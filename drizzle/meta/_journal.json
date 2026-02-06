@@ -1,5 +1,27 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1770389427236,
+      "tag": "0000_blue_william_stryker",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1770389567130,
+      "tag": "0001_friendly_karen_page",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1770391600149,
+      "tag": "0002_cloudy_joystick",
+      "breakpoints": true
+    }
+  ]
 }

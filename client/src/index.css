@@ -40,77 +40,115 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  
+  /* Cancagua Brand Colors */
+  --color-cancagua-tierra: oklch(0.78 0.06 75);
+  --color-cancagua-crema: oklch(0.93 0.02 75);
+  --color-cancagua-gris: oklch(0.70 0 0);
+  --color-cancagua-gris-oscuro: oklch(0.58 0 0);
 }
 
 :root {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-600);
-  --sidebar-primary-foreground: var(--color-blue-50);
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-  --radius: 0.65rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.235 0.015 65);
+  /* ============================================
+     CANCAGUA BRAND COLORS
+     Basado en Manual de Marca Oficial
+     
+     Paleta Principal:
+     - Tierra/Arena: #D3BC8D (PANTONE 467C)
+     - Crema Claro: #F1E7D9
+     - Gris Medio: #AAAAAA
+     - Gris Oscuro: #8C8C8C
+     ============================================ */
+  
+  /* Primary: Color Tierra/Arena - Principal de marca */
+  --primary: oklch(0.78 0.06 75); /* #D3BC8D */
+  --primary-foreground: oklch(0.25 0.02 75); /* Texto oscuro sobre tierra */
+  
+  /* Secondary: Crema claro */
+  --secondary: oklch(0.93 0.02 75); /* #F1E7D9 */
+  --secondary-foreground: oklch(0.35 0.02 75);
+  
+  /* Accent: Tierra más intenso para destacar */
+  --accent: oklch(0.72 0.08 75); /* Tierra más saturado */
+  --accent-foreground: oklch(0.20 0.02 75);
+  
+  /* Muted: Grises neutros */
+  --muted: oklch(0.96 0.01 75); /* Gris muy claro con tono cálido */
+  --muted-foreground: oklch(0.58 0 0); /* #8C8C8C */
+  
+  /* Destructive */
+  --destructive: oklch(0.55 0.20 27);
+  --destructive-foreground: oklch(1 0 0);
+  
+  /* Layout */
+  --radius: 0.5rem;
+  --background: oklch(0.995 0.005 75); /* Blanco cálido */
+  --foreground: oklch(0.25 0.02 75); /* Gris oscuro cálido */
+  
+  /* Cards */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.235 0.015 65);
+  --card-foreground: oklch(0.25 0.02 75);
+  
+  /* Popover */
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.235 0.015 65);
-  --secondary: oklch(0.98 0.001 286.375);
-  --secondary-foreground: oklch(0.4 0.015 65);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.141 0.005 285.823);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.623 0.214 259.815);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.235 0.015 65);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.623 0.214 259.815);
+  --popover-foreground: oklch(0.25 0.02 75);
+  
+  /* Borders & Inputs */
+  --border: oklch(0.88 0.02 75);
+  --input: oklch(0.92 0.01 75);
+  --ring: oklch(0.78 0.06 75);
+  
+  /* Sidebar - CMS Admin */
+  --sidebar: oklch(0.97 0.01 75);
+  --sidebar-foreground: oklch(0.30 0.02 75);
+  --sidebar-primary: oklch(0.78 0.06 75);
+  --sidebar-primary-foreground: oklch(0.20 0.02 75);
+  --sidebar-accent: oklch(0.93 0.02 75);
+  --sidebar-accent-foreground: oklch(0.25 0.02 75);
+  --sidebar-border: oklch(0.90 0.02 75);
+  --sidebar-ring: oklch(0.78 0.06 75);
+  
+  /* Charts - Tonos tierra y grises */
+  --chart-1: oklch(0.78 0.06 75);
+  --chart-2: oklch(0.70 0 0);
+  --chart-3: oklch(0.65 0.05 75);
+  --chart-4: oklch(0.58 0 0);
+  --chart-5: oklch(0.85 0.04 75);
 }
 
 .dark {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-500);
-  --sidebar-primary-foreground: var(--color-blue-50);
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.85 0.005 65);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.85 0.005 65);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.85 0.005 65);
-  --secondary: oklch(0.24 0.006 286.033);
-  --secondary-foreground: oklch(0.7 0.005 65);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground:  oklch(0.92 0.005 65);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.488 0.243 264.376);
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.85 0.005 65);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground:  oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.488 0.243 264.376);
+  --primary: oklch(0.78 0.06 75);
+  --primary-foreground: oklch(0.15 0.02 75);
+  --background: oklch(0.18 0.02 75);
+  --foreground: oklch(0.92 0.01 75);
+  --card: oklch(0.22 0.02 75);
+  --card-foreground: oklch(0.92 0.01 75);
+  --popover: oklch(0.22 0.02 75);
+  --popover-foreground: oklch(0.92 0.01 75);
+  --secondary: oklch(0.28 0.02 75);
+  --secondary-foreground: oklch(0.85 0.01 75);
+  --muted: oklch(0.30 0.02 75);
+  --muted-foreground: oklch(0.65 0.01 75);
+  --accent: oklch(0.35 0.03 75);
+  --accent-foreground: oklch(0.92 0.01 75);
+  --destructive: oklch(0.60 0.20 27);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.35 0.02 75);
+  --input: oklch(0.30 0.02 75);
+  --ring: oklch(0.78 0.06 75);
+  --chart-1: oklch(0.78 0.06 75);
+  --chart-2: oklch(0.65 0.04 75);
+  --chart-3: oklch(0.55 0.03 75);
+  --chart-4: oklch(0.70 0 0);
+  --chart-5: oklch(0.85 0.04 75);
+  --sidebar: oklch(0.20 0.02 75);
+  --sidebar-foreground: oklch(0.90 0.01 75);
+  --sidebar-primary: oklch(0.78 0.06 75);
+  --sidebar-primary-foreground: oklch(0.15 0.02 75);
+  --sidebar-accent: oklch(0.28 0.02 75);
+  --sidebar-accent-foreground: oklch(0.92 0.01 75);
+  --sidebar-border: oklch(0.35 0.02 75);
+  --sidebar-ring: oklch(0.78 0.06 75);
 }
 
 @layer base {
@@ -119,6 +157,22 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Josefin Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+  }
+  .font-display, .font-accent {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-style: italic;
+  }
+  .font-brand {
+    font-family: 'Josefin Sans', sans-serif;
+    font-weight: 300;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -133,45 +187,57 @@
   }
 }
 
+@layer utilities {
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes scroll {
+    0% { transform: translateY(0); }
+    50% { transform: translateY(8px); }
+    100% { transform: translateY(0); }
+  }
+  .animate-fade-in { animation: fade-in 0.8s ease-out forwards; }
+  .animate-scroll { animation: scroll 2s ease-in-out infinite; }
+  .animation-delay-200 { animation-delay: 0.2s; opacity: 0; }
+  .animation-delay-400 { animation-delay: 0.4s; opacity: 0; }
+  
+  .bg-cancagua-tierra { background-color: #D3BC8D; }
+  .bg-cancagua-crema { background-color: #F1E7D9; }
+  .text-cancagua-tierra { color: #D3BC8D; }
+  .text-cancagua-gris { color: #8C8C8C; }
+  .border-cancagua-tierra { border-color: #D3BC8D; }
+}
+
 @layer components {
-  /**
-   * Custom container utility that centers content and adds responsive padding.
-   *
-   * This overrides Tailwind's default container behavior to:
-   * - Auto-center content (mx-auto)
-   * - Add responsive horizontal padding
-   * - Set max-width for large screens
-   *
-   * Usage: <div className="container">...</div>
-   *
-   * For custom widths, use max-w-* utilities directly:
-   * <div className="max-w-6xl mx-auto px-4">...</div>
-   */
   .container {
     width: 100%;
     margin-left: auto;
     margin-right: auto;
-    padding-left: 1rem; /* 16px - mobile padding */
+    padding-left: 1rem;
     padding-right: 1rem;
   }
-
-  .flex {
-    min-height: 0;
-    min-width: 0;
-  }
-
+  .flex { min-height: 0; min-width: 0; }
   @media (min-width: 640px) {
-    .container {
-      padding-left: 1.5rem; /* 24px - tablet padding */
-      padding-right: 1.5rem;
-    }
+    .container { padding-left: 1.5rem; padding-right: 1.5rem; }
   }
-
   @media (min-width: 1024px) {
-    .container {
-      padding-left: 2rem; /* 32px - desktop padding */
-      padding-right: 2rem;
-      max-width: 1280px; /* Standard content width */
-    }
+    .container { padding-left: 2rem; padding-right: 2rem; max-width: 1280px; }
+  }
+  .btn-cancagua {
+    @apply bg-[#D3BC8D] text-[#3a3a3a] hover:bg-[#c4a976] transition-colors;
+    font-family: 'Josefin Sans', sans-serif;
+    letter-spacing: 0.05em;
+  }
+  .card-cancagua {
+    @apply bg-white border border-[#D3BC8D]/30 shadow-sm;
+  }
+  
+  /* Botones verdes del CMS con texto blanco para mejor contraste */
+  .bg-\[\#44580E\] {
+    color: white !important;
+  }
+  .bg-\[\#44580E\]:hover {
+    color: white !important;
   }
 }
