@@ -95,3 +95,18 @@
 ## Pendiente
 - [ ] Verificar que todas las páginas cargan correctamente con datos reales
 - [ ] Preparar instrucciones para separación del frontend en Render
+
+## Actualización: Módulo Concierge (Feb 6 2026)
+- [x] Migrar esquema de tablas concierge (concierge_services, concierge_sellers, concierge_sales, concierge_seller_metrics)
+- [x] Actualizar rol de usuario para incluir 'concierge'
+- [x] Copiar conciergeDb.ts (505 líneas)
+- [x] Copiar conciergeRouter.ts (417 líneas)
+- [x] Copiar conciergeWebhook.ts (182 líneas) - adaptado sin Skedu real
+- [x] Copiar skedu.ts (343 líneas) - adaptado como stub
+- [x] Copiar páginas concierge: HerramientaVenta.tsx, ServiciosDisponibles.tsx, Vendedores.tsx
+- [x] Actualizar DashboardLayout con categoría "Ventas" y eliminar resúmenes
+- [x] Actualizar App.tsx con rutas concierge y eliminar rutas de resúmenes
+- [x] Agregar router services.getAll y users.getByRole a routers.ts
+- [x] Registrar webhook concierge en server/_core/index.ts
+- [x] Ejecutar db:push para crear tablas concierge
+- [x] Verificar y tests (10/10 pasando)

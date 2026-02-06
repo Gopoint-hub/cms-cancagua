@@ -8,6 +8,7 @@ import { date, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "driz
  * - admin: Full access to all modules, can manage users except super_admins
  * - user: Access to specific modules only
  * - seller: Access to sales-related modules
+ * - concierge: Access only to concierge sales tool
  */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -19,7 +20,7 @@ export const users = mysqlTable("users", {
   passwordHash: varchar("passwordHash", { length: 255 }),
   loginMethod: varchar("loginMethod", { length: 64 }).default("email"),
   /** User role: super_admin, admin, user, seller */
-  role: mysqlEnum("role", ["super_admin", "admin", "editor", "user", "seller"]).default("user").notNull(),
+  role: mysqlEnum("role", ["super_admin", "admin", "editor", "user", "seller", "concierge"]).default("user").notNull(),
   /** User status: active, pending (invited but not activated), inactive */
   status: mysqlEnum("status", ["active", "pending", "inactive"]).default("pending").notNull(),
   /** Modules the user has access to (JSON array, null = all modules for admin roles) */
@@ -39,7 +40,7 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-export type UserRole = "super_admin" | "admin" | "user" | "seller";
+export type UserRole = "super_admin" | "admin" | "user" | "seller" | "concierge";
 export type UserStatus = "active" | "pending" | "inactive";
 
 // Servicios de Skedu
@@ -77,12 +78,6 @@ export const events = mysqlTable("events", {
   imageUrl: text("image_url"),
   location: text("location"),
   active: int("active").default(1).notNull(),
-  slug: varchar("slug", { length: 255 }),
-  contentHtml: text("content_html"),
-  images: text("images"),
-  externalLink: text("external_link"),
-  featured: int("featured").default(0),
-  status: varchar("status", { length: 50 }).default("active"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   lastSyncedAt: timestamp("last_synced_at"),
@@ -727,22 +722,22 @@ export const maintenanceReports = mysqlTable("maintenance_reports", {
   id: int("id").autoincrement().primaryKey(),
   reportNumber: varchar("report_number", { length: 50 }).notNull().unique(),
   title: text("title").notNull(),
-  area: varchar("area", { length: 100 }), // Área donde se realizó la mantención
-  equipment: varchar("equipment", { length: 150 }), // Equipo o instalación intervenida
-  location: text("location"), // Ubicación específica
+  area: varchar("area", { length: 100 }),
+  equipment: varchar("equipment", { length: 150 }),
+  location: text("location"),
   status: mysqlEnum("status", ["pending", "in_progress", "completed", "requires_follow_up"]).default("pending").notNull(),
   priority: mysqlEnum("priority", ["low", "medium", "high", "critical"]).default("medium").notNull(),
   maintenanceType: mysqlEnum("maintenance_type", ["preventive", "corrective", "emergency"]).default("corrective").notNull(),
-  description: text("description"), // Descripción del problema o trabajo realizado
-  resolution: text("resolution"), // Descripción de la solución aplicada
-  materialsUsed: text("materials_used"), // Materiales utilizados (JSON o texto)
-  observations: text("observations"), // Observaciones adicionales
+  description: text("description"),
+  resolution: text("resolution"),
+  materialsUsed: text("materials_used"),
+  observations: text("observations"),
   reportedById: int("reported_by_id").references(() => users.id).notNull(),
-  assignedToId: int("assigned_to_id").references(() => users.id), // Técnico asignado
-  scheduledDate: timestamp("scheduled_date"), // Fecha programada para la mantención
-  startedAt: timestamp("started_at"), // Fecha/hora de inicio del trabajo
-  completedAt: timestamp("completed_at"), // Fecha/hora de finalización
-  nextMaintenanceDate: timestamp("next_maintenance_date"), // Próxima mantención programada
+  assignedToId: int("assigned_to_id").references(() => users.id),
+  scheduledDate: timestamp("scheduled_date"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  nextMaintenanceDate: timestamp("next_maintenance_date"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
@@ -754,9 +749,9 @@ export type InsertMaintenanceReport = typeof maintenanceReports.$inferInsert;
 export const maintenanceReportPhotos = mysqlTable("maintenance_report_photos", {
   id: int("id").autoincrement().primaryKey(),
   reportId: int("report_id").references(() => maintenanceReports.id, { onDelete: "cascade" }).notNull(),
-  url: text("url").notNull(), // URL de Cloudinary
-  thumbnailUrl: text("thumbnail_url"), // URL de thumbnail (opcional)
-  description: text("description"), // Descripción de la foto
+  url: text("url").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  description: text("description"),
   photoType: mysqlEnum("photo_type", ["before", "during", "after", "evidence"]).default("evidence").notNull(),
   uploadedById: int("uploaded_by_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -778,3 +773,92 @@ export const maintenanceReportHistory = mysqlTable("maintenance_report_history",
 
 export type MaintenanceReportHistory = typeof maintenanceReportHistory.$inferSelect;
 export type InsertMaintenanceReportHistory = typeof maintenanceReportHistory.$inferInsert;
+
+// ============================================
+// MÓDULO CONCIERGE - Sistema de Ventas para Afiliados
+// ============================================
+
+/**
+ * Servicios disponibles para el canal Concierge.
+ * Los administradores configuran qué servicios pueden vender los vendedores,
+ * con precios y cantidades específicas para este canal.
+ */
+export const conciergeServices = mysqlTable("concierge_services", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("service_id").references(() => services.id, { onDelete: "cascade" }).notNull(),
+  price: int("price").notNull(),
+  availableQuantity: int("available_quantity").default(-1).notNull(),
+  active: int("active").default(1).notNull(),
+  sellerNotes: text("seller_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ConciergeService = typeof conciergeServices.$inferSelect;
+export type InsertConciergeService = typeof conciergeServices.$inferInsert;
+
+/**
+ * Configuración de vendedores del canal Concierge.
+ * Almacena la comisión y configuración específica de cada vendedor.
+ */
+export const conciergeSellers = mysqlTable("concierge_sellers", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").references(() => users.id, { onDelete: "cascade" }).notNull().unique(),
+  commissionRate: int("commission_rate").default(10).notNull(),
+  sellerCode: varchar("seller_code", { length: 20 }).notNull().unique(),
+  companyName: text("company_name"),
+  notes: text("notes"),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ConciergeSeller = typeof conciergeSellers.$inferSelect;
+export type InsertConciergeSeller = typeof conciergeSellers.$inferInsert;
+
+/**
+ * Registro de ventas del canal Concierge.
+ * Cada venta iniciada por un vendedor se registra aquí para tracking y comisiones.
+ */
+export const conciergeSales = mysqlTable("concierge_sales", {
+  id: int("id").autoincrement().primaryKey(),
+  sellerId: int("seller_id").references(() => conciergeSellers.id).notNull(),
+  conciergeServiceId: int("concierge_service_id").references(() => conciergeServices.id).notNull(),
+  amount: int("amount").notNull(),
+  commissionRate: int("commission_rate").notNull(),
+  commissionAmount: int("commission_amount").notNull(),
+  customerName: text("customer_name").notNull(),
+  customerEmail: varchar("customer_email", { length: 320 }),
+  customerPhone: varchar("customer_phone", { length: 50 }),
+  status: mysqlEnum("status", ["pending", "completed", "cancelled", "refunded"]).default("pending").notNull(),
+  saleReference: varchar("sale_reference", { length: 50 }).notNull().unique(),
+  skeduAppointmentUuid: varchar("skedu_appointment_uuid", { length: 100 }),
+  skeduGroupUuid: varchar("skedu_group_uuid", { length: 100 }),
+  paymentLink: text("payment_link"),
+  notes: text("notes"),
+  confirmedAt: timestamp("confirmed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ConciergeSale = typeof conciergeSales.$inferSelect;
+export type InsertConciergeSale = typeof conciergeSales.$inferInsert;
+
+/**
+ * Métricas agregadas de vendedores por período.
+ * Optimiza las consultas de dashboard evitando cálculos en tiempo real.
+ */
+export const conciergeSellerMetrics = mysqlTable("concierge_seller_metrics", {
+  id: int("id").autoincrement().primaryKey(),
+  sellerId: int("seller_id").references(() => conciergeSellers.id, { onDelete: "cascade" }).notNull(),
+  periodType: mysqlEnum("period_type", ["daily", "weekly", "monthly"]).notNull(),
+  periodKey: varchar("period_key", { length: 20 }).notNull(),
+  totalSales: int("total_sales").default(0).notNull(),
+  transactionCount: int("transaction_count").default(0).notNull(),
+  totalCommission: int("total_commission").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ConciergeSellerMetric = typeof conciergeSellerMetrics.$inferSelect;
+export type InsertConciergeSellerMetric = typeof conciergeSellerMetrics.$inferInsert;

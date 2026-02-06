@@ -7,10 +7,13 @@ import { z } from "zod";
 import * as db from "./db";
 import { generateQuoteNumber, calculateValidUntil } from "./quoteHelpers";
 import { invokeLLM } from "./_core/llm";
+import { conciergeRouter } from "./conciergeRouter";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
+  // Módulo Concierge - Sistema de ventas para afiliados
+  concierge: conciergeRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
 
@@ -669,6 +672,16 @@ export const appRouter = router({
       }),
   }),
 
+  // Servicios (para selector en Concierge)
+  services: router({
+    getAll: protectedProcedure.query(async ({ ctx }) => {
+      if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Solo administradores pueden listar servicios" });
+      }
+      return await db.getAllServices();
+    }),
+  }),
+
   // Gestión de usuarios (solo admin)
   users: router({
     // Listar todos los usuarios (solo super_admin y admin)
@@ -678,6 +691,17 @@ export const appRouter = router({
       }
       return await db.getAllUsers();
     }),
+
+    // Obtener usuarios por rol (para selector de vendedores concierge)
+    getByRole: protectedProcedure
+      .input(z.object({ role: z.string() }))
+      .query(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Solo administradores pueden listar usuarios" });
+        }
+        const allUsers = await db.getAllUsers();
+        return allUsers.filter(u => u.role === input.role);
+      }),
 
     // Obtener usuario por ID
     getById: protectedProcedure

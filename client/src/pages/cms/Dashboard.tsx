@@ -53,6 +53,9 @@ export default function CMSDashboard() {
     b2b: [
       { label: "Cotizaciones en proceso", value: pendingQuotes, icon: FileText },
     ],
+    ventas: [
+      { label: "Canal Concierge", value: "Ver", icon: BarChart3 },
+    ],
     marketing: [
       { label: "Suscriptores activos", value: totalSubscribers, icon: Newspaper },
     ],

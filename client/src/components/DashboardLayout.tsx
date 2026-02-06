@@ -24,18 +24,23 @@ import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, LogOut, PanelLeft, Users, Calendar, Mail, BarChart3,
   FileText, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
-  TrendingUp, Shield, Megaphone, ChevronDown, Home, UtensilsCrossed,
+  TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 // Definición de categorías y sus items de menú
-export type CategoryId = "b2c" | "b2b" | "marketing" | "metrics" | "operations" | "admin";
+export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin";
 
 interface MenuItem {
   icon: any;
@@ -60,7 +65,6 @@ export const categories: Category[] = [
     description: "Clientes & Servicios",
     color: "bg-emerald-500",
     items: [
-      { icon: LayoutDashboard, label: "Resumen B2C", path: "/cms/b2c" },
       { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales" },
       { icon: MessageSquare, label: "Mensajes", path: "/cms/mensajes" },
       { icon: Users, label: "Clientes", path: "/cms/clientes" },
@@ -73,10 +77,21 @@ export const categories: Category[] = [
     description: "Eventos Corporativos",
     color: "bg-blue-500",
     items: [
-      { icon: LayoutDashboard, label: "Resumen B2B", path: "/cms/b2b" },
       { icon: FileText, label: "Cotizaciones", path: "/cms/cotizaciones" },
       { icon: Package, label: "Catálogo Productos", path: "/cms/productos-corporativos" },
       { icon: Kanban, label: "CRM Pipeline", path: "/cms/crm-pipeline" },
+    ],
+  },
+  {
+    id: "ventas",
+    label: "Ventas",
+    icon: ShoppingCart,
+    description: "Canales de Venta",
+    color: "bg-teal-500",
+    items: [
+      { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta" },
+      { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios" },
+      { icon: Users, label: "Vendedores", path: "/cms/concierge/vendedores" },
     ],
   },
   {
@@ -86,7 +101,6 @@ export const categories: Category[] = [
     description: "Newsletters & Campañas",
     color: "bg-purple-500",
     items: [
-      { icon: LayoutDashboard, label: "Resumen Marketing", path: "/cms/marketing" },
       { icon: Newspaper, label: "Newsletters", path: "/cms/newsletter" },
       { icon: MailPlus, label: "Crear Newsletter", path: "/cms/crear-newsletter" },
       { icon: UsersRound, label: "Suscriptores", path: "/cms/suscriptores" },
@@ -102,7 +116,6 @@ export const categories: Category[] = [
     description: "Analytics & Reportes",
     color: "bg-amber-500",
     items: [
-      { icon: LayoutDashboard, label: "Resumen Métricas", path: "/cms/metricas" },
       { icon: BarChart3, label: "Analytics", path: "/cms/analytics" },
     ],
   },
@@ -123,7 +136,6 @@ export const categories: Category[] = [
     description: "Usuarios & Configuración",
     color: "bg-slate-500",
     items: [
-      { icon: LayoutDashboard, label: "Resumen Admin", path: "/cms/admin" },
       { icon: Users, label: "Usuarios", path: "/cms/usuarios" },
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
       { icon: RefreshCw, label: "Integraciones", path: "/cms/integraciones" },
@@ -132,34 +144,18 @@ export const categories: Category[] = [
   },
 ];
 
-// Context para compartir la categoría activa
-interface CategoryContextType {
-  activeCategory: CategoryId;
-  setActiveCategory: (category: CategoryId) => void;
-}
-
-const CategoryContext = createContext<CategoryContextType | null>(null);
-
-export function useCategoryContext() {
-  const context = useContext(CategoryContext);
-  if (!context) {
-    throw new Error("useCategoryContext must be used within DashboardLayout");
-  }
-  return context;
-}
-
 // Función para detectar categoría basada en la ruta actual
-function detectCategoryFromPath(path: string): CategoryId {
+function detectCategoryFromPath(path: string): CategoryId | null {
   for (const category of categories) {
     if (category.items.some(item => item.path === path)) {
       return category.id;
     }
   }
-  return "b2c"; // Default
+  return null;
 }
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
-const CATEGORY_KEY = "cms-active-category";
+const EXPANDED_CATEGORIES_KEY = "cms-expanded-categories";
 const DEFAULT_WIDTH = 260;
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 400;
@@ -175,27 +171,29 @@ export default function DashboardLayout({
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
     return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
   });
-  const [activeCategory, setActiveCategory] = useState<CategoryId>(() => {
-    // Primero intentar detectar por la ruta actual
-    const detectedCategory = detectCategoryFromPath(location);
-    if (detectedCategory !== "b2c" || location.startsWith("/b2c") || location === "/") {
-      return detectedCategory;
+  
+  // Estado para categorías expandidas (acordeón)
+  const [expandedCategories, setExpandedCategories] = useState<Set<CategoryId>>(() => {
+    const saved = localStorage.getItem(EXPANDED_CATEGORIES_KEY);
+    if (saved) {
+      try {
+        return new Set(JSON.parse(saved) as CategoryId[]);
+      } catch {
+        return new Set<CategoryId>();
+      }
     }
-    // Si no se detecta, usar el guardado en localStorage
-    const saved = localStorage.getItem(CATEGORY_KEY) as CategoryId;
-    return saved || "b2c";
+    // Por defecto, expandir la categoría de la ruta actual
+    const detected = detectCategoryFromPath(location);
+    return detected ? new Set([detected]) : new Set<CategoryId>();
   });
+
   const { loading, user } = useAuth();
 
-  // Actualizar categoría cuando cambia la ruta
+  // Expandir automáticamente la categoría cuando cambia la ruta
   useEffect(() => {
     const detected = detectCategoryFromPath(location);
-    if (detected !== activeCategory) {
-      // Solo actualizar si la ruta pertenece a una categoría diferente
-      const belongsToCategory = categories.find(c => c.id === activeCategory)?.items.some(i => i.path === location);
-      if (!belongsToCategory && location !== "/") {
-        setActiveCategory(detected);
-      }
+    if (detected && !expandedCategories.has(detected)) {
+      setExpandedCategories(prev => new Set(Array.from(prev).concat(detected)));
     }
   }, [location]);
 
@@ -204,8 +202,20 @@ export default function DashboardLayout({
   }, [sidebarWidth]);
 
   useEffect(() => {
-    localStorage.setItem(CATEGORY_KEY, activeCategory);
-  }, [activeCategory]);
+    localStorage.setItem(EXPANDED_CATEGORIES_KEY, JSON.stringify(Array.from(expandedCategories)));
+  }, [expandedCategories]);
+
+  const toggleCategory = (categoryId: CategoryId) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryId)) {
+        newSet.delete(categoryId);
+      } else {
+        newSet.add(categoryId);
+      }
+      return newSet;
+    });
+  };
 
   if (loading) {
     return <DashboardLayoutSkeleton />
@@ -238,30 +248,36 @@ export default function DashboardLayout({
   }
 
   return (
-    <CategoryContext.Provider value={{ activeCategory, setActiveCategory }}>
-      <SidebarProvider
-        style={
-          {
-            "--sidebar-width": `${sidebarWidth}px`,
-          } as CSSProperties
-        }
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": `${sidebarWidth}px`,
+        } as CSSProperties
+      }
+    >
+      <DashboardLayoutContent 
+        setSidebarWidth={setSidebarWidth}
+        expandedCategories={expandedCategories}
+        toggleCategory={toggleCategory}
       >
-        <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
-          {children}
-        </DashboardLayoutContent>
-      </SidebarProvider>
-    </CategoryContext.Provider>
+        {children}
+      </DashboardLayoutContent>
+    </SidebarProvider>
   );
 }
 
 type DashboardLayoutContentProps = {
   children: React.ReactNode;
   setSidebarWidth: (width: number) => void;
+  expandedCategories: Set<CategoryId>;
+  toggleCategory: (categoryId: CategoryId) => void;
 };
 
 function DashboardLayoutContent({
   children,
   setSidebarWidth,
+  expandedCategories,
+  toggleCategory,
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
@@ -270,11 +286,10 @@ function DashboardLayoutContent({
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
-  const { activeCategory, setActiveCategory } = useCategoryContext();
 
-  const currentCategory = categories.find(c => c.id === activeCategory) || categories[0];
-  const menuItems = currentCategory.items;
-  const activeMenuItem = menuItems.find(item => item.path === location);
+  // Detectar categoría y módulo activo para el header móvil
+  const activeCategory = categories.find(c => c.items.some(i => i.path === location));
+  const activeMenuItem = activeCategory?.items.find(item => item.path === location);
 
   useEffect(() => {
     if (isCollapsed) {
@@ -312,14 +327,6 @@ function DashboardLayoutContent({
     };
   }, [isResizing, setSidebarWidth]);
 
-  const handleCategoryChange = (categoryId: CategoryId) => {
-    setActiveCategory(categoryId);
-    const category = categories.find(c => c.id === categoryId);
-    if (category && category.items.length > 0) {
-      setLocation(category.items[0].path);
-    }
-  };
-
   return (
     <>
       <div className="relative" ref={sidebarRef}>
@@ -340,110 +347,89 @@ function DashboardLayoutContent({
                   <PanelLeft className="h-4 w-4 text-muted-foreground" />
                 </button>
                 {!isCollapsed && (
-                  <Link href="/" className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
+                  <Link href="/cms" className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
                     <span className="font-semibold tracking-tight truncate">
                       CMS Cancagua
                     </span>
                   </Link>
                 )}
               </div>
-
-              {/* Selector de categoría */}
-              {!isCollapsed && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/50 hover:bg-accent transition-colors w-full text-left">
-                      <div className={cn("h-6 w-6 rounded flex items-center justify-center", currentCategory.color)}>
-                        <currentCategory.icon className="h-3.5 w-3.5 text-white" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{currentCategory.label}</p>
-                        <p className="text-xs text-muted-foreground truncate">{currentCategory.description}</p>
-                      </div>
-                      <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    {categories.map((category) => (
-                      <DropdownMenuItem
-                        key={category.id}
-                        onClick={() => handleCategoryChange(category.id)}
-                        className={cn(
-                          "cursor-pointer",
-                          activeCategory === category.id && "bg-accent"
-                        )}
-                      >
-                        <div className={cn("h-6 w-6 rounded flex items-center justify-center mr-2", category.color)}>
-                          <category.icon className="h-3.5 w-3.5 text-white" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">{category.label}</p>
-                          <p className="text-xs text-muted-foreground">{category.description}</p>
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-
-              {/* Selector colapsado */}
-              {isCollapsed && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className={cn(
-                      "h-8 w-8 rounded flex items-center justify-center mx-auto",
-                      currentCategory.color,
-                      "hover:opacity-80 transition-opacity"
-                    )}>
-                      <currentCategory.icon className="h-4 w-4 text-white" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" side="right" className="w-56">
-                    {categories.map((category) => (
-                      <DropdownMenuItem
-                        key={category.id}
-                        onClick={() => handleCategoryChange(category.id)}
-                        className={cn(
-                          "cursor-pointer",
-                          activeCategory === category.id && "bg-accent"
-                        )}
-                      >
-                        <div className={cn("h-6 w-6 rounded flex items-center justify-center mr-2", category.color)}>
-                          <category.icon className="h-3.5 w-3.5 text-white" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">{category.label}</p>
-                          <p className="text-xs text-muted-foreground">{category.description}</p>
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
             </div>
           </SidebarHeader>
 
-          <SidebarContent className="gap-0">
-            <SidebarMenu className="px-2 py-1">
-              {menuItems.map((item) => {
-                const isActive = location === item.path;
+          <SidebarContent className="gap-0 overflow-y-auto">
+            {/* Menú Acordeón - Todas las categorías */}
+            <div className="px-2 py-1">
+              {categories.map((category) => {
+                const isExpanded = expandedCategories.has(category.id);
+                const hasActiveItem = category.items.some(item => item.path === location);
+                
                 return (
-                  <SidebarMenuItem key={item.path}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      onClick={() => setLocation(item.path)}
-                      tooltip={item.label}
-                      className="h-10 transition-all font-normal"
-                    >
-                      <item.icon
-                        className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
-                      />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
+                  <Collapsible
+                    key={category.id}
+                    open={isExpanded}
+                    onOpenChange={() => toggleCategory(category.id)}
+                    className="mb-1"
+                  >
+                    <CollapsibleTrigger asChild>
+                      <button
+                        className={cn(
+                          "flex items-center gap-2 w-full px-2 py-2 rounded-lg transition-colors text-left",
+                          "hover:bg-accent/50",
+                          hasActiveItem && "bg-accent/30"
+                        )}
+                      >
+                        {!isCollapsed && (
+                          <ChevronRight 
+                            className={cn(
+                              "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 shrink-0",
+                              isExpanded && "rotate-90"
+                            )} 
+                          />
+                        )}
+                        <div className={cn(
+                          "h-6 w-6 rounded flex items-center justify-center shrink-0",
+                          category.color
+                        )}>
+                          <category.icon className="h-3.5 w-3.5 text-white" />
+                        </div>
+                        {!isCollapsed && (
+                          <span className={cn(
+                            "text-sm font-medium truncate",
+                            hasActiveItem && "text-foreground"
+                          )}>
+                            {category.label}
+                          </span>
+                        )}
+                      </button>
+                    </CollapsibleTrigger>
+                    
+                    <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
+                      <SidebarMenu className={cn("mt-1", !isCollapsed && "ml-5 pl-2 border-l border-border/50")}>
+                        {category.items.map((item) => {
+                          const isActive = location === item.path;
+                          return (
+                            <SidebarMenuItem key={item.path}>
+                              <SidebarMenuButton
+                                isActive={isActive}
+                                onClick={() => setLocation(item.path)}
+                                tooltip={item.label}
+                                className="h-9 transition-all font-normal"
+                              >
+                                <item.icon
+                                  className={cn("h-4 w-4", isActive && "text-primary")}
+                                />
+                                <span className="text-sm">{item.label}</span>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          );
+                        })}
+                      </SidebarMenu>
+                    </CollapsibleContent>
+                  </Collapsible>
                 );
               })}
-            </SidebarMenu>
+            </div>
           </SidebarContent>
 
           <SidebarFooter className="p-3">
@@ -500,11 +486,13 @@ function DashboardLayoutContent({
             <div className="flex items-center gap-2">
               <SidebarTrigger className="h-9 w-9 rounded-lg bg-background" />
               <div className="flex items-center gap-3">
-                <div className={cn("h-6 w-6 rounded flex items-center justify-center", currentCategory.color)}>
-                  <currentCategory.icon className="h-3.5 w-3.5 text-white" />
-                </div>
+                {activeCategory && (
+                  <div className={cn("h-6 w-6 rounded flex items-center justify-center", activeCategory.color)}>
+                    <activeCategory.icon className="h-3.5 w-3.5 text-white" />
+                  </div>
+                )}
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-xs text-muted-foreground">{currentCategory.label}</span>
+                  <span className="text-xs text-muted-foreground">{activeCategory?.label ?? "CMS"}</span>
                   <span className="tracking-tight text-foreground text-sm">
                     {activeMenuItem?.label ?? "Menu"}
                   </span>
