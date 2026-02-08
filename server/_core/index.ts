@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import cors from "cors";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
@@ -34,6 +35,29 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // CORS: Allow cross-origin requests from the frontend (cancagua.cl)
+  // Needed for Concierge payment confirmation flow
+  const allowedOrigins = [
+    "https://cancagua.cl",
+    "https://www.cancagua.cl",
+    "http://localhost:5173",
+    "http://localhost:3000",
+  ];
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.some(allowed => origin.startsWith(allowed) || origin.includes("manus.computer"))) {
+        return callback(null, true);
+      }
+      callback(null, false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }));
+
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // Webhook para Skedu (Módulo Concierge)

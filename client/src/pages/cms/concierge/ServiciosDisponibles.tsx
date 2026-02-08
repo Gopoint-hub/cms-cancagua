@@ -59,7 +59,6 @@ interface ConciergeService {
   serviceDuration: number | null;
   serviceImageUrl: string | null;
   serviceCategory: string | null;
-  serviceSkeduId: string | null;
   createdAt: Date;
 }
 

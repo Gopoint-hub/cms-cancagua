@@ -42,7 +42,6 @@ interface ConciergeService {
   serviceDuration: number | null;
   serviceImageUrl: string | null;
   serviceCategory: string | null;
-  serviceSkeduId: string | null;
 }
 
 type ViewState = "services" | "form" | "success";
@@ -57,11 +56,14 @@ export default function HerramientaVenta() {
     notes: "",
   });
   const [saleResult, setSaleResult] = useState<{
+    success: boolean;
+    saleId: number;
     saleReference: string;
-    paymentLink: string;
+    paymentUrl: string;
     amount: number;
     serviceName: string | null;
     commissionAmount: number;
+    emailSent: boolean;
   } | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -118,7 +120,7 @@ export default function HerramientaVenta() {
     initiateSaleMutation.mutate({
       conciergeServiceId: selectedService.id,
       customerName: customerData.name,
-      customerEmail: customerData.email || undefined,
+      customerEmail: customerData.email,
       customerPhone: customerData.phone || undefined,
       notes: customerData.notes || undefined,
     });
@@ -290,7 +292,7 @@ export default function HerramientaVenta() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email">Email (opcional)</Label>
+              <Label htmlFor="email">Email del cliente *</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
@@ -339,7 +341,7 @@ export default function HerramientaVenta() {
             <Button
               type="submit"
               className="w-full h-14 text-lg"
-              disabled={!customerData.name || initiateSaleMutation.isPending}
+              disabled={!customerData.name || !customerData.email || initiateSaleMutation.isPending}
             >
               {initiateSaleMutation.isPending ? (
                 <>
@@ -372,7 +374,9 @@ export default function HerramientaVenta() {
             ¡Venta Iniciada!
           </h2>
           <p className="text-green-700">
-            Comparte el enlace con el cliente para que complete el pago
+            {saleResult?.emailSent
+              ? "Se envió un email al cliente con el enlace de pago"
+              : "Comparte el enlace con el cliente para que complete el pago"}
           </p>
         </CardContent>
       </Card>
@@ -425,7 +429,7 @@ export default function HerramientaVenta() {
           <CardContent className="space-y-4">
             {/* URL */}
             <div className="bg-gray-100 p-3 rounded-lg break-all text-sm">
-              {saleResult.paymentLink}
+              {saleResult.paymentUrl}
             </div>
 
             {/* Botones de acción */}
@@ -433,7 +437,7 @@ export default function HerramientaVenta() {
               <Button
                 variant="outline"
                 className="h-12"
-                onClick={() => copyToClipboard(saleResult.paymentLink)}
+                onClick={() => copyToClipboard(saleResult.paymentUrl)}
               >
                 {copied ? (
                   <Check className="w-4 h-4 mr-2" />
@@ -444,7 +448,7 @@ export default function HerramientaVenta() {
               </Button>
               <Button
                 className="h-12"
-                onClick={() => window.open(saleResult.paymentLink, "_blank")}
+                onClick={() => window.open(saleResult.paymentUrl, "_blank")}
               >
                 <ExternalLink className="w-4 h-4 mr-2" />
                 Abrir

@@ -110,3 +110,40 @@
 - [x] Registrar webhook concierge en server/_core/index.ts
 - [x] Ejecutar db:push para crear tablas concierge
 - [x] Verificar y tests (10/10 pasando)
+
+## Rehacer Módulo Concierge (Feb 8 2026)
+
+### Backend
+- [x] Configurar credenciales WebPay (API_KEY, COMMERCE_CODE, ENVIRONMENT)
+- [x] Configurar FRONTEND_URL y CONTACT_EMAIL en env
+- [x] Instalar transbank-sdk
+- [x] Implementar webpay.ts real (initiate + confirm transaction)
+- [x] Rehacer conciergeDb.ts con lógica de ventas, comisiones y estados
+- [x] Rehacer conciergeRouter.ts con endpoints para vendedor y admin
+- [x] Crear endpoints públicos para WebPay (initiate-payment, confirm-payment)
+- [x] Implementar emails: link de pago al cliente, confirmación al vendedor, notificación a contacto@cancagua.cl
+- [x] Implementar email de pago fallido al cliente y vendedor
+- [x] Configurar CORS para permitir llamadas desde cancagua.cl
+
+### Frontend - Vendedor (rol concierge)
+- [x] Página de venta: seleccionar servicio → formulario datos cliente → enviar link de pago
+- [x] Vista de estado de ventas del vendedor (pendientes, completadas, fallidas)
+- [x] Página "Mis Comisiones": ver comisiones propias acumuladas
+
+### Frontend - Admin
+- [x] Vista de todas las ventas de todos los vendedores
+- [x] Vista de comisiones por vendedor
+- [x] CRUD de servicios concierge
+- [x] CRUD de vendedores con porcentaje de comisión
+
+### Página de confirmación (para el frontend en Render)
+- [x] Preparar instrucciones para crear página cancagua.cl/concierge/payment-result
+- [x] Documentar endpoint público del CMS para confirmar pago
+
+### Tests
+- [x] Test de estructura de router concierge (18 tests)
+- [x] Test de endpoints de pago público
+- [x] Test de funciones WebPay (buyOrder, sessionId, isApproved)
+- [x] Test de credenciales WebPay producción
+- [x] Test de acceso protegido (admin y concierge)
+- [x] Todos los tests pasando (31/31)

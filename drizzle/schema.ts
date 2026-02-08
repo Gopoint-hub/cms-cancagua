@@ -832,10 +832,18 @@ export const conciergeSales = mysqlTable("concierge_sales", {
   customerPhone: varchar("customer_phone", { length: 50 }),
   status: mysqlEnum("status", ["pending", "completed", "cancelled", "refunded"]).default("pending").notNull(),
   saleReference: varchar("sale_reference", { length: 50 }).notNull().unique(),
-  skeduAppointmentUuid: varchar("skedu_appointment_uuid", { length: 100 }),
-  skeduGroupUuid: varchar("skedu_group_uuid", { length: 100 }),
+  /** WebPay token for the transaction */
+  webpayToken: varchar("webpay_token", { length: 255 }),
+  /** WebPay authorization code after successful payment */
+  webpayAuthCode: varchar("webpay_auth_code", { length: 100 }),
+  /** WebPay response code */
+  webpayResponseCode: int("webpay_response_code"),
+  /** WebPay card last 4 digits */
+  webpayCardNumber: varchar("webpay_card_number", { length: 20 }),
   paymentLink: text("payment_link"),
   notes: text("notes"),
+  /** Service name snapshot at time of sale */
+  serviceName: text("service_name"),
   confirmedAt: timestamp("confirmed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

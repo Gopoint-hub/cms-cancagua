@@ -32,6 +32,7 @@ import CMSReportesMantencion from "./pages/cms/ReportesMantencion";
 import CMSConciergeVenta from "./pages/cms/concierge/HerramientaVenta";
 import CMSConciergeServicios from "./pages/cms/concierge/ServiciosDisponibles";
 import CMSConciergeVendedores from "./pages/cms/concierge/Vendedores";
+import CMSMisComisiones from "./pages/cms/concierge/MisComisiones";
 import CMSIntegraciones from "./pages/cms/Integraciones";
 import CMSGiftCardsSales from "./pages/cms/GiftCardsSales";
 import CMSLogin from "./pages/cms/Login";
@@ -81,6 +82,7 @@ function Router() {
       <Route path="/cms/concierge/venta" component={CMSConciergeVenta} />
       <Route path="/cms/concierge/servicios" component={CMSConciergeServicios} />
       <Route path="/cms/concierge/vendedores" component={CMSConciergeVendedores} />
+      <Route path="/cms/concierge/mis-comisiones" component={CMSMisComisiones} />
 
       {/* Fallback */}
       <Route path="/404" component={NotFound} />

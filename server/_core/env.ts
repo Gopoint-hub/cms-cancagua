@@ -18,6 +18,17 @@ export const ENV = {
   // Email (Resend)
   resendApiKey: process.env.RESEND_API_KEY ?? "",
   
+  // WebPay (Transbank)
+  webpayApiKey: process.env.WEBPAY_API_KEY ?? "",
+  webpayCommerceCode: process.env.WEBPAY_COMMERCE_CODE ?? "",
+  webpayEnvironment: process.env.WEBPAY_ENVIRONMENT ?? "integration",
+
+  // Frontend URL (for WebPay return URL)
+  frontendUrl: process.env.FRONTEND_URL ?? "https://cancagua.cl",
+
+  // Contact email for reservations
+  contactEmail: process.env.CONTACT_EMAIL ?? "contacto@cancagua.cl",
+  
   // Manus built-in APIs (LLM, storage, etc.)
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",

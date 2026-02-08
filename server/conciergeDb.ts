@@ -1,7 +1,8 @@
 /**
  * Funciones de base de datos para el Módulo Concierge
+ * Integración con WebPay para pagos (sin Skedu)
  */
-import { eq, and, desc, sql, gte, lte, count, sum } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
 import { getDb } from "./db";
 import {
   conciergeServices,
@@ -13,7 +14,6 @@ import {
   InsertConciergeService,
   InsertConciergeSeller,
   InsertConciergeSale,
-  InsertConciergeSellerMetric,
 } from "../drizzle/schema";
 import { nanoid } from "nanoid";
 
@@ -21,9 +21,6 @@ import { nanoid } from "nanoid";
 // SERVICIOS CONCIERGE
 // ============================================
 
-/**
- * Obtener todos los servicios disponibles para Concierge
- */
 export async function getConciergeServices(activeOnly = true) {
   const db = await getDb();
   if (!db) return [];
@@ -39,13 +36,12 @@ export async function getConciergeServices(activeOnly = true) {
       active: conciergeServices.active,
       sellerNotes: conciergeServices.sellerNotes,
       createdAt: conciergeServices.createdAt,
-      // Datos del servicio base
+      updatedAt: conciergeServices.updatedAt,
       serviceName: services.name,
       serviceDescription: services.description,
       serviceDuration: services.duration,
       serviceImageUrl: services.imageUrl,
       serviceCategory: services.category,
-      serviceSkeduId: services.skeduId,
     })
     .from(conciergeServices)
     .leftJoin(services, eq(conciergeServices.serviceId, services.id))
@@ -55,9 +51,6 @@ export async function getConciergeServices(activeOnly = true) {
   return result;
 }
 
-/**
- * Obtener un servicio Concierge por ID
- */
 export async function getConciergeServiceById(id: number) {
   const db = await getDb();
   if (!db) return null;
@@ -74,7 +67,6 @@ export async function getConciergeServiceById(id: number) {
       serviceDescription: services.description,
       serviceDuration: services.duration,
       serviceImageUrl: services.imageUrl,
-      serviceSkeduId: services.skeduId,
     })
     .from(conciergeServices)
     .leftJoin(services, eq(conciergeServices.serviceId, services.id))
@@ -84,15 +76,11 @@ export async function getConciergeServiceById(id: number) {
   return result[0] || null;
 }
 
-/**
- * Crear o actualizar un servicio Concierge
- */
 export async function upsertConciergeService(data: InsertConciergeService) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   if (data.id) {
-    // Update
     await db
       .update(conciergeServices)
       .set({
@@ -105,15 +93,11 @@ export async function upsertConciergeService(data: InsertConciergeService) {
       .where(eq(conciergeServices.id, data.id));
     return data.id;
   } else {
-    // Insert
     const result = await db.insert(conciergeServices).values(data);
     return result[0].insertId;
   }
 }
 
-/**
- * Eliminar un servicio Concierge
- */
 export async function deleteConciergeService(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -125,9 +109,6 @@ export async function deleteConciergeService(id: number) {
 // VENDEDORES CONCIERGE
 // ============================================
 
-/**
- * Obtener todos los vendedores Concierge
- */
 export async function getConciergeSellers(activeOnly = false) {
   const db = await getDb();
   if (!db) return [];
@@ -144,7 +125,6 @@ export async function getConciergeSellers(activeOnly = false) {
       notes: conciergeSellers.notes,
       active: conciergeSellers.active,
       createdAt: conciergeSellers.createdAt,
-      // Datos del usuario
       userName: users.name,
       userEmail: users.email,
     })
@@ -156,9 +136,6 @@ export async function getConciergeSellers(activeOnly = false) {
   return result;
 }
 
-/**
- * Obtener un vendedor por ID de usuario
- */
 export async function getConciergeSellerByUserId(userId: number) {
   const db = await getDb();
   if (!db) return null;
@@ -172,9 +149,6 @@ export async function getConciergeSellerByUserId(userId: number) {
   return result[0] || null;
 }
 
-/**
- * Obtener un vendedor por código
- */
 export async function getConciergeSellerByCode(code: string) {
   const db = await getDb();
   if (!db) return null;
@@ -188,18 +162,13 @@ export async function getConciergeSellerByCode(code: string) {
   return result[0] || null;
 }
 
-/**
- * Crear o actualizar un vendedor Concierge
- */
 export async function upsertConciergeSeller(data: Omit<InsertConciergeSeller, "sellerCode"> & { sellerCode?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  // Generar código único si no existe
   const sellerCode = data.sellerCode || `SELL-${nanoid(8).toUpperCase()}`;
 
   if (data.id) {
-    // Update
     await db
       .update(conciergeSellers)
       .set({
@@ -211,7 +180,6 @@ export async function upsertConciergeSeller(data: Omit<InsertConciergeSeller, "s
       .where(eq(conciergeSellers.id, data.id));
     return data.id;
   } else {
-    // Insert
     const result = await db.insert(conciergeSellers).values({
       ...data,
       sellerCode,
@@ -220,9 +188,6 @@ export async function upsertConciergeSeller(data: Omit<InsertConciergeSeller, "s
   }
 }
 
-/**
- * Actualizar comisión de un vendedor
- */
 export async function updateSellerCommission(sellerId: number, commissionRate: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -234,18 +199,18 @@ export async function updateSellerCommission(sellerId: number, commissionRate: n
 }
 
 // ============================================
-// VENTAS CONCIERGE
+// VENTAS CONCIERGE (WebPay)
 // ============================================
 
-/**
- * Crear una nueva venta
- */
+export function generateSaleReference(): string {
+  return `CONC-${Date.now()}-${nanoid(6).toUpperCase()}`;
+}
+
 export async function createConciergeSale(data: Omit<InsertConciergeSale, "saleReference"> & { saleReference?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  // Generar referencia única
-  const saleReference = data.saleReference || `CONC-${Date.now()}-${nanoid(6).toUpperCase()}`;
+  const saleReference = data.saleReference || generateSaleReference();
 
   const result = await db.insert(conciergeSales).values({
     ...data,
@@ -255,9 +220,19 @@ export async function createConciergeSale(data: Omit<InsertConciergeSale, "saleR
   return { id: result[0].insertId, saleReference };
 }
 
-/**
- * Obtener una venta por referencia
- */
+export async function getConciergeSaleById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db
+    .select()
+    .from(conciergeSales)
+    .where(eq(conciergeSales.id, id))
+    .limit(1);
+
+  return result[0] || null;
+}
+
 export async function getConciergeSaleByReference(reference: string) {
   const db = await getDb();
   if (!db) return null;
@@ -271,16 +246,48 @@ export async function getConciergeSaleByReference(reference: string) {
   return result[0] || null;
 }
 
-/**
- * Actualizar estado de una venta
- */
+export async function getConciergeSaleByWebpayToken(token: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db
+    .select()
+    .from(conciergeSales)
+    .where(eq(conciergeSales.webpayToken, token))
+    .limit(1);
+
+  return result[0] || null;
+}
+
+export async function updateConciergeSaleWebpay(
+  saleId: number,
+  data: {
+    webpayToken?: string;
+    paymentLink?: string;
+    status?: "pending" | "completed" | "cancelled" | "refunded";
+    webpayAuthCode?: string;
+    webpayResponseCode?: number;
+    webpayCardNumber?: string;
+    confirmedAt?: Date;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .update(conciergeSales)
+    .set(data)
+    .where(eq(conciergeSales.id, saleId));
+}
+
 export async function updateConciergeSaleStatus(
   saleId: number,
   status: "pending" | "completed" | "cancelled" | "refunded",
   additionalData?: {
-    skeduAppointmentUuid?: string;
-    skeduGroupUuid?: string;
     confirmedAt?: Date;
+    webpayAuthCode?: string;
+    webpayResponseCode?: number;
+    webpayCardNumber?: string;
   }
 ) {
   const db = await getDb();
@@ -295,9 +302,18 @@ export async function updateConciergeSaleStatus(
     .where(eq(conciergeSales.id, saleId));
 }
 
-/**
- * Obtener ventas de un vendedor
- */
+export async function deleteConciergeSale(saleId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.delete(conciergeSales).where(eq(conciergeSales.id, saleId));
+}
+
+// ============================================
+// CONSULTAS DE VENTAS
+// ============================================
+
+/** Get sales for a specific seller (vendedor view) */
 export async function getConciergeSalesBySeller(
   sellerId: number,
   options?: {
@@ -313,15 +329,9 @@ export async function getConciergeSalesBySeller(
 
   const conditions = [eq(conciergeSales.sellerId, sellerId)];
 
-  if (options?.startDate) {
-    conditions.push(gte(conciergeSales.createdAt, options.startDate));
-  }
-  if (options?.endDate) {
-    conditions.push(lte(conciergeSales.createdAt, options.endDate));
-  }
-  if (options?.status) {
-    conditions.push(eq(conciergeSales.status, options.status as any));
-  }
+  if (options?.startDate) conditions.push(gte(conciergeSales.createdAt, options.startDate));
+  if (options?.endDate) conditions.push(lte(conciergeSales.createdAt, options.endDate));
+  if (options?.status) conditions.push(eq(conciergeSales.status, options.status as any));
 
   const result = await db
     .select({
@@ -331,27 +341,24 @@ export async function getConciergeSalesBySeller(
       commissionAmount: conciergeSales.commissionAmount,
       customerName: conciergeSales.customerName,
       customerEmail: conciergeSales.customerEmail,
+      customerPhone: conciergeSales.customerPhone,
       status: conciergeSales.status,
       saleReference: conciergeSales.saleReference,
+      serviceName: conciergeSales.serviceName,
+      notes: conciergeSales.notes,
       createdAt: conciergeSales.createdAt,
       confirmedAt: conciergeSales.confirmedAt,
-      // Datos del servicio
-      serviceName: services.name,
     })
     .from(conciergeSales)
-    .leftJoin(conciergeServices, eq(conciergeSales.conciergeServiceId, conciergeServices.id))
-    .leftJoin(services, eq(conciergeServices.serviceId, services.id))
     .where(and(...conditions))
     .orderBy(desc(conciergeSales.createdAt))
-    .limit(options?.limit || 50)
+    .limit(options?.limit || 100)
     .offset(options?.offset || 0);
 
   return result;
 }
 
-/**
- * Obtener todas las ventas (para admin)
- */
+/** Get all sales (admin view) */
 export async function getAllConciergeSales(options?: {
   startDate?: Date;
   endDate?: Date;
@@ -365,18 +372,10 @@ export async function getAllConciergeSales(options?: {
 
   const conditions = [];
 
-  if (options?.sellerId) {
-    conditions.push(eq(conciergeSales.sellerId, options.sellerId));
-  }
-  if (options?.startDate) {
-    conditions.push(gte(conciergeSales.createdAt, options.startDate));
-  }
-  if (options?.endDate) {
-    conditions.push(lte(conciergeSales.createdAt, options.endDate));
-  }
-  if (options?.status) {
-    conditions.push(eq(conciergeSales.status, options.status as any));
-  }
+  if (options?.sellerId) conditions.push(eq(conciergeSales.sellerId, options.sellerId));
+  if (options?.startDate) conditions.push(gte(conciergeSales.createdAt, options.startDate));
+  if (options?.endDate) conditions.push(lte(conciergeSales.createdAt, options.endDate));
+  if (options?.status) conditions.push(eq(conciergeSales.status, options.status as any));
 
   const result = await db
     .select({
@@ -386,64 +385,79 @@ export async function getAllConciergeSales(options?: {
       commissionAmount: conciergeSales.commissionAmount,
       customerName: conciergeSales.customerName,
       customerEmail: conciergeSales.customerEmail,
+      customerPhone: conciergeSales.customerPhone,
       status: conciergeSales.status,
       saleReference: conciergeSales.saleReference,
+      serviceName: conciergeSales.serviceName,
+      notes: conciergeSales.notes,
       createdAt: conciergeSales.createdAt,
       confirmedAt: conciergeSales.confirmedAt,
-      // Datos del vendedor
       sellerName: users.name,
       sellerCode: conciergeSellers.sellerCode,
-      // Datos del servicio
-      serviceName: services.name,
+      sellerCompany: conciergeSellers.companyName,
     })
     .from(conciergeSales)
     .leftJoin(conciergeSellers, eq(conciergeSales.sellerId, conciergeSellers.id))
     .leftJoin(users, eq(conciergeSellers.userId, users.id))
-    .leftJoin(conciergeServices, eq(conciergeSales.conciergeServiceId, conciergeServices.id))
-    .leftJoin(services, eq(conciergeServices.serviceId, services.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(conciergeSales.createdAt))
-    .limit(options?.limit || 50)
+    .limit(options?.limit || 100)
     .offset(options?.offset || 0);
 
   return result;
 }
 
 // ============================================
-// MÉTRICAS
+// MÉTRICAS Y COMISIONES
 // ============================================
 
-/**
- * Obtener métricas de un vendedor
- */
-export async function getSellerMetrics(
-  sellerId: number,
-  periodType: "daily" | "weekly" | "monthly",
-  startKey: string,
-  endKey: string
-) {
+/** Get commission summary for a specific seller */
+export async function getSellerCommissionSummary(sellerId: number) {
+  const db = await getDb();
+  if (!db) return { totalSales: 0, totalCommission: 0, completedCount: 0, pendingCount: 0 };
+
+  const result = await db
+    .select({
+      totalSales: sql<number>`COALESCE(SUM(CASE WHEN ${conciergeSales.status} = 'completed' THEN ${conciergeSales.amount} ELSE 0 END), 0)`,
+      totalCommission: sql<number>`COALESCE(SUM(CASE WHEN ${conciergeSales.status} = 'completed' THEN ${conciergeSales.commissionAmount} ELSE 0 END), 0)`,
+      completedCount: sql<number>`COALESCE(SUM(CASE WHEN ${conciergeSales.status} = 'completed' THEN 1 ELSE 0 END), 0)`,
+      pendingCount: sql<number>`COALESCE(SUM(CASE WHEN ${conciergeSales.status} = 'pending' THEN 1 ELSE 0 END), 0)`,
+    })
+    .from(conciergeSales)
+    .where(eq(conciergeSales.sellerId, sellerId));
+
+  return result[0] || { totalSales: 0, totalCommission: 0, completedCount: 0, pendingCount: 0 };
+}
+
+/** Get commission summary for all sellers (admin view) */
+export async function getCommissionsSummary(startDate?: Date, endDate?: Date) {
   const db = await getDb();
   if (!db) return [];
 
+  const conditions = [eq(conciergeSales.status, "completed")];
+  if (startDate) conditions.push(gte(conciergeSales.createdAt, startDate));
+  if (endDate) conditions.push(lte(conciergeSales.createdAt, endDate));
+
   const result = await db
-    .select()
-    .from(conciergeSellerMetrics)
-    .where(
-      and(
-        eq(conciergeSellerMetrics.sellerId, sellerId),
-        eq(conciergeSellerMetrics.periodType, periodType),
-        gte(conciergeSellerMetrics.periodKey, startKey),
-        lte(conciergeSellerMetrics.periodKey, endKey)
-      )
-    )
-    .orderBy(conciergeSellerMetrics.periodKey);
+    .select({
+      sellerId: conciergeSales.sellerId,
+      sellerName: users.name,
+      sellerCode: conciergeSellers.sellerCode,
+      companyName: conciergeSellers.companyName,
+      commissionRate: conciergeSellers.commissionRate,
+      totalSales: sql<number>`COALESCE(SUM(${conciergeSales.amount}), 0)`,
+      totalCommission: sql<number>`COALESCE(SUM(${conciergeSales.commissionAmount}), 0)`,
+      transactionCount: sql<number>`COUNT(*)`,
+    })
+    .from(conciergeSales)
+    .leftJoin(conciergeSellers, eq(conciergeSales.sellerId, conciergeSellers.id))
+    .leftJoin(users, eq(conciergeSellers.userId, users.id))
+    .where(and(...conditions))
+    .groupBy(conciergeSales.sellerId, users.name, conciergeSellers.sellerCode, conciergeSellers.companyName, conciergeSellers.commissionRate);
 
   return result;
 }
 
-/**
- * Calcular métricas en tiempo real para un vendedor
- */
 export async function calculateSellerMetricsRealtime(
   sellerId: number,
   startDate: Date,
@@ -471,35 +485,27 @@ export async function calculateSellerMetricsRealtime(
   return result[0] || { totalSales: 0, totalCommission: 0, transactionCount: 0 };
 }
 
-/**
- * Obtener resumen de comisiones por vendedor para un período
- */
-export async function getCommissionsSummary(startDate: Date, endDate: Date) {
+export async function getSellerMetrics(
+  sellerId: number,
+  periodType: "daily" | "weekly" | "monthly",
+  startKey: string,
+  endKey: string
+) {
   const db = await getDb();
   if (!db) return [];
 
   const result = await db
-    .select({
-      sellerId: conciergeSales.sellerId,
-      sellerName: users.name,
-      sellerCode: conciergeSellers.sellerCode,
-      companyName: conciergeSellers.companyName,
-      commissionRate: conciergeSellers.commissionRate,
-      totalSales: sql<number>`COALESCE(SUM(${conciergeSales.amount}), 0)`,
-      totalCommission: sql<number>`COALESCE(SUM(${conciergeSales.commissionAmount}), 0)`,
-      transactionCount: sql<number>`COUNT(*)`,
-    })
-    .from(conciergeSales)
-    .leftJoin(conciergeSellers, eq(conciergeSales.sellerId, conciergeSellers.id))
-    .leftJoin(users, eq(conciergeSellers.userId, users.id))
+    .select()
+    .from(conciergeSellerMetrics)
     .where(
       and(
-        eq(conciergeSales.status, "completed"),
-        gte(conciergeSales.createdAt, startDate),
-        lte(conciergeSales.createdAt, endDate)
+        eq(conciergeSellerMetrics.sellerId, sellerId),
+        eq(conciergeSellerMetrics.periodType, periodType),
+        gte(conciergeSellerMetrics.periodKey, startKey),
+        lte(conciergeSellerMetrics.periodKey, endKey)
       )
     )
-    .groupBy(conciergeSales.sellerId);
+    .orderBy(conciergeSellerMetrics.periodKey);
 
   return result;
 }
