@@ -1,0 +1,8 @@
+{
+  "query": "ALTER TABLE concierge_services DROP COLUMN price; ALTER TABLE concierge_sales ADD COLUMN price_label varchar(100) DEFAULT NULL AFTER service_name; ALTER TABLE concierge_service_prices CHANGE COLUMN concierge_service_id cs_id int NOT NULL;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute ALTER TABLE concierge_services DROP COLUMN price; ALTER TABLE concierge_sales ADD COLUMN price_label varchar(100) DEFAULT NULL AFTER service_name; ALTER TABLE concierge_service_prices CHANGE COLUMN concierge_service_id cs_id int NOT NULL;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1060 (42S21) at line 1: Duplicate column name 'price_label'"
+  ]
+}

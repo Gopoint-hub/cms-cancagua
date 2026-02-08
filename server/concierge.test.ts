@@ -102,10 +102,14 @@ describe("Concierge router structure", () => {
       "concierge.services.getAll",
       "concierge.services.upsert",
       "concierge.services.delete",
+      "concierge.services.upsertPrice",
+      "concierge.services.deletePrice",
+      "concierge.services.getPrices",
+      "concierge.services.getById",
       // Sellers (admin)
       "concierge.sellers.getAll",
       "concierge.sellers.upsert",
-      "concierge.sellers.getMetrics",
+      "concierge.sellers.getRealtimeMetrics",
       "concierge.sellers.updateCommission",
       // Sales (concierge)
       "concierge.sales.getAvailableServices",

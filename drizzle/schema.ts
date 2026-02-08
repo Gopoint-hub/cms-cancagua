@@ -780,13 +780,13 @@ export type InsertMaintenanceReportHistory = typeof maintenanceReportHistory.$in
 
 /**
  * Servicios disponibles para el canal Concierge.
- * Los administradores configuran qué servicios pueden vender los vendedores,
- * con precios y cantidades específicas para este canal.
+ * Los administradores configuran qué servicios pueden vender los vendedores.
+ * La info del servicio (nombre, descripción, etc.) viene de Skedu (tabla services).
+ * Los precios se configuran en el CMS con precios diferenciados (adulto, niño, etc.).
  */
 export const conciergeServices = mysqlTable("concierge_services", {
   id: int("id").autoincrement().primaryKey(),
   serviceId: int("service_id").references(() => services.id, { onDelete: "cascade" }).notNull(),
-  price: int("price").notNull(),
   availableQuantity: int("available_quantity").default(-1).notNull(),
   active: int("active").default(1).notNull(),
   sellerNotes: text("seller_notes"),
@@ -796,6 +796,24 @@ export const conciergeServices = mysqlTable("concierge_services", {
 
 export type ConciergeService = typeof conciergeServices.$inferSelect;
 export type InsertConciergeService = typeof conciergeServices.$inferInsert;
+
+/**
+ * Precios diferenciados por servicio Concierge.
+ * Cada servicio puede tener múltiples precios (ej: Adulto, Niño, Tercera Edad).
+ */
+export const conciergeServicePrices = mysqlTable("concierge_service_prices", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("cs_id").references(() => conciergeServices.id, { onDelete: "cascade" }).notNull(),
+  label: varchar("label", { length: 100 }).notNull(), // ej: "Adulto", "Niño", "Tercera Edad"
+  price: int("price").notNull(), // en pesos chilenos
+  sortOrder: int("sort_order").default(0).notNull(),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ConciergeServicePrice = typeof conciergeServicePrices.$inferSelect;
+export type InsertConciergeServicePrice = typeof conciergeServicePrices.$inferInsert;
 
 /**
  * Configuración de vendedores del canal Concierge.
@@ -844,6 +862,8 @@ export const conciergeSales = mysqlTable("concierge_sales", {
   notes: text("notes"),
   /** Service name snapshot at time of sale */
   serviceName: text("service_name"),
+  /** Price label snapshot (e.g. "Adulto", "Niño") */
+  priceLabel: varchar("price_label", { length: 100 }),
   confirmedAt: timestamp("confirmed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

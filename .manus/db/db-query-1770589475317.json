@@ -1,0 +1,40 @@
+{
+  "query": "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_NAME = 'concierge_services' ORDER BY ORDINAL_POSITION; SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_NAME = 'concierge_sales' AND COLUMN_NAME = 'price_label';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_NAME = 'concierge_services' ORDER BY ORDINAL_POSITION; SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_NAME = 'concierge_sales' AND COLUMN_NAME = 'price_label';",
+  "rows": [
+    {
+      "COLUMN_NAME": "id"
+    },
+    {
+      "COLUMN_NAME": "service_id"
+    },
+    {
+      "COLUMN_NAME": "price"
+    },
+    {
+      "COLUMN_NAME": "available_quantity"
+    },
+    {
+      "COLUMN_NAME": "active"
+    },
+    {
+      "COLUMN_NAME": "seller_notes"
+    },
+    {
+      "COLUMN_NAME": "created_at"
+    },
+    {
+      "COLUMN_NAME": "updated_at"
+    },
+    {
+      "COLUMN_NAME": "COLUMN_NAME"
+    },
+    {
+      "COLUMN_NAME": "price_label"
+    }
+  ],
+  "messages": [],
+  "stdout": "COLUMN_NAME\nid\nservice_id\nprice\navailable_quantity\nactive\nseller_notes\ncreated_at\nupdated_at\nCOLUMN_NAME\nprice_label\n",
+  "stderr": "",
+  "execution_time_ms": 66
+}

@@ -1,6 +1,7 @@
 /**
  * Router tRPC para el Módulo Concierge
  * Maneja operaciones de vendedores, servicios y ventas con WebPay
+ * Info de servicios viene de Skedu, precios diferenciados se configuran en CMS.
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -42,46 +43,101 @@ export const conciergeRouter = router({
   // SERVICIOS (Admin)
   // ============================================
   services: router({
-    /** Obtener todos los servicios Concierge (Admin) */
+    /** Obtener todos los servicios Concierge con precios (Admin) */
     getAll: adminProcedure
       .input(z.object({ activeOnly: z.boolean().optional() }).optional())
       .query(async ({ input }) => {
-        return await conciergeDb.getConciergeServices(input?.activeOnly ?? false);
+        return await conciergeDb.getConciergeServicesWithPrices(
+          input?.activeOnly ?? false
+        );
       }),
 
-    /** Obtener un servicio por ID */
+    /** Obtener un servicio por ID con sus precios */
     getById: adminProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        const service = await conciergeDb.getConciergeServiceById(input.id);
+        const service = await conciergeDb.getConciergeServiceWithPrices(
+          input.id
+        );
         if (!service) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Servicio no encontrado" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Servicio no encontrado",
+          });
         }
         return service;
       }),
 
-    /** Crear o actualizar un servicio Concierge */
+    /** Crear o actualizar un servicio Concierge (sin precios, solo metadata) */
     upsert: adminProcedure
       .input(
         z.object({
           id: z.number().optional(),
           serviceId: z.number(),
-          price: z.number().min(0),
           availableQuantity: z.number().default(-1),
           active: z.number().min(0).max(1).default(1),
           sellerNotes: z.string().optional(),
+          prices: z
+            .array(
+              z.object({
+                label: z.string().min(1),
+                price: z.number().min(0),
+                sortOrder: z.number().optional(),
+                active: z.number().min(0).max(1).optional(),
+              })
+            )
+            .optional(),
         })
       )
       .mutation(async ({ input }) => {
-        const id = await conciergeDb.upsertConciergeService(input);
+        const { prices, ...serviceData } = input;
+        const id = await conciergeDb.upsertConciergeService(serviceData);
+
+        // If prices were provided, replace them
+        if (prices && prices.length > 0) {
+          await conciergeDb.replaceServicePrices(id, prices);
+        }
+
         return { success: true, id };
       }),
 
-    /** Eliminar un servicio Concierge */
+    /** Eliminar un servicio Concierge (cascade deletes prices) */
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         await conciergeDb.deleteConciergeService(input.id);
+        return { success: true };
+      }),
+
+    /** Obtener precios de un servicio */
+    getPrices: adminProcedure
+      .input(z.object({ conciergeServiceId: z.number() }))
+      .query(async ({ input }) => {
+        return await conciergeDb.getServicePrices(input.conciergeServiceId);
+      }),
+
+    /** Agregar o actualizar un precio individual */
+    upsertPrice: adminProcedure
+      .input(
+        z.object({
+          id: z.number().optional(),
+          serviceId: z.number(), // concierge service id
+          label: z.string().min(1),
+          price: z.number().min(0),
+          sortOrder: z.number().optional(),
+          active: z.number().min(0).max(1).optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const id = await conciergeDb.upsertServicePrice(input);
+        return { success: true, id };
+      }),
+
+    /** Eliminar un precio */
+    deletePrice: adminProcedure
+      .input(z.object({ priceId: z.number() }))
+      .mutation(async ({ input }) => {
+        await conciergeDb.deleteServicePrice(input.priceId);
         return { success: true };
       }),
   }),
@@ -123,7 +179,10 @@ export const conciergeRouter = router({
         })
       )
       .mutation(async ({ input }) => {
-        await conciergeDb.updateSellerCommission(input.sellerId, input.commissionRate);
+        await conciergeDb.updateSellerCommission(
+          input.sellerId,
+          input.commissionRate
+        );
         return { success: true };
       }),
 
@@ -177,7 +236,10 @@ export const conciergeRouter = router({
         })
       )
       .query(async ({ input }) => {
-        return await conciergeDb.getCommissionsSummary(input.startDate, input.endDate);
+        return await conciergeDb.getCommissionsSummary(
+          input.startDate,
+          input.endDate
+        );
       }),
 
     /** Obtener todas las ventas (para detalle de comisiones) */
@@ -209,9 +271,9 @@ export const conciergeRouter = router({
   // HERRAMIENTA DE VENTA (Vendedor Concierge)
   // ============================================
   sales: router({
-    /** Obtener servicios disponibles para venta (Vendedor) */
+    /** Obtener servicios disponibles para venta con precios (Vendedor) */
     getAvailableServices: conciergeProcedure.query(async () => {
-      return await conciergeDb.getConciergeServices(true);
+      return await conciergeDb.getConciergeServicesWithPrices(true);
     }),
 
     /** Obtener información del vendedor actual */
@@ -220,7 +282,8 @@ export const conciergeRouter = router({
       if (!seller) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "No tienes configuración de vendedor. Contacta al administrador.",
+          message:
+            "No tienes configuración de vendedor. Contacta al administrador.",
         });
       }
       return seller;
@@ -228,20 +291,25 @@ export const conciergeRouter = router({
 
     /**
      * Iniciar una venta - Crea la transacción WebPay y envía el link de pago al cliente
+     * Ahora recibe priceId para saber qué precio diferenciado se eligió
      */
     initiateSale: conciergeProcedure
       .input(
         z.object({
           conciergeServiceId: z.number(),
+          priceId: z.number(), // ID del precio diferenciado seleccionado
           customerName: z.string().min(2),
           customerEmail: z.string().email(),
           customerPhone: z.string().optional(),
           notes: z.string().optional(),
+          quantity: z.number().min(1).default(1),
         })
       )
       .mutation(async ({ ctx, input }) => {
         // 1. Obtener información del vendedor
-        const seller = await conciergeDb.getConciergeSellerByUserId(ctx.user.id);
+        const seller = await conciergeDb.getConciergeSellerByUserId(
+          ctx.user.id
+        );
         if (!seller) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -274,12 +342,31 @@ export const conciergeRouter = router({
           });
         }
 
-        // 3. Calcular comisión
-        const amount = service.price;
+        // 3. Obtener el precio seleccionado
+        const selectedPrice = await conciergeDb.getServicePriceById(
+          input.priceId
+        );
+        if (!selectedPrice) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Precio no encontrado",
+          });
+        }
+
+        if (selectedPrice.serviceId !== input.conciergeServiceId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "El precio no corresponde al servicio seleccionado",
+          });
+        }
+
+        // 4. Calcular monto total y comisión
+        const amount = selectedPrice.price * input.quantity;
         const commissionRate = seller.commissionRate;
         const commissionAmount = Math.round((amount * commissionRate) / 100);
+        const priceLabel = `${selectedPrice.label}${input.quantity > 1 ? ` x${input.quantity}` : ""}`;
 
-        // 4. Crear registro de venta pendiente
+        // 5. Crear registro de venta pendiente
         const { id: saleId, saleReference } =
           await conciergeDb.createConciergeSale({
             sellerId: seller.id,
@@ -293,9 +380,10 @@ export const conciergeRouter = router({
             notes: input.notes,
             status: "pending",
             serviceName: service.serviceName || "Servicio Cancagua",
+            priceLabel,
           });
 
-        // 5. Crear transacción WebPay
+        // 6. Crear transacción WebPay
         const buyOrder = webpay.generateBuyOrder(saleId);
         const sessionId = webpay.generateSessionId();
         const frontendUrl = ENV.frontendUrl || "https://cancagua.cl";
@@ -309,16 +397,16 @@ export const conciergeRouter = router({
             returnUrl
           );
 
-          // 6. Construir la URL de pago completa (WebPay redirect URL)
+          // 7. Construir la URL de pago completa (WebPay redirect URL)
           const paymentUrl = `${wpResponse.url}?token_ws=${wpResponse.token}`;
 
-          // 7. Guardar token y link en la venta
+          // 8. Guardar token y link en la venta
           await conciergeDb.updateConciergeSaleWebpay(saleId, {
             webpayToken: wpResponse.token,
             paymentLink: paymentUrl,
           });
 
-          // 8. Enviar email al cliente con el link de pago
+          // 9. Enviar email al cliente con el link de pago
           const sellerName = ctx.user.name || "Vendedor Cancagua";
           await conciergeEmails.sendPaymentLinkEmail({
             customerName: input.customerName,
@@ -336,6 +424,7 @@ export const conciergeRouter = router({
             paymentUrl,
             amount,
             serviceName: service.serviceName,
+            priceLabel,
             commissionAmount,
             emailSent: true,
           };
@@ -442,9 +531,13 @@ export const conciergeRouter = router({
         const { token_ws } = input;
 
         // 1. Buscar la venta por el token de WebPay
-        const sale = await conciergeDb.getConciergeSaleByWebpayToken(token_ws);
+        const sale =
+          await conciergeDb.getConciergeSaleByWebpayToken(token_ws);
         if (!sale) {
-          console.warn("[Concierge Payment] Sale not found for token:", token_ws);
+          console.warn(
+            "[Concierge Payment] Sale not found for token:",
+            token_ws
+          );
           return {
             success: false,
             status: "not_found",
@@ -482,16 +575,21 @@ export const conciergeRouter = router({
 
           if (isApproved) {
             // 4a. PAGO EXITOSO
-            await conciergeDb.updateConciergeSaleStatus(sale.id, "completed", {
-              confirmedAt: new Date(),
-              webpayAuthCode: wpResult.authorizationCode,
-              webpayResponseCode: wpResult.responseCode,
-              webpayCardNumber: wpResult.cardNumber,
-            });
+            await conciergeDb.updateConciergeSaleStatus(
+              sale.id,
+              "completed",
+              {
+                confirmedAt: new Date(),
+                webpayAuthCode: wpResult.authorizationCode,
+                webpayResponseCode: wpResult.responseCode,
+                webpayCardNumber: wpResult.cardNumber,
+              }
+            );
 
             // Obtener datos del vendedor para emails
-            const seller = await conciergeDb.getConciergeSellerByUserId(sale.sellerId);
-            // Necesitamos el email del vendedor - buscamos en la tabla users
+            const seller = await conciergeDb.getConciergeSellerByUserId(
+              sale.sellerId
+            );
             const { getDb } = await import("./db");
             const db = await getDb();
             let sellerName = "Vendedor";
@@ -564,8 +662,9 @@ export const conciergeRouter = router({
             };
           } else {
             // 4b. PAGO RECHAZADO
-            // Obtener datos del vendedor para emails
-            const seller = await conciergeDb.getConciergeSellerByUserId(sale.sellerId);
+            const seller = await conciergeDb.getConciergeSellerByUserId(
+              sale.sellerId
+            );
             const { getDb } = await import("./db");
             const db = await getDb();
             let sellerName = "Vendedor";
@@ -649,6 +748,7 @@ export const conciergeRouter = router({
           serviceName: sale.serviceName,
           amount: sale.amount,
           customerName: sale.customerName,
+          priceLabel: sale.priceLabel,
         };
       }),
   }),

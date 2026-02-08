@@ -1,0 +1,84 @@
+{
+  "query": "DESCRIBE concierge_services; SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_NAME = 'concierge_service_prices';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute DESCRIBE concierge_services; SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_NAME = 'concierge_service_prices';",
+  "rows": [
+    {
+      "Field": "id",
+      "Type": "int(11)",
+      "Null": "NO",
+      "Key": "PRI",
+      "Default": "NULL",
+      "Extra": "auto_increment"
+    },
+    {
+      "Field": "service_id",
+      "Type": "int(11)",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "price",
+      "Type": "int(11)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "available_quantity",
+      "Type": "int(11)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "-1",
+      "Extra": ""
+    },
+    {
+      "Field": "active",
+      "Type": "int(11)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "1",
+      "Extra": ""
+    },
+    {
+      "Field": "seller_notes",
+      "Type": "text",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "created_at",
+      "Type": "timestamp",
+      "Null": "NO",
+      "Key": "",
+      "Default": "CURRENT_TIMESTAMP",
+      "Extra": ""
+    },
+    {
+      "Field": "updated_at",
+      "Type": "timestamp",
+      "Null": "NO",
+      "Key": "",
+      "Default": "CURRENT_TIMESTAMP",
+      "Extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+    }
+  ],
+  "messages": [
+    "COLUMN_NAME",
+    "id",
+    "concierge_service_id",
+    "label",
+    "price",
+    "sort_order",
+    "active",
+    "created_at",
+    "updated_at"
+  ],
+  "stdout": "Field\tType\tNull\tKey\tDefault\tExtra\nid\tint(11)\tNO\tPRI\tNULL\tauto_increment\nservice_id\tint(11)\tNO\tMUL\tNULL\t\nprice\tint(11)\tNO\t\tNULL\t\navailable_quantity\tint(11)\tNO\t\t-1\t\nactive\tint(11)\tNO\t\t1\t\nseller_notes\ttext\tYES\t\tNULL\t\ncreated_at\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\t\nupdated_at\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\tDEFAULT_GENERATED on update CURRENT_TIMESTAMP\nCOLUMN_NAME\nid\nconcierge_service_id\nlabel\nprice\nsort_order\nactive\ncreated_at\nupdated_at\n",
+  "stderr": "",
+  "execution_time_ms": 74
+}

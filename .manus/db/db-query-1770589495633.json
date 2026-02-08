@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE concierge_service_prices CHANGE COLUMN concierge_service_id cs_id int NOT NULL;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute ALTER TABLE concierge_service_prices CHANGE COLUMN concierge_service_id cs_id int NOT NULL;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 183
+}

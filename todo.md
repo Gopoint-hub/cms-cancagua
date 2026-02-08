@@ -147,3 +147,19 @@
 - [x] Test de credenciales WebPay producción
 - [x] Test de acceso protegido (admin y concierge)
 - [x] Todos los tests pasando (31/31)
+
+## Mejoras Módulo Concierge (Feb 8 2026 - v2)
+
+### Servicios con precios diferenciados
+- [x] Crear tabla concierge_service_prices para precios diferenciados (adulto, niño, etc.)
+- [x] Conectar servicios concierge con datos de Skedu (nombre, descripción del servicio)
+- [x] Actualizar backend para CRUD de precios diferenciados por servicio
+- [x] Actualizar frontend ServiciosDisponibles para mostrar/editar precios diferenciados
+- [x] Actualizar HerramientaVenta para que vendedor seleccione tipo de precio al crear venta
+
+### Vendedores → Módulo Usuarios
+- [x] Botón "Añadir vendedor" redirige al módulo Usuarios
+- [x] Simplificar vista de Vendedores para que trabaje con usuarios existentes
+
+### Tests
+- [x] Actualizar tests para nuevas funcionalidades (31/31 pasando)

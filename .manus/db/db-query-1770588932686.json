@@ -1,0 +1,80 @@
+{
+  "query": "SELECT id, skedu_id, name, price, category FROM services WHERE active = 1 LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, skedu_id, name, price, category FROM services WHERE active = 1 LIMIT 10;",
+  "rows": [
+    {
+      "id": "1",
+      "skedu_id": "71da575d-5949-47f3-ae42-3f78e356c57d",
+      "name": "Jornada de autocuidado Grupos",
+      "price": "0",
+      "category": "2de9bc07-ba51-4c9a-82c5-90db71718e2c"
+    },
+    {
+      "id": "2",
+      "skedu_id": "38740453-6310-4202-82e1-dc50f6b4586a",
+      "name": "Masaje Relajación 30 min",
+      "price": "0",
+      "category": "1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d"
+    },
+    {
+      "id": "3",
+      "skedu_id": "dc3b0862-ea5e-4809-81c6-450014ae8f87",
+      "name": "Pase BioReconecta 6hrs (Biopiscinas + Masaje + Kayak o Yoga)",
+      "price": "0",
+      "category": "2640c097-3623-4e2b-bf20-5eb9b1d5d5d9"
+    },
+    {
+      "id": "4",
+      "skedu_id": "d0a1a8fd-bc3f-405b-90b5-dd95b3cb3f10",
+      "name": "Masaje 50 minutos",
+      "price": "0",
+      "category": "1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d"
+    },
+    {
+      "id": "5",
+      "skedu_id": "4531f2c4-6aaa-41ae-82a7-b808b5fd7ff0",
+      "name": "Sauna Nativo STAFF",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3"
+    },
+    {
+      "id": "6",
+      "skedu_id": "486ccef7-d9d0-4310-9eaf-8034ece7ac26",
+      "name": "Sauna Nativo 2 Personas",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3"
+    },
+    {
+      "id": "7",
+      "skedu_id": "a944a041-9556-4c39-9252-ef1a01b28439",
+      "name": "Sauna Nativo Privado (Hasta 6 personas)",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3"
+    },
+    {
+      "id": "8",
+      "skedu_id": "dec44241-6cd4-4f56-8299-6f45829100d2",
+      "name": "Promoción del mes: Renovación de lavanda",
+      "price": "0",
+      "category": "1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d"
+    },
+    {
+      "id": "9",
+      "skedu_id": "f57b8d75-45e8-4811-b705-1a72637a1a50",
+      "name": "Hatha Yoga - Suave",
+      "price": "0",
+      "category": "c98cf093-2ba5-494d-a1e4-5a0bb360c387"
+    },
+    {
+      "id": "10",
+      "skedu_id": "d2ff9cba-5073-4d6b-9992-fb0e4d727caf",
+      "name": "Sauna Nativo 3 Personas",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tskedu_id\tname\tprice\tcategory\n1\t71da575d-5949-47f3-ae42-3f78e356c57d\tJornada de autocuidado Grupos\t0\t2de9bc07-ba51-4c9a-82c5-90db71718e2c\n2\t38740453-6310-4202-82e1-dc50f6b4586a\tMasaje Relajación 30 min\t0\t1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d\n3\tdc3b0862-ea5e-4809-81c6-450014ae8f87\tPase BioReconecta 6hrs (Biopiscinas + Masaje + Kayak o Yoga)\t0\t2640c097-3623-4e2b-bf20-5eb9b1d5d5d9\n4\td0a1a8fd-bc3f-405b-90b5-dd95b3cb3f10\tMasaje 50 minutos\t0\t1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d\n5\t4531f2c4-6aaa-41ae-82a7-b808b5fd7ff0\tSauna Nativo STAFF\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\n6\t486ccef7-d9d0-4310-9eaf-8034ece7ac26\tSauna Nativo 2 Personas\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\n7\ta944a041-9556-4c39-9252-ef1a01b28439\tSauna Nativo Privado (Hasta 6 personas)\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\n8\tdec44241-6cd4-4f56-8299-6f45829100d2\tPromoción del mes: Renovación de lavanda\t0\t1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d\n9\tf57b8d75-45e8-4811-b705-1a72637a1a50\tHatha Yoga - Suave\t0\tc98cf093-2ba5-494d-a1e4-5a0bb360c387\n10\td2ff9cba-5073-4d6b-9992-fb0e4d727caf\tSauna Nativo 3 Personas\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\n",
+  "stderr": "",
+  "execution_time_ms": 67
+}

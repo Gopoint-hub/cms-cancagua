@@ -1,11 +1,17 @@
 /**
  * Servicios Disponibles - Módulo Concierge (Admin)
- * Gestión de servicios que pueden vender los vendedores
+ * Info de servicios viene de Skedu, precios diferenciados se configuran en CMS.
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -44,13 +50,31 @@ import {
   Package,
   DollarSign,
   Loader2,
-  AlertCircle,
+  Tag,
+  X,
 } from "lucide-react";
+
+interface PriceEntry {
+  label: string;
+  price: number;
+  sortOrder: number;
+  active: number;
+}
+
+interface ServicePrice {
+  id: number;
+  serviceId: number;
+  label: string;
+  price: number;
+  sortOrder: number;
+  active: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 interface ConciergeService {
   id: number;
   serviceId: number;
-  price: number;
   availableQuantity: number;
   active: number;
   sellerNotes: string | null;
@@ -60,6 +84,7 @@ interface ConciergeService {
   serviceImageUrl: string | null;
   serviceCategory: string | null;
   createdAt: Date;
+  prices: ServicePrice[];
 }
 
 interface BaseService {
@@ -73,28 +98,38 @@ interface BaseService {
 
 export default function ServiciosDisponibles() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingService, setEditingService] = useState<ConciergeService | null>(null);
+  const [editingService, setEditingService] = useState<ConciergeService | null>(
+    null
+  );
   const [formData, setFormData] = useState({
     serviceId: 0,
-    price: 0,
     availableQuantity: -1,
     active: 1,
     sellerNotes: "",
   });
+  const [prices, setPrices] = useState<PriceEntry[]>([
+    { label: "Adulto", price: 0, sortOrder: 0, active: 1 },
+  ]);
 
-  // Obtener servicios Concierge
-  const { data: conciergeServices, isLoading, refetch } = trpc.concierge.services.getAll.useQuery({ activeOnly: false });
+  // Obtener servicios Concierge con precios
+  const {
+    data: conciergeServices,
+    isLoading,
+    refetch,
+  } = trpc.concierge.services.getAll.useQuery({ activeOnly: false });
 
   // Obtener servicios base de Skedu para el selector
   const { data: baseServices } = trpc.services.getAll.useQuery();
 
-  // Mutación para crear/actualizar servicio
+  // Mutación para crear/actualizar servicio con precios
   const upsertMutation = trpc.concierge.services.upsert.useMutation({
     onSuccess: () => {
       refetch();
       setIsDialogOpen(false);
       resetForm();
-      toast.success(editingService ? "Servicio actualizado" : "Servicio agregado");
+      toast.success(
+        editingService ? "Servicio actualizado" : "Servicio agregado"
+      );
     },
     onError: (error: any) => {
       toast.error(error.message || "Error al guardar el servicio");
@@ -125,11 +160,11 @@ export default function ServiciosDisponibles() {
   const resetForm = () => {
     setFormData({
       serviceId: 0,
-      price: 0,
       availableQuantity: -1,
       active: 1,
       sellerNotes: "",
     });
+    setPrices([{ label: "Adulto", price: 0, sortOrder: 0, active: 1 }]);
     setEditingService(null);
   };
 
@@ -144,11 +179,23 @@ export default function ServiciosDisponibles() {
     setEditingService(service);
     setFormData({
       serviceId: service.serviceId,
-      price: service.price,
       availableQuantity: service.availableQuantity,
       active: service.active,
       sellerNotes: service.sellerNotes || "",
     });
+    // Load existing prices
+    if (service.prices && service.prices.length > 0) {
+      setPrices(
+        service.prices.map((p) => ({
+          label: p.label,
+          price: p.price,
+          sortOrder: p.sortOrder,
+          active: p.active,
+        }))
+      );
+    } else {
+      setPrices([{ label: "Adulto", price: 0, sortOrder: 0, active: 1 }]);
+    }
     setIsDialogOpen(true);
   };
 
@@ -158,266 +205,382 @@ export default function ServiciosDisponibles() {
       toast.error("Selecciona un servicio");
       return;
     }
-    if (formData.price <= 0) {
-      toast.error("El precio debe ser mayor a 0");
+    const validPrices = prices.filter((p) => p.label.trim() && p.price > 0);
+    if (validPrices.length === 0) {
+      toast.error("Agrega al menos un precio válido");
       return;
     }
 
     upsertMutation.mutate({
       ...formData,
       id: editingService?.id,
+      prices: validPrices.map((p, i) => ({ ...p, sortOrder: i })),
     });
   };
 
   // Eliminar servicio
   const handleDelete = (id: number) => {
-    if (confirm("¿Estás seguro de eliminar este servicio?")) {
+    if (confirm("¿Estás seguro de eliminar este servicio y todos sus precios?")) {
       deleteMutation.mutate({ id });
     }
   };
 
+  // Agregar nueva fila de precio
+  const addPriceRow = () => {
+    setPrices([
+      ...prices,
+      { label: "", price: 0, sortOrder: prices.length, active: 1 },
+    ]);
+  };
+
+  // Actualizar una fila de precio
+  const updatePrice = (
+    index: number,
+    field: keyof PriceEntry,
+    value: string | number
+  ) => {
+    const updated = [...prices];
+    (updated[index] as any)[field] = value;
+    setPrices(updated);
+  };
+
+  // Eliminar una fila de precio
+  const removePrice = (index: number) => {
+    if (prices.length <= 1) {
+      toast.error("Debe haber al menos un precio");
+      return;
+    }
+    setPrices(prices.filter((_, i) => i !== index));
+  };
+
   return (
     <DashboardLayout>
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Servicios Disponibles</h1>
-          <p className="text-gray-500">
-            Gestiona los servicios que pueden vender los vendedores Concierge
-          </p>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Servicios Disponibles</h1>
+            <p className="text-gray-500">
+              Servicios de Skedu con precios diferenciados para el canal
+              Concierge
+            </p>
+          </div>
+          <Button onClick={handleNew}>
+            <Plus className="w-4 h-4 mr-2" />
+            Agregar Servicio
+          </Button>
         </div>
-        <Button onClick={handleNew}>
-          <Plus className="w-4 h-4 mr-2" />
-          Agregar Servicio
-        </Button>
-      </div>
 
-      {/* Tabla de servicios */}
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
-            </div>
-          ) : conciergeServices?.length === 0 ? (
-            <div className="p-12 text-center">
-              <Package className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No hay servicios configurados</h3>
-              <p className="text-gray-500 mb-4">
-                Agrega servicios para que los vendedores puedan ofrecerlos
-              </p>
-              <Button onClick={handleNew}>
-                <Plus className="w-4 h-4 mr-2" />
-                Agregar Primer Servicio
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Servicio</TableHead>
-                  <TableHead>Precio Concierge</TableHead>
-                  <TableHead>Disponibilidad</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {conciergeServices?.map((service: ConciergeService) => (
-                  <TableRow key={service.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        {service.serviceImageUrl ? (
-                          <img
-                            src={service.serviceImageUrl}
-                            alt={service.serviceName || ""}
-                            className="w-10 h-10 rounded-lg object-cover"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
-                            <Package className="w-5 h-5 text-gray-400" />
+        {/* Tabla de servicios */}
+        <Card>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="p-6 space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : conciergeServices?.length === 0 ? (
+              <div className="p-12 text-center">
+                <Package className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+                <h3 className="text-lg font-semibold mb-2">
+                  No hay servicios configurados
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  Agrega servicios de Skedu y configura precios diferenciados
+                </p>
+                <Button onClick={handleNew}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Agregar Primer Servicio
+                </Button>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Servicio (Skedu)</TableHead>
+                    <TableHead>Precios</TableHead>
+                    <TableHead>Disponibilidad</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {conciergeServices?.map((service) => (
+                    <TableRow key={service.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          {service.serviceImageUrl ? (
+                            <img
+                              src={service.serviceImageUrl}
+                              alt={service.serviceName || ""}
+                              className="w-10 h-10 rounded-lg object-cover"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                              <Package className="w-5 h-5 text-gray-400" />
+                            </div>
+                          )}
+                          <div>
+                            <p className="font-medium">
+                              {service.serviceName}
+                            </p>
+                            {service.serviceCategory && (
+                              <p className="text-sm text-gray-500">
+                                {service.serviceCategory}
+                              </p>
+                            )}
                           </div>
-                        )}
-                        <div>
-                          <p className="font-medium">{service.serviceName}</p>
-                          {service.serviceCategory && (
-                            <p className="text-sm text-gray-500">{service.serviceCategory}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {service.prices && service.prices.length > 0 ? (
+                            service.prices
+                              .filter((p) => p.active)
+                              .map((p) => (
+                                <div
+                                  key={p.id}
+                                  className="flex items-center gap-2"
+                                >
+                                  <Tag className="w-3 h-3 text-gray-400" />
+                                  <span className="text-sm text-gray-600">
+                                    {p.label}:
+                                  </span>
+                                  <span className="text-sm font-semibold text-blue-600">
+                                    {formatPrice(p.price)}
+                                  </span>
+                                </div>
+                              ))
+                          ) : (
+                            <span className="text-sm text-gray-400 italic">
+                              Sin precios
+                            </span>
                           )}
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className="font-semibold text-blue-600">
-                        {formatPrice(service.price)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {service.availableQuantity === -1 ? (
-                        <Badge variant="outline">Ilimitado</Badge>
-                      ) : (
-                        <Badge variant={service.availableQuantity > 0 ? "default" : "destructive"}>
-                          {service.availableQuantity} disponibles
+                      </TableCell>
+                      <TableCell>
+                        {service.availableQuantity === -1 ? (
+                          <Badge variant="outline">Ilimitado</Badge>
+                        ) : (
+                          <Badge
+                            variant={
+                              service.availableQuantity > 0
+                                ? "default"
+                                : "destructive"
+                            }
+                          >
+                            {service.availableQuantity} disponibles
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={service.active ? "default" : "secondary"}
+                        >
+                          {service.active ? "Activo" : "Inactivo"}
                         </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={service.active ? "default" : "secondary"}>
-                        {service.active ? "Activo" : "Inactivo"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(service)}
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(service.id)}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Diálogo de crear/editar */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {editingService ? "Editar Servicio" : "Agregar Servicio"}
-            </DialogTitle>
-            <DialogDescription>
-              {editingService
-                ? "Modifica la configuración del servicio para el canal Concierge"
-                : "Selecciona un servicio de Skedu y configura su precio para vendedores"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            {/* Selector de servicio base */}
-            <div className="space-y-2">
-              <Label>Servicio de Skedu *</Label>
-              <Select
-                value={formData.serviceId?.toString() || ""}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, serviceId: parseInt(value) })
-                }
-                disabled={!!editingService}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona un servicio" />
-                </SelectTrigger>
-                <SelectContent>
-                  {baseServices?.map((service: BaseService) => (
-                    <SelectItem key={service.id} value={service.id.toString()}>
-                      {service.name}
-                    </SelectItem>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEdit(service)}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(service.id)}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
-            {/* Precio */}
-            <div className="space-y-2">
-              <Label htmlFor="price">Precio Concierge (CLP) *</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  id="price"
-                  type="number"
-                  min="0"
-                  value={formData.price}
-                  onChange={(e) =>
-                    setFormData({ ...formData, price: parseInt(e.target.value) || 0 })
+        {/* Diálogo de crear/editar */}
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {editingService ? "Editar Servicio" : "Agregar Servicio"}
+              </DialogTitle>
+              <DialogDescription>
+                {editingService
+                  ? "Modifica la configuración y precios del servicio"
+                  : "Selecciona un servicio de Skedu y configura precios diferenciados"}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-5 py-4">
+              {/* Selector de servicio base */}
+              <div className="space-y-2">
+                <Label>Servicio de Skedu *</Label>
+                <Select
+                  value={formData.serviceId?.toString() || ""}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, serviceId: parseInt(value) })
                   }
-                  className="pl-10"
-                />
+                  disabled={!!editingService}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona un servicio" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {baseServices?.map((service: BaseService) => (
+                      <SelectItem
+                        key={service.id}
+                        value={service.id.toString()}
+                      >
+                        {service.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <p className="text-xs text-gray-500">
-                Este es el precio que verán los vendedores y clientes
-              </p>
-            </div>
 
-            {/* Cantidad disponible */}
-            <div className="space-y-2">
-              <Label htmlFor="quantity">Cantidad Disponible</Label>
-              <Input
-                id="quantity"
-                type="number"
-                min="-1"
-                value={formData.availableQuantity}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    availableQuantity: parseInt(e.target.value) || -1,
-                  })
-                }
-              />
-              <p className="text-xs text-gray-500">
-                Usa -1 para cantidad ilimitada
-              </p>
-            </div>
+              {/* Precios diferenciados */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-semibold">
+                    Precios Diferenciados *
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addPriceRow}
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Agregar Precio
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Ej: Adulto $25.000, Niño $15.000, Tercera Edad $20.000
+                </p>
 
-            {/* Notas para vendedores */}
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notas para Vendedores</Label>
-              <Textarea
-                id="notes"
-                placeholder="Información adicional para los vendedores..."
-                value={formData.sellerNotes}
-                onChange={(e) =>
-                  setFormData({ ...formData, sellerNotes: e.target.value })
-                }
-              />
-            </div>
+                <div className="space-y-2">
+                  {prices.map((entry, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center gap-2 p-3 border rounded-lg bg-gray-50/50"
+                    >
+                      <div className="flex-1">
+                        <Input
+                          placeholder="Etiqueta (ej: Adulto)"
+                          value={entry.label}
+                          onChange={(e) =>
+                            updatePrice(index, "label", e.target.value)
+                          }
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="w-36 relative">
+                        <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="Precio CLP"
+                          value={entry.price || ""}
+                          onChange={(e) =>
+                            updatePrice(
+                              index,
+                              "price",
+                              parseInt(e.target.value) || 0
+                            )
+                          }
+                          className="pl-7 h-9"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-gray-400 hover:text-red-500"
+                        onClick={() => removePrice(index)}
+                        disabled={prices.length <= 1}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
-            {/* Estado activo */}
-            <div className="flex items-center justify-between">
-              <div>
-                <Label>Estado</Label>
-                <p className="text-sm text-gray-500">
-                  Los servicios inactivos no aparecen para los vendedores
+              {/* Cantidad disponible */}
+              <div className="space-y-2">
+                <Label htmlFor="quantity">Cantidad Disponible</Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min="-1"
+                  value={formData.availableQuantity}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      availableQuantity: parseInt(e.target.value) || -1,
+                    })
+                  }
+                />
+                <p className="text-xs text-gray-500">
+                  Usa -1 para cantidad ilimitada
                 </p>
               </div>
-              <Switch
-                checked={formData.active === 1}
-                onCheckedChange={(checked) =>
-                  setFormData({ ...formData, active: checked ? 1 : 0 })
-                }
-              />
-            </div>
-          </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSave} disabled={upsertMutation.isPending}>
-              {upsertMutation.isPending && (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              )}
-              {editingService ? "Guardar Cambios" : "Agregar Servicio"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+              {/* Notas para vendedores */}
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notas para Vendedores</Label>
+                <Textarea
+                  id="notes"
+                  placeholder="Información adicional para los vendedores..."
+                  value={formData.sellerNotes}
+                  onChange={(e) =>
+                    setFormData({ ...formData, sellerNotes: e.target.value })
+                  }
+                />
+              </div>
+
+              {/* Estado activo */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Estado</Label>
+                  <p className="text-sm text-gray-500">
+                    Los servicios inactivos no aparecen para los vendedores
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.active === 1}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, active: checked ? 1 : 0 })
+                  }
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSave} disabled={upsertMutation.isPending}>
+                {upsertMutation.isPending && (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                )}
+                {editingService ? "Guardar Cambios" : "Agregar Servicio"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </DashboardLayout>
   );
 }

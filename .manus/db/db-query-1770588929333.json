@@ -1,0 +1,170 @@
+{
+  "query": "SELECT id, skedu_id, name, price, category, active FROM services LIMIT 20;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, skedu_id, name, price, category, active FROM services LIMIT 20;",
+  "rows": [
+    {
+      "id": "1",
+      "skedu_id": "71da575d-5949-47f3-ae42-3f78e356c57d",
+      "name": "Jornada de autocuidado Grupos",
+      "price": "0",
+      "category": "2de9bc07-ba51-4c9a-82c5-90db71718e2c",
+      "active": "1"
+    },
+    {
+      "id": "2",
+      "skedu_id": "38740453-6310-4202-82e1-dc50f6b4586a",
+      "name": "Masaje Relajación 30 min",
+      "price": "0",
+      "category": "1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d",
+      "active": "1"
+    },
+    {
+      "id": "3",
+      "skedu_id": "dc3b0862-ea5e-4809-81c6-450014ae8f87",
+      "name": "Pase BioReconecta 6hrs (Biopiscinas + Masaje + Kayak o Yoga)",
+      "price": "0",
+      "category": "2640c097-3623-4e2b-bf20-5eb9b1d5d5d9",
+      "active": "1"
+    },
+    {
+      "id": "4",
+      "skedu_id": "d0a1a8fd-bc3f-405b-90b5-dd95b3cb3f10",
+      "name": "Masaje 50 minutos",
+      "price": "0",
+      "category": "1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d",
+      "active": "1"
+    },
+    {
+      "id": "5",
+      "skedu_id": "4531f2c4-6aaa-41ae-82a7-b808b5fd7ff0",
+      "name": "Sauna Nativo STAFF",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3",
+      "active": "1"
+    },
+    {
+      "id": "6",
+      "skedu_id": "486ccef7-d9d0-4310-9eaf-8034ece7ac26",
+      "name": "Sauna Nativo 2 Personas",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3",
+      "active": "1"
+    },
+    {
+      "id": "7",
+      "skedu_id": "a944a041-9556-4c39-9252-ef1a01b28439",
+      "name": "Sauna Nativo Privado (Hasta 6 personas)",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3",
+      "active": "1"
+    },
+    {
+      "id": "8",
+      "skedu_id": "dec44241-6cd4-4f56-8299-6f45829100d2",
+      "name": "Promoción del mes: Renovación de lavanda",
+      "price": "0",
+      "category": "1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d",
+      "active": "1"
+    },
+    {
+      "id": "9",
+      "skedu_id": "f57b8d75-45e8-4811-b705-1a72637a1a50",
+      "name": "Hatha Yoga - Suave",
+      "price": "0",
+      "category": "c98cf093-2ba5-494d-a1e4-5a0bb360c387",
+      "active": "1"
+    },
+    {
+      "id": "10",
+      "skedu_id": "d2ff9cba-5073-4d6b-9992-fb0e4d727caf",
+      "name": "Sauna Nativo 3 Personas",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3",
+      "active": "1"
+    },
+    {
+      "id": "11",
+      "skedu_id": "294abb1b-bda0-4e10-8600-7d225f6ce663",
+      "name": "Sauna Nativo 1 Persona",
+      "price": "0",
+      "category": "88a5c6bb-22a7-45e4-8ac8-446f2422a2d3",
+      "active": "1"
+    },
+    {
+      "id": "12",
+      "skedu_id": "cb1312a9-4aca-4c71-9828-cc3911a9b782",
+      "name": "Pase Reconecta Detox 6,5hrs (Hot-tub + Masaje + Sauna + Kayak o Yoga)",
+      "price": "0",
+      "category": "2640c097-3623-4e2b-bf20-5eb9b1d5d5d9",
+      "active": "1"
+    },
+    {
+      "id": "13",
+      "skedu_id": "07228efe-177c-429c-89a0-676277abbdff",
+      "name": "Danza Infantil",
+      "price": "0",
+      "category": "c98cf093-2ba5-494d-a1e4-5a0bb360c387",
+      "active": "1"
+    },
+    {
+      "id": "14",
+      "skedu_id": "3a52ff0c-89cb-48cb-b2e5-f1395a6daf71",
+      "name": "Entrenamiento funcional & Animal Flow",
+      "price": "0",
+      "category": "c98cf093-2ba5-494d-a1e4-5a0bb360c387",
+      "active": "1"
+    },
+    {
+      "id": "15",
+      "skedu_id": "a266a8dd-090f-4261-9ebd-0c41087c080e",
+      "name": "Danza y Ritmos Africanos",
+      "price": "0",
+      "category": "c98cf093-2ba5-494d-a1e4-5a0bb360c387",
+      "active": "1"
+    },
+    {
+      "id": "16",
+      "skedu_id": "8dc087fd-67d9-40f0-944c-0872e64e8b0a",
+      "name": "Sonoterapia. Sábado 29 de Noviembre",
+      "price": "0",
+      "category": "2de9bc07-ba51-4c9a-82c5-90db71718e2c",
+      "active": "1"
+    },
+    {
+      "id": "17",
+      "skedu_id": "203139c0-f3d8-42d6-a996-15c5ed74c511",
+      "name": "Concierto Valentine's Day + Biopiscina nocturna. Sábado 14 de Febrero.",
+      "price": "0",
+      "category": "e93b850b-6fda-4fae-9fed-df5591c251c5",
+      "active": "1"
+    },
+    {
+      "id": "18",
+      "skedu_id": "3daa00ec-4c8d-41d5-995a-79ad4cbd8380",
+      "name": "Biopiscinas Geotermales (Estadía de 4 horas)",
+      "price": "0",
+      "category": "497f79e9-50f9-484a-a1e9-dab5f5d67d2d",
+      "active": "1"
+    },
+    {
+      "id": "19",
+      "skedu_id": "29ee2d1b-a529-4ad4-857b-c0e45facec62",
+      "name": "Encuentro de Inmersión. Domingo 21 de Diciembre",
+      "price": "0",
+      "category": "2de9bc07-ba51-4c9a-82c5-90db71718e2c",
+      "active": "1"
+    },
+    {
+      "id": "20",
+      "skedu_id": "f4975ff2-fd9c-4519-8103-97d6f75108bf",
+      "name": "Hot Tubs  (Estadia de 2.5hrs + 1.5 hrs Cafetería / Playa)",
+      "price": "0",
+      "category": "42390ed0-0266-4719-9eaf-14f1f43d7f3d",
+      "active": "1"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tskedu_id\tname\tprice\tcategory\tactive\n1\t71da575d-5949-47f3-ae42-3f78e356c57d\tJornada de autocuidado Grupos\t0\t2de9bc07-ba51-4c9a-82c5-90db71718e2c\t1\n2\t38740453-6310-4202-82e1-dc50f6b4586a\tMasaje Relajación 30 min\t0\t1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d\t1\n3\tdc3b0862-ea5e-4809-81c6-450014ae8f87\tPase BioReconecta 6hrs (Biopiscinas + Masaje + Kayak o Yoga)\t0\t2640c097-3623-4e2b-bf20-5eb9b1d5d5d9\t1\n4\td0a1a8fd-bc3f-405b-90b5-dd95b3cb3f10\tMasaje 50 minutos\t0\t1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d\t1\n5\t4531f2c4-6aaa-41ae-82a7-b808b5fd7ff0\tSauna Nativo STAFF\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\t1\n6\t486ccef7-d9d0-4310-9eaf-8034ece7ac26\tSauna Nativo 2 Personas\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\t1\n7\ta944a041-9556-4c39-9252-ef1a01b28439\tSauna Nativo Privado (Hasta 6 personas)\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\t1\n8\tdec44241-6cd4-4f56-8299-6f45829100d2\tPromoción del mes: Renovación de lavanda\t0\t1f2ee9c9-f6e7-4e6d-97a8-51ba5271960d\t1\n9\tf57b8d75-45e8-4811-b705-1a72637a1a50\tHatha Yoga - Suave\t0\tc98cf093-2ba5-494d-a1e4-5a0bb360c387\t1\n10\td2ff9cba-5073-4d6b-9992-fb0e4d727caf\tSauna Nativo 3 Personas\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\t1\n11\t294abb1b-bda0-4e10-8600-7d225f6ce663\tSauna Nativo 1 Persona\t0\t88a5c6bb-22a7-45e4-8ac8-446f2422a2d3\t1\n12\tcb1312a9-4aca-4c71-9828-cc3911a9b782\tPase Reconecta Detox 6,5hrs (Hot-tub + Masaje + Sauna + Kayak o Yoga)\t0\t2640c097-3623-4e2b-bf20-5eb9b1d5d5d9\t1\n13\t07228efe-177c-429c-89a0-676277abbdff\tDanza Infantil\t0\tc98cf093-2ba5-494d-a1e4-5a0bb360c387\t1\n14\t3a52ff0c-89cb-48cb-b2e5-f1395a6daf71\tEntrenamiento funcional & Animal Flow\t0\tc98cf093-2ba5-494d-a1e4-5a0bb360c387\t1\n15\ta266a8dd-090f-4261-9ebd-0c41087c080e\tDanza y Ritmos Africanos\t0\tc98cf093-2ba5-494d-a1e4-5a0bb360c387\t1\n16\t8dc087fd-67d9-40f0-944c-0872e64e8b0a\tSonoterapia. Sábado 29 de Noviembre\t0\t2de9bc07-ba51-4c9a-82c5-90db71718e2c\t1\n17\t203139c0-f3d8-42d6-a996-15c5ed74c511\tConcierto Valentine's Day + Biopiscina nocturna. Sábado 14 de Febrero.\t0\te93b850b-6fda-4fae-9fed-df5591c251c5\t1\n18\t3daa00ec-4c8d-41d5-995a-79ad4cbd8380\tBiopiscinas Geotermales (Estadía de 4 horas)\t0\t497f79e9-50f9-484a-a1e9-dab5f5d67d2d\t1\n19\t29ee2d1b-a529-4ad4-857b-c0e45facec62\tEncuentro de Inmersión. Domingo 21 de Diciembre\t0\t2de9bc07-ba51-4c9a-82c5-90db71718e2c\t1\n20\tf4975ff2-fd9c-4519-8103-97d6f75108bf\tHot Tubs  (Estadia de 2.5hrs + 1.5 hrs Cafetería / Playa)\t0\t42390ed0-0266-4719-9eaf-14f1f43d7f3d\t1\n",
+  "stderr": "",
+  "execution_time_ms": 92
+}

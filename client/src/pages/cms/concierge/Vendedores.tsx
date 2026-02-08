@@ -3,6 +3,7 @@
  * Gestión de vendedores y métricas de comisiones
  */
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,6 +89,7 @@ interface CommissionSummary {
 type PeriodType = "today" | "week" | "month" | "custom";
 
 export default function Vendedores() {
+  const [, navigate] = useLocation();
   const [activeTab, setActiveTab] = useState("sellers");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState<ConciergeSeller | null>(null);
@@ -193,10 +195,9 @@ export default function Vendedores() {
     setEditingSeller(null);
   };
 
-  // Abrir diálogo para nuevo vendedor
+  // Redirigir al módulo de usuarios para agregar vendedor
   const handleNew = () => {
-    resetForm();
-    setIsDialogOpen(true);
+    navigate("/cms/usuarios");
   };
 
   // Abrir diálogo para editar
@@ -248,7 +249,7 @@ export default function Vendedores() {
         </div>
         <Button onClick={handleNew}>
           <Plus className="w-4 h-4 mr-2" />
-          Agregar Vendedor
+          Ir a Usuarios
         </Button>
       </div>
 
@@ -288,7 +289,7 @@ export default function Vendedores() {
                   </p>
                   <Button onClick={handleNew}>
                     <Plus className="w-4 h-4 mr-2" />
-                    Agregar Primer Vendedor
+                    Ir a Usuarios
                   </Button>
                 </div>
               ) : (

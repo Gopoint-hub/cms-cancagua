@@ -1,17 +1,31 @@
 /**
  * Herramienta de Venta - Módulo Concierge
- * Interfaz mobile-first para que los vendedores realicen ventas
+ * Interfaz mobile-first para que los vendedores realicen ventas.
+ * Ahora con precios diferenciados (adulto, niño, etc.)
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   ShoppingCart,
@@ -27,13 +41,24 @@ import {
   DollarSign,
   Clock,
   Package,
+  Tag,
 } from "lucide-react";
 
 // Tipos
+interface ServicePrice {
+  id: number;
+  serviceId: number;
+  label: string;
+  price: number;
+  sortOrder: number;
+  active: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 interface ConciergeService {
   id: number;
   serviceId: number;
-  price: number;
   availableQuantity: number;
   active: number;
   sellerNotes: string | null;
@@ -42,13 +67,17 @@ interface ConciergeService {
   serviceDuration: number | null;
   serviceImageUrl: string | null;
   serviceCategory: string | null;
+  prices: ServicePrice[];
 }
 
 type ViewState = "services" | "form" | "success";
 
 export default function HerramientaVenta() {
   const [view, setView] = useState<ViewState>("services");
-  const [selectedService, setSelectedService] = useState<ConciergeService | null>(null);
+  const [selectedService, setSelectedService] =
+    useState<ConciergeService | null>(null);
+  const [selectedPriceId, setSelectedPriceId] = useState<number | null>(null);
+  const [quantity, setQuantity] = useState(1);
   const [customerData, setCustomerData] = useState({
     name: "",
     email: "",
@@ -62,16 +91,19 @@ export default function HerramientaVenta() {
     paymentUrl: string;
     amount: number;
     serviceName: string | null;
+    priceLabel: string;
     commissionAmount: number;
     emailSent: boolean;
   } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Obtener servicios disponibles
-  const { data: services, isLoading: loadingServices } = trpc.concierge.sales.getAvailableServices.useQuery();
+  // Obtener servicios disponibles con precios
+  const { data: services, isLoading: loadingServices } =
+    trpc.concierge.sales.getAvailableServices.useQuery();
 
   // Obtener información del vendedor
-  const { data: sellerInfo } = trpc.concierge.sales.getMySellerInfo.useQuery();
+  const { data: sellerInfo } =
+    trpc.concierge.sales.getMySellerInfo.useQuery();
 
   // Mutación para iniciar venta
   const initiateSaleMutation = trpc.concierge.sales.initiateSale.useMutation({
@@ -109,16 +141,34 @@ export default function HerramientaVenta() {
   // Seleccionar servicio
   const handleSelectService = (service: ConciergeService) => {
     setSelectedService(service);
+    setSelectedPriceId(null);
+    setQuantity(1);
+    // Auto-select if only one active price
+    const activePrices = service.prices.filter((p) => p.active);
+    if (activePrices.length === 1) {
+      setSelectedPriceId(activePrices[0].id);
+    }
     setView("form");
+  };
+
+  // Get selected price object
+  const getSelectedPrice = (): ServicePrice | undefined => {
+    if (!selectedService || !selectedPriceId) return undefined;
+    return selectedService.prices.find((p) => p.id === selectedPriceId);
   };
 
   // Enviar formulario
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedService) return;
+    if (!selectedService || !selectedPriceId) {
+      toast.error("Selecciona un precio");
+      return;
+    }
 
     initiateSaleMutation.mutate({
       conciergeServiceId: selectedService.id,
+      priceId: selectedPriceId,
+      quantity,
       customerName: customerData.name,
       customerEmail: customerData.email,
       customerPhone: customerData.phone || undefined,
@@ -130,8 +180,22 @@ export default function HerramientaVenta() {
   const handleNewSale = () => {
     setView("services");
     setSelectedService(null);
+    setSelectedPriceId(null);
+    setQuantity(1);
     setCustomerData({ name: "", email: "", phone: "", notes: "" });
     setSaleResult(null);
+  };
+
+  // Get price range string for a service
+  const getPriceRange = (service: ConciergeService) => {
+    const activePrices = service.prices.filter((p) => p.active);
+    if (activePrices.length === 0) return "Sin precio";
+    if (activePrices.length === 1)
+      return formatPrice(activePrices[0].price);
+    const min = Math.min(...activePrices.map((p) => p.price));
+    const max = Math.max(...activePrices.map((p) => p.price));
+    if (min === max) return formatPrice(min);
+    return `${formatPrice(min)} - ${formatPrice(max)}`;
   };
 
   // Vista de selección de servicios
@@ -144,9 +208,14 @@ export default function HerramientaVenta() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90">Vendedor</p>
-                <p className="font-semibold">{sellerInfo.companyName || "Mi Tienda"}</p>
+                <p className="font-semibold">
+                  {sellerInfo.companyName || "Mi Tienda"}
+                </p>
               </div>
-              <Badge variant="secondary" className="bg-white/20 text-white">
+              <Badge
+                variant="secondary"
+                className="bg-white/20 text-white"
+              >
                 {sellerInfo.commissionRate}% comisión
               </Badge>
             </div>
@@ -156,8 +225,12 @@ export default function HerramientaVenta() {
 
       {/* Título */}
       <div className="text-center py-2">
-        <h1 className="text-xl font-bold text-gray-900">Selecciona un Servicio</h1>
-        <p className="text-sm text-gray-500">Elige el servicio que deseas vender</p>
+        <h1 className="text-xl font-bold text-gray-900">
+          Selecciona un Servicio
+        </h1>
+        <p className="text-sm text-gray-500">
+          Elige el servicio que deseas vender
+        </p>
       </div>
 
       {/* Grid de servicios */}
@@ -169,7 +242,7 @@ export default function HerramientaVenta() {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
-          {services?.map((service: ConciergeService) => (
+          {services?.map((service) => (
             <Card
               key={service.id}
               className="cursor-pointer hover:shadow-lg transition-all duration-200 active:scale-95 border-2 hover:border-blue-500"
@@ -196,8 +269,8 @@ export default function HerramientaVenta() {
                   {service.serviceName || "Servicio"}
                 </h3>
                 <div className="flex items-center justify-between">
-                  <span className="text-lg font-bold text-blue-600">
-                    {formatPrice(service.price)}
+                  <span className="text-sm font-bold text-blue-600">
+                    {getPriceRange(service)}
                   </span>
                   {service.serviceDuration && (
                     <span className="text-xs text-gray-500 flex items-center gap-1">
@@ -206,6 +279,22 @@ export default function HerramientaVenta() {
                     </span>
                   )}
                 </div>
+                {/* Show price labels */}
+                {service.prices.filter((p) => p.active).length > 1 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {service.prices
+                      .filter((p) => p.active)
+                      .map((p) => (
+                        <Badge
+                          key={p.id}
+                          variant="outline"
+                          className="text-[10px] px-1 py-0"
+                        >
+                          {p.label}
+                        </Badge>
+                      ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}
@@ -224,142 +313,252 @@ export default function HerramientaVenta() {
   );
 
   // Vista de formulario de cliente
-  const renderFormView = () => (
-    <div className="space-y-4">
-      {/* Botón volver */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setView("services")}
-        className="mb-2"
-      >
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Volver
-      </Button>
+  const renderFormView = () => {
+    const selectedPriceObj = getSelectedPrice();
+    const totalAmount = selectedPriceObj
+      ? selectedPriceObj.price * quantity
+      : 0;
 
-      {/* Servicio seleccionado */}
-      {selectedService && (
-        <Card className="bg-blue-50 border-blue-200">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              {selectedService.serviceImageUrl ? (
-                <img
-                  src={selectedService.serviceImageUrl}
-                  alt={selectedService.serviceName || ""}
-                  className="w-16 h-16 rounded-lg object-cover"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-lg bg-blue-200 flex items-center justify-center">
-                  <Package className="w-6 h-6 text-blue-600" />
+    return (
+      <div className="space-y-4">
+        {/* Botón volver */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setView("services")}
+          className="mb-2"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Volver
+        </Button>
+
+        {/* Servicio seleccionado */}
+        {selectedService && (
+          <Card className="bg-blue-50 border-blue-200">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                {selectedService.serviceImageUrl ? (
+                  <img
+                    src={selectedService.serviceImageUrl}
+                    alt={selectedService.serviceName || ""}
+                    className="w-16 h-16 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-lg bg-blue-200 flex items-center justify-center">
+                    <Package className="w-6 h-6 text-blue-600" />
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h3 className="font-semibold">
+                    {selectedService.serviceName}
+                  </h3>
+                  {selectedService.serviceDuration && (
+                    <p className="text-sm text-gray-600 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {selectedService.serviceDuration} min
+                    </p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Selección de precio y cantidad */}
+        {selectedService && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Tag className="w-4 h-4" />
+                Tipo de Precio
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Price selection */}
+              <div className="space-y-2">
+                <Label>Selecciona el tipo *</Label>
+                <Select
+                  value={selectedPriceId?.toString() || ""}
+                  onValueChange={(val) =>
+                    setSelectedPriceId(parseInt(val))
+                  }
+                >
+                  <SelectTrigger className="h-12">
+                    <SelectValue placeholder="Selecciona un precio" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedService.prices
+                      .filter((p) => p.active)
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id.toString()}>
+                          {p.label} — {formatPrice(p.price)}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Quantity */}
+              <div className="space-y-2">
+                <Label>Cantidad</Label>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10"
+                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                    disabled={quantity <= 1}
+                  >
+                    -
+                  </Button>
+                  <span className="text-xl font-bold w-12 text-center">
+                    {quantity}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10"
+                    onClick={() => setQuantity(quantity + 1)}
+                  >
+                    +
+                  </Button>
+                </div>
+              </div>
+
+              {/* Total */}
+              {selectedPriceObj && (
+                <div className="bg-blue-50 p-3 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Total a cobrar</span>
+                    <span className="text-2xl font-bold text-blue-600">
+                      {formatPrice(totalAmount)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {selectedPriceObj.label} x {quantity}
+                  </p>
                 </div>
               )}
-              <div className="flex-1">
-                <h3 className="font-semibold">{selectedService.serviceName}</h3>
-                <p className="text-2xl font-bold text-blue-600">
-                  {formatPrice(selectedService.price)}
-                </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Formulario */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <User className="w-5 h-5" />
+              Datos del Cliente
+            </CardTitle>
+            <CardDescription>
+              Ingresa los datos del cliente para generar el enlace de pago
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Nombre del cliente *</Label>
+                <Input
+                  id="name"
+                  placeholder="Nombre completo"
+                  value={customerData.name}
+                  onChange={(e) =>
+                    setCustomerData({
+                      ...customerData,
+                      name: e.target.value,
+                    })
+                  }
+                  required
+                  className="h-12 text-base"
+                />
               </div>
-            </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email">Email del cliente *</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="cliente@email.com"
+                    value={customerData.email}
+                    onChange={(e) =>
+                      setCustomerData({
+                        ...customerData,
+                        email: e.target.value,
+                      })
+                    }
+                    className="h-12 text-base pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phone">Teléfono (opcional)</Label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="+56 9 1234 5678"
+                    value={customerData.phone}
+                    onChange={(e) =>
+                      setCustomerData({
+                        ...customerData,
+                        phone: e.target.value,
+                      })
+                    }
+                    className="h-12 text-base pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notas (opcional)</Label>
+                <Textarea
+                  id="notes"
+                  placeholder="Información adicional..."
+                  value={customerData.notes}
+                  onChange={(e) =>
+                    setCustomerData({
+                      ...customerData,
+                      notes: e.target.value,
+                    })
+                  }
+                  className="min-h-[80px]"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full h-14 text-lg"
+                disabled={
+                  !customerData.name ||
+                  !customerData.email ||
+                  !selectedPriceId ||
+                  initiateSaleMutation.isPending
+                }
+              >
+                {initiateSaleMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Generando enlace...
+                  </>
+                ) : (
+                  <>
+                    <ShoppingCart className="w-5 h-5 mr-2" />
+                    Generar Enlace de Pago
+                  </>
+                )}
+              </Button>
+            </form>
           </CardContent>
         </Card>
-      )}
-
-      {/* Formulario */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <User className="w-5 h-5" />
-            Datos del Cliente
-          </CardTitle>
-          <CardDescription>
-            Ingresa los datos del cliente para generar el enlace de pago
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Nombre del cliente *</Label>
-              <Input
-                id="name"
-                placeholder="Nombre completo"
-                value={customerData.name}
-                onChange={(e) =>
-                  setCustomerData({ ...customerData, name: e.target.value })
-                }
-                required
-                className="h-12 text-base"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email">Email del cliente *</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="cliente@email.com"
-                  value={customerData.email}
-                  onChange={(e) =>
-                    setCustomerData({ ...customerData, email: e.target.value })
-                  }
-                  className="h-12 text-base pl-10"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phone">Teléfono (opcional)</Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="+56 9 1234 5678"
-                  value={customerData.phone}
-                  onChange={(e) =>
-                    setCustomerData({ ...customerData, phone: e.target.value })
-                  }
-                  className="h-12 text-base pl-10"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notas (opcional)</Label>
-              <Textarea
-                id="notes"
-                placeholder="Información adicional..."
-                value={customerData.notes}
-                onChange={(e) =>
-                  setCustomerData({ ...customerData, notes: e.target.value })
-                }
-                className="min-h-[80px]"
-              />
-            </div>
-
-            <Button
-              type="submit"
-              className="w-full h-14 text-lg"
-              disabled={!customerData.name || !customerData.email || initiateSaleMutation.isPending}
-            >
-              {initiateSaleMutation.isPending ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Generando enlace...
-                </>
-              ) : (
-                <>
-                  <ShoppingCart className="w-5 h-5 mr-2" />
-                  Generar Enlace de Pago
-                </>
-              )}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
+      </div>
+    );
+  };
 
   // Vista de éxito con enlace de pago
   const renderSuccessView = () => (
@@ -392,6 +591,12 @@ export default function HerramientaVenta() {
               <span className="text-gray-600">Servicio</span>
               <span className="font-semibold">{saleResult.serviceName}</span>
             </div>
+            {saleResult.priceLabel && (
+              <div className="flex justify-between items-center py-2 border-b">
+                <span className="text-gray-600">Tipo</span>
+                <span className="font-medium">{saleResult.priceLabel}</span>
+              </div>
+            )}
             <div className="flex justify-between items-center py-2 border-b">
               <span className="text-gray-600">Monto</span>
               <span className="font-bold text-lg text-blue-600">
@@ -423,7 +628,8 @@ export default function HerramientaVenta() {
               Enlace de Pago
             </CardTitle>
             <CardDescription>
-              El cliente debe usar este enlace para completar la reserva y pago
+              El cliente debe usar este enlace para completar la reserva y
+              pago
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -448,7 +654,9 @@ export default function HerramientaVenta() {
               </Button>
               <Button
                 className="h-12"
-                onClick={() => window.open(saleResult.paymentUrl, "_blank")}
+                onClick={() =>
+                  window.open(saleResult.paymentUrl, "_blank")
+                }
               >
                 <ExternalLink className="w-4 h-4 mr-2" />
                 Abrir
