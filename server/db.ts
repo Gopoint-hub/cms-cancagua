@@ -1202,11 +1202,15 @@ export async function duplicateNewsletter(id: number) {
   if (!newsletter) return;
 
   const { id: _, createdAt: __, updatedAt: ___, ...data } = newsletter;
-  return await createNewsletter({
+  await createNewsletter({
     ...data,
     subject: `${data.subject} (Copia)`,
     status: "draft",
   });
+  // Get the newly created newsletter (most recent)
+  const { newsletters } = await import("../drizzle/schema");
+  const allNewsletters = await db.select().from(newsletters).orderBy(desc(newsletters.createdAt)).limit(1);
+  return allNewsletters.length > 0 ? allNewsletters[0] : undefined;
 }
 
 // Gift Cards

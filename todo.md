@@ -221,3 +221,6 @@
 
 ## Bug Fix: PDF cotización - textos superpuestos
 - [x] Fix: Los textos de descripción de productos se superponen entre filas cuando la descripción es extensa (altura de fila ahora se calcula dinámicamente con heightOfString + salto de página automático)
+
+## Bug Fix: Copiar/editar emailing no carga contenido existente
+- [x] Fix: Al copiar o editar un emailing, el wizard carga el HTML, subject, prompt y salta al paso 3 (diseño) directamente. Duplicar ahora redirige con el ID del nuevo newsletter.

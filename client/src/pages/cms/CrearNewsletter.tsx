@@ -16,7 +16,7 @@ import {
   Clock, X, Bot, User, RefreshCw, Check, FileText, Users, Mail, Pencil,
   Wand2, ChevronRight, CheckCircle2, Mic, MicOff, Square, Link2, ExternalLink
 } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useRoute } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 
 interface ChatMessage {
@@ -66,6 +66,11 @@ const EMAIL_TYPES = [
 export default function CMSCrearNewsletter() {
   const { user, loading: authLoading } = useAuth();
   const [, navigate] = useLocation();
+  
+  // Check if we're editing an existing newsletter
+  const [, params] = useRoute("/cms/crear-newsletter/:id");
+  const editId = params?.id ? parseInt(params.id) : null;
+  const isEditing = editId !== null && !isNaN(editId);
   
   // Step state - Ahora son 5 pasos
   const [currentStep, setCurrentStep] = useState(1);
@@ -133,8 +138,39 @@ export default function CMSCrearNewsletter() {
   const bodyFileInputRef = useRef<HTMLInputElement>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // Edit mode state
+  const [editDataLoaded, setEditDataLoaded] = useState(false);
+  
   // Queries
   const { data: lists, isLoading: listsLoading } = trpc.lists.getAll.useQuery();
+  const { data: existingNewsletter, isLoading: isLoadingNewsletter } = trpc.newsletters.getById.useQuery(
+    { id: editId! },
+    { enabled: isEditing }
+  );
+
+  // Load existing newsletter data when editing
+  useEffect(() => {
+    if (!isEditing || !existingNewsletter || editDataLoaded) return;
+    
+    // Set the HTML content and subject - skip to step 3 (design)
+    setHtmlContent(existingNewsletter.htmlContent || "");
+    setSubject(existingNewsletter.subject || "");
+    setGeneratedSubject(existingNewsletter.subject || "");
+    setSenderName(existingNewsletter.senderName || "Newsletter Cancagua");
+    
+    // Set the design prompt if available
+    if (existingNewsletter.designPrompt) {
+      setRequestText(existingNewsletter.designPrompt);
+    }
+    
+    // Set type to custom since we're editing
+    setSelectedType("custom");
+    
+    // Jump directly to step 3 (design) since we already have the HTML
+    setCurrentStep(3);
+    
+    setEditDataLoaded(true);
+  }, [isEditing, existingNewsletter, editDataLoaded]);
 
   // Mutations
   const generateDesignMutation = trpc.newsletters.generateDesign.useMutation({
@@ -178,6 +214,24 @@ export default function CMSCrearNewsletter() {
     },
     onError: (error) => {
       toast.error(error.message || "Error al guardar newsletter");
+      setIsSending(false);
+    },
+  });
+
+  const updateNewsletterMutation = trpc.newsletters.update.useMutation({
+    onSuccess: () => {
+      if (isSending) {
+        sendNewsletterMutation.mutate({
+          newsletterId: editId!,
+          listIds: selectedLists,
+        });
+      } else {
+        toast.success("Newsletter actualizado correctamente");
+        navigate("/cms/newsletter");
+      }
+    },
+    onError: (error) => {
+      toast.error(error.message || "Error al actualizar newsletter");
       setIsSending(false);
     },
   });
@@ -477,13 +531,25 @@ export default function CMSCrearNewsletter() {
       ? new Date(`${scheduledDate}T${scheduledTime}`) 
       : undefined;
 
-    createNewsletterMutation.mutate({
-      subject,
-      htmlContent,
-      designPrompt: requestText,
-      listIds: selectedLists.length > 0 ? selectedLists : [],
-      scheduledAt,
-    });
+    if (isEditing && editId) {
+      // Update existing newsletter
+      updateNewsletterMutation.mutate({
+        id: editId,
+        subject,
+        htmlContent,
+        designPrompt: requestText,
+        scheduledAt,
+      });
+    } else {
+      // Create new newsletter
+      createNewsletterMutation.mutate({
+        subject,
+        htmlContent,
+        designPrompt: requestText,
+        listIds: selectedLists.length > 0 ? selectedLists : [],
+        scheduledAt,
+      });
+    }
 
     if (sendOption === "schedule") {
       toast.success(`Newsletter programado para ${scheduledAt?.toLocaleString("es-CL")}`);
@@ -567,8 +633,8 @@ export default function CMSCrearNewsletter() {
             </Link>
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Crear Newsletter</h1>
-            <p className="text-gray-500">Crea tu email en 5 simples pasos</p>
+            <h1 className="text-2xl font-bold text-gray-900">{isEditing ? "Editar Newsletter" : "Crear Newsletter"}</h1>
+            <p className="text-gray-500">{isEditing ? "Modifica y envía tu newsletter" : "Crea tu email en 5 simples pasos"}</p>
           </div>
         </div>
 
@@ -611,6 +677,14 @@ export default function CMSCrearNewsletter() {
 
         {/* Step Content */}
         <div className="min-h-[500px]">
+          {/* Loading state for edit mode */}
+          {isEditing && isLoadingNewsletter && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="w-10 h-10 animate-spin text-[#44580E] mb-4" />
+              <p className="text-gray-500">Cargando newsletter...</p>
+            </div>
+          )}
+
           {/* Step 1: Tipo de Email */}
           {currentStep === 1 && (
             <div className="space-y-6">

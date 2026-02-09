@@ -1724,7 +1724,8 @@ export const appRouter = router({
         if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
-        return await db.duplicateNewsletter(input.id);
+        const newNewsletter = await db.duplicateNewsletter(input.id);
+        return { success: true, id: newNewsletter?.id };
       }),
 
     generateDesign: protectedProcedure

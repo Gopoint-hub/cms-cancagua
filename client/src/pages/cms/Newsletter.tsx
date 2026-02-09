@@ -48,11 +48,15 @@ export default function CMSNewsletter() {
   });
 
   const duplicateMutation = trpc.newsletters.duplicate.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast.success("Newsletter duplicado. Redirigiendo al editor...");
       refetch();
-      // Navegar al creador con el nuevo newsletter
-      setTimeout(() => navigate("/cms/crear-newsletter"), 500);
+      // Navegar al editor con el ID del nuevo newsletter
+      if (data.id) {
+        setTimeout(() => navigate(`/cms/crear-newsletter/${data.id}`), 500);
+      } else {
+        setTimeout(() => navigate("/cms/crear-newsletter"), 500);
+      }
     },
     onError: (error) => {
       toast.error(error.message || "Error al duplicar newsletter");

@@ -66,6 +66,7 @@ function Router() {
       <Route path="/cms/clientes" component={CMSClientes} />
       <Route path="/cms/newsletter" component={CMSNewsletter} />
       <Route path="/cms/crear-newsletter" component={CMSCrearNewsletter} />
+      <Route path="/cms/crear-newsletter/:id" component={CMSCrearNewsletter} />
       <Route path="/cms/suscriptores" component={CMSSuscriptores} />
       <Route path="/cms/listas" component={CMSListas} />
       <Route path="/cms/codigos-descuento" component={CMSCodigosDescuento} />
