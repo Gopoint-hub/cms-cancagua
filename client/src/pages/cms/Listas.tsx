@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -8,22 +8,68 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Loader2, Tag, Plus, Trash2, Edit, Users, Search, Eye, ArrowLeft, UserMinus } from "lucide-react";
+import { Loader2, Tag, Plus, Trash2, Edit, Users, Search, Eye, UserMinus, MapPin, Calendar, Briefcase, List, ChevronDown } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
+
+type ListCategory = "all" | "servicio" | "evento" | "ubicacion" | "otro";
+
+function getCategory(name: string): ListCategory {
+  if (name.startsWith("Servicio:")) return "servicio";
+  if (name.startsWith("Evento:")) return "evento";
+  if (name.startsWith("Ubicación:")) return "ubicacion";
+  return "otro";
+}
+
+function getCategoryLabel(cat: ListCategory): string {
+  switch (cat) {
+    case "all": return "Todas";
+    case "servicio": return "Servicios";
+    case "evento": return "Eventos";
+    case "ubicacion": return "Ubicaciones";
+    case "otro": return "Otras";
+  }
+}
+
+function getCategoryIcon(cat: ListCategory) {
+  switch (cat) {
+    case "servicio": return <Briefcase className="w-4 h-4" />;
+    case "evento": return <Calendar className="w-4 h-4" />;
+    case "ubicacion": return <MapPin className="w-4 h-4" />;
+    case "otro": return <List className="w-4 h-4" />;
+    default: return <Tag className="w-4 h-4" />;
+  }
+}
+
+function getCategoryBadgeColor(cat: ListCategory): string {
+  switch (cat) {
+    case "servicio": return "bg-blue-100 text-blue-700";
+    case "evento": return "bg-purple-100 text-purple-700";
+    case "ubicacion": return "bg-green-100 text-green-700";
+    case "otro": return "bg-gray-100 text-gray-700";
+    default: return "bg-gray-100 text-gray-700";
+  }
+}
+
+function getDisplayName(name: string): string {
+  return name.replace(/^(Servicio|Evento|Ubicación): /, "");
+}
 
 export default function CMSListas() {
   const { user, loading: authLoading } = useAuth();
   const [, navigate] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
-  
+  const [activeCategory, setActiveCategory] = useState<ListCategory>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedList, setSelectedList] = useState<any>(null);
-  
+
   // Form states
   const [listName, setListName] = useState("");
   const [listDescription, setListDescription] = useState("");
@@ -44,9 +90,7 @@ export default function CMSListas() {
       setListDescription("");
       refetch();
     },
-    onError: (error) => {
-      toast.error(error.message || "Error al crear lista");
-    },
+    onError: (error) => toast.error(error.message || "Error al crear lista"),
   });
 
   const updateMutation = trpc.lists.update.useMutation({
@@ -56,9 +100,7 @@ export default function CMSListas() {
       setSelectedList(null);
       refetch();
     },
-    onError: (error) => {
-      toast.error(error.message || "Error al actualizar lista");
-    },
+    onError: (error) => toast.error(error.message || "Error al actualizar lista"),
   });
 
   const deleteMutation = trpc.lists.delete.useMutation({
@@ -66,9 +108,16 @@ export default function CMSListas() {
       toast.success("Lista eliminada");
       refetch();
     },
-    onError: (error) => {
-      toast.error(error.message || "Error al eliminar lista");
+    onError: (error) => toast.error(error.message || "Error al eliminar lista"),
+  });
+
+  const bulkDeleteMutation = trpc.lists.bulkDelete.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.count} listas eliminadas`);
+      setSelectedIds(new Set());
+      refetch();
     },
+    onError: (error) => toast.error(error.message || "Error al eliminar listas"),
   });
 
   const removeSubscriberMutation = trpc.lists.removeSubscriber.useMutation({
@@ -77,10 +126,31 @@ export default function CMSListas() {
       refetchSubscribers();
       refetch();
     },
-    onError: (error) => {
-      toast.error(error.message || "Error al eliminar suscriptor");
-    },
+    onError: (error) => toast.error(error.message || "Error al eliminar suscriptor"),
   });
+
+  // Category counts
+  const categoryCounts = useMemo(() => {
+    if (!lists) return { all: 0, servicio: 0, evento: 0, ubicacion: 0, otro: 0 };
+    const counts = { all: lists.length, servicio: 0, evento: 0, ubicacion: 0, otro: 0 };
+    for (const list of lists) {
+      const cat = getCategory(list.name);
+      counts[cat]++;
+    }
+    return counts;
+  }, [lists]);
+
+  // Filter lists
+  const filteredLists = useMemo(() => {
+    if (!lists) return [];
+    return lists.filter((list: any) => {
+      const matchesCategory = activeCategory === "all" || getCategory(list.name) === activeCategory;
+      const matchesSearch = !searchQuery ||
+        list.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        list.description?.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCategory && matchesSearch;
+    });
+  }, [lists, activeCategory, searchQuery]);
 
   // Verificar permisos
   if (authLoading) {
@@ -97,9 +167,7 @@ export default function CMSListas() {
         <Card className="w-96">
           <CardHeader>
             <CardTitle>Acceso Denegado</CardTitle>
-            <CardDescription>
-              No tienes permisos para ver las listas.
-            </CardDescription>
+            <CardDescription>No tienes permisos para ver las listas.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild variant="outline" className="w-full">
@@ -111,36 +179,29 @@ export default function CMSListas() {
     );
   }
 
-  // Filtrar listas
-  const filteredLists = lists?.filter((list: any) => {
-    return !searchQuery || 
-      list.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      list.description?.toLowerCase().includes(searchQuery.toLowerCase());
-  });
-
   const handleCreate = () => {
     if (!listName.trim()) {
       toast.error("Por favor ingresa un nombre para la lista");
       return;
     }
-    createMutation.mutate({
-      name: listName,
-      description: listDescription || undefined,
-    });
+    createMutation.mutate({ name: listName, description: listDescription || undefined });
   };
 
   const handleUpdate = () => {
     if (!selectedList || !listName.trim()) return;
-    updateMutation.mutate({
-      id: selectedList.id,
-      name: listName,
-      description: listDescription || undefined,
-    });
+    updateMutation.mutate({ id: selectedList.id, name: listName, description: listDescription || undefined });
   };
 
   const handleDelete = (list: any) => {
     if (confirm(`¿Eliminar la lista "${list.name}"? Los suscriptores no serán eliminados.`)) {
       deleteMutation.mutate({ id: list.id });
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedIds.size === 0) return;
+    if (confirm(`¿Eliminar ${selectedIds.size} listas seleccionadas? Los suscriptores no serán eliminados.`)) {
+      bulkDeleteMutation.mutate({ ids: Array.from(selectedIds) });
     }
   };
 
@@ -156,17 +217,30 @@ export default function CMSListas() {
     setShowViewModal(true);
   };
 
-  const formatDate = (date: Date | string | null) => {
-    if (!date) return "-";
-    return new Date(date).toLocaleDateString("es-CL", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
 
-  // Estadísticas
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredLists.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredLists.map((l: any) => l.id)));
+    }
+  };
+
+  const formatDate = (date: Date | string | null) => {
+    if (!date) return "-";
+    return new Date(date).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" });
+  };
+
   const totalSubscribers = lists?.reduce((sum: number, list: any) => sum + (list.subscriberCount || 0), 0) || 0;
+  const categories: ListCategory[] = ["all", "servicio", "evento", "ubicacion", "otro"];
 
   return (
     <DashboardLayout>
@@ -175,7 +249,9 @@ export default function CMSListas() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Listas de Suscriptores</h1>
-            <p className="text-gray-500">Organiza tus suscriptores en listas para envíos segmentados</p>
+            <p className="text-gray-500">
+              {lists?.length || 0} listas · {totalSubscribers.toLocaleString()} asignaciones totales
+            </p>
           </div>
           <Button onClick={() => setShowCreateModal(true)} className="bg-[#44580E] hover:bg-[#3a4c0c]">
             <Plus className="w-4 h-4 mr-2" />
@@ -183,54 +259,65 @@ export default function CMSListas() {
           </Button>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-gray-100 rounded-lg">
-                  <Tag className="w-5 h-5 text-gray-600" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{lists?.length || 0}</p>
-                  <p className="text-sm text-gray-500">Listas</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <Users className="w-5 h-5 text-green-600" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{totalSubscribers}</p>
-                  <p className="text-sm text-gray-500">Suscriptores en Listas</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="col-span-2 md:col-span-1">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Search className="w-5 h-5 text-blue-600" />
-                </div>
-                <div className="flex-1">
-                  <Input
-                    placeholder="Buscar listas..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-8"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Category Tabs */}
+        <div className="flex flex-wrap gap-2">
+          {categories.map(cat => (
+            <Button
+              key={cat}
+              variant={activeCategory === cat ? "default" : "outline"}
+              size="sm"
+              onClick={() => { setActiveCategory(cat); setSelectedIds(new Set()); }}
+              className={activeCategory === cat ? "bg-[#44580E] hover:bg-[#3a4c0c]" : ""}
+            >
+              {cat !== "all" && getCategoryIcon(cat)}
+              <span className="ml-1">{getCategoryLabel(cat)}</span>
+              <Badge variant="secondary" className="ml-2 text-xs px-1.5 py-0">
+                {categoryCounts[cat]}
+              </Badge>
+            </Button>
+          ))}
         </div>
 
-        {/* Lists Grid */}
+        {/* Search + Bulk Actions */}
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              placeholder="Buscar listas..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">{selectedIds.size} seleccionadas</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBulkDelete}
+                disabled={bulkDeleteMutation.isPending}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+              >
+                {bulkDeleteMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4 mr-1" />
+                )}
+                Eliminar seleccionadas
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedIds(new Set())}
+              >
+                Deseleccionar
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Table */}
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-[#44580E]" />
@@ -240,73 +327,119 @@ export default function CMSListas() {
             <CardContent className="py-12">
               <div className="text-center">
                 <Tag className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No hay listas</h3>
-                <p className="text-gray-500 mb-4">Crea tu primera lista para segmentar tus suscriptores</p>
-                <Button onClick={() => setShowCreateModal(true)} className="bg-[#44580E] hover:bg-[#3a4c0c]">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Crear Lista
-                </Button>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  {searchQuery ? "Sin resultados" : "No hay listas"}
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  {searchQuery ? "Intenta con otro término de búsqueda" : "Crea tu primera lista para segmentar tus suscriptores"}
+                </p>
+                {!searchQuery && (
+                  <Button onClick={() => setShowCreateModal(true)} className="bg-[#44580E] hover:bg-[#3a4c0c]">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Crear Lista
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredLists.map((list: any) => (
-              <Card key={list.id} className="hover:shadow-md transition-shadow">
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 bg-[#44580E]/10 rounded-lg">
-                        <Tag className="w-5 h-5 text-[#44580E]" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-lg">{list.name}</CardTitle>
-                        <CardDescription className="text-sm">
-                          {list.subscriberCount || 0} suscriptores
-                        </CardDescription>
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      {formatDate(list.createdAt)}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {list.description && (
-                    <p className="text-sm text-gray-500 mb-4 line-clamp-2">
-                      {list.description}
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => openViewModal(list)}
-                    >
-                      <Eye className="w-4 h-4 mr-1" />
-                      Ver
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openEditModal(list)}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDelete(list)}
-                      disabled={deleteMutation.isPending}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+          <div className="border rounded-lg overflow-hidden bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-4 py-3 text-left w-10">
+                      <Checkbox
+                        checked={selectedIds.size === filteredLists.length && filteredLists.length > 0}
+                        onCheckedChange={toggleSelectAll}
+                      />
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nombre</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoría</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Suscriptores</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Creada</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredLists.map((list: any) => {
+                    const cat = getCategory(list.name);
+                    return (
+                      <tr
+                        key={list.id}
+                        className={`hover:bg-gray-50 transition-colors ${selectedIds.has(list.id) ? "bg-blue-50/50" : ""}`}
+                      >
+                        <td className="px-4 py-3">
+                          <Checkbox
+                            checked={selectedIds.has(list.id)}
+                            onCheckedChange={() => toggleSelect(list.id)}
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900 text-sm">
+                              {getDisplayName(list.name)}
+                            </span>
+                          </div>
+                          {list.description && (
+                            <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{list.description}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${getCategoryBadgeColor(cat)}`}>
+                            {getCategoryIcon(cat)}
+                            {getCategoryLabel(cat).replace(/s$/, "")}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="text-sm font-medium text-gray-700">
+                            {(list.subscriberCount || 0).toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          {formatDate(list.createdAt)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openViewModal(list)}
+                              className="h-8 w-8 p-0"
+                              title="Ver suscriptores"
+                            >
+                              <Eye className="w-4 h-4 text-gray-500" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditModal(list)}
+                              className="h-8 w-8 p-0"
+                              title="Editar"
+                            >
+                              <Edit className="w-4 h-4 text-gray-500" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(list)}
+                              disabled={deleteMutation.isPending}
+                              className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-3 bg-gray-50 border-t text-sm text-gray-500">
+              Mostrando {filteredLists.length} de {lists?.length || 0} listas
+            </div>
           </div>
         )}
 
@@ -346,9 +479,7 @@ export default function CMSListas() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Crear Nueva Lista</DialogTitle>
-            <DialogDescription>
-              Crea una lista para agrupar suscriptores
-            </DialogDescription>
+            <DialogDescription>Crea una lista para agrupar suscriptores</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
@@ -373,19 +504,13 @@ export default function CMSListas() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-              Cancelar
-            </Button>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>Cancelar</Button>
             <Button
               onClick={handleCreate}
               disabled={createMutation.isPending || !listName.trim()}
               className="bg-[#44580E] hover:bg-[#3a4c0c]"
             >
-              {createMutation.isPending ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4 mr-2" />
-              )}
+              {createMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
               Crear Lista
             </Button>
           </DialogFooter>
@@ -397,9 +522,7 @@ export default function CMSListas() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Editar Lista</DialogTitle>
-            <DialogDescription>
-              Modifica los datos de la lista
-            </DialogDescription>
+            <DialogDescription>Modifica los datos de la lista</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
@@ -422,19 +545,13 @@ export default function CMSListas() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditModal(false)}>
-              Cancelar
-            </Button>
+            <Button variant="outline" onClick={() => setShowEditModal(false)}>Cancelar</Button>
             <Button
               onClick={handleUpdate}
               disabled={updateMutation.isPending || !listName.trim()}
               className="bg-[#44580E] hover:bg-[#3a4c0c]"
             >
-              {updateMutation.isPending ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Edit className="w-4 h-4 mr-2" />
-              )}
+              {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Edit className="w-4 h-4 mr-2" />}
               Guardar Cambios
             </Button>
           </DialogFooter>
@@ -449,9 +566,7 @@ export default function CMSListas() {
               <Tag className="w-5 h-5 text-[#44580E]" />
               {selectedList?.name}
             </DialogTitle>
-            <DialogDescription>
-              {selectedList?.description || "Sin descripción"}
-            </DialogDescription>
+            <DialogDescription>{selectedList?.description || "Sin descripción"}</DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <div className="flex items-center justify-between mb-4">
@@ -459,16 +574,12 @@ export default function CMSListas() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  setShowViewModal(false);
-                  navigate("/cms/suscriptores");
-                }}
+                onClick={() => { setShowViewModal(false); navigate("/cms/suscriptores"); }}
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Agregar Suscriptores
               </Button>
             </div>
-            
             {subscribersLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-6 h-6 animate-spin text-[#44580E]" />
@@ -521,9 +632,7 @@ export default function CMSListas() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowViewModal(false)}>
-              Cerrar
-            </Button>
+            <Button variant="outline" onClick={() => setShowViewModal(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

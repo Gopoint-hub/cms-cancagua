@@ -2638,6 +2638,16 @@ Devuelve un JSON con este formato:
         await db.bulkRemoveSubscribersFromList(input.subscriberIds, input.listId);
         return { success: true, count: input.subscriberIds.length };
       }),
+
+    bulkDelete: protectedProcedure
+      .input(z.object({ ids: z.array(z.number()) }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        await db.bulkDeleteLists(input.ids);
+        return { success: true, count: input.ids.length };
+      }),
   }),
 
   // ============================================

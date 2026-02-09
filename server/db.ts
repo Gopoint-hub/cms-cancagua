@@ -1,4 +1,4 @@
-import { eq, gte, and, desc, sql, asc, like, or, isNull } from "drizzle-orm";
+import { eq, gte, and, desc, sql, asc, like, or, isNull, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -884,6 +884,14 @@ export async function deleteList(id: number) {
   const { subscriberLists, listSubscribers } = await import("../drizzle/schema");
   await db.delete(listSubscribers).where(eq(listSubscribers.listId, id));
   await db.delete(subscriberLists).where(eq(subscriberLists.id, id));
+}
+
+export async function bulkDeleteLists(ids: number[]) {
+  const db = await getDb();
+  if (!db || ids.length === 0) return;
+  const { subscriberLists, listSubscribers } = await import("../drizzle/schema");
+  await db.delete(listSubscribers).where(inArray(listSubscribers.listId, ids));
+  await db.delete(subscriberLists).where(inArray(subscriberLists.id, ids));
 }
 
 export async function getSubscribersInList(listId: number) {

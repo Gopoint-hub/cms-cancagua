@@ -183,3 +183,16 @@
 - [x] Crear 51 listas por evento
 - [x] Crear 411 listas por ubicación con fuzzy matching
 - [x] Asignar 9.669 suscriptores a listas correspondientes
+
+## Unificación de listas y mejora UI
+- [x] Analizar y proponer unificaciones de listas duplicadas
+- [x] Unificar variantes de Osorno en una sola lista
+- [x] Unificar variantes de Frutillar en una sola lista
+- [x] Agrupar listas por países (Otros Países para países pequeños)
+- [x] Eliminar listas basura (empresas, datos incorrectos)
+- [x] Unificar comunas de Santiago en "Santiago"
+- [x] Unificar todas las variantes de ciudades (Puerto Montt, Puerto Varas, Valdivia, Temuco, etc.)
+- [x] Cambiar vista de listas de tarjetas a tabla con filtros por categoría
+- [x] Agregar bulk actions (eliminar seleccionadas, seleccionar todo)
+- [x] Agregar endpoint bulkDelete al router de listas
+- [x] Resultado: 152 listas (6 servicios, 51 eventos, 95 ubicaciones)
