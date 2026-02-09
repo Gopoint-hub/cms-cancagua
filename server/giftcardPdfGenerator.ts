@@ -111,25 +111,32 @@ export async function generateGiftCardPDF(data: GiftCardData): Promise<Buffer> {
       // Overlay semi-transparente solo en el lado izquierdo para mejorar legibilidad del texto
       doc.rect(0, 0, 350, 400).fillOpacity(0.35).fill("#000000");
 
-      // Logo Cancagua (versión blanca)
-      const logoWhitePath = path.join(
-        process.cwd(),
-        "client/publichttps://res.cloudinary.com/dhuln9b1n/image/upload/v1769960664/cancagua/images/logo-cancagua-white.webp"
-      );
-      const logoPath = path.join(
-        process.cwd(),
-        "client/publichttps://res.cloudinary.com/dhuln9b1n/image/upload/v1770308861/cancagua/images/01_logo-cancagua.png"
-      );
+      // Logo Cancagua (versión blanca) - descargado desde Cloudinary
+      const logoWhiteUrl = "https://res.cloudinary.com/dhuln9b1n/image/upload/v1769960664/cancagua/images/logo-cancagua-white.webp";
+      const logoUrl = "https://res.cloudinary.com/dhuln9b1n/image/upload/v1770308861/cancagua/images/01_logo-cancagua.png";
       
-      // Intentar cargar logo blanco primero, si no existe usar el normal
       try {
         const sharp = (await import("sharp")).default;
-        if (fs.existsSync(logoWhitePath)) {
-          const logoPng = await sharp(logoWhitePath).png().toBuffer();
-          doc.image(logoPng, 30, 25, { width: 100 });
-        } else if (fs.existsSync(logoPath)) {
-          const logoPng = await sharp(logoPath).png().toBuffer();
-          doc.image(logoPng, 30, 25, { width: 100 });
+        // Intentar descargar logo blanco primero
+        let logoBuffer: Buffer | null = null;
+        try {
+          const resp = await fetch(logoWhiteUrl);
+          if (resp.ok) {
+            const arrayBuf = await resp.arrayBuffer();
+            logoBuffer = await sharp(Buffer.from(arrayBuf)).png().toBuffer();
+          }
+        } catch {
+          // Fallback al logo normal
+          try {
+            const resp = await fetch(logoUrl);
+            if (resp.ok) {
+              const arrayBuf = await resp.arrayBuffer();
+              logoBuffer = await sharp(Buffer.from(arrayBuf)).png().toBuffer();
+            }
+          } catch { /* ignore */ }
+        }
+        if (logoBuffer) {
+          doc.image(logoBuffer, 30, 25, { width: 100 });
         }
       } catch (logoError) {
         console.error("Error cargando logo:", logoError);

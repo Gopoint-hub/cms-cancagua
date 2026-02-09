@@ -172,3 +172,6 @@
 
 ## Bug Fix: Link de validación de email 404
 - [x] Corregir link de validación de email al invitar vendedores (APP_URL apuntaba a cancagua.cl en vez de cms.cancagua.cl)
+
+## Bug Fix: Logo roto en newsletters
+- [x] Corregir imagen del logo rota al crear/enviar newsletters (URLs de Cloudinary corregidas en upload-brand-images.ts, giftcardPdfGenerator.ts y ReportesMantencion.tsx)

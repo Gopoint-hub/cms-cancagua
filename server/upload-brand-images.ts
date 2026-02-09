@@ -17,8 +17,8 @@ export function getBrandImageUrls(): Record<string, string> {
   // Returns a map of image name -> URL
   // In production, these would be fetched from Cloudinary/S3
   return {
-    logo: "https://res.cloudinary.com/dhuln9b1n/image/upload/v1/cancagua/logo.png",
-    logoFooter: "https://res.cloudinary.com/dhuln9b1n/image/upload/v1/cancagua/logo-footer.png",
+    logo: "https://res.cloudinary.com/dhuln9b1n/image/upload/v1770308861/cancagua/images/01_logo-cancagua.png",
+    logoFooter: "https://res.cloudinary.com/dhuln9b1n/image/upload/v1769960664/cancagua/images/logo-cancagua-white.webp",
     hero: "",
     spa: "",
     naturaleza: "",
