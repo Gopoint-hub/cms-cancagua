@@ -1,0 +1,9 @@
+{
+  "query": "SELECT qi.id, qi.quote_id, qi.product_name, qi.quantity, qi.unit_price, qi.total, qi.discount_type, qi.discount_value, qi.sort_order, qi.schedule_time FROM quote_items qi WHERE qi.quote_id = (SELECT id FROM quotes LIMIT 1);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT qi.id, qi.quote_id, qi.product_name, qi.quantity, qi.unit_price, qi.total, qi.discount_type, qi.discount_value, qi.sort_order, qi.schedule_time FROM quote_items qi WHERE qi.quote_id = (SELECT id FROM quotes LIMIT 1);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 355
+}

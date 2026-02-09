@@ -215,3 +215,6 @@
 - [x] Frontend: Separar campo de imágenes en "Imagen para header" e "Imágenes dentro del emailing"
 - [x] Frontend: Indicar que la IA generará las imágenes si no se proporcionan
 - [x] Tests: Verificar nueva estructura de campos (19 tests, 76 total pasando)
+
+## Bug Fix: Editar cotización no carga datos existentes
+- [x] Fix: Al editar una cotización, el wizard debe pre-llenar todos los campos con los datos existentes (useEffect corregido: evita re-ejecución, setea isCreatingDeal/isCreatingClient para mostrar formularios, carga deal data async)

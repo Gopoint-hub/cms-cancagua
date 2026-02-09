@@ -1,0 +1,31 @@
+{
+  "query": "SELECT q.id, q.quote_number, q.name, q.status, (SELECT COUNT(*) FROM quote_items qi WHERE qi.quote_id = q.id) as item_count FROM quotes q;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT q.id, q.quote_number, q.name, q.status, (SELECT COUNT(*) FROM quote_items qi WHERE qi.quote_id = q.id) as item_count FROM quotes q;",
+  "rows": [
+    {
+      "id": "1",
+      "quote_number": "COT-1000",
+      "name": "NULL",
+      "status": "draft",
+      "item_count": "0"
+    },
+    {
+      "id": "2",
+      "quote_number": "COT-1001",
+      "name": "NULL",
+      "status": "draft",
+      "item_count": "0"
+    },
+    {
+      "id": "3",
+      "quote_number": "COT-1002",
+      "name": "E-press | Meditación",
+      "status": "approved",
+      "item_count": "4"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tquote_number\tname\tstatus\titem_count\n1\tCOT-1000\tNULL\tdraft\t0\n2\tCOT-1001\tNULL\tdraft\t0\n3\tCOT-1002\tE-press | Meditación\tapproved\t4\n",
+  "stderr": "",
+  "execution_time_ms": 355
+}

@@ -1,0 +1,34 @@
+{
+  "query": "SELECT id, quote_number, name, status, client_name, deal_id FROM quotes LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, quote_number, name, status, client_name, deal_id FROM quotes LIMIT 5;",
+  "rows": [
+    {
+      "id": "1",
+      "quote_number": "COT-1000",
+      "name": "NULL",
+      "status": "draft",
+      "client_name": "Claudio perez",
+      "deal_id": "NULL"
+    },
+    {
+      "id": "2",
+      "quote_number": "COT-1001",
+      "name": "NULL",
+      "status": "draft",
+      "client_name": "Claudio perez",
+      "deal_id": "NULL"
+    },
+    {
+      "id": "3",
+      "quote_number": "COT-1002",
+      "name": "E-press | Meditación",
+      "status": "approved",
+      "client_name": "Claudio perez",
+      "deal_id": "60001"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tquote_number\tname\tstatus\tclient_name\tdeal_id\n1\tCOT-1000\tNULL\tdraft\tClaudio perez\tNULL\n2\tCOT-1001\tNULL\tdraft\tClaudio perez\tNULL\n3\tCOT-1002\tE-press | Meditación\tapproved\tClaudio perez\t60001\n",
+  "stderr": "",
+  "execution_time_ms": 411
+}

@@ -232,83 +232,119 @@ export default function CotizacionWizard() {
   const createQuoteMutation = trpc.quotes.create.useMutation();
   const updateQuoteMutation = trpc.quotes.update.useMutation();
 
+  // Track if we've already loaded the quote data to avoid re-running
+  const [quoteDataLoaded, setQuoteDataLoaded] = useState(false);
+
   // Load existing quote data when editing
   useEffect(() => {
-    if (isEditing && existingQuote && existingItems) {
-      setIsLoadingQuote(true);
+    if (!isEditing || !existingQuote || quoteDataLoaded) return;
 
-      // Load deal data
-      if (existingQuote.dealId) {
-        setSelectedDealId(existingQuote.dealId);
-        const deal = deals.find((d: any) => d.id === existingQuote.dealId);
-        if (deal) {
-          setDealData({
-            id: deal.id,
-            name: deal.name,
-            pipeline: deal.pipeline || "jornada_autocuidado",
-            stage: deal.stage || "nuevo",
-            value: deal.value,
-            closeDate: deal.closeDate ? String(deal.closeDate) : undefined,
-            notes: deal.notes ?? undefined,
-          });
-        }
+    setIsLoadingQuote(true);
+
+    // Load deal data
+    if (existingQuote.dealId) {
+      setSelectedDealId(existingQuote.dealId);
+      // Try to find the deal in the loaded deals list
+      const deal = deals.find((d: any) => d.id === existingQuote.dealId);
+      if (deal) {
+        setDealData({
+          id: deal.id,
+          name: deal.name,
+          pipeline: deal.pipeline || "jornada_autocuidado",
+          stage: deal.stage || "nuevo",
+          value: deal.value,
+          closeDate: deal.closeDate ? String(deal.closeDate) : undefined,
+          notes: deal.notes ?? undefined,
+        });
+      } else {
+        // Deal not loaded yet, set basic data from quote
+        setDealData(prev => ({
+          ...prev,
+          id: existingQuote.dealId!,
+          name: existingQuote.name || "",
+        }));
       }
-
-      // Load buyer data
-      setBuyerData({
-        id: existingQuote.clientId || undefined,
-        name: existingQuote.clientName || "",
-        email: existingQuote.clientEmail || "",
-        phone: existingQuote.clientPhone || "",
-        whatsapp: existingQuote.clientWhatsapp || "",
-        position: existingQuote.clientPosition || "",
-        company: existingQuote.clientCompany || "",
-        rut: existingQuote.clientRut || "",
-        address: existingQuote.clientAddress || "",
-        giro: existingQuote.clientGiro || "",
-      });
-      if (existingQuote.clientId) {
-        setSelectedClientId(existingQuote.clientId);
-      }
-
-      // Load items
-      if (existingItems.length > 0) {
-        setItems(existingItems.map((item: any) => ({
-          id: item.id,
-          productId: item.productId,
-          productName: item.productName,
-          description: item.description || "",
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountType: item.discountType || "percentage",
-          discountValue: item.discountValue || 0,
-          total: item.total,
-          sortOrder: item.sortOrder || 0,
-          scheduleTime: item.scheduleTime || "",
-        })));
-      }
-
-      // Load quote details
-      setQuoteDetails({
-        name: existingQuote.name || "",
-        validUntil: existingQuote.validUntil
-          ? new Date(existingQuote.validUntil).toISOString().split("T")[0]
-          : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        language: "es",
-        region: "america_del_sur",
-        notes: existingQuote.notes || "",
-        termsOfPurchase: existingQuote.termsOfPurchase || DEFAULT_TERMS,
-      });
-
-      // Load event data
-      setNumberOfPeople(existingQuote.numberOfPeople || 10);
-      if (existingQuote.eventDate) {
-        setEventDate(new Date(existingQuote.eventDate).toISOString().split("T")[0]);
-      }
-
-      setIsLoadingQuote(false);
+      setIsCreatingDeal(false);
+    } else {
+      // No deal associated - show as creating new deal
+      setIsCreatingDeal(true);
     }
-  }, [isEditing, existingQuote, existingItems, deals]);
+
+    // Load buyer data - always show the form by setting isCreatingClient or selectedClientId
+    setBuyerData({
+      id: existingQuote.clientId || undefined,
+      name: existingQuote.clientName || "",
+      email: existingQuote.clientEmail || "",
+      phone: existingQuote.clientPhone || "",
+      whatsapp: existingQuote.clientWhatsapp || "",
+      position: existingQuote.clientPosition || "",
+      company: existingQuote.clientCompany || "",
+      rut: existingQuote.clientRut || "",
+      address: existingQuote.clientAddress || "",
+      giro: existingQuote.clientGiro || "",
+    });
+    if (existingQuote.clientId) {
+      setSelectedClientId(existingQuote.clientId);
+    } else {
+      // No client ID but we have client data - show as creating client
+      setIsCreatingClient(true);
+    }
+
+    // Load items from existing quote items
+    if (existingItems && existingItems.length > 0) {
+      setItems(existingItems.map((item: any) => ({
+        id: item.id,
+        productId: item.productId,
+        productName: item.productName,
+        description: item.description || "",
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountType: item.discountType || "percentage",
+        discountValue: item.discountValue || 0,
+        total: item.total,
+        sortOrder: item.sortOrder || 0,
+        scheduleTime: item.scheduleTime || "",
+      })));
+    }
+
+    // Load quote details
+    setQuoteDetails({
+      name: existingQuote.name || "",
+      validUntil: existingQuote.validUntil
+        ? new Date(existingQuote.validUntil).toISOString().split("T")[0]
+        : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      language: "es",
+      region: "america_del_sur",
+      notes: existingQuote.notes || "",
+      termsOfPurchase: existingQuote.termsOfPurchase || DEFAULT_TERMS,
+    });
+
+    // Load event data
+    setNumberOfPeople(existingQuote.numberOfPeople || 10);
+    if (existingQuote.eventDate) {
+      setEventDate(new Date(existingQuote.eventDate).toISOString().split("T")[0]);
+    }
+
+    setIsLoadingQuote(false);
+    setQuoteDataLoaded(true);
+  }, [isEditing, existingQuote, existingItems, deals, quoteDataLoaded]);
+
+  // Secondary effect: update deal data when deals list loads (may arrive after quote)
+  useEffect(() => {
+    if (!isEditing || !existingQuote?.dealId || !quoteDataLoaded || deals.length === 0) return;
+    const deal = deals.find((d: any) => d.id === existingQuote.dealId);
+    if (deal && dealData.name !== deal.name) {
+      setDealData({
+        id: deal.id,
+        name: deal.name,
+        pipeline: deal.pipeline || "jornada_autocuidado",
+        stage: deal.stage || "nuevo",
+        value: deal.value,
+        closeDate: deal.closeDate ? String(deal.closeDate) : undefined,
+        notes: deal.notes ?? undefined,
+      });
+    }
+  }, [isEditing, existingQuote, deals, quoteDataLoaded]);
 
   // Filtrar negocios por búsqueda
   const filteredDeals = useMemo(() => {

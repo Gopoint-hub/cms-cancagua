@@ -1,0 +1,29 @@
+{
+  "query": "SELECT id, quote_number, name, status, client_name, client_email, client_company, client_phone, client_whatsapp, deal_id, number_of_people, event_date, subtotal, total, valid_until, notes, terms_of_purchase FROM quotes LIMIT 1;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, quote_number, name, status, client_name, client_email, client_company, client_phone, client_whatsapp, deal_id, number_of_people, event_date, subtotal, total, valid_until, notes, terms_of_purchase FROM quotes LIMIT 1;",
+  "rows": [
+    {
+      "id": "1",
+      "quote_number": "COT-1000",
+      "name": "NULL",
+      "status": "draft",
+      "client_name": "Claudio perez",
+      "client_email": "contacto@cancagua.cl",
+      "client_company": "NULL",
+      "client_phone": "NULL",
+      "client_whatsapp": "NULL",
+      "deal_id": "NULL",
+      "number_of_people": "10",
+      "event_date": "NULL",
+      "subtotal": "1410000",
+      "total": "1410000",
+      "valid_until": "2026-05-10",
+      "notes": "NULL",
+      "terms_of_purchase": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tquote_number\tname\tstatus\tclient_name\tclient_email\tclient_company\tclient_phone\tclient_whatsapp\tdeal_id\tnumber_of_people\tevent_date\tsubtotal\ttotal\tvalid_until\tnotes\tterms_of_purchase\n1\tCOT-1000\tNULL\tdraft\tClaudio perez\tcontacto@cancagua.cl\tNULL\tNULL\tNULL\tNULL\t10\tNULL\t1410000\t1410000\t2026-05-10\tNULL\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 377
+}
