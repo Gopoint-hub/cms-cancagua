@@ -234,3 +234,6 @@
 
 ## Bug Fix: Error "Service Unavailable" al enviar newsletter
 - [x] Fix: Error "Service Unavailable" al enviar newsletter (batch reducido de 100 a 50, retry con backoff exponencial hasta 3 intentos, pausa de 1s entre batches, logging detallado)
+- [x] Fix: Convertir envío de newsletter a proceso asíncrono (respuesta inmediata, envío en background con retry)
+- [x] Frontend: Mostrar toast con mensaje de envío iniciado, estado 'Enviando' visible en lista de newsletters
+- [x] Backend: Endpoint sendStatus para consultar estado del envío

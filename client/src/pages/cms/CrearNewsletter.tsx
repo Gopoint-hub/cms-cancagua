@@ -238,7 +238,11 @@ export default function CMSCrearNewsletter() {
 
   const sendNewsletterMutation = trpc.newsletters.send.useMutation({
     onSuccess: (data) => {
-      toast.success(`Newsletter enviado a ${data.sent} destinatarios`);
+      if (data.message) {
+        toast.success(data.message);
+      } else {
+        toast.success(`Newsletter enviado a ${data.total} destinatarios`);
+      }
       setIsSending(false);
       navigate("/cms/newsletter");
     },

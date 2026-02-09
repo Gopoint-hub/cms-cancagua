@@ -2014,6 +2014,10 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           throw new TRPCError({ code: "NOT_FOUND", message: "Newsletter no encontrado" });
         }
 
+        if (newsletter.status === 'sending') {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Este newsletter ya se está enviando" });
+        }
+
         // Obtener suscriptores de las listas seleccionadas
         const allSubscribers: any[] = [];
         const seenEmails = new Set<string>();
@@ -2032,83 +2036,117 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           throw new TRPCError({ code: "BAD_REQUEST", message: "No hay suscriptores activos en las listas seleccionadas" });
         }
 
-        // Actualizar estado a 'sending'
-        await db.updateNewsletter(input.newsletterId, { status: 'sending' });
-
-        // Preparar emails con enlace de unsubscribe personalizado por suscriptor
-        const { sendBulkEmails, htmlToPlainText } = await import("./email");
-        const { ENV } = await import("./_core/env");
-        const appUrl = ENV.appUrl || 'https://cancagua-cms.manus.space';
-        
-        const emails = allSubscribers.map(sub => {
-          const encodedEmail = Buffer.from(sub.email).toString('base64');
-          const unsubscribeUrl = `${appUrl}/api/unsubscribe?email=${encodedEmail}`;
-          
-          // Inject unsubscribe link into the HTML content
-          let htmlWithUnsub = newsletter.htmlContent || '';
-          
-          // Replace placeholder if the AI included it
-          if (htmlWithUnsub.includes('{{unsubscribe_url}}')) {
-            htmlWithUnsub = htmlWithUnsub.replace(/\{\{unsubscribe_url\}\}/g, unsubscribeUrl);
-          }
-          
-          // Always append unsubscribe footer if not already present
-          if (!htmlWithUnsub.includes('/api/unsubscribe') && !htmlWithUnsub.includes('darse de baja')) {
-            const unsubFooter = `
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
-              <tr>
-                <td align="center" style="font-family: 'Fira Sans', Arial, sans-serif; font-size: 12px; color: #999999; padding: 8px 0;">
-                  <a href="${unsubscribeUrl}" style="color: #999999; text-decoration: underline;">Darse de baja de este newsletter</a>
-                </td>
-              </tr>
-            </table>`;
-            
-            // Try to insert before closing </body> or </html>, or append at end
-            if (htmlWithUnsub.includes('</body>')) {
-              htmlWithUnsub = htmlWithUnsub.replace('</body>', `${unsubFooter}</body>`);
-            } else if (htmlWithUnsub.includes('</html>')) {
-              htmlWithUnsub = htmlWithUnsub.replace('</html>', `${unsubFooter}</html>`);
-            } else {
-              htmlWithUnsub += unsubFooter;
-            }
-          }
-          
-          return {
-            to: sub.email,
-            subject: newsletter.subject,
-            html: htmlWithUnsub,
-            text: htmlToPlainText(htmlWithUnsub),
-          };
-        });
-
-        // Enviar emails con nombre de remitente personalizado
-        const result = await sendBulkEmails({
-          emails,
-          senderName: newsletter.senderName || 'Cancagua',
-        });
-
-        // Registrar envíos individuales
-        for (const sub of allSubscribers) {
-          await db.createNewsletterSend({
-            newsletterId: input.newsletterId,
-            subscriberId: sub.id,
-            status: result.success ? 'sent' : 'failed',
-          });
-        }
-
-        // Actualizar newsletter con resultados
-        await db.updateNewsletter(input.newsletterId, {
-          status: result.success ? 'sent' : 'failed',
-          sentAt: new Date(),
+        // Actualizar estado a 'sending' y guardar recipientCount inmediatamente
+        await db.updateNewsletter(input.newsletterId, { 
+          status: 'sending',
           recipientCount: allSubscribers.length,
         });
 
+        // Lanzar envío en background (no await) para evitar timeout del HTTP request
+        const newsletterId = input.newsletterId;
+        const senderName = newsletter.senderName || 'Cancagua';
+        const htmlContent = newsletter.htmlContent || '';
+        const subject = newsletter.subject;
+
+        (async () => {
+          try {
+            const { sendBulkEmails, htmlToPlainText } = await import("./email");
+            const { ENV } = await import("./_core/env");
+            const appUrl = ENV.appUrl || 'https://cancagua-cms.manus.space';
+
+            const emails = allSubscribers.map(sub => {
+              const encodedEmail = Buffer.from(sub.email).toString('base64');
+              const unsubscribeUrl = `${appUrl}/api/unsubscribe?email=${encodedEmail}`;
+              
+              let htmlWithUnsub = htmlContent;
+              
+              if (htmlWithUnsub.includes('{{unsubscribe_url}}')) {
+                htmlWithUnsub = htmlWithUnsub.replace(/\{\{unsubscribe_url\}\}/g, unsubscribeUrl);
+              }
+              
+              if (!htmlWithUnsub.includes('/api/unsubscribe') && !htmlWithUnsub.includes('darse de baja')) {
+                const unsubFooter = `
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
+                  <tr>
+                    <td align="center" style="font-family: 'Fira Sans', Arial, sans-serif; font-size: 12px; color: #999999; padding: 8px 0;">
+                      <a href="${unsubscribeUrl}" style="color: #999999; text-decoration: underline;">Darse de baja de este newsletter</a>
+                    </td>
+                  </tr>
+                </table>`;
+                
+                if (htmlWithUnsub.includes('</body>')) {
+                  htmlWithUnsub = htmlWithUnsub.replace('</body>', `${unsubFooter}</body>`);
+                } else if (htmlWithUnsub.includes('</html>')) {
+                  htmlWithUnsub = htmlWithUnsub.replace('</html>', `${unsubFooter}</html>`);
+                } else {
+                  htmlWithUnsub += unsubFooter;
+                }
+              }
+              
+              return {
+                to: sub.email,
+                subject,
+                html: htmlWithUnsub,
+                text: htmlToPlainText(htmlWithUnsub),
+              };
+            });
+
+            console.log(`[Newsletter BG] Iniciando envío de ${emails.length} emails para newsletter ${newsletterId}`);
+
+            const result = await sendBulkEmails({
+              emails,
+              senderName,
+            });
+
+            // Registrar envíos individuales
+            for (const sub of allSubscribers) {
+              await db.createNewsletterSend({
+                newsletterId,
+                subscriberId: sub.id,
+                status: result.sent > 0 ? 'sent' : 'failed',
+              });
+            }
+
+            // Actualizar newsletter con resultados
+            await db.updateNewsletter(newsletterId, {
+              status: result.sent > 0 ? 'sent' : 'failed',
+              sentAt: new Date(),
+              recipientCount: allSubscribers.length,
+            });
+
+            console.log(`[Newsletter BG] Envío completado para newsletter ${newsletterId}. Enviados: ${result.sent}, Fallidos: ${result.failed}`);
+          } catch (bgError: any) {
+            console.error(`[Newsletter BG] Error en envío background para newsletter ${newsletterId}:`, bgError);
+            await db.updateNewsletter(newsletterId, {
+              status: 'failed',
+              recipientCount: allSubscribers.length,
+            });
+          }
+        })();
+
+        // Responder inmediatamente al frontend
         return {
-          success: result.success,
-          sent: result.sent,
-          failed: result.failed,
+          success: true,
+          sent: 0,
+          failed: 0,
           total: allSubscribers.length,
-          errors: result.errors,
+          errors: [],
+          message: `Envío iniciado para ${allSubscribers.length} suscriptores. El proceso continúa en segundo plano.`,
+        };
+      }),
+
+    // Consultar estado de envío de un newsletter
+    sendStatus: protectedProcedure
+      .input(z.object({ newsletterId: z.number() }))
+      .query(async ({ input }) => {
+        const newsletter = await db.getNewsletterById(input.newsletterId);
+        if (!newsletter) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Newsletter no encontrado" });
+        }
+        return {
+          status: newsletter.status,
+          recipientCount: newsletter.recipientCount,
+          sentAt: newsletter.sentAt,
         };
       }),
 
