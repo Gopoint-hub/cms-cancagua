@@ -540,6 +540,14 @@ export default function Cotizaciones() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          onClick={() => setLocation(`/cms/cotizacion-wizard/${quote.id}`)}
+                          title="Editar cotización"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleExportPDF(quote.id)}
                           title="Exportar a PDF"
                         >

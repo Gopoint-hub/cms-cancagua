@@ -1320,10 +1320,10 @@ export async function getQuoteByNumber(quoteNumber: string) {
 
 export async function createQuote(quote: any) {
   const db = await getDb();
-  if (!db) return undefined;
+  if (!db) return { success: false };
   const { quotes } = await import("../drizzle/schema");
   await db.insert(quotes).values(quote);
-  return quote;
+  return { success: true, ...quote };
 }
 
 export async function updateQuote(id: number, data: any) {

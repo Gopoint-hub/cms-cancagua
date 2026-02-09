@@ -45,6 +45,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Plus,
   Trash2,
@@ -57,7 +58,6 @@ import {
   User,
   FileText,
   ShoppingCart,
-  CreditCard,
   Settings,
   CheckCircle,
   ChevronLeft,
@@ -66,6 +66,7 @@ import {
   X,
   Check,
   ChevronsUpDown,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useParams } from "wouter";
@@ -118,14 +119,13 @@ interface QuoteDetails {
   termsOfPurchase: string;
 }
 
-// Pasos del wizard (6 pasos - se eliminó "Tu información" ya que se registra automáticamente)
+// 5 pasos del wizard (se eliminó "Firma y pago")
 const WIZARD_STEPS = [
   { id: 1, title: "Negocio", icon: Building2, description: "Asociar con un negocio" },
   { id: 2, title: "Información del comprador", icon: User, description: "Datos del contacto" },
   { id: 3, title: "Elementos de pedido", icon: ShoppingCart, description: "Productos y servicios" },
-  { id: 4, title: "Firma y pago", icon: CreditCard, description: "Configuración de pago" },
-  { id: 5, title: "Plantilla y detalles", icon: Settings, description: "Nombre y términos" },
-  { id: 6, title: "Revisión", icon: CheckCircle, description: "Vista previa final" },
+  { id: 4, title: "Plantilla y detalles", icon: Settings, description: "Nombre y términos" },
+  { id: 5, title: "Revisión", icon: CheckCircle, description: "Vista previa final" },
 ];
 
 // Pipelines disponibles
@@ -158,6 +158,7 @@ export default function CotizacionWizard() {
   // Estado del wizard
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false);
 
   // Estado del negocio (Deal)
   const [dealData, setDealData] = useState<DealData>({
@@ -184,7 +185,7 @@ export default function CotizacionWizard() {
   const [sellerInfo, setSellerInfo] = useState({
     name: "Cancagua Spa & Retreat Center",
     email: "contacto@cancagua.cl",
-    phone: "+56940073999",
+    phone: "+56 9 8224 3411",
   });
 
   // Estado de los items
@@ -192,6 +193,7 @@ export default function CotizacionWizard() {
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState("");
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
 
   // Estado de detalles de la cotización
   const [quoteDetails, setQuoteDetails] = useState<QuoteDetails>({
@@ -213,12 +215,100 @@ export default function CotizacionWizard() {
   const { data: products = [] } = trpc.corporateProducts.getActive.useQuery();
   const { data: currentUser } = trpc.auth.me.useQuery();
 
+  // Query for loading existing quote when editing
+  const { data: existingQuote } = trpc.quotes.getById.useQuery(
+    { id: parseInt(params.id || "0") },
+    { enabled: isEditing && !!params.id }
+  );
+  const { data: existingItems = [] } = trpc.quotes.getItems.useQuery(
+    { quoteId: parseInt(params.id || "0") },
+    { enabled: isEditing && !!params.id }
+  );
+
   // Mutations
   const createDealMutation = trpc.deals.create.useMutation();
   const updateDealMutation = trpc.deals.update.useMutation();
   const createClientMutation = trpc.corporateClients.create.useMutation();
   const createQuoteMutation = trpc.quotes.create.useMutation();
   const updateQuoteMutation = trpc.quotes.update.useMutation();
+
+  // Load existing quote data when editing
+  useEffect(() => {
+    if (isEditing && existingQuote && existingItems) {
+      setIsLoadingQuote(true);
+
+      // Load deal data
+      if (existingQuote.dealId) {
+        setSelectedDealId(existingQuote.dealId);
+        const deal = deals.find((d: any) => d.id === existingQuote.dealId);
+        if (deal) {
+          setDealData({
+            id: deal.id,
+            name: deal.name,
+            pipeline: deal.pipeline || "jornada_autocuidado",
+            stage: deal.stage || "nuevo",
+            value: deal.value,
+            closeDate: deal.closeDate ? String(deal.closeDate) : undefined,
+            notes: deal.notes ?? undefined,
+          });
+        }
+      }
+
+      // Load buyer data
+      setBuyerData({
+        id: existingQuote.clientId || undefined,
+        name: existingQuote.clientName || "",
+        email: existingQuote.clientEmail || "",
+        phone: existingQuote.clientPhone || "",
+        whatsapp: existingQuote.clientWhatsapp || "",
+        position: existingQuote.clientPosition || "",
+        company: existingQuote.clientCompany || "",
+        rut: existingQuote.clientRut || "",
+        address: existingQuote.clientAddress || "",
+        giro: existingQuote.clientGiro || "",
+      });
+      if (existingQuote.clientId) {
+        setSelectedClientId(existingQuote.clientId);
+      }
+
+      // Load items
+      if (existingItems.length > 0) {
+        setItems(existingItems.map((item: any) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.productName,
+          description: item.description || "",
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountType: item.discountType || "percentage",
+          discountValue: item.discountValue || 0,
+          total: item.total,
+          sortOrder: item.sortOrder || 0,
+          scheduleTime: item.scheduleTime || "",
+        })));
+      }
+
+      // Load quote details
+      setQuoteDetails({
+        name: existingQuote.name || "",
+        validUntil: existingQuote.validUntil
+          ? new Date(existingQuote.validUntil).toISOString().split("T")[0]
+          : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        language: "es",
+        region: "america_del_sur",
+        notes: existingQuote.notes || "",
+        termsOfPurchase: existingQuote.termsOfPurchase || DEFAULT_TERMS,
+      });
+
+      // Load event data
+      setNumberOfPeople(existingQuote.numberOfPeople || 10);
+      if (existingQuote.eventDate) {
+        setEventDate(new Date(existingQuote.eventDate).toISOString().split("T")[0]);
+      }
+
+      setIsLoadingQuote(false);
+    }
+  }, [isEditing, existingQuote, existingItems, deals]);
 
   // Filtrar negocios por búsqueda
   const filteredDeals = useMemo(() => {
@@ -259,7 +349,7 @@ export default function CotizacionWizard() {
     }).format(price);
   };
 
-  // Validar paso actual (6 pasos)
+  // Validar paso actual (5 pasos)
   const validateStep = (step: number): boolean => {
     switch (step) {
       case 1:
@@ -267,12 +357,10 @@ export default function CotizacionWizard() {
       case 2:
         return !!buyerData.name && !!buyerData.email;
       case 3:
-        return items.length > 0; // Elementos de pedido
+        return items.length > 0;
       case 4:
-        return true; // Siempre válido (pago desactivado)
+        return !!quoteDetails.name && !!quoteDetails.validUntil;
       case 5:
-        return !!quoteDetails.name && !!quoteDetails.validUntil; // Plantilla y detalles
-      case 6:
         return true; // Revisión
       default:
         return false;
@@ -320,7 +408,6 @@ export default function CotizacionWizard() {
         toast.success("Negocio actualizado");
       } catch (error: any) {
         console.error("Error al actualizar negocio:", error);
-        // No bloqueamos el avance si falla la actualización
       }
     }
 
@@ -339,7 +426,6 @@ export default function CotizacionWizard() {
         });
         toast.success("Cliente creado exitosamente");
       } catch (error: any) {
-        // Ignorar si ya existe
         console.log("Cliente posiblemente ya existe");
       }
     }
@@ -350,7 +436,7 @@ export default function CotizacionWizard() {
     }
 
     // Avanzar al siguiente paso
-    if (currentStep < 6) {
+    if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -404,6 +490,13 @@ export default function CotizacionWizard() {
 
   // Agregar producto a la cotización
   const handleAddProduct = (product: any) => {
+    // Check if product is already in items
+    const exists = items.some(item => item.productId === product.id);
+    if (exists) {
+      toast.info(`"${product.name}" ya está en la cotización`);
+      return;
+    }
+
     const newItem: QuoteItem = {
       productId: product.id,
       productName: product.name,
@@ -420,9 +513,55 @@ export default function CotizacionWizard() {
     };
 
     setItems([...items, newItem]);
+    toast.success("Producto agregado");
+  };
+
+  // Agregar múltiples productos seleccionados
+  const handleAddSelectedProducts = () => {
+    const newItems: QuoteItem[] = [];
+    for (const productId of selectedProductIds) {
+      const product = products.find((p: any) => p.id === productId);
+      if (!product) continue;
+
+      // Skip if already in items
+      const exists = items.some(item => item.productId === product.id);
+      if (exists) continue;
+
+      newItems.push({
+        productId: product.id,
+        productName: product.name,
+        description: product.description ?? undefined,
+        quantity: 1,
+        unitPrice: product.unitPrice,
+        discountType: "percentage",
+        discountValue: 0,
+        total: product.priceType === "per_person"
+          ? product.unitPrice * numberOfPeople
+          : product.unitPrice,
+        sortOrder: items.length + newItems.length,
+        scheduleTime: "",
+      });
+    }
+
+    if (newItems.length > 0) {
+      setItems([...items, ...newItems]);
+      toast.success(`${newItems.length} producto(s) agregado(s)`);
+    } else {
+      toast.info("Los productos seleccionados ya están en la cotización");
+    }
+
+    setSelectedProductIds([]);
     setIsAddProductOpen(false);
     setProductSearchQuery("");
-    toast.success("Producto agregado");
+  };
+
+  // Toggle product selection
+  const toggleProductSelection = (productId: number) => {
+    setSelectedProductIds(prev =>
+      prev.includes(productId)
+        ? prev.filter(id => id !== productId)
+        : [...prev, productId]
+    );
   };
 
   // Actualizar item
@@ -479,7 +618,7 @@ export default function CotizacionWizard() {
 
   // Guardar cotización
   const handleSave = async (status: "draft" | "sent" = "draft") => {
-    if (!validateStep(1) || !validateStep(2) || !validateStep(4) || !validateStep(6)) {
+    if (!validateStep(1) || !validateStep(2) || !validateStep(3) || !validateStep(4)) {
       toast.error("Por favor completa todos los pasos requeridos");
       return;
     }
@@ -547,7 +686,7 @@ export default function CotizacionWizard() {
       setSellerInfo({
         name: currentUser.name || "Cancagua Spa & Retreat Center",
         email: currentUser.email || "contacto@cancagua.cl",
-        phone: "+56940073999",
+        phone: "+56 9 8224 3411",
       });
     }
   }, [currentUser]);
@@ -650,10 +789,11 @@ export default function CotizacionWizard() {
                   />
                   <CommandList>
                     <CommandEmpty>No se encontraron negocios</CommandEmpty>
-                    <CommandGroup heading="Negocios existentes">
+                    <CommandGroup>
                       {filteredDeals.map((deal: any) => (
                         <CommandItem
                           key={deal.id}
+                          value={deal.name}
                           onSelect={() => handleSelectDeal(deal)}
                         >
                           <Check
@@ -673,10 +813,9 @@ export default function CotizacionWizard() {
                           setSelectedDealId(null);
                           setDealSearchOpen(false);
                         }}
-                        className="text-primary"
                       >
                         <Plus className="mr-2 h-4 w-4" />
-                        Nuevo negocio
+                        Crear nuevo negocio
                       </CommandItem>
                     </CommandGroup>
                   </CommandList>
@@ -685,28 +824,24 @@ export default function CotizacionWizard() {
             </Popover>
           </div>
 
-          {(isCreatingDeal || selectedDealId) && (
+          {(selectedDealId || isCreatingDeal) && (
             <>
-              <Separator />
-
               <div>
                 <Label htmlFor="dealName">Nombre del negocio *</Label>
                 <Input
                   id="dealName"
                   value={dealData.name}
                   onChange={(e) => setDealData({ ...dealData, name: e.target.value })}
-                  placeholder="Ej: GCN Turismo - Evento Enero"
-                  
+                  placeholder="Ej: Jornada Empresa ABC"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="pipeline">Pipeline</Label>
+                  <Label>Pipeline</Label>
                   <Select
                     value={dealData.pipeline}
                     onValueChange={(value) => setDealData({ ...dealData, pipeline: value })}
-                    
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -722,11 +857,10 @@ export default function CotizacionWizard() {
                 </div>
 
                 <div>
-                  <Label htmlFor="stage">Etapa del negocio</Label>
+                  <Label>Etapa</Label>
                   <Select
                     value={dealData.stage}
                     onValueChange={(value) => setDealData({ ...dealData, stage: value })}
-                    
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -743,13 +877,23 @@ export default function CotizacionWizard() {
               </div>
 
               <div>
-                <Label htmlFor="closeDate">Fecha de cierre</Label>
+                <Label htmlFor="dealCloseDate">Fecha de cierre estimada</Label>
                 <Input
-                  id="closeDate"
+                  id="dealCloseDate"
                   type="date"
                   value={dealData.closeDate || ""}
                   onChange={(e) => setDealData({ ...dealData, closeDate: e.target.value })}
-                  
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="dealNotes">Notas del negocio</Label>
+                <Textarea
+                  id="dealNotes"
+                  value={dealData.notes || ""}
+                  onChange={(e) => setDealData({ ...dealData, notes: e.target.value })}
+                  placeholder="Notas adicionales sobre el negocio"
+                  rows={3}
                 />
               </div>
             </>
@@ -770,9 +914,6 @@ export default function CotizacionWizard() {
             <div className="bg-amber-50 p-4 rounded">
               <p className="font-medium">{dealData.name || "Nombre del negocio"}</p>
             </div>
-            <div className="mt-4 text-sm text-muted-foreground">
-              <p>Vista previa del documento...</p>
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -786,98 +927,97 @@ export default function CotizacionWizard() {
         <CardHeader>
           <CardTitle>Información del comprador</CardTitle>
           <CardDescription>
-            Selecciona un contacto existente o crea uno nuevo
+            Selecciona un cliente existente o ingresa los datos manualmente
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <Label>Contacto</Label>
-              <Popover open={clientSearchOpen} onOpenChange={setClientSearchOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    className="w-full justify-between mt-2"
-                  >
-                    {selectedClientId
-                      ? buyerData.name || "Contacto seleccionado"
-                      : isCreatingClient
-                      ? "Nuevo contacto"
-                      : "Agregar contacto..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-0" align="start">
-                  <Command>
-                    <CommandInput
-                      placeholder="Buscar contacto..."
-                      value={clientSearchQuery}
-                      onValueChange={setClientSearchQuery}
-                    />
-                    <CommandList>
-                      <CommandEmpty>No se encontraron contactos</CommandEmpty>
-                      <CommandGroup>
+          <div>
+            <Label>Elige o crea un contacto</Label>
+            <Popover open={clientSearchOpen} onOpenChange={setClientSearchOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={clientSearchOpen}
+                  className="w-full justify-between mt-2"
+                >
+                  {selectedClientId
+                    ? buyerData.name || "Cliente seleccionado"
+                    : isCreatingClient
+                    ? "Nuevo contacto"
+                    : "Seleccionar contacto..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0" align="start">
+                <Command>
+                  <CommandInput
+                    placeholder="Buscar cliente..."
+                    value={clientSearchQuery}
+                    onValueChange={setClientSearchQuery}
+                  />
+                  <CommandList>
+                    <CommandEmpty>No se encontraron clientes</CommandEmpty>
+                    <CommandGroup>
+                      {filteredClients.map((client: any) => (
                         <CommandItem
-                          value="__create_new_contact__"
-                          onSelect={() => {
-                            setIsCreatingClient(true);
-                            setSelectedClientId(null);
-                            setBuyerData({ name: "", email: "" });
-                            setClientSearchOpen(false);
-                          }}
-                          className="text-primary font-medium"
+                          key={client.id}
+                          value={`${client.contactName} ${client.companyName}`}
+                          onSelect={() => handleSelectClient(client)}
                         >
-                          <Plus className="mr-2 h-4 w-4" />
-                          Crear nuevo contacto
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              selectedClientId === client.id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <div>
+                            <p className="font-medium">{client.contactName}</p>
+                            <p className="text-xs text-muted-foreground">{client.companyName}</p>
+                          </div>
                         </CommandItem>
-                      </CommandGroup>
-                      <CommandGroup heading="Contactos existentes">
-                        {filteredClients.slice(0, 10).map((client: any) => (
-                          <CommandItem
-                            key={client.id}
-                            value={`client-${client.id}-${client.contactEmail || ''}`}
-                            onSelect={() => handleSelectClient(client)}
-                          >
-                            <div className="flex flex-col">
-                              <span>{client.contactName}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {client.contactEmail}
-                              </span>
-                            </div>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
+                      ))}
+                    </CommandGroup>
+                    <CommandGroup>
+                      <CommandItem
+                        onSelect={() => {
+                          setIsCreatingClient(true);
+                          setSelectedClientId(null);
+                          setBuyerData({ name: "", email: "" });
+                          setClientSearchOpen(false);
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Crear nuevo contacto
+                      </CommandItem>
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
-          {(isCreatingClient || selectedClientId) && (
+          {(selectedClientId || isCreatingClient) && (
             <>
-              <Separator />
-
               <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Label htmlFor="buyerName">Nombre completo *</Label>
+                <div>
+                  <Label htmlFor="buyerName">Nombre del contacto *</Label>
                   <Input
                     id="buyerName"
                     value={buyerData.name}
                     onChange={(e) => setBuyerData({ ...buyerData, name: e.target.value })}
-                    placeholder="Nombre del contacto"
+                    placeholder="Nombre completo"
                   />
                 </div>
 
-                <div className="col-span-2">
+                <div>
                   <Label htmlFor="buyerEmail">Email *</Label>
                   <Input
                     id="buyerEmail"
                     type="email"
                     value={buyerData.email}
                     onChange={(e) => setBuyerData({ ...buyerData, email: e.target.value })}
-                    placeholder="email@empresa.com"
+                    placeholder="email@empresa.cl"
                   />
                 </div>
 
@@ -892,12 +1032,32 @@ export default function CotizacionWizard() {
                 </div>
 
                 <div>
+                  <Label htmlFor="buyerWhatsapp">WhatsApp</Label>
+                  <Input
+                    id="buyerWhatsapp"
+                    value={buyerData.whatsapp || ""}
+                    onChange={(e) => setBuyerData({ ...buyerData, whatsapp: e.target.value })}
+                    placeholder="+56 9 1234 5678"
+                  />
+                </div>
+
+                <div>
                   <Label htmlFor="buyerPosition">Cargo</Label>
                   <Input
                     id="buyerPosition"
                     value={buyerData.position || ""}
                     onChange={(e) => setBuyerData({ ...buyerData, position: e.target.value })}
                     placeholder="Gerente de RRHH"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="buyerRut">RUT</Label>
+                  <Input
+                    id="buyerRut"
+                    value={buyerData.rut || ""}
+                    onChange={(e) => setBuyerData({ ...buyerData, rut: e.target.value })}
+                    placeholder="12.345.678-9"
                   />
                 </div>
 
@@ -908,6 +1068,51 @@ export default function CotizacionWizard() {
                     value={buyerData.company || ""}
                     onChange={(e) => setBuyerData({ ...buyerData, company: e.target.value })}
                     placeholder="Nombre de la empresa"
+                  />
+                </div>
+
+                <div className="col-span-2">
+                  <Label htmlFor="buyerAddress">Dirección</Label>
+                  <Input
+                    id="buyerAddress"
+                    value={buyerData.address || ""}
+                    onChange={(e) => setBuyerData({ ...buyerData, address: e.target.value })}
+                    placeholder="Dirección de la empresa"
+                  />
+                </div>
+
+                <div className="col-span-2">
+                  <Label htmlFor="buyerGiro">Giro</Label>
+                  <Input
+                    id="buyerGiro"
+                    value={buyerData.giro || ""}
+                    onChange={(e) => setBuyerData({ ...buyerData, giro: e.target.value })}
+                    placeholder="Giro de la empresa"
+                  />
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="numberOfPeople">Número de personas</Label>
+                  <Input
+                    id="numberOfPeople"
+                    type="number"
+                    min={1}
+                    value={numberOfPeople}
+                    onChange={(e) => setNumberOfPeople(parseInt(e.target.value) || 1)}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="eventDate">Fecha del evento</Label>
+                  <Input
+                    id="eventDate"
+                    type="date"
+                    value={eventDate}
+                    onChange={(e) => setEventDate(e.target.value)}
                   />
                 </div>
               </div>
@@ -934,92 +1139,9 @@ export default function CotizacionWizard() {
                 <p className="text-muted-foreground">{buyerData.phone}</p>
               </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-
-  // Paso 3: Tu información (vendedor)
-  const renderStep3 = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Tu información</CardTitle>
-          <CardDescription>
-            Información del vendedor que aparecerá en la cotización
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <Label htmlFor="sellerName">Nombre</Label>
-            <Input
-              id="sellerName"
-              value={sellerInfo.name}
-              onChange={(e) => setSellerInfo({ ...sellerInfo, name: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="sellerEmail">Email</Label>
-            <Input
-              id="sellerEmail"
-              type="email"
-              value={sellerInfo.email}
-              onChange={(e) => setSellerInfo({ ...sellerInfo, email: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="sellerPhone">Teléfono</Label>
-            <Input
-              id="sellerPhone"
-              value={sellerInfo.phone}
-              onChange={(e) => setSellerInfo({ ...sellerInfo, phone: e.target.value })}
-            />
-          </div>
-
-          <Separator />
-
-          <div>
-            <Label htmlFor="numberOfPeople">Número de personas</Label>
-            <Input
-              id="numberOfPeople"
-              type="number"
-              min={1}
-              value={numberOfPeople}
-              onChange={(e) => setNumberOfPeople(parseInt(e.target.value) || 1)}
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="eventDate">Fecha del evento</Label>
-            <Input
-              id="eventDate"
-              type="date"
-              value={eventDate}
-              onChange={(e) => setEventDate(e.target.value)}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Vista previa */}
-      <Card className="bg-muted/30">
-        <CardHeader>
-          <CardTitle className="text-sm text-muted-foreground">Vista previa de cotización</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="bg-white rounded-lg p-6 shadow-sm border">
-            <div className="flex justify-between text-sm">
-              <div>
-                <p className="font-medium">{buyerData.name}</p>
-                <p className="text-muted-foreground">{buyerData.email}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-muted-foreground">Creación: {new Date().toLocaleDateString("es-CL")}</p>
-                <p className="text-muted-foreground">Personas: {numberOfPeople}</p>
-              </div>
+            <div className="mt-3 text-sm text-muted-foreground">
+              <p>Personas: {numberOfPeople}</p>
+              {eventDate && <p>Fecha: {new Date(eventDate).toLocaleDateString("es-CL")}</p>}
             </div>
           </div>
         </CardContent>
@@ -1027,8 +1149,8 @@ export default function CotizacionWizard() {
     </div>
   );
 
-  // Paso 4: Elementos de pedido
-  const renderStep4 = () => (
+  // Paso 3: Elementos de pedido
+  const renderStep3 = () => (
     <div className="space-y-6">
       <Card>
         <CardHeader>
@@ -1039,7 +1161,7 @@ export default function CotizacionWizard() {
                 Revisa los elementos de pedido que quieres que aparezcan en la cotización
               </CardDescription>
             </div>
-            <Button onClick={() => setIsAddProductOpen(true)}>
+            <Button onClick={() => { setIsAddProductOpen(true); setSelectedProductIds([]); }}>
               <Plus className="w-4 h-4 mr-2" />
               Añadir elemento de pedido
             </Button>
@@ -1053,7 +1175,7 @@ export default function CotizacionWizard() {
               <p className="text-sm text-muted-foreground mb-4">
                 Seleccionar de la biblioteca de productos
               </p>
-              <Button onClick={() => setIsAddProductOpen(true)}>
+              <Button onClick={() => { setIsAddProductOpen(true); setSelectedProductIds([]); }}>
                 Seleccionar de la biblioteca de productos
               </Button>
             </div>
@@ -1181,13 +1303,13 @@ export default function CotizacionWizard() {
         </CardContent>
       </Card>
 
-      {/* Dialog para agregar productos */}
+      {/* Dialog para agregar productos - con multi-select */}
       <Dialog open={isAddProductOpen} onOpenChange={setIsAddProductOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Añadir elemento de pedido</DialogTitle>
+            <DialogTitle>Añadir elementos de pedido</DialogTitle>
             <DialogDescription>
-              Busca y selecciona productos de la biblioteca
+              Selecciona uno o más productos de la biblioteca
             </DialogDescription>
           </DialogHeader>
 
@@ -1202,38 +1324,77 @@ export default function CotizacionWizard() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10"></TableHead>
                     <TableHead>Nombre</TableHead>
                     <TableHead>Ref.</TableHead>
                     <TableHead>Precio unitario</TableHead>
-                    <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProducts.map((product: any) => (
-                    <TableRow key={product.id}>
-                      <TableCell>
-                        <span className="text-primary">{product.name}</span>
-                      </TableCell>
-                      <TableCell>--</TableCell>
-                      <TableCell>{formatPrice(product.unitPrice)}</TableCell>
-                      <TableCell>
-                        <Button
-                          size="sm"
-                          onClick={() => handleAddProduct(product)}
-                        >
-                          Agregar
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredProducts.map((product: any) => {
+                    const isAlreadyAdded = items.some(item => item.productId === product.id);
+                    const isSelected = selectedProductIds.includes(product.id);
+                    return (
+                      <TableRow
+                        key={product.id}
+                        className={cn(
+                          "cursor-pointer",
+                          isAlreadyAdded && "opacity-50",
+                          isSelected && "bg-primary/5"
+                        )}
+                        onClick={() => {
+                          if (!isAlreadyAdded) {
+                            toggleProductSelection(product.id);
+                          }
+                        }}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={isSelected || isAlreadyAdded}
+                            disabled={isAlreadyAdded}
+                            onCheckedChange={() => {
+                              if (!isAlreadyAdded) {
+                                toggleProductSelection(product.id);
+                              }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <span className={cn("text-primary", isAlreadyAdded && "line-through")}>
+                            {product.name}
+                          </span>
+                          {isAlreadyAdded && (
+                            <Badge variant="secondary" className="ml-2 text-xs">
+                              Ya agregado
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>--</TableCell>
+                        <TableCell>{formatPrice(product.unitPrice)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </ScrollArea>
+
+            {selectedProductIds.length > 0 && (
+              <div className="bg-primary/5 p-3 rounded-lg text-sm">
+                <strong>{selectedProductIds.length}</strong> producto(s) seleccionado(s)
+              </div>
+            )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddProductOpen(false)}>
+            <Button variant="outline" onClick={() => { setIsAddProductOpen(false); setSelectedProductIds([]); }}>
               Cancelar
+            </Button>
+            <Button
+              onClick={handleAddSelectedProducts}
+              disabled={selectedProductIds.length === 0}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Agregar {selectedProductIds.length > 0 ? `(${selectedProductIds.length})` : ""}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1241,67 +1402,8 @@ export default function CotizacionWizard() {
     </div>
   );
 
-  // Paso 5: Firma y pago
-  const renderStep5 = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Cobro de pagos</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-4 border rounded-lg">
-            <div>
-              <p className="font-medium">Acepta pagos online</p>
-              <p className="text-sm text-muted-foreground">
-                Incluye un enlace de pago en tu cotización para recibir pagos de tus clientes mediante tarjetas de crédito, tarjetas de débito y débitos bancarios.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <img src="/visa.svg" alt="Visa" className="h-6" />
-              <img src="/mastercard.svg" alt="Mastercard" className="h-6" />
-            </div>
-          </div>
-
-          <Badge variant="outline" className="text-orange-600 border-orange-300">
-            DESACTIVADA
-          </Badge>
-
-          <p className="text-sm text-muted-foreground">
-            Los pagos se gestionan por transferencia bancaria. Los datos de la cuenta aparecerán en la cotización.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Vista previa */}
-      <Card className="bg-muted/30">
-        <CardHeader>
-          <CardTitle className="text-sm text-muted-foreground">Vista previa de cotización</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="bg-white rounded-lg p-6 shadow-sm border">
-            <div className="text-center mb-4">
-              <h3 className="font-semibold">Cancagua Spa & Retreat Center</h3>
-            </div>
-            <div className="bg-amber-50 p-4 rounded text-sm">
-              <p className="font-medium mb-2">Comentarios de Cancagua Spa & Retreat Center</p>
-              <div className="space-y-1 text-muted-foreground">
-                <p>Cuenta Bancaria</p>
-                <p>Banco: Santander</p>
-                <p>Cuenta: Corriente</p>
-                <p>No de Cuenta: 9569934-0</p>
-                <p>Nombre: Cancagua Spa y Centro de Bienestar Limitada</p>
-                <p>RUT: 77.926.863-2</p>
-                <p>Correo: eventos@cancagua.cl</p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-
-  // Paso 6: Plantilla y detalles
-  const renderStep6 = () => (
+  // Paso 4: Plantilla y detalles
+  const renderStep4 = () => (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card>
         <CardHeader>
@@ -1433,14 +1535,22 @@ export default function CotizacionWizard() {
                 <span>{formatPrice(total)}</span>
               </div>
             </div>
+
+            {/* Datos bancarios */}
+            <div className="mt-4 p-3 bg-amber-50 rounded text-xs text-muted-foreground">
+              <p className="font-medium mb-1 text-foreground">Datos bancarios</p>
+              <p>Banco: Santander | Cuenta Corriente: 9569934-0</p>
+              <p>Cancagua Spa y Centro de Bienestar Limitada</p>
+              <p>RUT: 77.926.863-2 | eventos@cancagua.cl</p>
+            </div>
           </div>
         </CardContent>
       </Card>
     </div>
   );
 
-  // Paso 7: Revisión
-  const renderStep7 = () => (
+  // Paso 5: Revisión
+  const renderStep5 = () => (
     <Card>
       <CardHeader>
         <CardTitle>Revisión</CardTitle>
@@ -1449,7 +1559,7 @@ export default function CotizacionWizard() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="bg-white rounded-lg p-8 shadow-lg border max-w-3xl mx-auto">
+        <div className="bg-white rounded-lg p-8 shadow-lg border max-w-4xl mx-auto">
           {/* Header */}
           <div className="text-center mb-6">
             <h2 className="text-xl font-bold text-amber-800">Cancagua Spa & Retreat Center</h2>
@@ -1463,12 +1573,14 @@ export default function CotizacionWizard() {
                 <p className="font-medium">{buyerData.name}</p>
                 <p className="text-muted-foreground">{buyerData.email}</p>
                 <p className="text-muted-foreground">{buyerData.phone}</p>
+                {buyerData.company && <p className="text-muted-foreground">{buyerData.company}</p>}
               </div>
               <div className="text-right">
-                <p>Referencia: {new Date().getTime()}</p>
                 <p>Creación: {new Date().toLocaleDateString("es-CL")}</p>
                 <p>Caducidad: {new Date(quoteDetails.validUntil).toLocaleDateString("es-CL")}</p>
-                <p>Presupuesto creado por: Cancagua Spa & Retreat Center</p>
+                <p>Personas: {numberOfPeople}</p>
+                {eventDate && <p>Evento: {new Date(eventDate).toLocaleDateString("es-CL")}</p>}
+                <p className="mt-1 text-muted-foreground">Presupuesto creado por: Cancagua Spa & Retreat Center</p>
               </div>
             </div>
           </div>
@@ -1480,6 +1592,19 @@ export default function CotizacionWizard() {
               <p className="text-sm whitespace-pre-line">{quoteDetails.notes}</p>
             </div>
           )}
+
+          {/* Datos bancarios */}
+          <div className="border rounded-lg p-4 mb-6">
+            <p className="font-medium mb-2">Datos bancarios</p>
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>Banco: Santander</p>
+              <p>Cuenta: Corriente</p>
+              <p>No de Cuenta: 9569934-0</p>
+              <p>Nombre: Cancagua Spa y Centro de Bienestar Limitada</p>
+              <p>RUT: 77.926.863-2</p>
+              <p>Correo: eventos@cancagua.cl</p>
+            </div>
+          </div>
 
           {/* Productos */}
           <div className="mb-6">
@@ -1540,12 +1665,17 @@ export default function CotizacionWizard() {
               </p>
             </div>
           )}
+
+          {/* Footer */}
+          <div className="border-t mt-6 pt-4 text-center text-xs text-muted-foreground">
+            <p>Cancagua Spa & Retreat Center | Frutillar, Chile | contacto@cancagua.cl | +56 9 8224 3411</p>
+          </div>
         </div>
       </CardContent>
     </Card>
   );
 
-  // Renderizar paso actual (6 pasos)
+  // Renderizar paso actual (5 pasos)
   const renderCurrentStep = () => {
     switch (currentStep) {
       case 1:
@@ -1553,17 +1683,28 @@ export default function CotizacionWizard() {
       case 2:
         return renderStep2(); // Información del comprador
       case 3:
-        return renderStep4(); // Elementos de pedido (era paso 4)
+        return renderStep3(); // Elementos de pedido
       case 4:
-        return renderStep5(); // Firma y pago (era paso 5)
+        return renderStep4(); // Plantilla y detalles
       case 5:
-        return renderStep6(); // Plantilla y detalles (era paso 6)
-      case 6:
-        return renderStep7(); // Revisión (era paso 7)
+        return renderStep5(); // Revisión
       default:
         return null;
     }
   };
+
+  if (isEditing && !existingQuote) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto py-8 max-w-7xl flex items-center justify-center min-h-[400px]">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-6 h-6 animate-spin" />
+            <span className="text-muted-foreground">Cargando cotización...</span>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -1572,10 +1713,10 @@ export default function CotizacionWizard() {
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-3xl font-bold">
-              {isEditing ? "Editar cotización" : "Editar una cotización"}
+              {isEditing ? "Editar cotización" : "Nueva cotización"}
             </h1>
             <p className="text-muted-foreground mt-1">
-              Paso {currentStep} de 6
+              Paso {currentStep} de 5
             </p>
           </div>
           <Button variant="outline" onClick={() => setLocation("/cms/cotizaciones")}>
@@ -1601,14 +1742,29 @@ export default function CotizacionWizard() {
           </Button>
 
           <div className="flex gap-2">
-            {currentStep === 6 ? (
+            {currentStep === 5 ? (
               <>
-                <Button variant="outline" onClick={() => handleSave("draft")}>
-                  <Save className="w-4 h-4 mr-2" />
+                <Button
+                  variant="outline"
+                  onClick={() => handleSave("draft")}
+                  disabled={createQuoteMutation.isPending || updateQuoteMutation.isPending}
+                >
+                  {(createQuoteMutation.isPending || updateQuoteMutation.isPending) ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4 mr-2" />
+                  )}
                   Guardar
                 </Button>
-                <Button onClick={() => handleSave("sent")}>
-                  <Send className="w-4 h-4 mr-2" />
+                <Button
+                  onClick={() => handleSave("sent")}
+                  disabled={createQuoteMutation.isPending || updateQuoteMutation.isPending}
+                >
+                  {(createQuoteMutation.isPending || updateQuoteMutation.isPending) ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4 mr-2" />
+                  )}
                   Publicar
                 </Button>
               </>

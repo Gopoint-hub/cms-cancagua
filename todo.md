@@ -196,3 +196,14 @@
 - [x] Agregar bulk actions (eliminar seleccionadas, seleccionar todo)
 - [x] Agregar endpoint bulkDelete al router de listas
 - [x] Resultado: 152 listas (6 servicios, 51 eventos, 95 ubicaciones)
+
+## Correcciones Módulo B2B Cotizaciones
+- [x] Fix: cotizaciones no se guardan como borrador (createQuote retornaba objeto sin .success)
+- [x] Fix: error al guardar cotización (schema validation corregida)
+- [x] Fix: error al publicar y enviar cotización
+- [x] Permitir agregar múltiples servicios desde la biblioteca al mismo tiempo (checkboxes multi-select)
+- [x] Quitar opción de pago online (reducido de 6 a 5 pasos, datos bancarios en vista previa)
+- [x] Ajustar ancho de previsualización de cotización (max-w-4xl en revisión)
+- [x] Cambiar teléfono del footer a +56 9 8224 3411 (wizard + pdfGenerator)
+- [x] Permitir editar cotización desde el módulo cotizaciones (botón Edit + carga de datos)
+- [x] Permitir crear nueva cotización desde el módulo cotizaciones (título 'Nueva cotización')

@@ -147,7 +147,7 @@ export async function generateQuotePDF(data: QuoteData): Promise<Buffer> {
       doc.fillColor(COLORS.primary);
       doc.text("contacto@cancagua.cl", rightCol, rightYPos, { align: "right", width: 215 });
       rightYPos += 10;
-      doc.text("+56940073999", rightCol, rightYPos, { align: "right", width: 215 });
+      doc.text("+56 9 8224 3411", rightCol, rightYPos, { align: "right", width: 215 });
 
       yPos = 200;
 
@@ -388,7 +388,7 @@ Valores IVA incluido`;
         .fontSize(8)
         .fillColor(COLORS.textLight)
         .text(
-          "Cancagua Spa & Retreat Center | Frutillar, Chile | contacto@cancagua.cl | +56940073999",
+          "Cancagua Spa & Retreat Center | Frutillar, Chile | contacto@cancagua.cl | +56 9 8224 3411",
           leftCol,
           footerY,
           { align: "center", width: pageWidth }
@@ -686,7 +686,7 @@ export async function generateQuotePDFLegacy(data: QuoteData): Promise<Buffer> {
           { align: "center", width: 495 }
         );
 
-      doc.text("contacto@cancagua.cl | +56 9 XXXX XXXX", 50, footerY + 12, {
+      doc.text("contacto@cancagua.cl | +56 9 8224 3411", 50, footerY + 12, {
         align: "center",
         width: 495,
       });
