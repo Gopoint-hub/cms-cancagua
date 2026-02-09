@@ -26,7 +26,7 @@ import {
   FileText, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -434,6 +434,20 @@ function DashboardLayoutContent({
           </SidebarContent>
 
           <SidebarFooter className="p-3">
+            {/* Enlace de Ayuda fijo */}
+            <button
+              onClick={() => setLocation("/cms/ayuda")}
+              className={cn(
+                "flex items-center gap-2 w-full px-2 py-2 rounded-lg transition-colors text-left mb-2",
+                "hover:bg-accent/50",
+                location === "/cms/ayuda" && "bg-accent text-accent-foreground"
+              )}
+            >
+              <HelpCircle className={cn("h-4 w-4 shrink-0", location === "/cms/ayuda" ? "text-primary" : "text-muted-foreground")} />
+              {!isCollapsed && (
+                <span className="text-sm font-medium">Ayuda</span>
+              )}
+            </button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">

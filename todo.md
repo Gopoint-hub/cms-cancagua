@@ -247,3 +247,7 @@
 - [x] Mantener las 6 listas de servicio intactas
 - [x] Actualizar contadores de suscriptores en las nuevas listas
 - [x] Verificar deduplicación: envío ya usa Set de emails para evitar duplicados al seleccionar múltiples listas
+
+## Módulo de Ayuda
+- [x] Crear página de Ayuda con sección de Newsletters documentando el sistema de listas y envío
+- [x] Agregar enlace de Ayuda fijo en la parte inferior del sidebar para todos los usuarios (icono HelpCircle)
