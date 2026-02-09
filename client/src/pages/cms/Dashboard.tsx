@@ -68,6 +68,9 @@ export default function CMSDashboard() {
     admin: [
       { label: "Usuarios", value: "Gestionar", icon: Users },
     ],
+    ayuda: [
+      { label: "Documentación", value: "Ver", icon: BarChart3 },
+    ],
   };
 
   return (

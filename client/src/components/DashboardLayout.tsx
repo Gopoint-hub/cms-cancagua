@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/collapsible";
 
 // Definición de categorías y sus items de menú
-export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin";
+export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda";
 
 interface MenuItem {
   icon: any;
@@ -141,6 +141,16 @@ export const categories: Category[] = [
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
       { icon: RefreshCw, label: "Integraciones", path: "/cms/integraciones" },
       { icon: Settings, label: "Configuración", path: "/cms/configuracion" },
+    ],
+  },
+  {
+    id: "ayuda",
+    label: "Ayuda",
+    icon: HelpCircle,
+    description: "Documentación & Guías",
+    color: "bg-cyan-500",
+    items: [
+      { icon: Mail, label: "Newsletters", path: "/cms/ayuda/newsletters" },
     ],
   },
 ];
@@ -434,20 +444,6 @@ function DashboardLayoutContent({
           </SidebarContent>
 
           <SidebarFooter className="p-3">
-            {/* Enlace de Ayuda fijo */}
-            <button
-              onClick={() => setLocation("/cms/ayuda")}
-              className={cn(
-                "flex items-center gap-2 w-full px-2 py-2 rounded-lg transition-colors text-left mb-2",
-                "hover:bg-accent/50",
-                location === "/cms/ayuda" && "bg-accent text-accent-foreground"
-              )}
-            >
-              <HelpCircle className={cn("h-4 w-4 shrink-0", location === "/cms/ayuda" ? "text-primary" : "text-muted-foreground")} />
-              {!isCollapsed && (
-                <span className="text-sm font-medium">Ayuda</span>
-              )}
-            </button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">

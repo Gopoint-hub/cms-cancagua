@@ -251,3 +251,5 @@
 ## Módulo de Ayuda
 - [x] Crear página de Ayuda con sección de Newsletters documentando el sistema de listas y envío
 - [x] Agregar enlace de Ayuda fijo en la parte inferior del sidebar para todos los usuarios (icono HelpCircle)
+- [x] Mover Ayuda de enlace fijo a categoría del sidebar (debajo de Admin) con acordeón expandible
+- [x] Crear sub-página AyudaNewsletters (/cms/ayuda/newsletters) como primer módulo dentro de la categoría Ayuda

@@ -1,6 +1,3 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Accordion,
   AccordionContent,
@@ -8,110 +5,37 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
-  Mail, ChevronRight, BookOpen, AlertCircle, CheckCircle2,
-  ListChecks, Send, Users, Shield
+  Mail, AlertCircle, CheckCircle2,
+  ListChecks, Send, Shield
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
-// Tipo para las secciones de ayuda
-interface HelpSection {
-  id: string;
-  icon: any;
-  title: string;
-  description: string;
-  badge?: string;
-  content: React.ReactNode;
-}
-
-const helpSections: HelpSection[] = [
-  {
-    id: "newsletters",
-    icon: Mail,
-    title: "Newsletters y Envío de Mailings",
-    description: "Cómo funciona el sistema de listas, envío de emails y deduplicación",
-    badge: "Documentación",
-    content: <NewsletterHelp />,
-  },
-];
-
-export default function Ayuda() {
-  const [activeSection, setActiveSection] = useState<string | null>("newsletters");
-
+export default function AyudaNewsletters() {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Header */}
       <div className="space-y-1">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+          <span>Ayuda</span>
+          <span>/</span>
+          <span className="text-foreground">Newsletters</span>
+        </div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <BookOpen className="h-6 w-6 text-primary" />
-          Centro de Ayuda
+          <Mail className="h-6 w-6 text-primary" />
+          Newsletters y Envío de Mailings
         </h1>
         <p className="text-muted-foreground">
-          Documentación interna del sistema para el equipo de Cancagua
+          Cómo funciona el sistema de listas, envío de emails y deduplicación
         </p>
       </div>
 
-      {/* Secciones */}
-      <div className="grid gap-4">
-        {helpSections.map((section) => (
-          <Card
-            key={section.id}
-            className={`cursor-pointer transition-all ${
-              activeSection === section.id
-                ? "ring-2 ring-primary/20 shadow-md"
-                : "hover:shadow-sm"
-            }`}
-          >
-            <CardHeader
-              className="pb-3 cursor-pointer"
-              onClick={() =>
-                setActiveSection(activeSection === section.id ? null : section.id)
-              }
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <section.icon className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      {section.title}
-                      {section.badge && (
-                        <Badge variant="secondary" className="text-xs font-normal">
-                          {section.badge}
-                        </Badge>
-                      )}
-                    </CardTitle>
-                    <CardDescription className="mt-0.5">
-                      {section.description}
-                    </CardDescription>
-                  </div>
-                </div>
-                <ChevronRight
-                  className={`h-5 w-5 text-muted-foreground transition-transform ${
-                    activeSection === section.id ? "rotate-90" : ""
-                  }`}
-                />
-              </div>
-            </CardHeader>
-            {activeSection === section.id && (
-              <CardContent className="pt-0">{section.content}</CardContent>
-            )}
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NewsletterHelp() {
-  return (
-    <div className="space-y-6 text-sm leading-relaxed">
       {/* Resumen */}
       <div className="bg-muted/50 rounded-lg p-4 border">
         <div className="flex items-start gap-3">
           <AlertCircle className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
           <div>
             <p className="font-medium text-foreground mb-1">Resumen rápido</p>
-            <p className="text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               El sistema de newsletters permite enviar emails masivos a suscriptores organizados en listas.
               Al enviar, el sistema <strong>deduplica automáticamente</strong>: aunque selecciones todas las listas,
               cada persona recibe <strong>solo 1 email</strong>, nunca duplicados.
@@ -130,7 +54,7 @@ function NewsletterHelp() {
             </div>
           </AccordionTrigger>
           <AccordionContent className="pb-4">
-            <div className="space-y-4">
+            <div className="space-y-4 text-sm">
               <p className="text-muted-foreground">
                 Las listas se organizan en 3 categorías. Cada suscriptor puede estar en múltiples listas
                 simultáneamente según sus intereses y ubicación.
@@ -219,7 +143,7 @@ function NewsletterHelp() {
             </div>
           </AccordionTrigger>
           <AccordionContent className="pb-4">
-            <div className="space-y-3">
+            <div className="space-y-3 text-sm">
               <div className="bg-green-50 dark:bg-green-950/20 rounded-lg p-4 border border-green-200 dark:border-green-800">
                 <p className="font-medium text-green-700 dark:text-green-400 mb-1">
                   No hay riesgo de envíos duplicados
@@ -264,7 +188,7 @@ function NewsletterHelp() {
             </div>
           </AccordionTrigger>
           <AccordionContent className="pb-4">
-            <div className="space-y-3">
+            <div className="space-y-3 text-sm">
               <p className="text-muted-foreground">
                 El envío de newsletters funciona de forma <strong>asíncrona</strong> para manejar
                 grandes volúmenes sin errores de timeout:
@@ -301,7 +225,7 @@ function NewsletterHelp() {
             </div>
           </AccordionTrigger>
           <AccordionContent className="pb-4">
-            <div className="space-y-3">
+            <div className="space-y-3 text-sm">
               <p className="text-muted-foreground">
                 Todos los emails enviados incluyen automáticamente un enlace de "Darse de baja" en el pie del email.
                 Esto es obligatorio por ley y buenas prácticas de email marketing.
