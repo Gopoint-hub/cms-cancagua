@@ -169,3 +169,6 @@
 - [x] Extraer las 1.408 traducciones del CMS antiguo
 - [x] Importar traducciones a la base de datos del CMS nuevo (1408/1408, 0 errores)
 - [x] Verificar que la importación sea correcta (en:690, pt:351, fr:253, de:114)
+
+## Bug Fix: Link de validación de email 404
+- [x] Corregir link de validación de email al invitar vendedores (APP_URL apuntaba a cancagua.cl en vez de cms.cancagua.cl)
