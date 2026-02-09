@@ -9,9 +9,11 @@ import {
   ListChecks, Send, Shield
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import DashboardLayout from "@/components/DashboardLayout";
 
 export default function AyudaNewsletters() {
   return (
+    <DashboardLayout>
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Header */}
       <div className="space-y-1">
@@ -254,5 +256,6 @@ export default function AyudaNewsletters() {
         </AccordionItem>
       </Accordion>
     </div>
+    </DashboardLayout>
   );
 }
