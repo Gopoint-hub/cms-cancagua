@@ -1,0 +1,1067 @@
+{
+  "query": "SELECT sl.id, sl.name, sl.description, sl.subscriber_count, sl.created_at FROM subscriber_lists sl ORDER BY sl.id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT sl.id, sl.name, sl.description, sl.subscriber_count, sl.created_at FROM subscriber_lists sl ORDER BY sl.id;",
+  "rows": [
+    {
+      "id": "30002",
+      "name": "Servicio: Hot Tubs",
+      "description": "Clientes que han reservado Hot Tubs",
+      "subscriber_count": "2372",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30003",
+      "name": "Servicio: Masajes",
+      "description": "Clientes que han reservado Masajes",
+      "subscriber_count": "1174",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30004",
+      "name": "Servicio: Biopiscinas",
+      "description": "Clientes que han reservado Biopiscinas",
+      "subscriber_count": "1837",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30005",
+      "name": "Servicio: Sauna Nativo",
+      "description": "Clientes que han reservado Sauna Nativo",
+      "subscriber_count": "367",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30006",
+      "name": "Servicio: Tablas SUP",
+      "description": "Clientes que han reservado Tablas SUP",
+      "subscriber_count": "277",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30007",
+      "name": "Servicio: Clases Regulares",
+      "description": "Clientes que han reservado Clases Regulares",
+      "subscriber_count": "73",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30009",
+      "name": "Ubicación: Puerto Montt",
+      "description": "Clientes de Puerto Montt",
+      "subscriber_count": "532",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30010",
+      "name": "Ubicación: Frutillar",
+      "description": "Clientes de Frutillar",
+      "subscriber_count": "468",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30012",
+      "name": "Evento: Taller Del Método Wim Hof Con Alan Iceman. Sábado 31 De Enero",
+      "description": "Asistentes al evento Taller Del Método Wim Hof Con Alan Iceman. Sábado 31 De Enero",
+      "subscriber_count": "28",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30013",
+      "name": "Ubicación: Osorno",
+      "description": "Clientes de Osorno",
+      "subscriber_count": "250",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30014",
+      "name": "Evento: Encuentro De Inmersión. Domingo 21 De Diciembre",
+      "description": "Asistentes al evento Encuentro De Inmersión. Domingo 21 De Diciembre",
+      "subscriber_count": "14",
+      "created_at": "2026-02-09 16:32:08"
+    },
+    {
+      "id": "30015",
+      "name": "Evento: Sonoterapia. Sábado 27 De Septiembre",
+      "description": "Asistentes al evento Sonoterapia. Sábado 27 De Septiembre",
+      "subscriber_count": "14",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30016",
+      "name": "Evento: Encuentro De Inmersión. Domingo 14 De Septiembre",
+      "description": "Asistentes al evento Encuentro De Inmersión. Domingo 14 De Septiembre",
+      "subscriber_count": "13",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30021",
+      "name": "Ubicación: Fresia",
+      "description": "Clientes de Fresia",
+      "subscriber_count": "14",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30022",
+      "name": "Ubicación: Llanquihue",
+      "description": "Clientes de Llanquihue",
+      "subscriber_count": "67",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30023",
+      "name": "Evento: Encuentro De Inmersión. Domingo 22 De Junio",
+      "description": "Asistentes al evento Encuentro De Inmersión. Domingo 22 De Junio",
+      "subscriber_count": "14",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30024",
+      "name": "Evento: Ciclo De Cine Al Agua: En Búsqueda De La Felicidad. Viernes 20 De Junio",
+      "description": "Asistentes al evento Ciclo De Cine Al Agua: En Búsqueda De La Felicidad. Viernes 20 De Junio",
+      "subscriber_count": "6",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30025",
+      "name": "Evento: Encuentro De Inmersión. Domingo 23 De Noviembre",
+      "description": "Asistentes al evento Encuentro De Inmersión. Domingo 23 De Noviembre",
+      "subscriber_count": "15",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30026",
+      "name": "Ubicación: Puerto Varas",
+      "description": "Clientes de Puerto Varas",
+      "subscriber_count": "525",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30027",
+      "name": "Ubicación: Viña del Mar",
+      "description": "Clientes de Viña del Mar",
+      "subscriber_count": "29",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30029",
+      "name": "Evento: After Party En Cancagua: Música, Fiesta Y Agua Bajo Las Estrellas. Sábado 9 Agosto",
+      "description": "Asistentes al evento After Party En Cancagua: Música, Fiesta Y Agua Bajo Las Estrellas. Sábado 9 Agosto",
+      "subscriber_count": "6",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30030",
+      "name": "Evento: Concierto Sensorial: Equinoccio",
+      "description": "Asistentes al evento Concierto Sensorial: Equinoccio",
+      "subscriber_count": "16",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30031",
+      "name": "Evento: Latino Austral: Experiencia Sensorial",
+      "description": "Asistentes al evento Latino Austral: Experiencia Sensorial",
+      "subscriber_count": "14",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30033",
+      "name": "Evento: Concierto Sensorial: Love Is In The Air",
+      "description": "Asistentes al evento Concierto Sensorial: Love Is In The Air",
+      "subscriber_count": "9",
+      "created_at": "2026-02-09 16:32:09"
+    },
+    {
+      "id": "30034",
+      "name": "Ubicación: Santiago",
+      "description": "Clientes de Santiago",
+      "subscriber_count": "545",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30036",
+      "name": "Ubicación: Pichilemu",
+      "description": "Clientes de Pichilemu",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30038",
+      "name": "Ubicación: Concepción",
+      "description": "Clientes de Concepción",
+      "subscriber_count": "45",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30039",
+      "name": "Ubicación: Reino Unido",
+      "description": "Clientes de Reino Unido",
+      "subscriber_count": "15",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30040",
+      "name": "Ubicación: Chillán",
+      "description": "Clientes de Chillán",
+      "subscriber_count": "13",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30042",
+      "name": "Ubicación: Curicó",
+      "description": "Clientes de Curicó",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30047",
+      "name": "Ubicación: Rancagua",
+      "description": "Clientes de Rancagua",
+      "subscriber_count": "10",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30048",
+      "name": "Ubicación: Estados Unidos",
+      "description": "Clientes de Estados Unidos",
+      "subscriber_count": "26",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30050",
+      "name": "Ubicación: Brasil",
+      "description": "Clientes de Brasil",
+      "subscriber_count": "16",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30051",
+      "name": "Ubicación: Temuco",
+      "description": "Clientes de Temuco",
+      "subscriber_count": "35",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30052",
+      "name": "Ubicación: Argentina",
+      "description": "Clientes de Argentina",
+      "subscriber_count": "21",
+      "created_at": "2026-02-09 16:32:10"
+    },
+    {
+      "id": "30054",
+      "name": "Ubicación: Villa Alemana",
+      "description": "Clientes de Villa Alemana",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30056",
+      "name": "Ubicación: Talca",
+      "description": "Clientes de Talca",
+      "subscriber_count": "11",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30057",
+      "name": "Ubicación: Pucón",
+      "description": "Clientes de Pucón",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30058",
+      "name": "Ubicación: Machalí",
+      "description": "Clientes de Machalí",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30060",
+      "name": "Ubicación: Antofagasta",
+      "description": "Clientes de Antofagasta",
+      "subscriber_count": "12",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30063",
+      "name": "Ubicación: Taltal",
+      "description": "Clientes de Taltal",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30065",
+      "name": "Ubicación: San Fernando",
+      "description": "Clientes de San Fernando",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30067",
+      "name": "Ubicación: La Serena",
+      "description": "Clientes de La Serena",
+      "subscriber_count": "7",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30069",
+      "name": "Ubicación: Chile, Lebu",
+      "description": "Clientes de Chile, Lebu",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30070",
+      "name": "Ubicación: Copiapó",
+      "description": "Clientes de Copiapó",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:11"
+    },
+    {
+      "id": "30072",
+      "name": "Evento: Yoga & Sonoterapia. Sábado 20 De Diciembre",
+      "description": "Asistentes al evento Yoga & Sonoterapia. Sábado 20 De Diciembre",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30073",
+      "name": "Ubicación: Purranque",
+      "description": "Clientes de Purranque",
+      "subscriber_count": "24",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30076",
+      "name": "Evento: Somatic Breathwork Reset With Sonja Bloder. Sábado 3 De Mayo",
+      "description": "Asistentes al evento Somatic Breathwork Reset With Sonja Bloder. Sábado 3 De Mayo",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30077",
+      "name": "Ubicación: Alemania",
+      "description": "Clientes de Alemania",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30078",
+      "name": "Ubicación: Valdivia",
+      "description": "Clientes de Valdivia",
+      "subscriber_count": "46",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30079",
+      "name": "Evento: Sonoterapia. Sábado 25 De Octubre",
+      "description": "Asistentes al evento Sonoterapia. Sábado 25 De Octubre",
+      "subscriber_count": "7",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30081",
+      "name": "Evento: Sonoterapia. Sábado 28 De Junio",
+      "description": "Asistentes al evento Sonoterapia. Sábado 28 De Junio",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30082",
+      "name": "Ubicación: Linares",
+      "description": "Clientes de Linares",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30083",
+      "name": "Ubicación: Punta Arenas",
+      "description": "Clientes de Punta Arenas",
+      "subscriber_count": "11",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30084",
+      "name": "Evento: Somatic Breathwork - Nervous System Reset Journey. Sábado 17 De Enero",
+      "description": "Asistentes al evento Somatic Breathwork - Nervous System Reset Journey. Sábado 17 De Enero",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30085",
+      "name": "Evento: Concierto En Biopiscinas: Fiestas Patrias En Cancagua. Viernes 19 De Septiembre",
+      "description": "Asistentes al evento Concierto En Biopiscinas: Fiestas Patrias En Cancagua. Viernes 19 De Septiembre",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30086",
+      "name": "Evento: Círculo De Mujeres 8m",
+      "description": "Asistentes al evento Círculo De Mujeres 8m",
+      "subscriber_count": "12",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30087",
+      "name": "Ubicación: Curanilahue",
+      "description": "Clientes de Curanilahue",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30089",
+      "name": "Evento: Heart Coherence Workshop. Viernes 16 De Enero.",
+      "description": "Asistentes al evento Heart Coherence Workshop. Viernes 16 De Enero.",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:12"
+    },
+    {
+      "id": "30091",
+      "name": "Evento: Jornada De Profundización Y Reflexión: Paz Y Conflictos Internos. Sábado 8 Noviembre",
+      "description": "Asistentes al evento Jornada De Profundización Y Reflexión: Paz Y Conflictos Internos. Sábado 8 Noviembre",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30093",
+      "name": "Evento: Círculo De Mujeres: Luna Creciente. Viernes 28 De Noviembre",
+      "description": "Asistentes al evento Círculo De Mujeres: Luna Creciente. Viernes 28 De Noviembre",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30094",
+      "name": "Ubicación: Nueva Braunau",
+      "description": "Clientes de Nueva Braunau",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30096",
+      "name": "Evento: Coffee Swim With The Chileman",
+      "description": "Asistentes al evento Coffee Swim With The Chileman",
+      "subscriber_count": "15",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30098",
+      "name": "Ubicación: Valparaíso",
+      "description": "Clientes de Valparaíso",
+      "subscriber_count": "9",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30104",
+      "name": "Ubicación: Chile, Paihuano",
+      "description": "Clientes de Chile, Paihuano",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30106",
+      "name": "Evento: Jornada Terapéutica Solidaria",
+      "description": "Asistentes al evento Jornada Terapéutica Solidaria",
+      "subscriber_count": "6",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30107",
+      "name": "Evento: Encuentro De Inmersión. Domingo 12 De Octubre",
+      "description": "Asistentes al evento Encuentro De Inmersión. Domingo 12 De Octubre",
+      "subscriber_count": "10",
+      "created_at": "2026-02-09 16:32:13"
+    },
+    {
+      "id": "30113",
+      "name": "Evento: Concierto: Sueños De Serenidad. Jueves 17 De Abril",
+      "description": "Asistentes al evento Concierto: Sueños De Serenidad. Jueves 17 De Abril",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:14"
+    },
+    {
+      "id": "30114",
+      "name": "Ubicación: Chile, La Ligua",
+      "description": "Clientes de Chile, La Ligua",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:14"
+    },
+    {
+      "id": "30119",
+      "name": "Ubicación: Graneros",
+      "description": "Clientes de Graneros",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:14"
+    },
+    {
+      "id": "30120",
+      "name": "Ubicación: Lago Ranco",
+      "description": "Clientes de Lago Ranco",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:14"
+    },
+    {
+      "id": "30121",
+      "name": "Ubicación: Arica",
+      "description": "Clientes de Arica",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:14"
+    },
+    {
+      "id": "30123",
+      "name": "Evento: Miércoles De Cafetería Abierta A Público",
+      "description": "Asistentes al evento Miércoles De Cafetería Abierta A Público",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:14"
+    },
+    {
+      "id": "30139",
+      "name": "Ubicación: Los Muermos",
+      "description": "Clientes de Los Muermos",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:15"
+    },
+    {
+      "id": "30140",
+      "name": "Ubicación: Quilpué",
+      "description": "Clientes de Quilpué",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:15"
+    },
+    {
+      "id": "30143",
+      "name": "Ubicación: Chile, Gorbea",
+      "description": "Clientes de Chile, Gorbea",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:15"
+    },
+    {
+      "id": "30149",
+      "name": "Ubicación: Colombia",
+      "description": "Clientes de Colombia",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:16"
+    },
+    {
+      "id": "30150",
+      "name": "Evento: Pilates E Hipopresivos",
+      "description": "Asistentes al evento Pilates E Hipopresivos",
+      "subscriber_count": "20",
+      "created_at": "2026-02-09 16:32:16"
+    },
+    {
+      "id": "30151",
+      "name": "Evento: Sonoterapia Marzo",
+      "description": "Asistentes al evento Sonoterapia Marzo",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:16"
+    },
+    {
+      "id": "30154",
+      "name": "Evento: Día De La Danza: Danza Afro Con Percusión ¡En Vivo! Miércoles 30 De Abril",
+      "description": "Asistentes al evento Día De La Danza: Danza Afro Con Percusión ¡En Vivo! Miércoles 30 De Abril",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:16"
+    },
+    {
+      "id": "30157",
+      "name": "Ubicación: Coyhaique",
+      "description": "Clientes de Coyhaique",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:16"
+    },
+    {
+      "id": "30160",
+      "name": "Ubicación: España",
+      "description": "Clientes de España",
+      "subscriber_count": "15",
+      "created_at": "2026-02-09 16:32:16"
+    },
+    {
+      "id": "30162",
+      "name": "Evento: Sonoterapia. Sábado 29 De Noviembre",
+      "description": "Asistentes al evento Sonoterapia. Sábado 29 De Noviembre",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:16"
+    },
+    {
+      "id": "30165",
+      "name": "Ubicación: Puerto Octay",
+      "description": "Clientes de Puerto Octay",
+      "subscriber_count": "15",
+      "created_at": "2026-02-09 16:32:17"
+    },
+    {
+      "id": "30167",
+      "name": "Evento: Concierto De Jazz: Body And Soul. Viernes 25 De Julio",
+      "description": "Asistentes al evento Concierto De Jazz: Body And Soul. Viernes 25 De Julio",
+      "subscriber_count": "6",
+      "created_at": "2026-02-09 16:32:17"
+    },
+    {
+      "id": "30168",
+      "name": "Ubicación: Holanda",
+      "description": "Clientes de Holanda",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:17"
+    },
+    {
+      "id": "30176",
+      "name": "Evento: Encuentro De Inmersión. Domingo 31 De Agosto",
+      "description": "Asistentes al evento Encuentro De Inmersión. Domingo 31 De Agosto",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:17"
+    },
+    {
+      "id": "30178",
+      "name": "Evento: Encuentro De Inmersión. Domingo 27 De Julio",
+      "description": "Asistentes al evento Encuentro De Inmersión. Domingo 27 De Julio",
+      "subscriber_count": "23",
+      "created_at": "2026-02-09 16:32:17"
+    },
+    {
+      "id": "30179",
+      "name": "Evento: Sonoterapia. Sábado 26 De Abril",
+      "description": "Asistentes al evento Sonoterapia. Sábado 26 De Abril",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:17"
+    },
+    {
+      "id": "30180",
+      "name": "Ubicación: Calbuco",
+      "description": "Clientes de Calbuco",
+      "subscriber_count": "15",
+      "created_at": "2026-02-09 16:32:17"
+    },
+    {
+      "id": "30185",
+      "name": "Ubicación: Australia",
+      "description": "Clientes de Australia",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:18"
+    },
+    {
+      "id": "30187",
+      "name": "Ubicación: Suiza",
+      "description": "Clientes de Suiza",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:18"
+    },
+    {
+      "id": "30190",
+      "name": "Ubicación: La Unión",
+      "description": "Clientes de La Unión",
+      "subscriber_count": "14",
+      "created_at": "2026-02-09 16:32:18"
+    },
+    {
+      "id": "30191",
+      "name": "Ubicación: Collipulli",
+      "description": "Clientes de Collipulli",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:18"
+    },
+    {
+      "id": "30197",
+      "name": "Ubicación: Perú",
+      "description": "Clientes de Perú",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:18"
+    },
+    {
+      "id": "30203",
+      "name": "Ubicación: Parral",
+      "description": "Clientes de Parral",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:19"
+    },
+    {
+      "id": "30209",
+      "name": "Ubicación: Francia",
+      "description": "Clientes de Francia",
+      "subscriber_count": "7",
+      "created_at": "2026-02-09 16:32:19"
+    },
+    {
+      "id": "30210",
+      "name": "Evento: Encuentro De Sauna Y Lago. Miércoles 12 De Noviembre",
+      "description": "Asistentes al evento Encuentro De Sauna Y Lago. Miércoles 12 De Noviembre",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:19"
+    },
+    {
+      "id": "30219",
+      "name": "Ubicación: Caldera Atacama",
+      "description": "Clientes de Caldera Atacama",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:19"
+    },
+    {
+      "id": "30223",
+      "name": "Ubicación: Ensenada",
+      "description": "Clientes de Ensenada",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:20"
+    },
+    {
+      "id": "30227",
+      "name": "Evento: Sonoterapia. Sábado 19 De Julio",
+      "description": "Asistentes al evento Sonoterapia. Sábado 19 De Julio",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:20"
+    },
+    {
+      "id": "30229",
+      "name": "Evento: Watsu: Terapia Acuática Individual. Domingo 17 De Agosto",
+      "description": "Asistentes al evento Watsu: Terapia Acuática Individual. Domingo 17 De Agosto",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:20"
+    },
+    {
+      "id": "30239",
+      "name": "Evento: Tambourine De Music Together",
+      "description": "Asistentes al evento Tambourine De Music Together",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:20"
+    },
+    {
+      "id": "30249",
+      "name": "Ubicación: Maullín",
+      "description": "Clientes de Maullín",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:21"
+    },
+    {
+      "id": "30250",
+      "name": "Ubicación: Los Ángeles",
+      "description": "Clientes de Los Ángeles",
+      "subscriber_count": "7",
+      "created_at": "2026-02-09 16:32:21"
+    },
+    {
+      "id": "30251",
+      "name": "Ubicación: Buill, Chaitén",
+      "description": "Clientes de Buill, Chaitén",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:21"
+    },
+    {
+      "id": "30252",
+      "name": "Ubicación: Los Álamos Chile",
+      "description": "Clientes de Los Álamos Chile",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:21"
+    },
+    {
+      "id": "30265",
+      "name": "Evento: Círculo De Mujeres: Luna Llena. Viernes 8 De Agosto",
+      "description": "Asistentes al evento Círculo De Mujeres: Luna Llena. Viernes 8 De Agosto",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:22"
+    },
+    {
+      "id": "30266",
+      "name": "Evento: Círculo De Mujeres: Ruta Al Invierno. Viernes 13 De Junio",
+      "description": "Asistentes al evento Círculo De Mujeres: Ruta Al Invierno. Viernes 13 De Junio",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:22"
+    },
+    {
+      "id": "30271",
+      "name": "Ubicación: Algarrobo",
+      "description": "Clientes de Algarrobo",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:22"
+    },
+    {
+      "id": "30276",
+      "name": "Ubicación: Olmué",
+      "description": "Clientes de Olmué",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:22"
+    },
+    {
+      "id": "30285",
+      "name": "Ubicación: Río Bueno",
+      "description": "Clientes de Río Bueno",
+      "subscriber_count": "9",
+      "created_at": "2026-02-09 16:32:23"
+    },
+    {
+      "id": "30294",
+      "name": "Ubicación: Lonquimay",
+      "description": "Clientes de Lonquimay",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:23"
+    },
+    {
+      "id": "30307",
+      "name": "Ubicación: Quintero",
+      "description": "Clientes de Quintero",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:24"
+    },
+    {
+      "id": "30308",
+      "name": "Evento: Clase Especial De Danza Afro. Martes 16 Y Miércoles 17",
+      "description": "Asistentes al evento Clase Especial De Danza Afro. Martes 16 Y Miércoles 17",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:24"
+    },
+    {
+      "id": "30309",
+      "name": "Ubicación: Coquimbo",
+      "description": "Clientes de Coquimbo",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:24"
+    },
+    {
+      "id": "30311",
+      "name": "Ubicación: Los Andes",
+      "description": "Clientes de Los Andes",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:24"
+    },
+    {
+      "id": "30315",
+      "name": "Ubicación: San Felipe",
+      "description": "Clientes de San Felipe",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30316",
+      "name": "Evento: Cosmic Dance. Sábado 6 De Septiembre",
+      "description": "Asistentes al evento Cosmic Dance. Sábado 6 De Septiembre",
+      "subscriber_count": "5",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30317",
+      "name": "Evento: Cosmic Dance (Sábado 6 De Septiembre)",
+      "description": "Asistentes al evento Cosmic Dance (Sábado 6 De Septiembre)",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30318",
+      "name": "Ubicación: Requínoa Chile",
+      "description": "Clientes de Requínoa Chile",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30319",
+      "name": "Evento: Ecstatic Dance \"M I C E L Ae\"",
+      "description": "Asistentes al evento Ecstatic Dance \"M I C E L Ae\"",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30322",
+      "name": "Ubicación: Puyehue",
+      "description": "Clientes de Puyehue",
+      "subscriber_count": "7",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30323",
+      "name": "Evento: Sonoterapia. Sábado 23 De Agosto",
+      "description": "Asistentes al evento Sonoterapia. Sábado 23 De Agosto",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30331",
+      "name": "Ubicación: Futrono",
+      "description": "Clientes de Futrono",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:25"
+    },
+    {
+      "id": "30333",
+      "name": "Evento: Ciclo Cine Al Agua: Moana. 15 De Agosto",
+      "description": "Asistentes al evento Ciclo Cine Al Agua: Moana. 15 De Agosto",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:26"
+    },
+    {
+      "id": "30338",
+      "name": "Ubicación: Los Lagos",
+      "description": "Clientes de Los Lagos",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:26"
+    },
+    {
+      "id": "30344",
+      "name": "Evento: Ciclo De Cine Al Agua: Into The Wild. Viernes 23 De Mayo",
+      "description": "Asistentes al evento Ciclo De Cine Al Agua: Into The Wild. Viernes 23 De Mayo",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:26"
+    },
+    {
+      "id": "30345",
+      "name": "Ubicación: Calama",
+      "description": "Clientes de Calama",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:26"
+    },
+    {
+      "id": "30348",
+      "name": "Evento: Watsu: Terapia Acuática Individual. Domingo 13 Y Domingo 20 De Julio.",
+      "description": "Asistentes al evento Watsu: Terapia Acuática Individual. Domingo 13 Y Domingo 20 De Julio.",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:26"
+    },
+    {
+      "id": "30362",
+      "name": "Ubicación: Villarrica",
+      "description": "Clientes de Villarrica",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:27"
+    },
+    {
+      "id": "30370",
+      "name": "Ubicación: Quillota",
+      "description": "Clientes de Quillota",
+      "subscriber_count": "6",
+      "created_at": "2026-02-09 16:32:28"
+    },
+    {
+      "id": "30382",
+      "name": "Ubicación: San Antonio",
+      "description": "Clientes de San Antonio",
+      "subscriber_count": "4",
+      "created_at": "2026-02-09 16:32:28"
+    },
+    {
+      "id": "30385",
+      "name": "Ubicación: México",
+      "description": "Clientes de México",
+      "subscriber_count": "8",
+      "created_at": "2026-02-09 16:32:28"
+    },
+    {
+      "id": "30386",
+      "name": "Ubicación: Vallenar",
+      "description": "Clientes de Vallenar",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:28"
+    },
+    {
+      "id": "30390",
+      "name": "Ubicación: Santa Cruz",
+      "description": "Clientes de Santa Cruz",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:29"
+    },
+    {
+      "id": "30391",
+      "name": "Ubicación: Iquique",
+      "description": "Clientes de Iquique",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:29"
+    },
+    {
+      "id": "30393",
+      "name": "Ubicación: Río Negro",
+      "description": "Clientes de Río Negro",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:32:29"
+    },
+    {
+      "id": "30404",
+      "name": "Ubicación: Villa Alegre",
+      "description": "Clientes de Villa Alegre",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:29"
+    },
+    {
+      "id": "30407",
+      "name": "Ubicación: Nogales",
+      "description": "Clientes de Nogales",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:30"
+    },
+    {
+      "id": "30415",
+      "name": "Ubicación: Mulchen Octava Región",
+      "description": "Clientes de Mulchen Octava Región",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:30"
+    },
+    {
+      "id": "30423",
+      "name": "Ubicación: Yumbel",
+      "description": "Clientes de Yumbel",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:30"
+    },
+    {
+      "id": "30428",
+      "name": "Evento: Sonoterapia Abril",
+      "description": "Asistentes al evento Sonoterapia Abril",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:31"
+    },
+    {
+      "id": "30430",
+      "name": "Ubicación: Valle De Elqui",
+      "description": "Clientes de Valle De Elqui",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:31"
+    },
+    {
+      "id": "30443",
+      "name": "Ubicación: Cañete",
+      "description": "Clientes de Cañete",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:32"
+    },
+    {
+      "id": "30452",
+      "name": "Ubicación: Puchuncavi",
+      "description": "Clientes de Puchuncavi",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:32"
+    },
+    {
+      "id": "30462",
+      "name": "Ubicación: San Pablo",
+      "description": "Clientes de San Pablo",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:32:33"
+    },
+    {
+      "id": "30469",
+      "name": "Evento: Pilates E Hipopresivos Sobre La Tabla De Sup",
+      "description": "Asistentes al evento Pilates E Hipopresivos Sobre La Tabla De Sup",
+      "subscriber_count": "1",
+      "created_at": "2026-02-09 16:32:33"
+    },
+    {
+      "id": "30470",
+      "name": "Ubicación: Uruguay",
+      "description": "Lista unificada: Uruguay",
+      "subscriber_count": "3",
+      "created_at": "2026-02-09 16:51:54"
+    },
+    {
+      "id": "30471",
+      "name": "Ubicación: Otros Países",
+      "description": "Lista unificada: Otros Países",
+      "subscriber_count": "26",
+      "created_at": "2026-02-09 16:51:55"
+    },
+    {
+      "id": "30472",
+      "name": "Ubicación: Llay-Llay",
+      "description": "Lista unificada: Llay-Llay",
+      "subscriber_count": "2",
+      "created_at": "2026-02-09 16:52:51"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\tdescription\tsubscriber_count\tcreated_at\n30002\tServicio: Hot Tubs\tClientes que han reservado Hot Tubs\t2372\t2026-02-09 16:32:08\n30003\tServicio: Masajes\tClientes que han reservado Masajes\t1174\t2026-02-09 16:32:08\n30004\tServicio: Biopiscinas\tClientes que han reservado Biopiscinas\t1837\t2026-02-09 16:32:08\n30005\tServicio: Sauna Nativo\tClientes que han reservado Sauna Nativo\t367\t2026-02-09 16:32:08\n30006\tServicio: Tablas SUP\tClientes que han reservado Tablas SUP\t277\t2026-02-09 16:32:08\n30007\tServicio: Clases Regulares\tClientes que han reservado Clases Regulares\t73\t2026-02-09 16:32:08\n30009\tUbicación: Puerto Montt\tClientes de Puerto Montt\t532\t2026-02-09 16:32:08\n30010\tUbicación: Frutillar\tClientes de Frutillar\t468\t2026-02-09 16:32:08\n30012\tEvento: Taller Del Método Wim Hof Con Alan Iceman. Sábado 31 De Enero\tAsistentes al evento Taller Del Método Wim Hof Con Alan Iceman. Sábado 31 De Enero\t28\t2026-02-09 16:32:08\n30013\tUbicación: Osorno\tClientes de Osorno\t250\t2026-02-09 16:32:08\n30014\tEvento: Encuentro De Inmersión. Domingo 21 De Diciembre\tAsistentes al evento Encuentro De Inmersión. Domingo 21 De Diciembre\t14\t2026-02-09 16:32:08\n30015\tEvento: Sonoterapia. Sábado 27 De Septiembre\tAsistentes al evento Sonoterapia. Sábado 27 De Septiembre\t14\t2026-02-09 16:32:09\n30016\tEvento: Encuentro De Inmersión. Domingo 14 De Septiembre\tAsistentes al evento Encuentro De Inmersión. Domingo 14 De Septiembre\t13\t2026-02-09 16:32:09\n30021\tUbicación: Fresia\tClientes de Fresia\t14\t2026-02-09 16:32:09\n30022\tUbicación: Llanquihue\tClientes de Llanquihue\t67\t2026-02-09 16:32:09\n30023\tEvento: Encuentro De Inmersión. Domingo 22 De Junio\tAsistentes al evento Encuentro De Inmersión. Domingo 22 De Junio\t14\t2026-02-09 16:32:09\n30024\tEvento: Ciclo De Cine Al Agua: En Búsqueda De La Felicidad. Viernes 20 De Junio\tAsistentes al evento Ciclo De Cine Al Agua: En Búsqueda De La Felicidad. Viernes 20 De Junio\t6\t2026-02-09 16:32:09\n30025\tEvento: Encuentro De Inmersión. Domingo 23 De Noviembre\tAsistentes al evento Encuentro De Inmersión. Domingo 23 De Noviembre\t15\t2026-02-09 16:32:09\n30026\tUbicación: Puerto Varas\tClientes de Puerto Varas\t525\t2026-02-09 16:32:09\n30027\tUbicación: Viña del Mar\tClientes de Viña del Mar\t29\t2026-02-09 16:32:09\n30029\tEvento: After Party En Cancagua: Música, Fiesta Y Agua Bajo Las Estrellas. Sábado 9 Agosto\tAsistentes al evento After Party En Cancagua: Música, Fiesta Y Agua Bajo Las Estrellas. Sábado 9 Agosto\t6\t2026-02-09 16:32:09\n30030\tEvento: Concierto Sensorial: Equinoccio\tAsistentes al evento Concierto Sensorial: Equinoccio\t16\t2026-02-09 16:32:09\n30031\tEvento: Latino Austral: Experiencia Sensorial\tAsistentes al evento Latino Austral: Experiencia Sensorial\t14\t2026-02-09 16:32:09\n30033\tEvento: Concierto Sensorial: Love Is In The Air\tAsistentes al evento Concierto Sensorial: Love Is In The Air\t9\t2026-02-09 16:32:09\n30034\tUbicación: Santiago\tClientes de Santiago\t545\t2026-02-09 16:32:10\n30036\tUbicación: Pichilemu\tClientes de Pichilemu\t1\t2026-02-09 16:32:10\n30038\tUbicación: Concepción\tClientes de Concepción\t45\t2026-02-09 16:32:10\n30039\tUbicación: Reino Unido\tClientes de Reino Unido\t15\t2026-02-09 16:32:10\n30040\tUbicación: Chillán\tClientes de Chillán\t13\t2026-02-09 16:32:10\n30042\tUbicación: Curicó\tClientes de Curicó\t8\t2026-02-09 16:32:10\n30047\tUbicación: Rancagua\tClientes de Rancagua\t10\t2026-02-09 16:32:10\n30048\tUbicación: Estados Unidos\tClientes de Estados Unidos\t26\t2026-02-09 16:32:10\n30050\tUbicación: Brasil\tClientes de Brasil\t16\t2026-02-09 16:32:10\n30051\tUbicación: Temuco\tClientes de Temuco\t35\t2026-02-09 16:32:10\n30052\tUbicación: Argentina\tClientes de Argentina\t21\t2026-02-09 16:32:10\n30054\tUbicación: Villa Alemana\tClientes de Villa Alemana\t3\t2026-02-09 16:32:11\n30056\tUbicación: Talca\tClientes de Talca\t11\t2026-02-09 16:32:11\n30057\tUbicación: Pucón\tClientes de Pucón\t2\t2026-02-09 16:32:11\n30058\tUbicación: Machalí\tClientes de Machalí\t3\t2026-02-09 16:32:11\n30060\tUbicación: Antofagasta\tClientes de Antofagasta\t12\t2026-02-09 16:32:11\n30063\tUbicación: Taltal\tClientes de Taltal\t1\t2026-02-09 16:32:11\n30065\tUbicación: San Fernando\tClientes de San Fernando\t4\t2026-02-09 16:32:11\n30067\tUbicación: La Serena\tClientes de La Serena\t7\t2026-02-09 16:32:11\n30069\tUbicación: Chile, Lebu\tClientes de Chile, Lebu\t1\t2026-02-09 16:32:11\n30070\tUbicación: Copiapó\tClientes de Copiapó\t1\t2026-02-09 16:32:11\n30072\tEvento: Yoga & Sonoterapia. Sábado 20 De Diciembre\tAsistentes al evento Yoga & Sonoterapia. Sábado 20 De Diciembre\t3\t2026-02-09 16:32:12\n30073\tUbicación: Purranque\tClientes de Purranque\t24\t2026-02-09 16:32:12\n30076\tEvento: Somatic Breathwork Reset With Sonja Bloder. Sábado 3 De Mayo\tAsistentes al evento Somatic Breathwork Reset With Sonja Bloder. Sábado 3 De Mayo\t8\t2026-02-09 16:32:12\n30077\tUbicación: Alemania\tClientes de Alemania\t8\t2026-02-09 16:32:12\n30078\tUbicación: Valdivia\tClientes de Valdivia\t46\t2026-02-09 16:32:12\n30079\tEvento: Sonoterapia. Sábado 25 De Octubre\tAsistentes al evento Sonoterapia. Sábado 25 De Octubre\t7\t2026-02-09 16:32:12\n30081\tEvento: Sonoterapia. Sábado 28 De Junio\tAsistentes al evento Sonoterapia. Sábado 28 De Junio\t8\t2026-02-09 16:32:12\n30082\tUbicación: Linares\tClientes de Linares\t5\t2026-02-09 16:32:12\n30083\tUbicación: Punta Arenas\tClientes de Punta Arenas\t11\t2026-02-09 16:32:12\n30084\tEvento: Somatic Breathwork - Nervous System Reset Journey. Sábado 17 De Enero\tAsistentes al evento Somatic Breathwork - Nervous System Reset Journey. Sábado 17 De Enero\t3\t2026-02-09 16:32:12\n30085\tEvento: Concierto En Biopiscinas: Fiestas Patrias En Cancagua. Viernes 19 De Septiembre\tAsistentes al evento Concierto En Biopiscinas: Fiestas Patrias En Cancagua. Viernes 19 De Septiembre\t2\t2026-02-09 16:32:12\n30086\tEvento: Círculo De Mujeres 8m\tAsistentes al evento Círculo De Mujeres 8m\t12\t2026-02-09 16:32:12\n30087\tUbicación: Curanilahue\tClientes de Curanilahue\t1\t2026-02-09 16:32:12\n30089\tEvento: Heart Coherence Workshop. Viernes 16 De Enero.\tAsistentes al evento Heart Coherence Workshop. Viernes 16 De Enero.\t2\t2026-02-09 16:32:12\n30091\tEvento: Jornada De Profundización Y Reflexión: Paz Y Conflictos Internos. Sábado 8 Noviembre\tAsistentes al evento Jornada De Profundización Y Reflexión: Paz Y Conflictos Internos. Sábado 8 Noviembre\t2\t2026-02-09 16:32:13\n30093\tEvento: Círculo De Mujeres: Luna Creciente. Viernes 28 De Noviembre\tAsistentes al evento Círculo De Mujeres: Luna Creciente. Viernes 28 De Noviembre\t3\t2026-02-09 16:32:13\n30094\tUbicación: Nueva Braunau\tClientes de Nueva Braunau\t2\t2026-02-09 16:32:13\n30096\tEvento: Coffee Swim With The Chileman\tAsistentes al evento Coffee Swim With The Chileman\t15\t2026-02-09 16:32:13\n30098\tUbicación: Valparaíso\tClientes de Valparaíso\t9\t2026-02-09 16:32:13\n30104\tUbicación: Chile, Paihuano\tClientes de Chile, Paihuano\t1\t2026-02-09 16:32:13\n30106\tEvento: Jornada Terapéutica Solidaria\tAsistentes al evento Jornada Terapéutica Solidaria\t6\t2026-02-09 16:32:13\n30107\tEvento: Encuentro De Inmersión. Domingo 12 De Octubre\tAsistentes al evento Encuentro De Inmersión. Domingo 12 De Octubre\t10\t2026-02-09 16:32:13\n30113\tEvento: Concierto: Sueños De Serenidad. Jueves 17 De Abril\tAsistentes al evento Concierto: Sueños De Serenidad. Jueves 17 De Abril\t5\t2026-02-09 16:32:14\n30114\tUbicación: Chile, La Ligua\tClientes de Chile, La Ligua\t1\t2026-02-09 16:32:14\n30119\tUbicación: Graneros\tClientes de Graneros\t2\t2026-02-09 16:32:14\n30120\tUbicación: Lago Ranco\tClientes de Lago Ranco\t1\t2026-02-09 16:32:14\n30121\tUbicación: Arica\tClientes de Arica\t2\t2026-02-09 16:32:14\n30123\tEvento: Miércoles De Cafetería Abierta A Público\tAsistentes al evento Miércoles De Cafetería Abierta A Público\t2\t2026-02-09 16:32:14\n30139\tUbicación: Los Muermos\tClientes de Los Muermos\t8\t2026-02-09 16:32:15\n30140\tUbicación: Quilpué\tClientes de Quilpué\t4\t2026-02-09 16:32:15\n30143\tUbicación: Chile, Gorbea\tClientes de Chile, Gorbea\t1\t2026-02-09 16:32:15\n30149\tUbicación: Colombia\tClientes de Colombia\t2\t2026-02-09 16:32:16\n30150\tEvento: Pilates E Hipopresivos\tAsistentes al evento Pilates E Hipopresivos\t20\t2026-02-09 16:32:16\n30151\tEvento: Sonoterapia Marzo\tAsistentes al evento Sonoterapia Marzo\t8\t2026-02-09 16:32:16\n30154\tEvento: Día De La Danza: Danza Afro Con Percusión ¡En Vivo! Miércoles 30 De Abril\tAsistentes al evento Día De La Danza: Danza Afro Con Percusión ¡En Vivo! Miércoles 30 De Abril\t3\t2026-02-09 16:32:16\n30157\tUbicación: Coyhaique\tClientes de Coyhaique\t5\t2026-02-09 16:32:16\n30160\tUbicación: España\tClientes de España\t15\t2026-02-09 16:32:16\n30162\tEvento: Sonoterapia. Sábado 29 De Noviembre\tAsistentes al evento Sonoterapia. Sábado 29 De Noviembre\t4\t2026-02-09 16:32:16\n30165\tUbicación: Puerto Octay\tClientes de Puerto Octay\t15\t2026-02-09 16:32:17\n30167\tEvento: Concierto De Jazz: Body And Soul. Viernes 25 De Julio\tAsistentes al evento Concierto De Jazz: Body And Soul. Viernes 25 De Julio\t6\t2026-02-09 16:32:17\n30168\tUbicación: Holanda\tClientes de Holanda\t4\t2026-02-09 16:32:17\n30176\tEvento: Encuentro De Inmersión. Domingo 31 De Agosto\tAsistentes al evento Encuentro De Inmersión. Domingo 31 De Agosto\t2\t2026-02-09 16:32:17\n30178\tEvento: Encuentro De Inmersión. Domingo 27 De Julio\tAsistentes al evento Encuentro De Inmersión. Domingo 27 De Julio\t23\t2026-02-09 16:32:17\n30179\tEvento: Sonoterapia. Sábado 26 De Abril\tAsistentes al evento Sonoterapia. Sábado 26 De Abril\t4\t2026-02-09 16:32:17\n30180\tUbicación: Calbuco\tClientes de Calbuco\t15\t2026-02-09 16:32:17\n30185\tUbicación: Australia\tClientes de Australia\t5\t2026-02-09 16:32:18\n30187\tUbicación: Suiza\tClientes de Suiza\t4\t2026-02-09 16:32:18\n30190\tUbicación: La Unión\tClientes de La Unión\t14\t2026-02-09 16:32:18\n30191\tUbicación: Collipulli\tClientes de Collipulli\t1\t2026-02-09 16:32:18\n30197\tUbicación: Perú\tClientes de Perú\t5\t2026-02-09 16:32:18\n30203\tUbicación: Parral\tClientes de Parral\t2\t2026-02-09 16:32:19\n30209\tUbicación: Francia\tClientes de Francia\t7\t2026-02-09 16:32:19\n30210\tEvento: Encuentro De Sauna Y Lago. Miércoles 12 De Noviembre\tAsistentes al evento Encuentro De Sauna Y Lago. Miércoles 12 De Noviembre\t1\t2026-02-09 16:32:19\n30219\tUbicación: Caldera Atacama\tClientes de Caldera Atacama\t1\t2026-02-09 16:32:19\n30223\tUbicación: Ensenada\tClientes de Ensenada\t3\t2026-02-09 16:32:20\n30227\tEvento: Sonoterapia. Sábado 19 De Julio\tAsistentes al evento Sonoterapia. Sábado 19 De Julio\t8\t2026-02-09 16:32:20\n30229\tEvento: Watsu: Terapia Acuática Individual. Domingo 17 De Agosto\tAsistentes al evento Watsu: Terapia Acuática Individual. Domingo 17 De Agosto\t3\t2026-02-09 16:32:20\n30239\tEvento: Tambourine De Music Together\tAsistentes al evento Tambourine De Music Together\t5\t2026-02-09 16:32:20\n30249\tUbicación: Maullín\tClientes de Maullín\t5\t2026-02-09 16:32:21\n30250\tUbicación: Los Ángeles\tClientes de Los Ángeles\t7\t2026-02-09 16:32:21\n30251\tUbicación: Buill, Chaitén\tClientes de Buill, Chaitén\t1\t2026-02-09 16:32:21\n30252\tUbicación: Los Álamos Chile\tClientes de Los Álamos Chile\t1\t2026-02-09 16:32:21\n30265\tEvento: Círculo De Mujeres: Luna Llena. Viernes 8 De Agosto\tAsistentes al evento Círculo De Mujeres: Luna Llena. Viernes 8 De Agosto\t8\t2026-02-09 16:32:22\n30266\tEvento: Círculo De Mujeres: Ruta Al Invierno. Viernes 13 De Junio\tAsistentes al evento Círculo De Mujeres: Ruta Al Invierno. Viernes 13 De Junio\t4\t2026-02-09 16:32:22\n30271\tUbicación: Algarrobo\tClientes de Algarrobo\t2\t2026-02-09 16:32:22\n30276\tUbicación: Olmué\tClientes de Olmué\t1\t2026-02-09 16:32:22\n30285\tUbicación: Río Bueno\tClientes de Río Bueno\t9\t2026-02-09 16:32:23\n30294\tUbicación: Lonquimay\tClientes de Lonquimay\t1\t2026-02-09 16:32:23\n30307\tUbicación: Quintero\tClientes de Quintero\t1\t2026-02-09 16:32:24\n30308\tEvento: Clase Especial De Danza Afro. Martes 16 Y Miércoles 17\tAsistentes al evento Clase Especial De Danza Afro. Martes 16 Y Miércoles 17\t1\t2026-02-09 16:32:24\n30309\tUbicación: Coquimbo\tClientes de Coquimbo\t3\t2026-02-09 16:32:24\n30311\tUbicación: Los Andes\tClientes de Los Andes\t4\t2026-02-09 16:32:24\n30315\tUbicación: San Felipe\tClientes de San Felipe\t3\t2026-02-09 16:32:25\n30316\tEvento: Cosmic Dance. Sábado 6 De Septiembre\tAsistentes al evento Cosmic Dance. Sábado 6 De Septiembre\t5\t2026-02-09 16:32:25\n30317\tEvento: Cosmic Dance (Sábado 6 De Septiembre)\tAsistentes al evento Cosmic Dance (Sábado 6 De Septiembre)\t3\t2026-02-09 16:32:25\n30318\tUbicación: Requínoa Chile\tClientes de Requínoa Chile\t1\t2026-02-09 16:32:25\n30319\tEvento: Ecstatic Dance \"M I C E L Ae\"\tAsistentes al evento Ecstatic Dance \"M I C E L Ae\"\t8\t2026-02-09 16:32:25\n30322\tUbicación: Puyehue\tClientes de Puyehue\t7\t2026-02-09 16:32:25\n30323\tEvento: Sonoterapia. Sábado 23 De Agosto\tAsistentes al evento Sonoterapia. Sábado 23 De Agosto\t8\t2026-02-09 16:32:25\n30331\tUbicación: Futrono\tClientes de Futrono\t2\t2026-02-09 16:32:25\n30333\tEvento: Ciclo Cine Al Agua: Moana. 15 De Agosto\tAsistentes al evento Ciclo Cine Al Agua: Moana. 15 De Agosto\t4\t2026-02-09 16:32:26\n30338\tUbicación: Los Lagos\tClientes de Los Lagos\t2\t2026-02-09 16:32:26\n30344\tEvento: Ciclo De Cine Al Agua: Into The Wild. Viernes 23 De Mayo\tAsistentes al evento Ciclo De Cine Al Agua: Into The Wild. Viernes 23 De Mayo\t2\t2026-02-09 16:32:26\n30345\tUbicación: Calama\tClientes de Calama\t3\t2026-02-09 16:32:26\n30348\tEvento: Watsu: Terapia Acuática Individual. Domingo 13 Y Domingo 20 De Julio.\tAsistentes al evento Watsu: Terapia Acuática Individual. Domingo 13 Y Domingo 20 De Julio.\t1\t2026-02-09 16:32:26\n30362\tUbicación: Villarrica\tClientes de Villarrica\t2\t2026-02-09 16:32:27\n30370\tUbicación: Quillota\tClientes de Quillota\t6\t2026-02-09 16:32:28\n30382\tUbicación: San Antonio\tClientes de San Antonio\t4\t2026-02-09 16:32:28\n30385\tUbicación: México\tClientes de México\t8\t2026-02-09 16:32:28\n30386\tUbicación: Vallenar\tClientes de Vallenar\t1\t2026-02-09 16:32:28\n30390\tUbicación: Santa Cruz\tClientes de Santa Cruz\t1\t2026-02-09 16:32:29\n30391\tUbicación: Iquique\tClientes de Iquique\t2\t2026-02-09 16:32:29\n30393\tUbicación: Río Negro\tClientes de Río Negro\t3\t2026-02-09 16:32:29\n30404\tUbicación: Villa Alegre\tClientes de Villa Alegre\t1\t2026-02-09 16:32:29\n30407\tUbicación: Nogales\tClientes de Nogales\t1\t2026-02-09 16:32:30\n30415\tUbicación: Mulchen Octava Región\tClientes de Mulchen Octava Región\t1\t2026-02-09 16:32:30\n30423\tUbicación: Yumbel\tClientes de Yumbel\t1\t2026-02-09 16:32:30\n30428\tEvento: Sonoterapia Abril\tAsistentes al evento Sonoterapia Abril\t1\t2026-02-09 16:32:31\n30430\tUbicación: Valle De Elqui\tClientes de Valle De Elqui\t1\t2026-02-09 16:32:31\n30443\tUbicación: Cañete\tClientes de Cañete\t1\t2026-02-09 16:32:32\n30452\tUbicación: Puchuncavi\tClientes de Puchuncavi\t1\t2026-02-09 16:32:32\n30462\tUbicación: San Pablo\tClientes de San Pablo\t2\t2026-02-09 16:32:33\n30469\tEvento: Pilates E Hipopresivos Sobre La Tabla De Sup\tAsistentes al evento Pilates E Hipopresivos Sobre La Tabla De Sup\t1\t2026-02-09 16:32:33\n30470\tUbicación: Uruguay\tLista unificada: Uruguay\t3\t2026-02-09 16:51:54\n30471\tUbicación: Otros Países\tLista unificada: Otros Países\t26\t2026-02-09 16:51:55\n30472\tUbicación: Llay-Llay\tLista unificada: Llay-Llay\t2\t2026-02-09 16:52:51\n",
+  "stderr": "",
+  "execution_time_ms": 530
+}

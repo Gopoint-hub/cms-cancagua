@@ -237,3 +237,13 @@
 - [x] Fix: Convertir envío de newsletter a proceso asíncrono (respuesta inmediata, envío en background con retry)
 - [x] Frontend: Mostrar toast con mensaje de envío iniciado, estado 'Enviando' visible en lista de newsletters
 - [x] Backend: Endpoint sendStatus para consultar estado del envío
+
+## Simplificación de listas de suscriptores (151 → 11)
+- [x] Crear 4 listas geográficas nuevas (Zona Norte 35, Zona Central 664, Zona Sur 2117, Internacional 164)
+- [x] Crear 1 lista "Eventos" consolidada (311 suscriptores únicos)
+- [x] Migrar suscriptores de 95 listas de ubicación a las zonas correspondientes (2980 migrados, sin duplicados)
+- [x] Migrar suscriptores de 50 listas de eventos a la lista "Eventos" (311 migrados, sin duplicados)
+- [x] Eliminar las 145 listas antiguas (ubicaciones + eventos individuales)
+- [x] Mantener las 6 listas de servicio intactas
+- [x] Actualizar contadores de suscriptores en las nuevas listas
+- [x] Verificar deduplicación: envío ya usa Set de emails para evitar duplicados al seleccionar múltiples listas
