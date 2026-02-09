@@ -218,3 +218,6 @@
 
 ## Bug Fix: Editar cotización no carga datos existentes
 - [x] Fix: Al editar una cotización, el wizard debe pre-llenar todos los campos con los datos existentes (useEffect corregido: evita re-ejecución, setea isCreatingDeal/isCreatingClient para mostrar formularios, carga deal data async)
+
+## Bug Fix: PDF cotización - textos superpuestos
+- [x] Fix: Los textos de descripción de productos se superponen entre filas cuando la descripción es extensa (altura de fila ahora se calcula dinámicamente con heightOfString + salto de página automático)

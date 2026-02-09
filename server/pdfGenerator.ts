@@ -250,13 +250,36 @@ Correo: eventos@cancagua.cl`;
 
       // Items de la tabla
       sortedItems.forEach((item, index) => {
+        // Calculate dynamic row height based on content
+        const descWidth = colWidths.name - 20;
+        
+        // Calculate product name height
+        doc.fontSize(10);
+        const nameHeight = doc.heightOfString(item.productName, { width: descWidth });
+        
+        // Calculate description height
+        let descHeight = 0;
+        if (item.description) {
+          doc.fontSize(8);
+          descHeight = doc.heightOfString(item.description, { width: descWidth });
+        }
+        
+        // Calculate schedule time height
+        let scheduleHeight = 0;
+        if (item.scheduleTime) {
+          doc.fontSize(8);
+          scheduleHeight = doc.heightOfString(`⏰ ${item.scheduleTime}`, { width: descWidth });
+        }
+        
+        // Total item height: padding (8 top + 10 bottom) + name + gap + description + gap + schedule
+        const contentHeight = nameHeight + (descHeight > 0 ? 4 + descHeight : 0) + (scheduleHeight > 0 ? 4 + scheduleHeight : 0);
+        const itemHeight = contentHeight + 18; // 8px top padding + 10px bottom padding
+        
         // Verificar si necesitamos nueva página
-        if (yPos > 700) {
+        if (yPos + itemHeight > 740) {
           doc.addPage();
           yPos = 40;
         }
-
-        const itemHeight = item.description ? 45 : 30;
 
         // Línea separadora
         doc
@@ -267,43 +290,49 @@ Correo: eventos@cancagua.cl`;
           .stroke();
 
         yPos += 8;
+        const rowStartY = yPos;
 
         // Nombre del producto
         doc
           .fontSize(10)
           .fillColor(COLORS.primary)
-          .text(item.productName, leftCol + 10, yPos, { width: colWidths.name - 20 });
+          .text(item.productName, leftCol + 10, yPos, { width: descWidth });
+
+        yPos += nameHeight;
 
         // Descripción (si existe)
         if (item.description) {
+          yPos += 4; // gap between name and description
           doc
             .fontSize(8)
             .fillColor(COLORS.textLight)
-            .text(item.description, leftCol + 10, yPos + 14, { width: colWidths.name - 20 });
+            .text(item.description, leftCol + 10, yPos, { width: descWidth });
+          yPos += descHeight;
         }
 
         // Hora del itinerario (si existe)
         if (item.scheduleTime) {
-          const descOffset = item.description ? 26 : 14;
+          yPos += 4; // gap
           doc
             .fontSize(8)
             .fillColor(COLORS.textLight)
-            .text(`⏰ ${item.scheduleTime}`, leftCol + 10, yPos + descOffset, { width: colWidths.name - 20 });
+            .text(`⏰ ${item.scheduleTime}`, leftCol + 10, yPos, { width: descWidth });
+          yPos += scheduleHeight;
         }
 
-        // Cantidad
+        // Cantidad, precio y total - aligned vertically with the product name
         doc
           .fontSize(9)
           .fillColor(COLORS.text)
-          .text(item.quantity.toString(), leftCol + colWidths.name, yPos, { width: colWidths.qty, align: "center" });
+          .text(item.quantity.toString(), leftCol + colWidths.name, rowStartY, { width: colWidths.qty, align: "center" });
 
         // Precio unitario
-        doc.text(`$${item.unitPrice.toLocaleString("es-CL")}`, leftCol + colWidths.name + colWidths.qty, yPos, { width: colWidths.price, align: "right" });
+        doc.text(`$${item.unitPrice.toLocaleString("es-CL")}`, leftCol + colWidths.name + colWidths.qty, rowStartY, { width: colWidths.price, align: "right" });
 
         // Total
-        doc.text(`$${item.total.toLocaleString("es-CL")}`, leftCol + colWidths.name + colWidths.qty + colWidths.price, yPos, { width: colWidths.total, align: "right" });
+        doc.text(`$${item.total.toLocaleString("es-CL")}`, leftCol + colWidths.name + colWidths.qty + colWidths.price, rowStartY, { width: colWidths.total, align: "right" });
 
-        yPos += itemHeight;
+        yPos += 10; // bottom padding
       });
 
       // Línea final de la tabla
