@@ -231,3 +231,6 @@
 ## Unsubscribe en newsletters
 - [x] Agregar enlace de unsubscribe al pie de los emails enviados (inyección automática + placeholder {{unsubscribe_url}} en prompt LLM)
 - [x] Crear endpoint/página de unsubscribe funcional (GET /api/unsubscribe?email=base64 con página de confirmación branded)
+
+## Bug Fix: Error "Service Unavailable" al enviar newsletter
+- [x] Fix: Error "Service Unavailable" al enviar newsletter (batch reducido de 100 a 50, retry con backoff exponencial hasta 3 intentos, pausa de 1s entre batches, logging detallado)

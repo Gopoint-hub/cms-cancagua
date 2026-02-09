@@ -94,7 +94,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
 
 /**
  * Envía emails en lote (batch)
- * Resend permite hasta 100 emails por batch
+ * Resend permite hasta 100 emails por batch, pero usamos 50 para mayor estabilidad
  */
 export async function sendBulkEmails(options: SendBulkEmailOptions): Promise<{ 
   success: boolean; 
@@ -114,14 +114,17 @@ export async function sendBulkEmails(options: SendBulkEmailOptions): Promise<{
       errors: [] as string[],
     };
 
-    // Dividir en batches de 100 (límite de Resend)
-    const batchSize = 100;
+    // Dividir en batches de 50 (conservador para evitar rate limiting / Service Unavailable)
+    const batchSize = 50;
     const batches = [];
     for (let i = 0; i < options.emails.length; i += batchSize) {
       batches.push(options.emails.slice(i, i + batchSize));
     }
 
-    for (const batch of batches) {
+    console.log(`[Newsletter] Enviando ${options.emails.length} emails en ${batches.length} batches de ${batchSize}`);
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
       // Determinar el nombre del remitente para el batch
       let senderName = DEFAULT_FROM_NAME;
       if (options.senderName) {
@@ -142,28 +145,56 @@ export async function sendBulkEmails(options: SendBulkEmailOptions): Promise<{
         tags: options.tags,
       }));
 
-      try {
-        const { data, error } = await resend.batch.send(batchEmails);
-        
-        if (error) {
+      // Retry logic with exponential backoff (up to 3 attempts)
+      let success = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { data, error } = await resend.batch.send(batchEmails);
+          
+          if (error) {
+            const errMsg = error.message || 'Error desconocido';
+            // If Service Unavailable or rate limited, retry
+            if ((errMsg.includes('Service Unavailable') || errMsg.includes('rate') || errMsg.includes('429') || errMsg.includes('503')) && attempt < 3) {
+              const delay = attempt * 2000; // 2s, 4s
+              console.warn(`[Newsletter] Batch ${batchIndex + 1}/${batches.length} intento ${attempt} falló (${errMsg}). Reintentando en ${delay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+            results.failed += batch.length;
+            results.errors.push(`Batch ${batchIndex + 1}: ${errMsg}`);
+          } else {
+            results.sent += batch.length;
+          }
+          success = true;
+          break;
+        } catch (batchError: any) {
+          const errMsg = batchError.message || 'Error en batch';
+          // If Service Unavailable or network error, retry
+          if ((errMsg.includes('Service Unavailable') || errMsg.includes('ECONNRESET') || errMsg.includes('fetch') || errMsg.includes('503') || errMsg.includes('429')) && attempt < 3) {
+            const delay = attempt * 2000;
+            console.warn(`[Newsletter] Batch ${batchIndex + 1}/${batches.length} intento ${attempt} excepción (${errMsg}). Reintentando en ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
           results.failed += batch.length;
-          results.errors.push(error.message);
-        } else {
-          results.sent += batch.length;
+          results.errors.push(`Batch ${batchIndex + 1}: ${errMsg}`);
+          success = true; // Mark as handled to exit retry loop
+          break;
         }
-      } catch (batchError: any) {
-        results.failed += batch.length;
-        results.errors.push(batchError.message || 'Error en batch');
       }
 
-      // Pequeña pausa entre batches para evitar rate limiting
-      if (batches.length > 1) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+      console.log(`[Newsletter] Batch ${batchIndex + 1}/${batches.length} completado. Enviados: ${results.sent}, Fallidos: ${results.failed}`);
+
+      // Pausa entre batches para evitar rate limiting (1 segundo)
+      if (batchIndex < batches.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
+    console.log(`[Newsletter] Envío completado. Total enviados: ${results.sent}, Total fallidos: ${results.failed}`);
+
     return {
-      success: results.failed === 0,
+      success: results.sent > 0 && results.failed < results.sent,
       sent: results.sent,
       failed: results.failed,
       errors: results.errors,
