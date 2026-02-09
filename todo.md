@@ -163,3 +163,9 @@
 
 ### Tests
 - [x] Actualizar tests para nuevas funcionalidades (31/31 pasando)
+
+## Importación de Traducciones desde CMS Antiguo
+- [x] Verificar estado actual de tabla content_translations en CMS nuevo
+- [x] Extraer las 1.408 traducciones del CMS antiguo
+- [x] Importar traducciones a la base de datos del CMS nuevo (1408/1408, 0 errores)
+- [x] Verificar que la importación sea correcta (en:690, pt:351, fr:253, de:114)
