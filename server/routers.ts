@@ -1730,6 +1730,9 @@ export const appRouter = router({
     generateDesign: protectedProcedure
       .input(z.object({
         prompt: z.string(),
+        headerImage: z.string().optional(),
+        bodyImages: z.array(z.string()).optional(),
+        // Legacy field kept for backwards compatibility
         images: z.array(z.string()).optional(),
         generateImages: z.boolean().optional().default(true),
       }))
@@ -1745,26 +1748,40 @@ export const appRouter = router({
         // Obtener las URLs de imágenes de marca desde S3
         const brandImages = getBrandImageUrls();
 
-        // Paso 1: Generar imágenes adicionales con IA si se solicita
-        let generatedImageUrls: string[] = [];
+        // Determinar si el usuario proporcionó imagen de header
+        const userHeaderImage = input.headerImage || null;
+        const userBodyImages = input.bodyImages || input.images || [];
 
-        if (input.generateImages) {
+        // Paso 1: Generar imagen hero con IA SOLO si el usuario NO proporcionó una imagen de header
+        let generatedHeaderUrl: string | null = null;
+        let generatedBodyUrls: string[] = [];
+
+        if (!userHeaderImage && input.generateImages) {
           try {
             // Generar imagen hero basada en el prompt del usuario
             const imagePrompt = `Fotografía profesional de alta calidad para email marketing de CANCAGUA, un spa y centro de retiro en el sur de Chile. La imagen debe transmitir serenidad, paz y conexión con la naturaleza. Estilo: elegante, cálido, tonos tierra y naturales. Contexto: ${input.prompt}. NO incluir texto ni logos en la imagen.`;
 
             const heroImage = await generateImage({ prompt: imagePrompt });
             if (heroImage.url) {
-              generatedImageUrls.push(heroImage.url);
+              generatedHeaderUrl = heroImage.url;
             }
           } catch (error) {
-            console.error('Error generando imagen:', error);
+            console.error('Error generando imagen hero:', error);
             // Continuar sin imagen si falla la generación
           }
         }
 
-        // Combinar imágenes proporcionadas con las generadas
-        const allImages = [...(input.images || []), ...generatedImageUrls];
+        // Si no hay imágenes de cuerpo y se solicita generación, generar una
+        if (userBodyImages.length === 0 && input.generateImages && !generatedHeaderUrl && !userHeaderImage) {
+          // No generar imágenes de cuerpo extra si ya se generó header
+        }
+
+        // Determinar la imagen de header final
+        const finalHeaderImage = userHeaderImage || generatedHeaderUrl;
+        // Combinar imágenes de cuerpo proporcionadas
+        const allBodyImages = [...userBodyImages, ...generatedBodyUrls];
+        // Legacy: combinar todas las imágenes para el catálogo
+        const allImages = [finalHeaderImage, ...allBodyImages].filter(Boolean) as string[];
 
         // Construir el catálogo de imágenes disponibles para el prompt
         const imagesCatalog = BRAND_IMAGE_CATALOG.map(img => {
@@ -1772,9 +1789,14 @@ export const appRouter = router({
           return `- ${img.name}: ${img.description} | URL: ${url}`;
         }).join('\n');
 
-        // Agregar imágenes generadas al catálogo
-        const generatedImagesList = generatedImageUrls.length > 0
-          ? `\n\nIMÁGENES GENERADAS POR IA (usar como hero o imagen principal):\n${generatedImageUrls.map((url, i) => `- imagen_generada_${i + 1}: ${url}`).join('\n')}`
+        // Construir sección de imagen de header
+        const headerImageSection = finalHeaderImage
+          ? `\n\nIMAGEN DE HEADER/HERO (OBLIGATORIO usar esta imagen como banner principal del email):\n- URL: ${finalHeaderImage}\n- Origen: ${userHeaderImage ? 'Proporcionada por el usuario' : 'Generada por IA'}`
+          : '';
+
+        // Construir sección de imágenes de cuerpo
+        const bodyImagesSection = allBodyImages.length > 0
+          ? `\n\nIMÁGENES PARA EL CUERPO DEL EMAIL (incluir dentro del contenido del email):\n${allBodyImages.map((url, i) => `- imagen_cuerpo_${i + 1}: ${url}`).join('\n')}`
           : '';
 
         // Construir el prompt para generar HTML de email con estilo de marca Cancagua
@@ -1824,15 +1846,16 @@ export const appRouter = router({
 Logo principal: ${brandImages.logo || 'No disponible'}
 Logo footer: ${brandImages.logoFooter || 'No disponible'}
 
-Imágenes disponibles:
-${imagesCatalog}${generatedImagesList}
+Imágenes de marca disponibles:
+${imagesCatalog}${headerImageSection}${bodyImagesSection}
 
 ## INSTRUCCIONES PARA IMÁGENES
-1. SIEMPRE usa el logo real de la URL proporcionada arriba en el header del email
-2. Selecciona imágenes del catálogo según el contexto del email (ej: si es sobre spa, usa biopiscinas o masajes)
-3. Si hay imágenes generadas por IA, úsalas como imagen hero principal
-4. Usa las URLs EXACTAS proporcionadas, no inventes URLs
-5. Incluye alt text descriptivo en todas las imágenes
+1. SIEMPRE usa el logo real de la URL proporcionada arriba en el header del email (logo de Cancagua)
+2. Si hay una IMAGEN DE HEADER/HERO proporcionada, DEBES usarla como imagen principal/banner del email justo debajo del logo. NO la ignores.
+3. Si hay IMÁGENES PARA EL CUERPO, inclúyelas dentro del contenido del email en posiciones relevantes al contexto.
+4. Si NO hay imagen de header ni de cuerpo proporcionadas, selecciona imágenes del catálogo de marca según el contexto.
+5. Usa las URLs EXACTAS proporcionadas, no inventes URLs.
+6. Incluye alt text descriptivo en todas las imágenes.
 
 ## REDES SOCIALES (URLs REALES)
 - Instagram: https://www.instagram.com/cancaguachile/
@@ -1849,7 +1872,15 @@ IMPORTANTE: Devuelve un JSON con la siguiente estructura:
 El asunto debe ser atractivo, relevante al contenido, y puede incluir emojis si es apropiado.
 NO incluyas marcadores de código. Devuelve SOLO el JSON válido.`;
 
-        const userPrompt = `${input.prompt}${input.images && input.images.length > 0 ? `\n\nImágenes a incluir: ${input.images.join(", ")}` : ""}`;
+        // Construir prompt del usuario con información de imágenes
+        let userImageInfo = '';
+        if (userHeaderImage) {
+          userImageInfo += `\n\nImagen de header proporcionada por el usuario (USAR como banner/hero): ${userHeaderImage}`;
+        }
+        if (allBodyImages.length > 0) {
+          userImageInfo += `\n\nImágenes para el cuerpo del email: ${allBodyImages.join(", ")}`;
+        }
+        const userPrompt = `${input.prompt}${userImageInfo}`;
 
         const response = await invokeLLM({
           messages: [

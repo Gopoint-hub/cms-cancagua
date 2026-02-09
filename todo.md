@@ -207,3 +207,11 @@
 - [x] Cambiar teléfono del footer a +56 9 8224 3411 (wizard + pdfGenerator)
 - [x] Permitir editar cotización desde el módulo cotizaciones (botón Edit + carga de datos)
 - [x] Permitir crear nueva cotización desde el módulo cotizaciones (título 'Nueva cotización')
+
+## Mejora Newsletter: Separar imágenes header y cuerpo
+- [x] Backend: Actualizar generateDesign para aceptar headerImage y bodyImages por separado
+- [x] Backend: Solo generar imagen hero con IA si no se proporciona headerImage
+- [x] Backend: Actualizar prompt LLM para diferenciar imagen de header vs imágenes de cuerpo
+- [x] Frontend: Separar campo de imágenes en "Imagen para header" e "Imágenes dentro del emailing"
+- [x] Frontend: Indicar que la IA generará las imágenes si no se proporcionan
+- [x] Tests: Verificar nueva estructura de campos (19 tests, 76 total pasando)

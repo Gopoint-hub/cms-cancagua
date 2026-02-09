@@ -76,6 +76,15 @@ export default function CMSCrearNewsletter() {
   
   // Step 2: Solicitud (NUEVO)
   const [requestText, setRequestText] = useState("");
+  // Imagen de header (1 sola)
+  const [headerImage, setHeaderImage] = useState<string | null>(null); // URL de S3
+  const [headerImagePreview, setHeaderImagePreview] = useState<string | null>(null); // Base64 para preview
+  const [isUploadingHeaderImage, setIsUploadingHeaderImage] = useState(false);
+  // Imágenes dentro del emailing (múltiples)
+  const [bodyImages, setBodyImages] = useState<string[]>([]); // URLs de S3
+  const [bodyImagesPreview, setBodyImagesPreview] = useState<string[]>([]); // Base64 para preview
+  const [isUploadingBodyImage, setIsUploadingBodyImage] = useState(false);
+  // Legacy compatibility
   const [uploadedImages, setUploadedImages] = useState<string[]>([]); // URLs de S3
   const [uploadedImagesPreview, setUploadedImagesPreview] = useState<string[]>([]); // Base64 para preview
   const [isRecording, setIsRecording] = useState(false);
@@ -120,6 +129,8 @@ export default function CMSCrearNewsletter() {
   
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const headerFileInputRef = useRef<HTMLInputElement>(null);
+  const bodyFileInputRef = useRef<HTMLInputElement>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   // Queries
@@ -196,7 +207,7 @@ export default function CMSCrearNewsletter() {
     },
   });
 
-  // Upload image mutation
+  // Upload image mutation (legacy)
   const uploadImageMutation = trpc.newsletters.uploadImage.useMutation({
     onSuccess: (data) => {
       setUploadedImages((prev) => [...prev, data.url]);
@@ -206,6 +217,32 @@ export default function CMSCrearNewsletter() {
     onError: (error) => {
       toast.error(error.message || "Error al subir imagen");
       setIsUploadingImage(false);
+    },
+  });
+
+  // Upload header image mutation
+  const uploadHeaderImageMutation = trpc.newsletters.uploadImage.useMutation({
+    onSuccess: (data) => {
+      setHeaderImage(data.url);
+      toast.success("Imagen de header subida correctamente");
+      setIsUploadingHeaderImage(false);
+    },
+    onError: (error) => {
+      toast.error(error.message || "Error al subir imagen de header");
+      setIsUploadingHeaderImage(false);
+    },
+  });
+
+  // Upload body image mutation
+  const uploadBodyImageMutation = trpc.newsletters.uploadImage.useMutation({
+    onSuccess: (data) => {
+      setBodyImages((prev) => [...prev, data.url]);
+      toast.success("Imagen subida correctamente");
+      setIsUploadingBodyImage(false);
+    },
+    onError: (error) => {
+      toast.error(error.message || "Error al subir imagen");
+      setIsUploadingBodyImage(false);
     },
   });
 
@@ -272,6 +309,51 @@ export default function CMSCrearNewsletter() {
       };
       reader.readAsDataURL(file);
     });
+  };
+
+  const handleHeaderImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0]; // Solo 1 imagen de header
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setHeaderImagePreview(dataUrl);
+      setIsUploadingHeaderImage(true);
+      uploadHeaderImageMutation.mutate({
+        imageData: dataUrl,
+        fileName: `newsletter-header-${Date.now()}-${file.name}`,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeHeaderImage = () => {
+    setHeaderImage(null);
+    setHeaderImagePreview(null);
+  };
+
+  const handleBodyImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        setBodyImagesPreview((prev) => [...prev, dataUrl]);
+        setIsUploadingBodyImage(true);
+        uploadBodyImageMutation.mutate({
+          imageData: dataUrl,
+          fileName: `newsletter-body-${Date.now()}-${file.name}`,
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeBodyImage = (index: number) => {
+    setBodyImages((prev) => prev.filter((_, i) => i !== index));
+    setBodyImagesPreview((prev) => prev.filter((_, i) => i !== index));
   };
 
   const removeImage = (index: number) => {
@@ -347,7 +429,10 @@ export default function CMSCrearNewsletter() {
 
     generateDesignMutation.mutate({
       prompt: fullPrompt,
-      images: uploadedImages,
+      headerImage: headerImage || undefined,
+      bodyImages: bodyImages.length > 0 ? bodyImages : undefined,
+      // Legacy: pass all images too for backwards compat
+      images: [...(headerImage ? [headerImage] : []), ...bodyImages],
       generateImages: true,
     });
   };
@@ -715,45 +800,102 @@ export default function CMSCrearNewsletter() {
                 </CardContent>
               </Card>
 
-              {/* Imágenes opcionales */}
+              {/* Imagen para header */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Imágenes adicionales (opcional)</CardTitle>
-                  <CardDescription>Sube imágenes que quieras incluir en el diseño</CardDescription>
+                  <CardTitle className="text-base">Imagen para header (opcional)</CardTitle>
+                  <CardDescription>Sube una imagen que se usará como banner principal del email. Si no subes una, la IA generará una automáticamente.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <input
                     type="file"
-                    ref={fileInputRef}
-                    onChange={handleImageUpload}
+                    ref={headerFileInputRef}
+                    onChange={handleHeaderImageUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  
+                  {isUploadingHeaderImage && (
+                    <div className="flex items-center gap-2 text-[#44580E] text-sm mb-4">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Subiendo imagen de header...
+                    </div>
+                  )}
+                  
+                  {(headerImage || headerImagePreview) ? (
+                    <div className="relative group inline-block mb-4">
+                      <img
+                        src={headerImagePreview || headerImage || ''}
+                        alt="Header"
+                        className="max-h-40 rounded-lg object-cover"
+                      />
+                      {headerImage && (
+                        <div className="absolute bottom-1 left-1 bg-green-500 text-white text-xs px-1 rounded">
+                          ✓ S3
+                        </div>
+                      )}
+                      <button
+                        onClick={removeHeaderImage}
+                        className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => headerFileInputRef.current?.click()}
+                      >
+                        <Upload className="w-4 h-4 mr-2" />
+                        Subir imagen de header
+                      </Button>
+                      <span className="text-xs text-gray-400">Si no subes una, la IA creará una</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Imágenes dentro del emailing */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Imágenes dentro del emailing (opcional)</CardTitle>
+                  <CardDescription>Sube imágenes que se incluirán en el cuerpo del email. Si no subes ninguna, la IA seleccionará imágenes de la marca.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <input
+                    type="file"
+                    ref={bodyFileInputRef}
+                    onChange={handleBodyImageUpload}
                     accept="image/*"
                     multiple
                     className="hidden"
                   />
                   
-                  {isUploadingImage && (
+                  {isUploadingBodyImage && (
                     <div className="flex items-center gap-2 text-[#44580E] text-sm mb-4">
                       <Loader2 className="w-4 h-4 animate-spin" />
                       Subiendo imagen...
                     </div>
                   )}
                   
-                  {(uploadedImages.length > 0 || uploadedImagesPreview.length > 0) && (
+                  {(bodyImages.length > 0 || bodyImagesPreview.length > 0) && (
                     <div className="flex gap-2 mb-4 flex-wrap">
-                      {(uploadedImagesPreview.length > 0 ? uploadedImagesPreview : uploadedImages).map((img, index) => (
+                      {(bodyImagesPreview.length > 0 ? bodyImagesPreview : bodyImages).map((img, index) => (
                         <div key={index} className="relative group">
                           <img
                             src={img}
                             alt={`Imagen ${index + 1}`}
                             className="w-20 h-20 object-cover rounded-lg"
                           />
-                          {uploadedImages[index] && (
+                          {bodyImages[index] && (
                             <div className="absolute bottom-1 left-1 bg-green-500 text-white text-xs px-1 rounded">
                               ✓ S3
                             </div>
                           )}
                           <button
-                            onClick={() => removeImage(index)}
+                            onClick={() => removeBodyImage(index)}
                             className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <X className="w-3 h-3" />
@@ -766,10 +908,10 @@ export default function CMSCrearNewsletter() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => bodyFileInputRef.current?.click()}
                   >
                     <Upload className="w-4 h-4 mr-2" />
-                    Subir Imágenes
+                    Subir imágenes
                   </Button>
                 </CardContent>
               </Card>
