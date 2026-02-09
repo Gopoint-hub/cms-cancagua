@@ -1,0 +1,22 @@
+{
+  "query": "SELECT 'subscribers' as tbl, COUNT(*) as cnt FROM newsletter_subscribers UNION ALL SELECT 'lists', COUNT(*) FROM subscriber_lists UNION ALL SELECT 'members', COUNT(*) FROM list_subscribers;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT 'subscribers' as tbl, COUNT(*) as cnt FROM newsletter_subscribers UNION ALL SELECT 'lists', COUNT(*) FROM subscriber_lists UNION ALL SELECT 'members', COUNT(*) FROM list_subscribers;",
+  "rows": [
+    {
+      "tbl": "lists",
+      "cnt": "468"
+    },
+    {
+      "tbl": "members",
+      "cnt": "3480"
+    },
+    {
+      "tbl": "subscribers",
+      "cnt": "4806"
+    }
+  ],
+  "messages": [],
+  "stdout": "tbl\tcnt\nlists\t468\nmembers\t3480\nsubscribers\t4806\n",
+  "stderr": "",
+  "execution_time_ms": 368
+}

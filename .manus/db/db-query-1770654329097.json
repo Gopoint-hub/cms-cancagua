@@ -1,0 +1,19 @@
+{
+  "query": "SHOW TABLES LIKE '%list%'; SHOW TABLES LIKE '%member%';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SHOW TABLES LIKE '%list%'; SHOW TABLES LIKE '%member%';",
+  "rows": [
+    {
+      "Tables_in_h57JzrJUFhgVF2g2BrDxyQ (%list%)": "list_subscribers"
+    },
+    {
+      "Tables_in_h57JzrJUFhgVF2g2BrDxyQ (%list%)": "newsletter_lists"
+    },
+    {
+      "Tables_in_h57JzrJUFhgVF2g2BrDxyQ (%list%)": "subscriber_lists"
+    }
+  ],
+  "messages": [],
+  "stdout": "Tables_in_h57JzrJUFhgVF2g2BrDxyQ (%list%)\nlist_subscribers\nnewsletter_lists\nsubscriber_lists\n",
+  "stderr": "",
+  "execution_time_ms": 405
+}

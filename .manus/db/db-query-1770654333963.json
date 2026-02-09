@@ -1,0 +1,22 @@
+{
+  "query": "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME LIKE '%list%' OR TABLE_NAME LIKE '%member%' OR TABLE_NAME LIKE '%subscri%');",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME LIKE '%list%' OR TABLE_NAME LIKE '%member%' OR TABLE_NAME LIKE '%subscri%');",
+  "rows": [
+    {
+      "TABLE_NAME": "list_subscribers"
+    },
+    {
+      "TABLE_NAME": "newsletter_lists"
+    },
+    {
+      "TABLE_NAME": "newsletter_subscribers"
+    },
+    {
+      "TABLE_NAME": "subscriber_lists"
+    }
+  ],
+  "messages": [],
+  "stdout": "TABLE_NAME\nlist_subscribers\nnewsletter_lists\nnewsletter_subscribers\nsubscriber_lists\n",
+  "stderr": "",
+  "execution_time_ms": 363
+}

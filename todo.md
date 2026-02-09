@@ -175,3 +175,11 @@
 
 ## Bug Fix: Logo roto en newsletters
 - [x] Corregir imagen del logo rota al crear/enviar newsletters (URLs de Cloudinary corregidas en upload-brand-images.ts, giftcardPdfGenerator.ts y ReportesMantencion.tsx)
+
+## Importación limpia de clientes con listas segmentadas
+- [x] Eliminar suscriptores actuales y listas existentes
+- [x] Importar 4.806 suscriptores únicos desde Excel
+- [x] Crear 6 listas por servicio (Hot Tub, Masajes, Biopiscinas, Sauna, Tablas, Clases)
+- [x] Crear 51 listas por evento
+- [x] Crear 411 listas por ubicación con fuzzy matching
+- [x] Asignar 9.669 suscriptores a listas correspondientes

@@ -1,0 +1,27 @@
+{
+  "query": "DESCRIBE newsletter_subscribers; DESCRIBE subscriber_lists; DESCRIBE subscriber_list_members;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute DESCRIBE newsletter_subscribers; DESCRIBE subscriber_lists; DESCRIBE subscriber_list_members;",
+  "returncode": 1,
+  "logs": [
+    "Field\tType\tNull\tKey\tDefault\tExtra",
+    "id\tint(11)\tNO\tPRI\tNULL\tauto_increment",
+    "email\tvarchar(320)\tNO\tUNI\tNULL\t",
+    "name\ttext\tYES\t\tNULL\t",
+    "status\tenum('active','unsubscribed')\tNO\t\tactive\t",
+    "source\tvarchar(100)\tNO\t\twebsite\t",
+    "metadata\ttext\tYES\t\tNULL\t",
+    "subscribed_at\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\t",
+    "unsubscribed_at\ttimestamp\tYES\t\tNULL\t",
+    "created_at\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\t",
+    "updated_at\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\tDEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+    "Field\tType\tNull\tKey\tDefault\tExtra",
+    "id\tint(11)\tNO\tPRI\tNULL\tauto_increment",
+    "name\ttext\tNO\t\tNULL\t",
+    "description\ttext\tYES\t\tNULL\t",
+    "segmentation_rules\ttext\tYES\t\tNULL\t",
+    "subscriber_count\tint(11)\tNO\t\t0\t",
+    "created_at\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\t",
+    "updated_at\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\tDEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+    "ERROR 1146 (42S02) at line 1: Table 'h57jzrjufhgvf2g2brdxyq.subscriber_list_members' doesn't exist"
+  ]
+}

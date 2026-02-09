@@ -1,0 +1,25 @@
+{
+  "query": "SELECT COUNT(*) as subscribers FROM newsletter_subscribers; SELECT COUNT(*) as lists FROM subscriber_lists; SELECT COUNT(*) as members FROM list_subscribers;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT COUNT(*) as subscribers FROM newsletter_subscribers; SELECT COUNT(*) as lists FROM subscriber_lists; SELECT COUNT(*) as members FROM list_subscribers;",
+  "rows": [
+    {
+      "subscribers": "4806"
+    },
+    {
+      "subscribers": "lists"
+    },
+    {
+      "subscribers": "468"
+    },
+    {
+      "subscribers": "members"
+    },
+    {
+      "subscribers": "3480"
+    }
+  ],
+  "messages": [],
+  "stdout": "subscribers\n4806\nlists\n468\nmembers\n3480\n",
+  "stderr": "",
+  "execution_time_ms": 528
+}
