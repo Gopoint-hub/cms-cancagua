@@ -224,3 +224,10 @@
 
 ## Bug Fix: Copiar/editar emailing no carga contenido existente
 - [x] Fix: Al copiar o editar un emailing, el wizard carga el HTML, subject, prompt y salta al paso 3 (diseño) directamente. Duplicar ahora redirige con el ID del nuevo newsletter.
+
+## Agregar newsletter faltante
+- [x] Newsletter San Valentín (ID 90007) cambiado de status "failed" a "draft" para poder reenviarlo
+
+## Unsubscribe en newsletters
+- [x] Agregar enlace de unsubscribe al pie de los emails enviados (inyección automática + placeholder {{unsubscribe_url}} en prompt LLM)
+- [x] Crear endpoint/página de unsubscribe funcional (GET /api/unsubscribe?email=base64 con página de confirmación branded)

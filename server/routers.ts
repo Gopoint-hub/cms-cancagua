@@ -1863,6 +1863,8 @@ ${imagesCatalog}${headerImageSection}${bodyImagesSection}
 - Facebook: https://www.facebook.com/Cancaguachile-100421855205587
 
 En el footer del email, incluye links a estas redes sociales con texto simple (no imágenes).
+Además, SIEMPRE incluye al final del footer un enlace de darse de baja con este formato exacto:
+<a href="{{unsubscribe_url}}" style="color: #999999; text-decoration: underline; font-size: 12px;">Darse de baja de este newsletter</a>
 
 IMPORTANTE: Devuelve un JSON con la siguiente estructura:
 {
@@ -2033,14 +2035,51 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
         // Actualizar estado a 'sending'
         await db.updateNewsletter(input.newsletterId, { status: 'sending' });
 
-        // Preparar emails
+        // Preparar emails con enlace de unsubscribe personalizado por suscriptor
         const { sendBulkEmails, htmlToPlainText } = await import("./email");
-        const emails = allSubscribers.map(sub => ({
-          to: sub.email,
-          subject: newsletter.subject,
-          html: newsletter.htmlContent || '',
-          text: htmlToPlainText(newsletter.htmlContent || ''),
-        }));
+        const { ENV } = await import("./_core/env");
+        const appUrl = ENV.appUrl || 'https://cancagua-cms.manus.space';
+        
+        const emails = allSubscribers.map(sub => {
+          const encodedEmail = Buffer.from(sub.email).toString('base64');
+          const unsubscribeUrl = `${appUrl}/api/unsubscribe?email=${encodedEmail}`;
+          
+          // Inject unsubscribe link into the HTML content
+          let htmlWithUnsub = newsletter.htmlContent || '';
+          
+          // Replace placeholder if the AI included it
+          if (htmlWithUnsub.includes('{{unsubscribe_url}}')) {
+            htmlWithUnsub = htmlWithUnsub.replace(/\{\{unsubscribe_url\}\}/g, unsubscribeUrl);
+          }
+          
+          // Always append unsubscribe footer if not already present
+          if (!htmlWithUnsub.includes('/api/unsubscribe') && !htmlWithUnsub.includes('darse de baja')) {
+            const unsubFooter = `
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
+              <tr>
+                <td align="center" style="font-family: 'Fira Sans', Arial, sans-serif; font-size: 12px; color: #999999; padding: 8px 0;">
+                  <a href="${unsubscribeUrl}" style="color: #999999; text-decoration: underline;">Darse de baja de este newsletter</a>
+                </td>
+              </tr>
+            </table>`;
+            
+            // Try to insert before closing </body> or </html>, or append at end
+            if (htmlWithUnsub.includes('</body>')) {
+              htmlWithUnsub = htmlWithUnsub.replace('</body>', `${unsubFooter}</body>`);
+            } else if (htmlWithUnsub.includes('</html>')) {
+              htmlWithUnsub = htmlWithUnsub.replace('</html>', `${unsubFooter}</html>`);
+            } else {
+              htmlWithUnsub += unsubFooter;
+            }
+          }
+          
+          return {
+            to: sub.email,
+            subject: newsletter.subject,
+            html: htmlWithUnsub,
+            text: htmlToPlainText(htmlWithUnsub),
+          };
+        });
 
         // Enviar emails con nombre de remitente personalizado
         const result = await sendBulkEmails({

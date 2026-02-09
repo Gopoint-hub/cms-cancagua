@@ -1,0 +1,70 @@
+{
+  "query": "SELECT id, subject, status, sent_at FROM newsletters ORDER BY id DESC LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, subject, status, sent_at FROM newsletters ORDER BY id DESC LIMIT 10;",
+  "rows": [
+    {
+      "id": "90009",
+      "subject": "💖 Escapada Romántica en Cancagua: Biopiscina, Masajes y Cena (Copia)",
+      "status": "draft",
+      "sent_at": "2026-02-09 15:54:35"
+    },
+    {
+      "id": "90008",
+      "subject": "💖 Escapada Romántica en Cancagua: Biopiscina, Masajes y Cena (Copia)",
+      "status": "draft",
+      "sent_at": "2026-02-09 15:54:35"
+    },
+    {
+      "id": "90007",
+      "subject": "💖 Celebra el Amor en Cancagua: San Valentín en Frutillar",
+      "status": "failed",
+      "sent_at": "2026-02-09 17:52:42"
+    },
+    {
+      "id": "90006",
+      "subject": "💖 Escapada Romántica en Cancagua: Biopiscina, Masajes y Cena",
+      "status": "sent",
+      "sent_at": "2026-02-09 15:54:35"
+    },
+    {
+      "id": "90005",
+      "subject": "💖 Escapada Romántica 14 Febrero: Biopiscina, Masajes y Tabla en Cancagua",
+      "status": "draft",
+      "sent_at": "NULL"
+    },
+    {
+      "id": "90004",
+      "subject": "💖 Escapada Romántica 14 Febrero: Biopiscina, Masajes y Tabla en Cancagua",
+      "status": "draft",
+      "sent_at": "NULL"
+    },
+    {
+      "id": "60003",
+      "subject": "Sumérgete en la serenidad: Biopiscinas en Cancagua 🌿",
+      "status": "sent",
+      "sent_at": "2026-02-01 16:29:31"
+    },
+    {
+      "id": "30002",
+      "subject": "Una experiencia de frío guiada por el único Instructor Avanzado del Método Wim Hof en Chile",
+      "status": "sent",
+      "sent_at": "2026-01-24 03:01:53"
+    },
+    {
+      "id": "30001",
+      "subject": "🧘🏼‍♀️ Paz y 30% OFF: Tu Retiro de Naturaleza en Cancagua te Espera",
+      "status": "sent",
+      "sent_at": "2026-01-24 02:01:51"
+    },
+    {
+      "id": "1",
+      "subject": "Bienvenidos a Cancagua!",
+      "status": "sent",
+      "sent_at": "2026-01-15 00:43:44"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tsubject\tstatus\tsent_at\n90009\t💖 Escapada Romántica en Cancagua: Biopiscina, Masajes y Cena (Copia)\tdraft\t2026-02-09 15:54:35\n90008\t💖 Escapada Romántica en Cancagua: Biopiscina, Masajes y Cena (Copia)\tdraft\t2026-02-09 15:54:35\n90007\t💖 Celebra el Amor en Cancagua: San Valentín en Frutillar\tfailed\t2026-02-09 17:52:42\n90006\t💖 Escapada Romántica en Cancagua: Biopiscina, Masajes y Cena\tsent\t2026-02-09 15:54:35\n90005\t💖 Escapada Romántica 14 Febrero: Biopiscina, Masajes y Tabla en Cancagua\tdraft\tNULL\n90004\t💖 Escapada Romántica 14 Febrero: Biopiscina, Masajes y Tabla en Cancagua\tdraft\tNULL\n60003\tSumérgete en la serenidad: Biopiscinas en Cancagua 🌿\tsent\t2026-02-01 16:29:31\n30002\tUna experiencia de frío guiada por el único Instructor Avanzado del Método Wim Hof en Chile\tsent\t2026-01-24 03:01:53\n30001\t🧘🏼‍♀️ Paz y 30% OFF: Tu Retiro de Naturaleza en Cancagua te Espera\tsent\t2026-01-24 02:01:51\n1\tBienvenidos a Cancagua!\tsent\t2026-01-15 00:43:44\n",
+  "stderr": "",
+  "execution_time_ms": 354
+}

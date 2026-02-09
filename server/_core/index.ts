@@ -9,6 +9,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import conciergeWebhook from "../conciergeWebhook";
+import unsubscribeRouter from "../unsubscribeRoute";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -62,6 +63,8 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Webhook para Skedu (Módulo Concierge)
   app.use("/api/webhooks/skedu", conciergeWebhook);
+  // Unsubscribe route for newsletters
+  app.use("/api/unsubscribe", unsubscribeRouter);
   // tRPC API
   app.use(
     "/api/trpc",
