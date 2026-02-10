@@ -1178,6 +1178,46 @@ export default function CMSCrearNewsletter() {
                 </Card>
               ) : (
                 <div className="space-y-3">
+                  {/* Enviar a todos */}
+                  <div
+                    onClick={() => {
+                      if (selectedLists.length === lists.length) {
+                        setSelectedLists([]);
+                      } else {
+                        setSelectedLists(lists.map((l: any) => l.id));
+                      }
+                    }}
+                    className={`flex items-center justify-between p-5 rounded-xl border-2 cursor-pointer transition-all ${
+                      selectedLists.length === lists.length
+                        ? "border-[#44580E] bg-[#44580E]/10"
+                        : "border-dashed border-gray-300 hover:border-[#44580E]/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                        selectedLists.length === lists.length ? "bg-[#44580E] text-white" : "bg-gray-100"
+                      }`}>
+                        {selectedLists.length === lists.length ? (
+                          <Check className="w-5 h-5" />
+                        ) : (
+                          <Users className="w-5 h-5 text-gray-400" />
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">Enviar a todos</h3>
+                        <p className="text-sm text-gray-500">Seleccionar todas las listas de suscriptores</p>
+                      </div>
+                    </div>
+                    <Badge variant="secondary" className="text-base px-3 py-1">
+                      {lists.reduce((sum: number, l: any) => sum + (l.subscriberCount || 0), 0)} suscriptores
+                    </Badge>
+                  </div>
+
+                  <div className="relative my-2">
+                    <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                    <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">o selecciona listas específicas</span></div>
+                  </div>
+
                   {lists.map((list: any) => (
                     <div
                       key={list.id}

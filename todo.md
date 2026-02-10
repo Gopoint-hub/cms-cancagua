@@ -254,3 +254,4 @@
 - [x] Mover Ayuda de enlace fijo a categoría del sidebar (debajo de Admin) con acordeón expandible
 - [x] Crear sub-página AyudaNewsletters (/cms/ayuda/newsletters) como primer módulo dentro de la categoría Ayuda
 - [x] Fix: AyudaNewsletters no muestra el sidebar (agregado DashboardLayout wrapper)
+- [x] Agregar opción "Enviar a todos" en el selector de listas del newsletter (toggle seleccionar/deseleccionar todas)
