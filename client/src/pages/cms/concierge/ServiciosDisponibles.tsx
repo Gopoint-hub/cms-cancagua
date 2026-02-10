@@ -132,9 +132,13 @@ export default function ServiciosDisponibles() {
 
   // Mutación para eliminar servicio
   const deleteMutation = trpc.concierge.services.delete.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       refetch();
-      toast.success("Servicio eliminado");
+      if (data.deactivated) {
+        toast.info("Este servicio tiene ventas asociadas. Se desactivó en vez de eliminarse para conservar el historial.");
+      } else {
+        toast.success("Servicio eliminado");
+      }
     },
     onError: (error: any) => {
       toast.error(error.message || "Error al eliminar el servicio");
@@ -214,7 +218,7 @@ export default function ServiciosDisponibles() {
 
   // Eliminar servicio
   const handleDelete = (id: number) => {
-    if (confirm("¿Estás seguro de eliminar este servicio y todos sus precios?")) {
+    if (confirm("¿Estás seguro? Si el servicio tiene ventas asociadas, se desactivará en vez de eliminarse.")) {
       deleteMutation.mutate({ id });
     }
   };

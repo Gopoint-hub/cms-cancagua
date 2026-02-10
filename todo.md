@@ -294,3 +294,6 @@
 - [x] Mostrar cupos restantes al vendedor en herramienta de venta
 - [x] Bloquear venta si no hay cupos disponibles
 - [x] -1 sigue significando ilimitado (sin restricción de cupos)
+
+## Bug Fix: No se puede eliminar servicio concierge
+- [x] Fix: Eliminar servicio falla por foreign key constraints (ventas, precios, cupos asociados) - si tiene ventas se desactiva, si no se elimina

@@ -316,12 +316,30 @@ export async function checkQuotaAvailable(
   };
 }
 
-export async function deleteConciergeService(id: number) {
+export async function deleteConciergeService(id: number): Promise<{ deleted: boolean; deactivated: boolean }> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  // Prices are cascade-deleted via FK
+  // Check if there are sales associated with this service
+  const salesCount = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(conciergeSales)
+    .where(eq(conciergeSales.conciergeServiceId, id));
+
+  const hasSales = (salesCount[0]?.count ?? 0) > 0;
+
+  if (hasSales) {
+    // Can't delete - deactivate instead to preserve sales history
+    await db
+      .update(conciergeServices)
+      .set({ active: 0 })
+      .where(eq(conciergeServices.id, id));
+    return { deleted: false, deactivated: true };
+  }
+
+  // No sales - safe to delete (prices + quota cascade-deleted via FK)
   await db.delete(conciergeServices).where(eq(conciergeServices.id, id));
+  return { deleted: true, deactivated: false };
 }
 
 // ============================================

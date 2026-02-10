@@ -106,8 +106,8 @@ export const conciergeRouter = router({
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
-        await conciergeDb.deleteConciergeService(input.id);
-        return { success: true };
+        const result = await conciergeDb.deleteConciergeService(input.id);
+        return { success: true, ...result };
       }),
 
     /** Obtener precios de un servicio */
