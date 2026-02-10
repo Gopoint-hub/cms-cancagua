@@ -28,7 +28,8 @@ const conciergeProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   if (
     ctx.user.role !== "super_admin" &&
     ctx.user.role !== "admin" &&
-    ctx.user.role !== "concierge"
+    ctx.user.role !== "concierge" &&
+    ctx.user.role !== "seller"
   ) {
     throw new TRPCError({
       code: "FORBIDDEN",
@@ -282,13 +283,15 @@ export const conciergeRouter = router({
     getMySellerInfo: conciergeProcedure.query(async ({ ctx }) => {
       let seller = await conciergeDb.getConciergeSellerByUserId(ctx.user.id);
       if (!seller) {
-        // Auto-crear seller para admin/superadmin para que puedan probar
-        if (ctx.user.role === "super_admin" || ctx.user.role === "admin") {
-          const sellerId = await conciergeDb.upsertConciergeSeller({
+        // Auto-crear seller para admin/superadmin y vendedores sin registro
+        const canAutoCreate = ["super_admin", "admin", "seller", "concierge"].includes(ctx.user.role);
+        if (canAutoCreate) {
+          const isAdmin = ctx.user.role === "super_admin" || ctx.user.role === "admin";
+          await conciergeDb.upsertConciergeSeller({
             userId: ctx.user.id,
             commissionRate: 0,
-            companyName: ctx.user.name || "Administrador",
-            notes: "Auto-creado para pruebas de admin",
+            companyName: ctx.user.name || (isAdmin ? "Administrador" : "Vendedor"),
+            notes: isAdmin ? "Auto-creado para pruebas de admin" : "Auto-creado al acceder por primera vez",
             active: 1,
           });
           seller = await conciergeDb.getConciergeSellerByUserId(ctx.user.id);

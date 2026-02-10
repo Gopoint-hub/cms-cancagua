@@ -1,0 +1,46 @@
+{
+  "query": "SELECT id, name, email, role FROM users ORDER BY id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, name, email, role FROM users ORDER BY id;",
+  "rows": [
+    {
+      "id": "2130001",
+      "name": "hermosillamario",
+      "email": "hermosillamario@gmail.com",
+      "role": "super_admin"
+    },
+    {
+      "id": "2130004",
+      "name": "Sebastián",
+      "email": "sebastian@gopointagency.com",
+      "role": "super_admin"
+    },
+    {
+      "id": "2160001",
+      "name": "Berni",
+      "email": "eventos@cancagua.cl",
+      "role": "super_admin"
+    },
+    {
+      "id": "2190001",
+      "name": "Luciana",
+      "email": "luciana.misi@gmail.com",
+      "role": "super_admin"
+    },
+    {
+      "id": "2220001",
+      "name": "Constansa Sandoval ",
+      "email": "Sandovalconstansa7@gmail.com",
+      "role": "admin"
+    },
+    {
+      "id": "2220002",
+      "name": "Vendedor 1",
+      "email": "contacto@cancagua.cl",
+      "role": "seller"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\temail\trole\n2130001\thermosillamario\thermosillamario@gmail.com\tsuper_admin\n2130004\tSebastián\tsebastian@gopointagency.com\tsuper_admin\n2160001\tBerni\teventos@cancagua.cl\tsuper_admin\n2190001\tLuciana\tluciana.misi@gmail.com\tsuper_admin\n2220001\tConstansa Sandoval \tSandovalconstansa7@gmail.com\tadmin\n2220002\tVendedor 1\tcontacto@cancagua.cl\tseller\n",
+  "stderr": "",
+  "execution_time_ms": 360
+}

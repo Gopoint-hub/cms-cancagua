@@ -1,0 +1,20 @@
+{
+  "query": "SELECT cs.id, cs.user_id, cs.company_name, cs.commission_rate, cs.active, u.name, u.email, u.role FROM concierge_sellers cs LEFT JOIN users u ON cs.user_id = u.id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT cs.id, cs.user_id, cs.company_name, cs.commission_rate, cs.active, u.name, u.email, u.role FROM concierge_sellers cs LEFT JOIN users u ON cs.user_id = u.id;",
+  "rows": [
+    {
+      "id": "1",
+      "user_id": "2130004",
+      "company_name": "Sebastián",
+      "commission_rate": "0",
+      "active": "1",
+      "name": "Sebastián",
+      "email": "sebastian@gopointagency.com",
+      "role": "super_admin"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuser_id\tcompany_name\tcommission_rate\tactive\tname\temail\trole\n1\t2130004\tSebastián\t0\t1\tSebastián\tsebastian@gopointagency.com\tsuper_admin\n",
+  "stderr": "",
+  "execution_time_ms": 350
+}

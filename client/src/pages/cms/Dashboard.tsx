@@ -273,7 +273,7 @@ export default function CMSDashboard() {
   if (loading) return null;
 
   // Vendedores ven un dashboard simplificado
-  if (user?.role === "concierge") {
+  if (user?.role === "concierge" || user?.role === "seller") {
     return <SellerDashboard />;
   }
 

@@ -1,0 +1,19 @@
+{
+  "query": "SELECT * FROM concierge_services;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT * FROM concierge_services;",
+  "rows": [
+    {
+      "id": "1",
+      "service_id": "33",
+      "available_quantity": "-1",
+      "active": "1",
+      "seller_notes": "",
+      "created_at": "2026-02-08 23:34:58",
+      "updated_at": "2026-02-08 23:34:58"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tservice_id\tavailable_quantity\tactive\tseller_notes\tcreated_at\tupdated_at\n1\t33\t-1\t1\t\t2026-02-08 23:34:58\t2026-02-08 23:34:58\n",
+  "stderr": "",
+  "execution_time_ms": 353
+}

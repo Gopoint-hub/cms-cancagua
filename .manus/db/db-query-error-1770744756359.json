@@ -1,0 +1,10 @@
+{
+  "query": "SELECT cs.id, cs.service_id, cs.active, cs.available_quantity, s.name as service_name FROM concierge_services cs LEFT JOIN services s ON cs.service_id = s.id; SELECT id, service_id, price_type, price FROM concierge_service_prices;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT cs.id, cs.service_id, cs.active, cs.available_quantity, s.name as service_name FROM concierge_services cs LEFT JOIN services s ON cs.service_id = s.id; SELECT id, service_id, price_type, price FROM concierge_service_prices;",
+  "returncode": 1,
+  "logs": [
+    "id\tservice_id\tactive\tavailable_quantity\tservice_name",
+    "1\t33\t1\t-1\tBiopiscinas en Frutillar + Traslado incluido",
+    "ERROR 1054 (42S22) at line 1: Unknown column 'service_id' in 'field list'"
+  ]
+}

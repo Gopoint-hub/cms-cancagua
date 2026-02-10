@@ -1,0 +1,16 @@
+{
+  "query": "SELECT cs.id, cs.service_id, cs.active, s.name FROM concierge_services cs LEFT JOIN services s ON cs.service_id = s.id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT cs.id, cs.service_id, cs.active, s.name FROM concierge_services cs LEFT JOIN services s ON cs.service_id = s.id;",
+  "rows": [
+    {
+      "id": "1",
+      "service_id": "33",
+      "active": "1",
+      "name": "Biopiscinas en Frutillar + Traslado incluido"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tservice_id\tactive\tname\n1\t33\t1\tBiopiscinas en Frutillar + Traslado incluido\n",
+  "stderr": "",
+  "execution_time_ms": 359
+}

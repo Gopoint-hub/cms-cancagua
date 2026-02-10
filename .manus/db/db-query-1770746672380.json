@@ -1,0 +1,21 @@
+{
+  "query": "SELECT * FROM concierge_sellers;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT * FROM concierge_sellers;",
+  "rows": [
+    {
+      "id": "1",
+      "user_id": "2130004",
+      "commission_rate": "0",
+      "seller_code": "SELL-RYGJXENQ",
+      "company_name": "Sebastián",
+      "notes": "Auto-creado para pruebas de admin",
+      "active": "1",
+      "created_at": "2026-02-10 17:58:45",
+      "updated_at": "2026-02-10 17:58:45"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuser_id\tcommission_rate\tseller_code\tcompany_name\tnotes\tactive\tcreated_at\tupdated_at\n1\t2130004\t0\tSELL-RYGJXENQ\tSebastián\tAuto-creado para pruebas de admin\t1\t2026-02-10 17:58:45\t2026-02-10 17:58:45\n",
+  "stderr": "",
+  "execution_time_ms": 351
+}

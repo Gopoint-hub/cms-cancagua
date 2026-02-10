@@ -1,0 +1,17 @@
+{
+  "query": "SELECT id, service_id, active, available_quantity, seller_notes FROM concierge_services;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, service_id, active, available_quantity, seller_notes FROM concierge_services;",
+  "rows": [
+    {
+      "id": "1",
+      "service_id": "33",
+      "active": "1",
+      "available_quantity": "-1",
+      "seller_notes": ""
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tservice_id\tactive\tavailable_quantity\tseller_notes\n1\t33\t1\t-1\t\n",
+  "stderr": "",
+  "execution_time_ms": 351
+}

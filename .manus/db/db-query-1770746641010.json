@@ -1,0 +1,16 @@
+{
+  "query": "SELECT u.id, u.name, u.email, u.role FROM users u WHERE u.email = 'contacto@cancagua.cl' OR u.role = 'concierge';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT u.id, u.name, u.email, u.role FROM users u WHERE u.email = 'contacto@cancagua.cl' OR u.role = 'concierge';",
+  "rows": [
+    {
+      "id": "2220002",
+      "name": "Vendedor 1",
+      "email": "contacto@cancagua.cl",
+      "role": "seller"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\temail\trole\n2220002\tVendedor 1\tcontacto@cancagua.cl\tseller\n",
+  "stderr": "",
+  "execution_time_ms": 351
+}

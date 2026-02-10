@@ -278,3 +278,4 @@
 - [x] Sidebar: vendedor solo ve Concierge (venta) y Mis Comisiones
 - [x] Dashboard: vendedor ve dashboard simplificado, no el Panel de Control completo
 - [x] Vendedor no debe ver B2C, B2B, Marketing, Métricas, Operaciones, Admin, Ayuda
+- [x] Bug Fix: Vendedor no ve servicios en herramienta de venta (lista vacía) - rol era 'seller' no 'concierge', y faltaba auto-crear seller record
