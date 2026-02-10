@@ -46,6 +46,8 @@ interface MenuItem {
   icon: any;
   label: string;
   path: string;
+  /** If set, only these roles can see this item. If not set, all roles can see it. */
+  roles?: string[];
 }
 
 interface Category {
@@ -55,6 +57,8 @@ interface Category {
   description: string;
   color: string;
   items: MenuItem[];
+  /** If set, only these roles can see this category. If not set, all roles can see it. */
+  roles?: string[];
 }
 
 export const categories: Category[] = [
@@ -64,6 +68,7 @@ export const categories: Category[] = [
     icon: Store,
     description: "Clientes & Servicios",
     color: "bg-emerald-500",
+    roles: ["super_admin", "admin"],
     items: [
       { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales" },
       { icon: MessageSquare, label: "Mensajes", path: "/cms/mensajes" },
@@ -76,6 +81,7 @@ export const categories: Category[] = [
     icon: Briefcase,
     description: "Eventos Corporativos",
     color: "bg-blue-500",
+    roles: ["super_admin", "admin"],
     items: [
       { icon: FileText, label: "Cotizaciones", path: "/cms/cotizaciones" },
       { icon: Package, label: "Catálogo Productos", path: "/cms/productos-corporativos" },
@@ -90,8 +96,8 @@ export const categories: Category[] = [
     color: "bg-teal-500",
     items: [
       { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta" },
-      { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios" },
-      { icon: DollarSign, label: "Comisiones", path: "/cms/concierge/vendedores" },
+      { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios", roles: ["super_admin", "admin"] },
+      { icon: DollarSign, label: "Comisiones", path: "/cms/concierge/vendedores", roles: ["super_admin", "admin"] },
       { icon: DollarSign, label: "Mis Comisiones", path: "/cms/concierge/mis-comisiones" },
     ],
   },
@@ -101,6 +107,7 @@ export const categories: Category[] = [
     icon: Megaphone,
     description: "Newsletters & Campañas",
     color: "bg-purple-500",
+    roles: ["super_admin", "admin"],
     items: [
       { icon: Newspaper, label: "Newsletters", path: "/cms/newsletter" },
       { icon: MailPlus, label: "Crear Newsletter", path: "/cms/crear-newsletter" },
@@ -116,6 +123,7 @@ export const categories: Category[] = [
     icon: TrendingUp,
     description: "Analytics & Reportes",
     color: "bg-amber-500",
+    roles: ["super_admin", "admin"],
     items: [
       { icon: BarChart3, label: "Analytics", path: "/cms/analytics" },
     ],
@@ -126,6 +134,7 @@ export const categories: Category[] = [
     icon: HardHat,
     description: "Mantención & Operaciones",
     color: "bg-orange-500",
+    roles: ["super_admin", "admin"],
     items: [
       { icon: Wrench, label: "Reportes Mantención", path: "/cms/reportes-mantencion" },
     ],
@@ -136,6 +145,7 @@ export const categories: Category[] = [
     icon: Shield,
     description: "Usuarios & Configuración",
     color: "bg-slate-500",
+    roles: ["super_admin", "admin"],
     items: [
       { icon: Users, label: "Usuarios", path: "/cms/usuarios" },
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
@@ -149,6 +159,7 @@ export const categories: Category[] = [
     icon: HelpCircle,
     description: "Documentación & Guías",
     color: "bg-cyan-500",
+    roles: ["super_admin", "admin"],
     items: [
       { icon: Mail, label: "Newsletters", path: "/cms/ayuda/newsletters" },
     ],
@@ -369,11 +380,16 @@ function DashboardLayoutContent({
           </SidebarHeader>
 
           <SidebarContent className="gap-0 overflow-y-auto">
-            {/* Menú Acordeón - Todas las categorías */}
+            {/* Menú Acordeón - Categorías filtradas por rol */}
             <div className="px-2 py-1">
-              {categories.map((category) => {
+              {categories
+                .filter(cat => !cat.roles || cat.roles.includes(user?.role || ""))
+                .map((category) => {
+                // Filter items by role too
+                const visibleItems = category.items.filter(item => !item.roles || item.roles.includes(user?.role || ""));
+                if (visibleItems.length === 0) return null;
                 const isExpanded = expandedCategories.has(category.id);
-                const hasActiveItem = category.items.some(item => item.path === location);
+                const hasActiveItem = visibleItems.some(item => item.path === location);
                 
                 return (
                   <Collapsible
@@ -417,7 +433,7 @@ function DashboardLayoutContent({
                     
                     <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
                       <SidebarMenu className={cn("mt-1", !isCollapsed && "ml-5 pl-2 border-l border-border/50")}>
-                        {category.items.map((item) => {
+                        {visibleItems.map((item) => {
                           const isActive = location === item.path;
                           return (
                             <SidebarMenuItem key={item.path}>

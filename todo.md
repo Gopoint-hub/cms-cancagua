@@ -273,3 +273,8 @@
 ## Admin/Superadmin como vendedores concierge
 - [x] Permitir que superadmin y admin accedan a Herramienta de Venta como vendedores
 - [x] Auto-crear seller info para admin/superadmin si no existe al acceder a venta
+
+## Restricción de vista para rol vendedor (concierge)
+- [x] Sidebar: vendedor solo ve Concierge (venta) y Mis Comisiones
+- [x] Dashboard: vendedor ve dashboard simplificado, no el Panel de Control completo
+- [x] Vendedor no debe ver B2C, B2B, Marketing, Métricas, Operaciones, Admin, Ayuda
