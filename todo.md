@@ -267,3 +267,5 @@
 - [x] Diseño mobile-first optimizado para vendedores
 - [x] Actualizar VendedorConcierge (venta) para usar mismo diseño sin imágenes
 - [x] Eliminar dependencia de image_url en módulos de concierge
+- [x] Bug Fix: Herramienta de venta solo permite un tipo de precio a la vez - necesita soportar múltiples líneas (ej: 3 Adultos + 2 Niños)
+- [x] Bug Fix: "0" suelto aparece en tarjeta de servicio (duración 0 min no debería mostrarse)

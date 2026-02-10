@@ -291,21 +291,34 @@ export const conciergeRouter = router({
 
     /**
      * Iniciar una venta - Crea la transacción WebPay y envía el link de pago al cliente
-     * Ahora recibe priceId para saber qué precio diferenciado se eligió
+     * Acepta múltiples líneas de precio (ej: 3 Adultos + 2 Niños) en una sola venta.
+     * También mantiene compatibilidad con el formato antiguo (priceId + quantity).
      */
     initiateSale: conciergeProcedure
       .input(
         z.object({
           conciergeServiceId: z.number(),
-          priceId: z.number(), // ID del precio diferenciado seleccionado
+          // Nuevo: array de items con priceId y quantity
+          items: z.array(z.object({
+            priceId: z.number(),
+            quantity: z.number().min(1),
+          })).min(1).optional(),
+          // Legacy: single priceId + quantity (backward compat)
+          priceId: z.number().optional(),
+          quantity: z.number().min(1).default(1).optional(),
           customerName: z.string().min(2),
           customerEmail: z.string().email(),
           customerPhone: z.string().optional(),
           notes: z.string().optional(),
-          quantity: z.number().min(1).default(1),
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // Normalize: convert legacy single-price format to items array
+        const items = input.items || (input.priceId ? [{ priceId: input.priceId, quantity: input.quantity || 1 }] : []);
+        if (items.length === 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Debes agregar al menos un tipo de precio" });
+        }
+
         // 1. Obtener información del vendedor
         const seller = await conciergeDb.getConciergeSellerByUserId(
           ctx.user.id
@@ -342,36 +355,36 @@ export const conciergeRouter = router({
           });
         }
 
-        // 3. Obtener el precio seleccionado
-        const selectedPrice = await conciergeDb.getServicePriceById(
-          input.priceId
-        );
-        if (!selectedPrice) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Precio no encontrado",
-          });
+        // 3. Validar y calcular cada línea de precio
+        let totalAmount = 0;
+        const priceLabels: string[] = [];
+        const lineDetails: { label: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
+
+        for (const item of items) {
+          const price = await conciergeDb.getServicePriceById(item.priceId);
+          if (!price) {
+            throw new TRPCError({ code: "NOT_FOUND", message: `Precio ID ${item.priceId} no encontrado` });
+          }
+          if (price.serviceId !== input.conciergeServiceId) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "El precio no corresponde al servicio seleccionado" });
+          }
+          const subtotal = price.price * item.quantity;
+          totalAmount += subtotal;
+          priceLabels.push(`${price.label} x${item.quantity}`);
+          lineDetails.push({ label: price.label, quantity: item.quantity, unitPrice: price.price, subtotal });
         }
 
-        if (selectedPrice.serviceId !== input.conciergeServiceId) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "El precio no corresponde al servicio seleccionado",
-          });
-        }
-
-        // 4. Calcular monto total y comisión
-        const amount = selectedPrice.price * input.quantity;
+        // 4. Calcular comisión sobre el total
         const commissionRate = seller.commissionRate;
-        const commissionAmount = Math.round((amount * commissionRate) / 100);
-        const priceLabel = `${selectedPrice.label}${input.quantity > 1 ? ` x${input.quantity}` : ""}`;
+        const commissionAmount = Math.round((totalAmount * commissionRate) / 100);
+        const priceLabel = priceLabels.join(", ");
 
         // 5. Crear registro de venta pendiente
         const { id: saleId, saleReference } =
           await conciergeDb.createConciergeSale({
             sellerId: seller.id,
             conciergeServiceId: input.conciergeServiceId,
-            amount,
+            amount: totalAmount,
             commissionRate,
             commissionAmount,
             customerName: input.customerName,
@@ -393,7 +406,7 @@ export const conciergeRouter = router({
           const wpResponse = await webpay.createTransaction(
             buyOrder,
             sessionId,
-            amount,
+            totalAmount,
             returnUrl
           );
 
@@ -412,7 +425,7 @@ export const conciergeRouter = router({
             customerName: input.customerName,
             customerEmail: input.customerEmail,
             serviceName: service.serviceName || "Servicio Cancagua",
-            amount,
+            amount: totalAmount,
             paymentUrl,
             sellerName,
           });
@@ -422,9 +435,10 @@ export const conciergeRouter = router({
             saleId,
             saleReference,
             paymentUrl,
-            amount,
+            amount: totalAmount,
             serviceName: service.serviceName,
             priceLabel,
+            lineDetails,
             commissionAmount,
             emailSent: true,
           };

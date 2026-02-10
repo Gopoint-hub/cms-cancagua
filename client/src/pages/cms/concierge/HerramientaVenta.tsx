@@ -1,9 +1,10 @@
 /**
  * Herramienta de Venta - Módulo Concierge
  * Interfaz mobile-first para que los vendedores realicen ventas.
+ * Soporta múltiples líneas de precio (ej: 3 Adultos + 2 Niños) en una sola venta.
  * Diseño sin imágenes: usa iconos y colores por categoría para identificación rápida.
  */
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import {
@@ -19,13 +20,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   ShoppingCart,
@@ -42,6 +36,8 @@ import {
   Package,
   Tag,
   ChevronRight,
+  Minus,
+  Plus,
 } from "lucide-react";
 import { getCategoryInfo, inferCategoryFromName } from "@/lib/serviceCategories";
 
@@ -71,14 +67,24 @@ interface ConciergeService {
   prices: ServicePrice[];
 }
 
+interface LineDetail {
+  label: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
 type ViewState = "services" | "form" | "success";
+
+// Map de cantidades por priceId
+type QuantityMap = Record<number, number>;
 
 export default function HerramientaVenta() {
   const [view, setView] = useState<ViewState>("services");
   const [selectedService, setSelectedService] =
     useState<ConciergeService | null>(null);
-  const [selectedPriceId, setSelectedPriceId] = useState<number | null>(null);
-  const [quantity, setQuantity] = useState(1);
+  // Nuevo: mapa de cantidades por cada tipo de precio
+  const [quantities, setQuantities] = useState<QuantityMap>({});
   const [customerData, setCustomerData] = useState({
     name: "",
     email: "",
@@ -93,6 +99,7 @@ export default function HerramientaVenta() {
     amount: number;
     serviceName: string | null;
     priceLabel: string;
+    lineDetails?: LineDetail[];
     commissionAmount: number;
     emailSent: boolean;
   } | null>(null);
@@ -139,37 +146,64 @@ export default function HerramientaVenta() {
     }
   };
 
-  // Seleccionar servicio
+  // Seleccionar servicio → ir al formulario con cantidades en 0
   const handleSelectService = (service: ConciergeService) => {
     setSelectedService(service);
-    setSelectedPriceId(null);
-    setQuantity(1);
-    // Auto-select if only one active price
-    const activePrices = service.prices.filter((p) => p.active);
-    if (activePrices.length === 1) {
-      setSelectedPriceId(activePrices[0].id);
-    }
+    // Inicializar cantidades en 0 para cada precio activo
+    const initialQuantities: QuantityMap = {};
+    service.prices.filter((p) => p.active).forEach((p) => {
+      initialQuantities[p.id] = 0;
+    });
+    setQuantities(initialQuantities);
     setView("form");
   };
 
-  // Get selected price object
-  const getSelectedPrice = (): ServicePrice | undefined => {
-    if (!selectedService || !selectedPriceId) return undefined;
-    return selectedService.prices.find((p) => p.id === selectedPriceId);
+  // Cambiar cantidad de un tipo de precio
+  const updateQuantity = (priceId: number, delta: number) => {
+    setQuantities((prev) => ({
+      ...prev,
+      [priceId]: Math.max(0, (prev[priceId] || 0) + delta),
+    }));
   };
+
+  // Calcular items activos (cantidad > 0)
+  const activeItems = useMemo(() => {
+    if (!selectedService) return [];
+    return selectedService.prices
+      .filter((p) => p.active && (quantities[p.id] || 0) > 0)
+      .map((p) => ({
+        priceId: p.id,
+        label: p.label,
+        unitPrice: p.price,
+        quantity: quantities[p.id] || 0,
+        subtotal: p.price * (quantities[p.id] || 0),
+      }));
+  }, [selectedService, quantities]);
+
+  // Total combinado
+  const totalAmount = useMemo(() => {
+    return activeItems.reduce((sum, item) => sum + item.subtotal, 0);
+  }, [activeItems]);
+
+  // Total personas
+  const totalPersonas = useMemo(() => {
+    return activeItems.reduce((sum, item) => sum + item.quantity, 0);
+  }, [activeItems]);
 
   // Enviar formulario
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedService || !selectedPriceId) {
-      toast.error("Selecciona un precio");
+    if (!selectedService || activeItems.length === 0) {
+      toast.error("Agrega al menos una persona");
       return;
     }
 
     initiateSaleMutation.mutate({
       conciergeServiceId: selectedService.id,
-      priceId: selectedPriceId,
-      quantity,
+      items: activeItems.map((item) => ({
+        priceId: item.priceId,
+        quantity: item.quantity,
+      })),
       customerName: customerData.name,
       customerEmail: customerData.email,
       customerPhone: customerData.phone || undefined,
@@ -181,22 +215,9 @@ export default function HerramientaVenta() {
   const handleNewSale = () => {
     setView("services");
     setSelectedService(null);
-    setSelectedPriceId(null);
-    setQuantity(1);
+    setQuantities({});
     setCustomerData({ name: "", email: "", phone: "", notes: "" });
     setSaleResult(null);
-  };
-
-  // Get price range string for a service
-  const getPriceRange = (service: ConciergeService) => {
-    const activePrices = service.prices.filter((p) => p.active);
-    if (activePrices.length === 0) return "Sin precio";
-    if (activePrices.length === 1)
-      return formatPrice(activePrices[0].price);
-    const min = Math.min(...activePrices.map((p) => p.price));
-    const max = Math.max(...activePrices.map((p) => p.price));
-    if (min === max) return formatPrice(min);
-    return `${formatPrice(min)} - ${formatPrice(max)}`;
   };
 
   // Get category info for a service
@@ -204,7 +225,6 @@ export default function HerramientaVenta() {
     if (service.serviceCategory) {
       return getCategoryInfo(service.serviceCategory);
     }
-    // Fallback: infer from name
     if (service.serviceName) {
       return inferCategoryFromName(service.serviceName);
     }
@@ -246,7 +266,7 @@ export default function HerramientaVenta() {
         </p>
       </div>
 
-      {/* Lista de servicios - diseño mobile-first sin imágenes */}
+      {/* Lista de servicios */}
       {loadingServices ? (
         <div className="space-y-3">
           {[1, 2, 3, 4].map((i) => (
@@ -284,8 +304,8 @@ export default function HerramientaVenta() {
                         {service.serviceName || "Servicio"}
                       </h3>
 
-                      {/* Prices inline */}
-                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
+                      {/* Prices - each on its own line for clarity */}
+                      <div className="flex flex-col gap-0.5 mb-1">
                         {activePrices.length > 0 ? (
                           activePrices.map((p) => (
                             <span key={p.id} className="text-xs">
@@ -302,8 +322,8 @@ export default function HerramientaVenta() {
                         )}
                       </div>
 
-                      {/* Duration if available */}
-                      {service.serviceDuration && service.serviceDuration > 0 && (
+                      {/* Duration if available and > 0 */}
+                      {service.serviceDuration != null && service.serviceDuration > 0 && (
                         <span className="text-xs text-gray-400 flex items-center gap-1">
                           <Clock className="w-3 h-3" />
                           {service.serviceDuration} min
@@ -334,16 +354,11 @@ export default function HerramientaVenta() {
     </div>
   );
 
-  // Vista de formulario de cliente
+  // Vista de formulario de cliente con múltiples líneas de precio
   const renderFormView = () => {
-    const selectedPriceObj = getSelectedPrice();
-    const totalAmount = selectedPriceObj
-      ? selectedPriceObj.price * quantity
-      : 0;
-
-    // Get category for selected service
     const cat = selectedService ? getServiceCategory(selectedService) : getCategoryInfo(null);
     const IconComponent = cat.icon;
+    const activePrices = selectedService?.prices.filter((p) => p.active) || [];
 
     return (
       <div className="space-y-4">
@@ -358,9 +373,9 @@ export default function HerramientaVenta() {
           Volver
         </Button>
 
-        {/* Servicio seleccionado - sin imagen, con icono de categoría */}
+        {/* Servicio seleccionado */}
         {selectedService && (
-          <Card className={`${cat.bgColor.replace("100", "50")} border-2 ${cat.borderColor}`}>
+          <Card className={`border-2 ${cat.borderColor}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div
@@ -372,10 +387,10 @@ export default function HerramientaVenta() {
                   <p className={`text-xs font-medium ${cat.accentColor} mb-0.5`}>
                     {cat.name}
                   </p>
-                  <h3 className="font-bold text-base">
+                  <h3 className="font-bold text-base text-gray-900">
                     {selectedService.serviceName}
                   </h3>
-                  {selectedService.serviceDuration && selectedService.serviceDuration > 0 && (
+                  {selectedService.serviceDuration != null && selectedService.serviceDuration > 0 && (
                     <p className="text-sm text-gray-600 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {selectedService.serviceDuration} min
@@ -387,88 +402,105 @@ export default function HerramientaVenta() {
           </Card>
         )}
 
-        {/* Selección de precio y cantidad */}
+        {/* Selector de cantidades por tipo de precio */}
         {selectedService && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Tag className="w-4 h-4" />
-                Tipo de Precio
+                ¿Cuántas personas?
               </CardTitle>
+              <CardDescription>
+                Indica la cantidad para cada tipo
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Price selection */}
-              <div className="space-y-2">
-                <Label>Selecciona el tipo *</Label>
-                <Select
-                  value={selectedPriceId?.toString() || ""}
-                  onValueChange={(val) =>
-                    setSelectedPriceId(parseInt(val))
-                  }
+            <CardContent className="space-y-0">
+              {activePrices.map((p, idx) => (
+                <div
+                  key={p.id}
+                  className={`flex items-center justify-between py-4 ${
+                    idx < activePrices.length - 1 ? "border-b border-gray-100" : ""
+                  }`}
                 >
-                  <SelectTrigger className="h-12">
-                    <SelectValue placeholder="Selecciona un precio" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {selectedService.prices
-                      .filter((p) => p.active)
-                      .map((p) => (
-                        <SelectItem key={p.id} value={p.id.toString()}>
-                          {p.label} — {formatPrice(p.price)}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Quantity */}
-              <div className="space-y-2">
-                <Label>Cantidad</Label>
-                <div className="flex items-center gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-10 w-10"
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    disabled={quantity <= 1}
-                  >
-                    -
-                  </Button>
-                  <span className="text-xl font-bold w-12 text-center">
-                    {quantity}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-10 w-10"
-                    onClick={() => setQuantity(quantity + 1)}
-                  >
-                    +
-                  </Button>
-                </div>
-              </div>
-
-              {/* Total */}
-              {selectedPriceObj && (
-                <div className={`${cat.bgColor.replace("100", "50")} p-3 rounded-lg`}>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Total a cobrar</span>
-                    <span className={`text-2xl font-bold ${cat.accentColor}`}>
-                      {formatPrice(totalAmount)}
-                    </span>
+                  {/* Label y precio unitario */}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-900 text-base">
+                      {p.label}
+                    </p>
+                    <p className={`text-sm ${cat.accentColor} font-medium`}>
+                      {formatPrice(p.price)} c/u
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {selectedPriceObj.label} x {quantity}
-                  </p>
+
+                  {/* Controles de cantidad */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => updateQuantity(p.id, -1)}
+                      disabled={(quantities[p.id] || 0) <= 0}
+                    >
+                      <Minus className="w-4 h-4" />
+                    </Button>
+                    <span className="text-xl font-bold w-10 text-center tabular-nums">
+                      {quantities[p.id] || 0}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => updateQuantity(p.id, 1)}
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              {/* Resumen del desglose */}
+              {activeItems.length > 0 && (
+                <div className={`mt-4 pt-4 border-t-2 ${cat.borderColor}`}>
+                  {/* Desglose por línea */}
+                  <div className="space-y-1.5 mb-3">
+                    {activeItems.map((item) => (
+                      <div
+                        key={item.priceId}
+                        className="flex justify-between text-sm"
+                      >
+                        <span className="text-gray-600">
+                          {item.label} x {item.quantity}
+                        </span>
+                        <span className="font-medium text-gray-800">
+                          {formatPrice(item.subtotal)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Total */}
+                  <div className={`${cat.bgColor} -mx-6 px-6 py-3 rounded-b-lg`}>
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-gray-700 font-medium">Total a cobrar</span>
+                        <p className="text-xs text-gray-500">
+                          {totalPersonas} {totalPersonas === 1 ? "persona" : "personas"}
+                        </p>
+                      </div>
+                      <span className={`text-2xl font-bold ${cat.accentColor}`}>
+                        {formatPrice(totalAmount)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
         )}
 
-        {/* Formulario */}
+        {/* Formulario de datos del cliente */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -560,7 +592,7 @@ export default function HerramientaVenta() {
                 disabled={
                   !customerData.name ||
                   !customerData.email ||
-                  !selectedPriceId ||
+                  activeItems.length === 0 ||
                   initiateSaleMutation.isPending
                 }
               >
@@ -573,6 +605,11 @@ export default function HerramientaVenta() {
                   <>
                     <ShoppingCart className="w-5 h-5 mr-2" />
                     Generar Enlace de Pago
+                    {totalAmount > 0 && (
+                      <span className="ml-2 opacity-90">
+                        ({formatPrice(totalAmount)})
+                      </span>
+                    )}
                   </>
                 )}
               </Button>
@@ -612,16 +649,35 @@ export default function HerramientaVenta() {
           <CardContent className="space-y-4">
             <div className="flex justify-between items-center py-2 border-b">
               <span className="text-gray-600">Servicio</span>
-              <span className="font-semibold">{saleResult.serviceName}</span>
+              <span className="font-medium">{saleResult.serviceName}</span>
             </div>
-            {saleResult.priceLabel && (
+
+            {/* Desglose por línea si hay múltiples */}
+            {saleResult.lineDetails && saleResult.lineDetails.length > 0 ? (
+              <div className="py-2 border-b">
+                <span className="text-gray-600 text-sm">Detalle:</span>
+                <div className="mt-1 space-y-1">
+                  {saleResult.lineDetails.map((line, i) => (
+                    <div key={i} className="flex justify-between text-sm">
+                      <span className="text-gray-700">
+                        {line.label} x {line.quantity}
+                      </span>
+                      <span className="font-medium">
+                        {formatPrice(line.subtotal)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : saleResult.priceLabel ? (
               <div className="flex justify-between items-center py-2 border-b">
                 <span className="text-gray-600">Tipo</span>
                 <span className="font-medium">{saleResult.priceLabel}</span>
               </div>
-            )}
+            ) : null}
+
             <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Monto</span>
+              <span className="text-gray-600">Monto Total</span>
               <span className="font-bold text-lg text-blue-600">
                 {formatPrice(saleResult.amount)}
               </span>
