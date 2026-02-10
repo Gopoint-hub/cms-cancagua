@@ -48,6 +48,9 @@ import {
   Building2,
   Percent,
   BarChart3,
+  Users,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from "date-fns";
 import { es } from "date-fns/locale";
@@ -79,7 +82,7 @@ interface CommissionSummary {
 type PeriodType = "today" | "week" | "month";
 
 export default function Vendedores() {
-  const [activeTab, setActiveTab] = useState("commissions");
+  const [activeTab, setActiveTab] = useState("sellers");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState<ConciergeSeller | null>(null);
   const [selectedSeller, setSelectedSeller] = useState<ConciergeSeller | null>(null);
@@ -218,6 +221,10 @@ export default function Vendedores() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
+          <TabsTrigger value="sellers" className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            Vendedores
+          </TabsTrigger>
           <TabsTrigger value="commissions" className="flex items-center gap-2">
             <DollarSign className="w-4 h-4" />
             Comisiones
@@ -227,6 +234,100 @@ export default function Vendedores() {
             Métricas
           </TabsTrigger>
         </TabsList>
+
+        {/* Tab: Vendedores */}
+        <TabsContent value="sellers" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Vendedores Activos</CardTitle>
+              <CardDescription>
+                Gestiona los vendedores del canal Concierge y sus comisiones
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {!sellers ? (
+                <div className="p-6 space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : sellers.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  <Users className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                  <p>No hay vendedores registrados</p>
+                  <p className="text-sm mt-1">Los vendedores se crean desde Admin → Usuarios asignando el rol "seller"</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Vendedor</TableHead>
+                      <TableHead>Código</TableHead>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead className="text-center">Comisión</TableHead>
+                      <TableHead className="text-center">Estado</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sellers.map((seller: ConciergeSeller) => (
+                      <TableRow key={seller.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{seller.userName || "Sin nombre"}</p>
+                            <p className="text-xs text-gray-500">{seller.userEmail}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-sm bg-gray-100 px-2 py-1 rounded">{seller.sellerCode}</code>
+                        </TableCell>
+                        <TableCell>{seller.companyName || "-"}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="outline" className="text-base font-semibold">
+                            {seller.commissionRate}%
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {seller.active ? (
+                            <Badge className="bg-green-100 text-green-700 border-green-200">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Activo
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="bg-red-100 text-red-700 border-red-200">
+                              <XCircle className="w-3 h-3 mr-1" />
+                              Inactivo
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditingSeller(seller);
+                              setFormData({
+                                userId: seller.userId,
+                                commissionRate: seller.commissionRate,
+                                companyName: seller.companyName || "",
+                                notes: seller.notes || "",
+                                active: seller.active,
+                              });
+                              setIsDialogOpen(true);
+                            }}
+                          >
+                            <Edit className="w-4 h-4 mr-1" />
+                            Editar
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Tab: Comisiones */}
         <TabsContent value="commissions" className="space-y-4">

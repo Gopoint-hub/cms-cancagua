@@ -279,3 +279,9 @@
 - [x] Dashboard: vendedor ve dashboard simplificado, no el Panel de Control completo
 - [x] Vendedor no debe ver B2C, B2B, Marketing, Métricas, Operaciones, Admin, Ayuda
 - [x] Bug Fix: Vendedor no ve servicios en herramienta de venta (lista vacía) - rol era 'seller' no 'concierge', y faltaba auto-crear seller record
+
+## Rediseño email de pago concierge
+- [x] Rediseñar email de pago con estilo Cancagua (colores tierra, logo visible, diseño elegante)
+- [x] Incluir desglose de items en el email (ej: Adulto x3, Niño x2)
+- [x] Mejorar logo (usar versión letras blancas sobre fondo oscuro)
+- [x] Agregar tabla de vendedores activos con comisión editable en módulo Comisiones Concierge

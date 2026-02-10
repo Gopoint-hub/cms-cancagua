@@ -463,6 +463,7 @@ export const conciergeRouter = router({
             amount: totalAmount,
             paymentUrl,
             sellerName,
+            items: lineDetails,
           });
 
           return {
