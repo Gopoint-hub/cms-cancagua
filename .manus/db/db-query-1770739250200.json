@@ -1,0 +1,16 @@
+{
+  "query": "SELECT s.id, s.name, s.image_url, cs.id as cs_id FROM services s JOIN concierge_services cs ON cs.service_id = s.id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT s.id, s.name, s.image_url, cs.id as cs_id FROM services s JOIN concierge_services cs ON cs.service_id = s.id;",
+  "rows": [
+    {
+      "id": "33",
+      "name": "Biopiscinas en Frutillar + Traslado incluido",
+      "image_url": "[object Object]",
+      "cs_id": "1"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\timage_url\tcs_id\n33\tBiopiscinas en Frutillar + Traslado incluido\t[object Object]\t1\n",
+  "stderr": "",
+  "execution_time_ms": 345
+}

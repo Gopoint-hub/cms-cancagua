@@ -1,0 +1,15 @@
+{
+  "query": "SELECT id, name, image_url FROM services WHERE id IN (SELECT service_id FROM concierge_services) LIMIT 10;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, name, image_url FROM services WHERE id IN (SELECT service_id FROM concierge_services) LIMIT 10;",
+  "rows": [
+    {
+      "id": "33",
+      "name": "Biopiscinas en Frutillar + Traslado incluido",
+      "image_url": "[object Object]"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\timage_url\n33\tBiopiscinas en Frutillar + Traslado incluido\t[object Object]\n",
+  "stderr": "",
+  "execution_time_ms": 569
+}

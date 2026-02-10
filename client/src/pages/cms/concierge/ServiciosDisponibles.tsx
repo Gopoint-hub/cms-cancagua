@@ -1,6 +1,7 @@
 /**
  * Servicios Disponibles - Módulo Concierge (Admin)
  * Info de servicios viene de Skedu, precios diferenciados se configuran en CMS.
+ * Diseño sin imágenes: usa iconos y colores por categoría para identificación rápida.
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -34,14 +35,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { toast } from "sonner";
 import {
   Plus,
@@ -50,9 +43,10 @@ import {
   Package,
   DollarSign,
   Loader2,
-  Tag,
   X,
+  Clock,
 } from "lucide-react";
+import { getCategoryInfo, getCategoryName } from "@/lib/serviceCategories";
 
 interface PriceEntry {
   label: string;
@@ -253,6 +247,18 @@ export default function ServiciosDisponibles() {
     setPrices(prices.filter((_, i) => i !== index));
   };
 
+  // Get price range string for a service
+  const getPriceRange = (service: ConciergeService) => {
+    const activePrices = service.prices.filter((p) => p.active);
+    if (activePrices.length === 0) return "Sin precio";
+    if (activePrices.length === 1)
+      return formatPrice(activePrices[0].price);
+    const min = Math.min(...activePrices.map((p) => p.price));
+    const max = Math.max(...activePrices.map((p) => p.price));
+    if (min === max) return formatPrice(min);
+    return `${formatPrice(min)} - ${formatPrice(max)}`;
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -261,8 +267,7 @@ export default function ServiciosDisponibles() {
           <div>
             <h1 className="text-2xl font-bold">Servicios Disponibles</h1>
             <p className="text-gray-500">
-              Servicios de Skedu con precios diferenciados para el canal
-              Concierge
+              Servicios con precios diferenciados para el canal Concierge
             </p>
           </div>
           <Button onClick={handleNew}>
@@ -271,142 +276,140 @@ export default function ServiciosDisponibles() {
           </Button>
         </div>
 
-        {/* Tabla de servicios */}
-        <Card>
-          <CardContent className="p-0">
-            {isLoading ? (
-              <div className="p-6 space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-16 w-full" />
-                ))}
-              </div>
-            ) : conciergeServices?.length === 0 ? (
-              <div className="p-12 text-center">
-                <Package className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-semibold mb-2">
-                  No hay servicios configurados
-                </h3>
-                <p className="text-gray-500 mb-4">
-                  Agrega servicios de Skedu y configura precios diferenciados
-                </p>
-                <Button onClick={handleNew}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Agregar Primer Servicio
-                </Button>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Servicio (Skedu)</TableHead>
-                    <TableHead>Precios</TableHead>
-                    <TableHead>Disponibilidad</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {conciergeServices?.map((service) => (
-                    <TableRow key={service.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          {service.serviceImageUrl ? (
-                            <img
-                              src={service.serviceImageUrl}
-                              alt={service.serviceName || ""}
-                              className="w-10 h-10 rounded-lg object-cover"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
-                              <Package className="w-5 h-5 text-gray-400" />
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-medium">
-                              {service.serviceName}
-                            </p>
-                            {service.serviceCategory && (
-                              <p className="text-sm text-gray-500">
-                                {service.serviceCategory}
-                              </p>
-                            )}
-                          </div>
+        {/* Grid de servicios como tarjetas */}
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-48 rounded-xl" />
+            ))}
+          </div>
+        ) : conciergeServices?.length === 0 ? (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <Package className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-semibold mb-2">
+                No hay servicios configurados
+              </h3>
+              <p className="text-gray-500 mb-4">
+                Agrega servicios y configura precios diferenciados
+              </p>
+              <Button onClick={handleNew}>
+                <Plus className="w-4 h-4 mr-2" />
+                Agregar Primer Servicio
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {conciergeServices?.map((service) => {
+              const cat = getCategoryInfo(service.serviceCategory);
+              const IconComponent = cat.icon;
+              return (
+                <Card
+                  key={service.id}
+                  className={`relative overflow-hidden border-2 ${cat.borderColor} ${!service.active ? "opacity-60" : ""}`}
+                >
+                  {/* Category color bar at top */}
+                  <div className={`h-1.5 ${cat.bgColor.replace("100", "400")}`} />
+
+                  <CardContent className="p-4">
+                    {/* Top row: Icon + Name + Status */}
+                    <div className="flex items-start gap-3 mb-3">
+                      <div
+                        className={`w-12 h-12 rounded-xl ${cat.bgColor} flex items-center justify-center shrink-0`}
+                      >
+                        <IconComponent className={`w-6 h-6 ${cat.iconColor}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-base leading-tight mb-0.5">
+                          {service.serviceName || "Servicio"}
+                        </h3>
+                        <span className={`text-xs font-medium ${cat.accentColor}`}>
+                          {cat.name}
+                        </span>
+                      </div>
+                      <Badge
+                        variant={service.active ? "default" : "secondary"}
+                        className="shrink-0 text-xs"
+                      >
+                        {service.active ? "Activo" : "Inactivo"}
+                      </Badge>
+                    </div>
+
+                    {/* Prices */}
+                    <div className="bg-gray-50 rounded-lg p-3 mb-3">
+                      {service.prices && service.prices.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {service.prices
+                            .filter((p) => p.active)
+                            .map((p) => (
+                              <div
+                                key={p.id}
+                                className="flex items-center justify-between"
+                              >
+                                <span className="text-sm text-gray-600">
+                                  {p.label}
+                                </span>
+                                <span className={`text-sm font-bold ${cat.accentColor}`}>
+                                  {formatPrice(p.price)}
+                                </span>
+                              </div>
+                            ))}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          {service.prices && service.prices.length > 0 ? (
-                            service.prices
-                              .filter((p) => p.active)
-                              .map((p) => (
-                                <div
-                                  key={p.id}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Tag className="w-3 h-3 text-gray-400" />
-                                  <span className="text-sm text-gray-600">
-                                    {p.label}:
-                                  </span>
-                                  <span className="text-sm font-semibold text-blue-600">
-                                    {formatPrice(p.price)}
-                                  </span>
-                                </div>
-                              ))
-                          ) : (
-                            <span className="text-sm text-gray-400 italic">
-                              Sin precios
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {service.availableQuantity === -1 ? (
-                          <Badge variant="outline">Ilimitado</Badge>
-                        ) : (
-                          <Badge
-                            variant={
-                              service.availableQuantity > 0
-                                ? "default"
-                                : "destructive"
-                            }
-                          >
-                            {service.availableQuantity} disponibles
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={service.active ? "default" : "secondary"}
-                        >
-                          {service.active ? "Activo" : "Inactivo"}
+                      ) : (
+                        <span className="text-sm text-gray-400 italic">
+                          Sin precios configurados
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Bottom row: Availability + Duration + Actions */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {service.availableQuantity === -1
+                            ? "Ilimitado"
+                            : `${service.availableQuantity} disp.`}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleEdit(service)}
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDelete(service.id)}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                        {service.serviceDuration && service.serviceDuration > 0 && (
+                          <span className="text-xs text-gray-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {service.serviceDuration}min
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleEdit(service)}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:text-red-700"
+                          onClick={() => handleDelete(service.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Seller notes if any */}
+                    {service.sellerNotes && (
+                      <p className="text-xs text-gray-500 mt-2 italic border-t pt-2">
+                        {service.sellerNotes}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
 
         {/* Diálogo de crear/editar */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -418,14 +421,14 @@ export default function ServiciosDisponibles() {
               <DialogDescription>
                 {editingService
                   ? "Modifica la configuración y precios del servicio"
-                  : "Selecciona un servicio de Skedu y configura precios diferenciados"}
+                  : "Selecciona un servicio y configura precios diferenciados"}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-5 py-4">
               {/* Selector de servicio base */}
               <div className="space-y-2">
-                <Label>Servicio de Skedu *</Label>
+                <Label>Servicio *</Label>
                 <Select
                   value={formData.serviceId?.toString() || ""}
                   onValueChange={(value) =>
@@ -442,7 +445,12 @@ export default function ServiciosDisponibles() {
                         key={service.id}
                         value={service.id.toString()}
                       >
-                        {service.name}
+                        <span className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">
+                            {getCategoryName(service.category)}
+                          </span>
+                          <span className="font-medium">{service.name}</span>
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>

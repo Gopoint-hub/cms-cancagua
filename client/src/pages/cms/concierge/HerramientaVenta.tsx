@@ -1,7 +1,7 @@
 /**
  * Herramienta de Venta - Módulo Concierge
  * Interfaz mobile-first para que los vendedores realicen ventas.
- * Ahora con precios diferenciados (adulto, niño, etc.)
+ * Diseño sin imágenes: usa iconos y colores por categoría para identificación rápida.
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -38,11 +38,12 @@ import {
   Check,
   ExternalLink,
   Loader2,
-  DollarSign,
   Clock,
   Package,
   Tag,
+  ChevronRight,
 } from "lucide-react";
+import { getCategoryInfo, inferCategoryFromName } from "@/lib/serviceCategories";
 
 // Tipos
 interface ServicePrice {
@@ -198,6 +199,18 @@ export default function HerramientaVenta() {
     return `${formatPrice(min)} - ${formatPrice(max)}`;
   };
 
+  // Get category info for a service
+  const getServiceCategory = (service: ConciergeService) => {
+    if (service.serviceCategory) {
+      return getCategoryInfo(service.serviceCategory);
+    }
+    // Fallback: infer from name
+    if (service.serviceName) {
+      return inferCategoryFromName(service.serviceName);
+    }
+    return getCategoryInfo(null);
+  };
+
   // Vista de selección de servicios
   const renderServicesView = () => (
     <div className="space-y-4">
@@ -233,71 +246,80 @@ export default function HerramientaVenta() {
         </p>
       </div>
 
-      {/* Grid de servicios */}
+      {/* Lista de servicios - diseño mobile-first sin imágenes */}
       {loadingServices ? (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-3">
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-40 rounded-xl" />
+            <Skeleton key={i} className="h-24 rounded-xl" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {services?.map((service) => (
-            <Card
-              key={service.id}
-              className="cursor-pointer hover:shadow-lg transition-all duration-200 active:scale-95 border-2 hover:border-blue-500"
-              onClick={() => handleSelectService(service)}
-            >
-              <CardContent className="p-3">
-                {/* Imagen del servicio */}
-                {service.serviceImageUrl ? (
-                  <div className="aspect-square rounded-lg overflow-hidden mb-2 bg-gray-100">
-                    <img
-                      src={service.serviceImageUrl}
-                      alt={service.serviceName || "Servicio"}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                ) : (
-                  <div className="aspect-square rounded-lg bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center mb-2">
-                    <Package className="w-8 h-8 text-blue-500" />
-                  </div>
-                )}
+        <div className="space-y-3">
+          {services?.map((service) => {
+            const cat = getServiceCategory(service);
+            const IconComponent = cat.icon;
+            const activePrices = service.prices.filter((p) => p.active);
 
-                {/* Info del servicio */}
-                <h3 className="font-semibold text-sm line-clamp-2 mb-1">
-                  {service.serviceName || "Servicio"}
-                </h3>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-blue-600">
-                    {getPriceRange(service)}
-                  </span>
-                  {service.serviceDuration && (
-                    <span className="text-xs text-gray-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {service.serviceDuration}min
-                    </span>
-                  )}
-                </div>
-                {/* Show price labels */}
-                {service.prices.filter((p) => p.active).length > 1 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {service.prices
-                      .filter((p) => p.active)
-                      .map((p) => (
-                        <Badge
-                          key={p.id}
-                          variant="outline"
-                          className="text-[10px] px-1 py-0"
-                        >
-                          {p.label}
-                        </Badge>
-                      ))}
+            return (
+              <Card
+                key={service.id}
+                className={`cursor-pointer hover:shadow-lg transition-all duration-200 active:scale-[0.98] border-2 ${cat.borderColor} hover:border-blue-400`}
+                onClick={() => handleSelectService(service)}
+              >
+                <CardContent className="p-0">
+                  <div className="flex items-stretch">
+                    {/* Left: Category icon block */}
+                    <div
+                      className={`w-20 ${cat.bgColor} flex flex-col items-center justify-center gap-1 rounded-l-xl shrink-0`}
+                    >
+                      <IconComponent className={`w-7 h-7 ${cat.iconColor}`} />
+                      <span className={`text-[10px] font-semibold ${cat.iconColor} text-center leading-tight px-1`}>
+                        {cat.name}
+                      </span>
+                    </div>
+
+                    {/* Right: Service info */}
+                    <div className="flex-1 p-3 flex flex-col justify-center min-w-0">
+                      <h3 className="font-bold text-sm leading-tight mb-1.5 text-gray-900">
+                        {service.serviceName || "Servicio"}
+                      </h3>
+
+                      {/* Prices inline */}
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
+                        {activePrices.length > 0 ? (
+                          activePrices.map((p) => (
+                            <span key={p.id} className="text-xs">
+                              <span className="text-gray-500">{p.label}: </span>
+                              <span className={`font-bold ${cat.accentColor}`}>
+                                {formatPrice(p.price)}
+                              </span>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">
+                            Sin precio
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Duration if available */}
+                      {service.serviceDuration && service.serviceDuration > 0 && (
+                        <span className="text-xs text-gray-400 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {service.serviceDuration} min
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Arrow indicator */}
+                    <div className="flex items-center pr-3">
+                      <ChevronRight className="w-5 h-5 text-gray-300" />
+                    </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -319,6 +341,10 @@ export default function HerramientaVenta() {
       ? selectedPriceObj.price * quantity
       : 0;
 
+    // Get category for selected service
+    const cat = selectedService ? getServiceCategory(selectedService) : getCategoryInfo(null);
+    const IconComponent = cat.icon;
+
     return (
       <div className="space-y-4">
         {/* Botón volver */}
@@ -332,27 +358,24 @@ export default function HerramientaVenta() {
           Volver
         </Button>
 
-        {/* Servicio seleccionado */}
+        {/* Servicio seleccionado - sin imagen, con icono de categoría */}
         {selectedService && (
-          <Card className="bg-blue-50 border-blue-200">
+          <Card className={`${cat.bgColor.replace("100", "50")} border-2 ${cat.borderColor}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                {selectedService.serviceImageUrl ? (
-                  <img
-                    src={selectedService.serviceImageUrl}
-                    alt={selectedService.serviceName || ""}
-                    className="w-16 h-16 rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-lg bg-blue-200 flex items-center justify-center">
-                    <Package className="w-6 h-6 text-blue-600" />
-                  </div>
-                )}
+                <div
+                  className={`w-14 h-14 rounded-xl ${cat.bgColor} flex items-center justify-center shrink-0`}
+                >
+                  <IconComponent className={`w-7 h-7 ${cat.iconColor}`} />
+                </div>
                 <div className="flex-1">
-                  <h3 className="font-semibold">
+                  <p className={`text-xs font-medium ${cat.accentColor} mb-0.5`}>
+                    {cat.name}
+                  </p>
+                  <h3 className="font-bold text-base">
                     {selectedService.serviceName}
                   </h3>
-                  {selectedService.serviceDuration && (
+                  {selectedService.serviceDuration && selectedService.serviceDuration > 0 && (
                     <p className="text-sm text-gray-600 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {selectedService.serviceDuration} min
@@ -429,10 +452,10 @@ export default function HerramientaVenta() {
 
               {/* Total */}
               {selectedPriceObj && (
-                <div className="bg-blue-50 p-3 rounded-lg">
+                <div className={`${cat.bgColor.replace("100", "50")} p-3 rounded-lg`}>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Total a cobrar</span>
-                    <span className="text-2xl font-bold text-blue-600">
+                    <span className={`text-2xl font-bold ${cat.accentColor}`}>
                       {formatPrice(totalAmount)}
                     </span>
                   </div>

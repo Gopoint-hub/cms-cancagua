@@ -261,3 +261,9 @@
 - [x] Renombrar módulo a "Comisiones Concierge" con solo pestañas Comisiones y Métricas
 - [x] Actualizar sidebar: "Vendedores" → "Comisiones" con icono DollarSign
 - [x] Mantener diálogo de edición (comisión, empresa, notas) accesible desde tabla de comisiones
+
+## Rediseño módulo Concierge sin imágenes (mobile-first)
+- [x] Rediseñar ServiciosDisponibles sin imágenes - tarjetas con iconos, nombre destacado, precio, categoría
+- [x] Diseño mobile-first optimizado para vendedores
+- [x] Actualizar VendedorConcierge (venta) para usar mismo diseño sin imágenes
+- [x] Eliminar dependencia de image_url en módulos de concierge
