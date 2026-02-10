@@ -269,3 +269,7 @@
 - [x] Eliminar dependencia de image_url en módulos de concierge
 - [x] Bug Fix: Herramienta de venta solo permite un tipo de precio a la vez - necesita soportar múltiples líneas (ej: 3 Adultos + 2 Niños)
 - [x] Bug Fix: "0" suelto aparece en tarjeta de servicio (duración 0 min no debería mostrarse)
+
+## Admin/Superadmin como vendedores concierge
+- [x] Permitir que superadmin y admin accedan a Herramienta de Venta como vendedores
+- [x] Auto-crear seller info para admin/superadmin si no existe al acceder a venta

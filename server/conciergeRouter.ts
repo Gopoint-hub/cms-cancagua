@@ -276,15 +276,35 @@ export const conciergeRouter = router({
       return await conciergeDb.getConciergeServicesWithPrices(true);
     }),
 
-    /** Obtener información del vendedor actual */
+    /** Obtener información del vendedor actual.
+     *  Si el usuario es admin/superadmin y no tiene seller, se auto-crea uno.
+     */
     getMySellerInfo: conciergeProcedure.query(async ({ ctx }) => {
-      const seller = await conciergeDb.getConciergeSellerByUserId(ctx.user.id);
+      let seller = await conciergeDb.getConciergeSellerByUserId(ctx.user.id);
       if (!seller) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message:
-            "No tienes configuración de vendedor. Contacta al administrador.",
-        });
+        // Auto-crear seller para admin/superadmin para que puedan probar
+        if (ctx.user.role === "super_admin" || ctx.user.role === "admin") {
+          const sellerId = await conciergeDb.upsertConciergeSeller({
+            userId: ctx.user.id,
+            commissionRate: 0,
+            companyName: ctx.user.name || "Administrador",
+            notes: "Auto-creado para pruebas de admin",
+            active: 1,
+          });
+          seller = await conciergeDb.getConciergeSellerByUserId(ctx.user.id);
+          if (!seller) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Error al crear perfil de vendedor",
+            });
+          }
+        } else {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message:
+              "No tienes configuración de vendedor. Contacta al administrador.",
+          });
+        }
       }
       return seller;
     }),
@@ -319,15 +339,27 @@ export const conciergeRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "Debes agregar al menos un tipo de precio" });
         }
 
-        // 1. Obtener información del vendedor
-        const seller = await conciergeDb.getConciergeSellerByUserId(
+        // 1. Obtener información del vendedor (auto-crear para admin/superadmin)
+        let seller = await conciergeDb.getConciergeSellerByUserId(
           ctx.user.id
         );
         if (!seller) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "No tienes configuración de vendedor",
-          });
+          if (ctx.user.role === "super_admin" || ctx.user.role === "admin") {
+            await conciergeDb.upsertConciergeSeller({
+              userId: ctx.user.id,
+              commissionRate: 0,
+              companyName: ctx.user.name || "Administrador",
+              notes: "Auto-creado para pruebas de admin",
+              active: 1,
+            });
+            seller = await conciergeDb.getConciergeSellerByUserId(ctx.user.id);
+          }
+          if (!seller) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "No tienes configuración de vendedor",
+            });
+          }
         }
 
         if (!seller.active) {
