@@ -787,7 +787,8 @@ export type InsertMaintenanceReportHistory = typeof maintenanceReportHistory.$in
 export const conciergeServices = mysqlTable("concierge_services", {
   id: int("id").autoincrement().primaryKey(),
   serviceId: int("service_id").references(() => services.id, { onDelete: "cascade" }).notNull(),
-  availableQuantity: int("available_quantity").default(-1).notNull(),
+  /** Cupos diarios: máximo de personas que se pueden atender por día. -1 = ilimitado */
+  dailyQuota: int("daily_quota").default(-1).notNull(),
   active: int("active").default(1).notNull(),
   sellerNotes: text("seller_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -814,6 +815,23 @@ export const conciergeServicePrices = mysqlTable("concierge_service_prices", {
 
 export type ConciergeServicePrice = typeof conciergeServicePrices.$inferSelect;
 export type InsertConciergeServicePrice = typeof conciergeServicePrices.$inferInsert;
+
+/**
+ * Registro de uso diario de cupos por servicio.
+ * Se reinicia automáticamente cada día (hora Chile, America/Santiago).
+ */
+export const conciergeQuotaUsage = mysqlTable("concierge_quota_usage", {
+  id: int("id").autoincrement().primaryKey(),
+  conciergeServiceId: int("concierge_service_id").references(() => conciergeServices.id, { onDelete: "cascade" }).notNull(),
+  /** Fecha en formato YYYY-MM-DD en hora Chile */
+  usageDate: varchar("usage_date", { length: 10 }).notNull(),
+  /** Total de personas vendidas en este día */
+  usedQuota: int("used_quota").default(0).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ConciergeQuotaUsage = typeof conciergeQuotaUsage.$inferSelect;
+export type InsertConciergeQuotaUsage = typeof conciergeQuotaUsage.$inferInsert;
 
 /**
  * Configuración de vendedores del canal Concierge.

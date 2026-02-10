@@ -285,3 +285,12 @@
 - [x] Incluir desglose de items en el email (ej: Adulto x3, Niño x2)
 - [x] Mejorar logo (usar versión letras blancas sobre fondo oscuro)
 - [x] Agregar tabla de vendedores activos con comisión editable en módulo Comisiones Concierge
+
+## Sistema de Cupos Diarios para Servicios Concierge
+- [x] Renombrar "Cantidad Disponible" a "Cupos Diarios" con descripción clara (máximo personas por día)
+- [x] Crear tabla de uso diario de cupos (service_id, fecha, cupos_usados)
+- [x] Descontar cupos al confirmar venta (no al crear link de pago)
+- [x] Calcular cupos restantes del día en hora Chile (America/Santiago)
+- [x] Mostrar cupos restantes al vendedor en herramienta de venta
+- [x] Bloquear venta si no hay cupos disponibles
+- [x] -1 sigue significando ilimitado (sin restricción de cupos)

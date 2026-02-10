@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE concierge_services CHANGE COLUMN available_quantity daily_quota int NOT NULL DEFAULT -1;\n\nCREATE TABLE IF NOT EXISTS concierge_quota_usage (\n  id int AUTO_INCREMENT PRIMARY KEY,\n  concierge_service_id int NOT NULL,\n  usage_date varchar(10) NOT NULL,\n  used_quota int NOT NULL DEFAULT 0,\n  updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n  CONSTRAINT fk_quota_service FOREIGN KEY (concierge_service_id) REFERENCES concierge_services(id) ON DELETE CASCADE\n);\n\nCREATE INDEX idx_quota_service_date ON concierge_quota_usage(concierge_service_id, usage_date);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute ALTER TABLE concierge_services CHANGE COLUMN available_quantity daily_quota int NOT NULL DEFAULT -1;\n\nCREATE TABLE IF NOT EXISTS concierge_quota_usage (\n  id int AUTO_INCREMENT PRIMARY KEY,\n  concierge_service_id int NOT NULL,\n  usage_date varchar(10) NOT NULL,\n  used_quota int NOT NULL DEFAULT 0,\n  updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n  CONSTRAINT fk_quota_service FOREIGN KEY (concierge_service_id) REFERENCES concierge_services(id) ON DELETE CASCADE\n);\n\nCREATE INDEX idx_quota_service_date ON concierge_quota_usage(concierge_service_id, usage_date);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1315
+}

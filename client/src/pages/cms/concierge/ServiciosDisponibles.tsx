@@ -69,7 +69,7 @@ interface ServicePrice {
 interface ConciergeService {
   id: number;
   serviceId: number;
-  availableQuantity: number;
+  dailyQuota: number;
   active: number;
   sellerNotes: string | null;
   serviceName: string | null;
@@ -97,7 +97,7 @@ export default function ServiciosDisponibles() {
   );
   const [formData, setFormData] = useState({
     serviceId: 0,
-    availableQuantity: -1,
+    dailyQuota: -1,
     active: 1,
     sellerNotes: "",
   });
@@ -154,7 +154,7 @@ export default function ServiciosDisponibles() {
   const resetForm = () => {
     setFormData({
       serviceId: 0,
-      availableQuantity: -1,
+      dailyQuota: -1,
       active: 1,
       sellerNotes: "",
     });
@@ -173,7 +173,7 @@ export default function ServiciosDisponibles() {
     setEditingService(service);
     setFormData({
       serviceId: service.serviceId,
-      availableQuantity: service.availableQuantity,
+      dailyQuota: service.dailyQuota,
       active: service.active,
       sellerNotes: service.sellerNotes || "",
     });
@@ -367,9 +367,9 @@ export default function ServiciosDisponibles() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs">
-                          {service.availableQuantity === -1
+                          {service.dailyQuota === -1
                             ? "Ilimitado"
-                            : `${service.availableQuantity} disp.`}
+                            : `${service.dailyQuota} cupos/día`}
                         </Badge>
                         {service.serviceDuration && service.serviceDuration > 0 && (
                           <span className="text-xs text-gray-500 flex items-center gap-1">
@@ -525,23 +525,23 @@ export default function ServiciosDisponibles() {
                 </div>
               </div>
 
-              {/* Cantidad disponible */}
+              {/* Cupos diarios */}
               <div className="space-y-2">
-                <Label htmlFor="quantity">Cantidad Disponible</Label>
+                <Label htmlFor="dailyQuota">Cupos Diarios</Label>
                 <Input
-                  id="quantity"
+                  id="dailyQuota"
                   type="number"
                   min="-1"
-                  value={formData.availableQuantity}
+                  value={formData.dailyQuota}
                   onChange={(e) =>
                     setFormData({
                       ...formData,
-                      availableQuantity: parseInt(e.target.value) || -1,
+                      dailyQuota: parseInt(e.target.value) || -1,
                     })
                   }
                 />
                 <p className="text-xs text-gray-500">
-                  Usa -1 para cantidad ilimitada
+                  Cantidad máxima de personas que se pueden atender por día. Usa -1 para ilimitado.
                 </p>
               </div>
 

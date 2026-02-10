@@ -75,7 +75,7 @@ export const conciergeRouter = router({
         z.object({
           id: z.number().optional(),
           serviceId: z.number(),
-          availableQuantity: z.number().default(-1),
+          dailyQuota: z.number().default(-1),
           active: z.number().min(0).max(1).default(1),
           sellerNotes: z.string().optional(),
           prices: z
@@ -274,7 +274,15 @@ export const conciergeRouter = router({
   sales: router({
     /** Obtener servicios disponibles para venta con precios (Vendedor) */
     getAvailableServices: conciergeProcedure.query(async () => {
-      return await conciergeDb.getConciergeServicesWithPrices(true);
+      const services = await conciergeDb.getConciergeServicesWithPrices(true);
+      // Enrich with today's quota usage
+      const serviceIds = services.map(s => s.id);
+      const quotaUsage = await conciergeDb.getQuotaUsedTodayBulk(serviceIds);
+      return services.map(s => ({
+        ...s,
+        quotaUsedToday: quotaUsage.get(s.id) || 0,
+        quotaRemaining: s.dailyQuota === -1 ? -1 : Math.max(0, s.dailyQuota - (quotaUsage.get(s.id) || 0)),
+      }));
     }),
 
     /** Obtener información del vendedor actual.
@@ -390,7 +398,17 @@ export const conciergeRouter = router({
           });
         }
 
-        // 3. Validar y calcular cada línea de precio
+        // 3. Verificar cupos disponibles
+        const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+        const quotaCheck = await conciergeDb.checkQuotaAvailable(input.conciergeServiceId, totalQuantity);
+        if (!quotaCheck.available) {
+          const msg = quotaCheck.remaining <= 0
+            ? `No quedan cupos disponibles para hoy (cupo diario: ${quotaCheck.dailyQuota})`
+            : `Solo quedan ${quotaCheck.remaining} cupos para hoy (solicitaste ${totalQuantity})`;
+          throw new TRPCError({ code: "BAD_REQUEST", message: msg });
+        }
+
+        // 4. Validar y calcular cada línea de precio
         let totalAmount = 0;
         const priceLabels: string[] = [];
         const lineDetails: { label: string; quantity: number; unitPrice: number; subtotal: number }[] = [];
@@ -700,6 +718,19 @@ export const conciergeRouter = router({
               sellerName,
               sellerCode,
             });
+
+            // Incrementar cupos usados hoy
+            try {
+              // Calcular cantidad total de personas de la venta
+              // priceLabel tiene formato "Adulto x3, Niño x2"
+              const totalQty = (sale.priceLabel || '').split(',').reduce((sum: number, part: string) => {
+                const match = part.match(/x(\d+)/);
+                return sum + (match ? parseInt(match[1]) : 0);
+              }, 0) || 1;
+              await conciergeDb.incrementQuotaUsage(sale.conciergeServiceId, totalQty);
+            } catch (quotaErr) {
+              console.error('[Concierge] Error incrementing quota:', quotaErr);
+            }
 
             return {
               success: true,

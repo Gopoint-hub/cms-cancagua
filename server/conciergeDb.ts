@@ -8,6 +8,7 @@ import { getDb } from "./db";
 import {
   conciergeServices,
   conciergeServicePrices,
+  conciergeQuotaUsage,
   conciergeSellers,
   conciergeSales,
   conciergeSellerMetrics,
@@ -34,7 +35,7 @@ export async function getConciergeServices(activeOnly = true) {
     .select({
       id: conciergeServices.id,
       serviceId: conciergeServices.serviceId,
-      availableQuantity: conciergeServices.availableQuantity,
+      dailyQuota: conciergeServices.dailyQuota,
       active: conciergeServices.active,
       sellerNotes: conciergeServices.sellerNotes,
       createdAt: conciergeServices.createdAt,
@@ -62,7 +63,7 @@ export async function getConciergeServiceById(id: number) {
     .select({
       id: conciergeServices.id,
       serviceId: conciergeServices.serviceId,
-      availableQuantity: conciergeServices.availableQuantity,
+      dailyQuota: conciergeServices.dailyQuota,
       active: conciergeServices.active,
       sellerNotes: conciergeServices.sellerNotes,
       serviceName: services.name,
@@ -89,7 +90,7 @@ export async function getConciergeServicesWithPrices(activeOnly = true) {
     .select({
       id: conciergeServices.id,
       serviceId: conciergeServices.serviceId,
-      availableQuantity: conciergeServices.availableQuantity,
+      dailyQuota: conciergeServices.dailyQuota,
       active: conciergeServices.active,
       sellerNotes: conciergeServices.sellerNotes,
       createdAt: conciergeServices.createdAt,
@@ -154,7 +155,7 @@ export async function getConciergeServiceWithPrices(id: number) {
 export async function upsertConciergeService(data: {
   id?: number;
   serviceId: number;
-  availableQuantity?: number;
+  dailyQuota?: number;
   active?: number;
   sellerNotes?: string;
 }) {
@@ -166,7 +167,7 @@ export async function upsertConciergeService(data: {
       .update(conciergeServices)
       .set({
         serviceId: data.serviceId,
-        availableQuantity: data.availableQuantity ?? -1,
+        dailyQuota: data.dailyQuota ?? -1,
         active: data.active ?? 1,
         sellerNotes: data.sellerNotes,
       })
@@ -175,12 +176,144 @@ export async function upsertConciergeService(data: {
   } else {
     const result = await db.insert(conciergeServices).values({
       serviceId: data.serviceId,
-      availableQuantity: data.availableQuantity ?? -1,
+      dailyQuota: data.dailyQuota ?? -1,
       active: data.active ?? 1,
       sellerNotes: data.sellerNotes,
     });
     return result[0].insertId;
   }
+}
+
+// ============================================
+// CUPOS DIARIOS
+// ============================================
+
+/** Obtener la fecha actual en hora Chile (America/Santiago) en formato YYYY-MM-DD */
+export function getChileDateToday(): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(now); // Returns YYYY-MM-DD
+}
+
+/** Obtener cupos usados hoy para un servicio */
+export async function getQuotaUsedToday(conciergeServiceId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const today = getChileDateToday();
+  const result = await db
+    .select({ usedQuota: conciergeQuotaUsage.usedQuota })
+    .from(conciergeQuotaUsage)
+    .where(
+      and(
+        eq(conciergeQuotaUsage.conciergeServiceId, conciergeServiceId),
+        eq(conciergeQuotaUsage.usageDate, today)
+      )
+    )
+    .limit(1);
+
+  return result[0]?.usedQuota ?? 0;
+}
+
+/** Obtener cupos usados hoy para múltiples servicios */
+export async function getQuotaUsedTodayBulk(serviceIds: number[]): Promise<Map<number, number>> {
+  const db = await getDb();
+  const result = new Map<number, number>();
+  if (!db || serviceIds.length === 0) return result;
+
+  const today = getChileDateToday();
+  const rows = await db
+    .select({
+      conciergeServiceId: conciergeQuotaUsage.conciergeServiceId,
+      usedQuota: conciergeQuotaUsage.usedQuota,
+    })
+    .from(conciergeQuotaUsage)
+    .where(
+      and(
+        sql`${conciergeQuotaUsage.conciergeServiceId} IN (${sql.join(
+          serviceIds.map((id) => sql`${id}`),
+          sql`, `
+        )})`,
+        eq(conciergeQuotaUsage.usageDate, today)
+      )
+    );
+
+  for (const row of rows) {
+    result.set(row.conciergeServiceId, row.usedQuota);
+  }
+  return result;
+}
+
+/** Incrementar cupos usados para un servicio (al confirmar pago) */
+export async function incrementQuotaUsage(conciergeServiceId: number, quantity: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const today = getChileDateToday();
+
+  // Upsert: insert or update
+  const existing = await db
+    .select({ id: conciergeQuotaUsage.id, usedQuota: conciergeQuotaUsage.usedQuota })
+    .from(conciergeQuotaUsage)
+    .where(
+      and(
+        eq(conciergeQuotaUsage.conciergeServiceId, conciergeServiceId),
+        eq(conciergeQuotaUsage.usageDate, today)
+      )
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .update(conciergeQuotaUsage)
+      .set({ usedQuota: existing[0].usedQuota + quantity })
+      .where(eq(conciergeQuotaUsage.id, existing[0].id));
+  } else {
+    await db.insert(conciergeQuotaUsage).values({
+      conciergeServiceId,
+      usageDate: today,
+      usedQuota: quantity,
+    });
+  }
+}
+
+/** Verificar si hay cupos disponibles para un servicio */
+export async function checkQuotaAvailable(
+  conciergeServiceId: number,
+  requestedQuantity: number
+): Promise<{ available: boolean; remaining: number; dailyQuota: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  // Get the service's daily quota
+  const service = await db
+    .select({ dailyQuota: conciergeServices.dailyQuota })
+    .from(conciergeServices)
+    .where(eq(conciergeServices.id, conciergeServiceId))
+    .limit(1);
+
+  if (!service[0]) throw new Error("Service not found");
+
+  const dailyQuota = service[0].dailyQuota;
+
+  // -1 means unlimited
+  if (dailyQuota === -1) {
+    return { available: true, remaining: -1, dailyQuota: -1 };
+  }
+
+  const usedToday = await getQuotaUsedToday(conciergeServiceId);
+  const remaining = dailyQuota - usedToday;
+
+  return {
+    available: remaining >= requestedQuantity,
+    remaining,
+    dailyQuota,
+  };
 }
 
 export async function deleteConciergeService(id: number) {

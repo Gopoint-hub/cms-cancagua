@@ -56,7 +56,9 @@ interface ServicePrice {
 interface ConciergeService {
   id: number;
   serviceId: number;
-  availableQuantity: number;
+  dailyQuota: number;
+  quotaUsedToday: number;
+  quotaRemaining: number;
   active: number;
   sellerNotes: string | null;
   serviceName: string | null;
@@ -280,11 +282,13 @@ export default function HerramientaVenta() {
             const IconComponent = cat.icon;
             const activePrices = service.prices.filter((p) => p.active);
 
+            const isSoldOut = service.quotaRemaining === 0;
+
             return (
               <Card
                 key={service.id}
-                className={`cursor-pointer hover:shadow-lg transition-all duration-200 active:scale-[0.98] border-2 ${cat.borderColor} hover:border-blue-400`}
-                onClick={() => handleSelectService(service)}
+                className={`transition-all duration-200 border-2 ${isSoldOut ? 'opacity-50 cursor-not-allowed border-gray-200' : `cursor-pointer hover:shadow-lg active:scale-[0.98] ${cat.borderColor} hover:border-blue-400`}`}
+                onClick={() => !isSoldOut && handleSelectService(service)}
               >
                 <CardContent className="p-0">
                   <div className="flex items-stretch">
@@ -322,13 +326,28 @@ export default function HerramientaVenta() {
                         )}
                       </div>
 
-                      {/* Duration if available and > 0 */}
-                      {service.serviceDuration != null && service.serviceDuration > 0 && (
-                        <span className="text-xs text-gray-400 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {service.serviceDuration} min
-                        </span>
-                      )}
+                      {/* Quota info */}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {service.dailyQuota === -1 ? (
+                          <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded font-medium">
+                            Cupos ilimitados
+                          </span>
+                        ) : isSoldOut ? (
+                          <span className="text-[10px] bg-red-50 text-red-700 px-1.5 py-0.5 rounded font-bold">
+                            Sin cupos hoy
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded font-medium">
+                            {service.quotaRemaining} cupos restantes hoy
+                          </span>
+                        )}
+                        {service.serviceDuration != null && service.serviceDuration > 0 && (
+                          <span className="text-xs text-gray-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {service.serviceDuration} min
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Arrow indicator */}
