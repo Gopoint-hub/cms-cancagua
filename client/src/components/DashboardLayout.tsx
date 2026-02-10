@@ -91,7 +91,7 @@ export const categories: Category[] = [
     items: [
       { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta" },
       { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios" },
-      { icon: Users, label: "Vendedores", path: "/cms/concierge/vendedores" },
+      { icon: DollarSign, label: "Comisiones", path: "/cms/concierge/vendedores" },
       { icon: DollarSign, label: "Mis Comisiones", path: "/cms/concierge/mis-comisiones" },
     ],
   },

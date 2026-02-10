@@ -255,3 +255,9 @@
 - [x] Crear sub-página AyudaNewsletters (/cms/ayuda/newsletters) como primer módulo dentro de la categoría Ayuda
 - [x] Fix: AyudaNewsletters no muestra el sidebar (agregado DashboardLayout wrapper)
 - [x] Agregar opción "Enviar a todos" en el selector de listas del newsletter (toggle seleccionar/deseleccionar todas)
+
+## Eliminar pestaña Vendedores redundante en módulo Concierge
+- [x] Eliminar pestaña "Vendedores" del módulo Vendedores Concierge (ya se gestionan en Usuarios)
+- [x] Renombrar módulo a "Comisiones Concierge" con solo pestañas Comisiones y Métricas
+- [x] Actualizar sidebar: "Vendedores" → "Comisiones" con icono DollarSign
+- [x] Mantener diálogo de edición (comisión, empresa, notas) accesible desde tabla de comisiones

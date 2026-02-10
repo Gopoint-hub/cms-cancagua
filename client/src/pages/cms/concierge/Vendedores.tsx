@@ -1,9 +1,9 @@
 /**
- * Vendedores - Módulo Concierge (Admin)
- * Gestión de vendedores y métricas de comisiones
+ * Comisiones Concierge - Módulo Concierge (Admin)
+ * Gestión de comisiones y métricas de ventas
+ * Los vendedores se gestionan desde el módulo de Usuarios
  */
 import { useState } from "react";
-import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,20 +40,16 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import {
-  Users,
-  Plus,
   Edit,
   TrendingUp,
   DollarSign,
   ShoppingCart,
-  Calendar,
   Loader2,
   Building2,
   Percent,
   BarChart3,
-  Eye,
 } from "lucide-react";
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays } from "date-fns";
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from "date-fns";
 import { es } from "date-fns/locale";
 
 interface ConciergeSeller {
@@ -69,12 +65,6 @@ interface ConciergeSeller {
   userEmail: string | null;
 }
 
-interface SellerMetrics {
-  totalSales: number;
-  totalCommission: number;
-  transactionCount: number;
-}
-
 interface CommissionSummary {
   sellerId: number;
   sellerName: string | null;
@@ -86,11 +76,10 @@ interface CommissionSummary {
   transactionCount: number;
 }
 
-type PeriodType = "today" | "week" | "month" | "custom";
+type PeriodType = "today" | "week" | "month";
 
 export default function Vendedores() {
-  const [, navigate] = useLocation();
-  const [activeTab, setActiveTab] = useState("sellers");
+  const [activeTab, setActiveTab] = useState("commissions");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState<ConciergeSeller | null>(null);
   const [selectedSeller, setSelectedSeller] = useState<ConciergeSeller | null>(null);
@@ -128,11 +117,8 @@ export default function Vendedores() {
 
   const dateRange = getDateRange();
 
-  // Obtener vendedores
-  const { data: sellers, isLoading: loadingSellers, refetch: refetchSellers } = trpc.concierge.sellers.getAll.useQuery({ activeOnly: false });
-
-  // Obtener usuarios con rol concierge para el selector
-  const { data: conciergeUsers } = trpc.users.getByRole.useQuery({ role: "concierge" });
+  // Obtener vendedores (para el selector de métricas y edición)
+  const { data: sellers, refetch: refetchSellers } = trpc.concierge.sellers.getAll.useQuery({ activeOnly: false });
 
   // Obtener resumen de comisiones
   const { data: commissionsSummary, isLoading: loadingCommissions } = trpc.concierge.commissions.getSummary.useQuery({
@@ -150,27 +136,16 @@ export default function Vendedores() {
     { enabled: !!selectedSeller }
   );
 
-  // Mutación para crear/actualizar vendedor
+  // Mutación para actualizar vendedor
   const upsertMutation = trpc.concierge.sellers.upsert.useMutation({
     onSuccess: () => {
       refetchSellers();
       setIsDialogOpen(false);
       resetForm();
-      toast.success(editingSeller ? "Vendedor actualizado" : "Vendedor agregado");
+      toast.success("Vendedor actualizado");
     },
     onError: (error: any) => {
       toast.error(error.message || "Error al guardar el vendedor");
-    },
-  });
-
-  // Mutación para actualizar comisión
-  const updateCommissionMutation = trpc.concierge.sellers.updateCommission.useMutation({
-    onSuccess: () => {
-      refetchSellers();
-      toast.success("Comisión actualizada");
-    },
-    onError: (error: any) => {
-      toast.error(error.message || "Error al actualizar la comisión");
     },
   });
 
@@ -195,31 +170,24 @@ export default function Vendedores() {
     setEditingSeller(null);
   };
 
-  // Redirigir al módulo de usuarios para agregar vendedor
-  const handleNew = () => {
-    navigate("/cms/usuarios");
-  };
-
-  // Abrir diálogo para editar
-  const handleEdit = (seller: ConciergeSeller) => {
-    setEditingSeller(seller);
-    setFormData({
-      userId: seller.userId,
-      commissionRate: seller.commissionRate,
-      companyName: seller.companyName || "",
-      notes: seller.notes || "",
-      active: seller.active,
-    });
-    setIsDialogOpen(true);
+  // Abrir diálogo para editar vendedor desde la tabla de comisiones
+  const handleEditSeller = (sellerId: number) => {
+    const seller = sellers?.find((s: ConciergeSeller) => s.id === sellerId);
+    if (seller) {
+      setEditingSeller(seller);
+      setFormData({
+        userId: seller.userId,
+        commissionRate: seller.commissionRate,
+        companyName: seller.companyName || "",
+        notes: seller.notes || "",
+        active: seller.active,
+      });
+      setIsDialogOpen(true);
+    }
   };
 
   // Guardar vendedor
   const handleSave = () => {
-    if (!formData.userId && !editingSeller) {
-      toast.error("Selecciona un usuario");
-      return;
-    }
-
     upsertMutation.mutate({
       ...formData,
       id: editingSeller?.id,
@@ -240,26 +208,16 @@ export default function Vendedores() {
     <DashboardLayout>
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Vendedores Concierge</h1>
-          <p className="text-gray-500">
-            Gestiona vendedores, comisiones y métricas de ventas
-          </p>
-        </div>
-        <Button onClick={handleNew}>
-          <Plus className="w-4 h-4 mr-2" />
-          Ir a Usuarios
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold">Comisiones Concierge</h1>
+        <p className="text-gray-500">
+          Gestiona comisiones y métricas de ventas del canal Concierge
+        </p>
       </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="sellers" className="flex items-center gap-2">
-            <Users className="w-4 h-4" />
-            Vendedores
-          </TabsTrigger>
           <TabsTrigger value="commissions" className="flex items-center gap-2">
             <DollarSign className="w-4 h-4" />
             Comisiones
@@ -269,99 +227,6 @@ export default function Vendedores() {
             Métricas
           </TabsTrigger>
         </TabsList>
-
-        {/* Tab: Vendedores */}
-        <TabsContent value="sellers" className="space-y-4">
-          <Card>
-            <CardContent className="p-0">
-              {loadingSellers ? (
-                <div className="p-6 space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-16 w-full" />
-                  ))}
-                </div>
-              ) : sellers?.length === 0 ? (
-                <div className="p-12 text-center">
-                  <Users className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No hay vendedores</h3>
-                  <p className="text-gray-500 mb-4">
-                    Agrega vendedores para comenzar a rastrear comisiones
-                  </p>
-                  <Button onClick={handleNew}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Ir a Usuarios
-                  </Button>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Vendedor</TableHead>
-                      <TableHead>Código</TableHead>
-                      <TableHead>Empresa</TableHead>
-                      <TableHead>Comisión</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sellers?.map((seller: ConciergeSeller) => (
-                      <TableRow key={seller.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{seller.userName || "Sin nombre"}</p>
-                            <p className="text-sm text-gray-500">{seller.userEmail}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <code className="text-sm bg-gray-100 px-2 py-1 rounded">
-                            {seller.sellerCode}
-                          </code>
-                        </TableCell>
-                        <TableCell>
-                          {seller.companyName || (
-                            <span className="text-gray-400">No especificada</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="font-mono">
-                            {seller.commissionRate}%
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={seller.active ? "default" : "secondary"}>
-                            {seller.active ? "Activo" : "Inactivo"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setSelectedSeller(seller);
-                                setActiveTab("metrics");
-                              }}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(seller)}
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* Tab: Comisiones */}
         <TabsContent value="commissions" className="space-y-4">
@@ -454,6 +319,7 @@ export default function Vendedores() {
                       <TableHead className="text-right">Transacciones</TableHead>
                       <TableHead className="text-right">Comisión (%)</TableHead>
                       <TableHead className="text-right">A Pagar</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -475,6 +341,32 @@ export default function Vendedores() {
                         </TableCell>
                         <TableCell className="text-right font-bold text-green-600">
                           {formatPrice(item.totalCommission)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Ver métricas"
+                              onClick={() => {
+                                const seller = sellers?.find((s: ConciergeSeller) => s.id === item.sellerId);
+                                if (seller) {
+                                  setSelectedSeller(seller);
+                                  setActiveTab("metrics");
+                                }
+                              }}
+                            >
+                              <BarChart3 className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Editar comisión"
+                              onClick={() => handleEditSeller(item.sellerId)}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -613,45 +505,22 @@ export default function Vendedores() {
         </TabsContent>
       </Tabs>
 
-      {/* Diálogo de crear/editar vendedor */}
+      {/* Diálogo de editar vendedor (comisión, empresa, notas) */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {editingSeller ? "Editar Vendedor" : "Agregar Vendedor"}
-            </DialogTitle>
+            <DialogTitle>Editar Vendedor</DialogTitle>
             <DialogDescription>
-              {editingSeller
-                ? "Modifica la configuración del vendedor"
-                : "Configura un nuevo vendedor para el canal Concierge"}
+              Modifica la comisión y configuración del vendedor
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* Selector de usuario */}
-            {!editingSeller && (
-              <div className="space-y-2">
-                <Label>Usuario *</Label>
-                <Select
-                  value={formData.userId?.toString() || ""}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, userId: parseInt(value) })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona un usuario con rol concierge" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {conciergeUsers?.map((user: any) => (
-                      <SelectItem key={user.id} value={user.id.toString()}>
-                        {user.name || user.email}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-gray-500">
-                  Solo aparecen usuarios con rol "concierge"
-                </p>
+            {/* Info del vendedor (solo lectura) */}
+            {editingSeller && (
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="font-medium">{editingSeller.userName || editingSeller.userEmail}</p>
+                <p className="text-sm text-gray-500">Código: {editingSeller.sellerCode}</p>
               </div>
             )}
 
@@ -730,7 +599,7 @@ export default function Vendedores() {
               {upsertMutation.isPending && (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               )}
-              {editingSeller ? "Guardar Cambios" : "Agregar Vendedor"}
+              Guardar Cambios
             </Button>
           </DialogFooter>
         </DialogContent>
