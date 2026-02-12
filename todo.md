@@ -297,3 +297,6 @@
 
 ## Bug Fix: No se puede eliminar servicio concierge
 - [x] Fix: Eliminar servicio falla por foreign key constraints (ventas, precios, cupos asociados) - si tiene ventas se desactiva, si no se elimina
+
+## Bug Fix: "Enviar a todos" muestra conteo incorrecto de suscriptores
+- [x] Fix: "Enviar a todos" muestra ~9000 suscriptores en vez de ~4806 (falta deduplicación en el conteo)

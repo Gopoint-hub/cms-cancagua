@@ -909,6 +909,36 @@ export async function getSubscribersInList(listId: number) {
     .where(eq(listSubscribers.listId, listId));
 }
 
+export async function getUniqueSubscriberCountForLists(listIds: number[]): Promise<number> {
+  const db = await getDb();
+  if (!db || listIds.length === 0) return 0;
+  const { newsletterSubscribers, listSubscribers } = await import("../drizzle/schema");
+  const result = await db.select({
+    count: sql<number>`COUNT(DISTINCT ${newsletterSubscribers.id})`,
+  })
+    .from(newsletterSubscribers)
+    .innerJoin(listSubscribers, eq(newsletterSubscribers.id, listSubscribers.subscriberId))
+    .where(
+      and(
+        inArray(listSubscribers.listId, listIds),
+        eq(newsletterSubscribers.status, 'active')
+      )
+    );
+  return result[0]?.count || 0;
+}
+
+export async function getTotalUniqueActiveSubscribers(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const { newsletterSubscribers } = await import("../drizzle/schema");
+  const result = await db.select({
+    count: sql<number>`COUNT(*)`,
+  })
+    .from(newsletterSubscribers)
+    .where(eq(newsletterSubscribers.status, 'active'));
+  return result[0]?.count || 0;
+}
+
 export async function addSubscriberToList(subscriberId: number, listId: number) {
   const db = await getDb();
   if (!db) return;

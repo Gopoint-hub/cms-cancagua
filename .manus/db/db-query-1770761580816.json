@@ -1,0 +1,9 @@
+{
+  "query": "UPDATE concierge_services SET active = 1 WHERE active = 0",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute UPDATE concierge_services SET active = 1 WHERE active = 0",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 354
+}

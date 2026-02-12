@@ -1,0 +1,8 @@
+{
+  "query": "SELECT \n  (SELECT COUNT(*) FROM newsletter_subscribers WHERE unsubscribed = 0) as active_subscribers,\n  (SELECT COUNT(*) FROM newsletter_subscribers) as total_subscribers,\n  (SELECT SUM(subscriber_count) FROM subscriber_lists) as sum_of_list_counts,\n  (SELECT COUNT(*) FROM list_subscribers) as total_list_memberships\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT \n  (SELECT COUNT(*) FROM newsletter_subscribers WHERE unsubscribed = 0) as active_subscribers,\n  (SELECT COUNT(*) FROM newsletter_subscribers) as total_subscribers,\n  (SELECT SUM(subscriber_count) FROM subscriber_lists) as sum_of_list_counts,\n  (SELECT COUNT(*) FROM list_subscribers) as total_list_memberships\n",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'unsubscribed' in 'where clause'"
+  ]
+}

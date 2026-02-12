@@ -1,0 +1,18 @@
+{
+  "query": "SELECT id, concierge_service_id, amount, status, customer_name, created_at FROM concierge_sales ORDER BY id",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT id, concierge_service_id, amount, status, customer_name, created_at FROM concierge_sales ORDER BY id",
+  "rows": [
+    {
+      "id": "1",
+      "concierge_service_id": "1",
+      "amount": "1100",
+      "status": "pending",
+      "customer_name": "Sebastian Jara",
+      "created_at": "2026-02-10 18:18:06"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tconcierge_service_id\tamount\tstatus\tcustomer_name\tcreated_at\n1\t1\t1100\tpending\tSebastian Jara\t2026-02-10 18:18:06\n",
+  "stderr": "",
+  "execution_time_ms": 350
+}

@@ -2664,6 +2664,28 @@ Devuelve un JSON con este formato:
         return await db.getAllLists();
       }),
 
+    uniqueSubscriberCount: protectedProcedure
+      .input(z.object({ listIds: z.array(z.number()) }))
+      .query(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        if (input.listIds.length === 0) {
+          return { count: 0 };
+        }
+        const count = await db.getUniqueSubscriberCountForLists(input.listIds);
+        return { count };
+      }),
+
+    totalActiveSubscribers: protectedProcedure
+      .query(async ({ ctx }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        const count = await db.getTotalUniqueActiveSubscribers();
+        return { count };
+      }),
+
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {

@@ -143,6 +143,11 @@ export default function CMSCrearNewsletter() {
   
   // Queries
   const { data: lists, isLoading: listsLoading } = trpc.lists.getAll.useQuery();
+  const { data: totalActiveData } = trpc.lists.totalActiveSubscribers.useQuery();
+  const { data: uniqueCountData } = trpc.lists.uniqueSubscriberCount.useQuery(
+    { listIds: selectedLists },
+    { enabled: selectedLists.length > 0 }
+  );
   const { data: existingNewsletter, isLoading: isLoadingNewsletter } = trpc.newsletters.getById.useQuery(
     { id: editId! },
     { enabled: isEditing }
@@ -560,9 +565,7 @@ export default function CMSCrearNewsletter() {
     }
   };
 
-  const totalRecipients = lists
-    ?.filter((list: any) => selectedLists.includes(list.id))
-    .reduce((sum: number, list: any) => sum + (list.subscriberCount || 0), 0) || 0;
+  const totalRecipients = uniqueCountData?.count || 0;
 
   const canProceedToStep = (step: number): boolean => {
     switch (step) {
@@ -1209,7 +1212,7 @@ export default function CMSCrearNewsletter() {
                       </div>
                     </div>
                     <Badge variant="secondary" className="text-base px-3 py-1">
-                      {lists.reduce((sum: number, l: any) => sum + (l.subscriberCount || 0), 0)} suscriptores
+                      {totalActiveData?.count?.toLocaleString() || '...'} suscriptores únicos
                     </Badge>
                   </div>
 
@@ -1255,7 +1258,7 @@ export default function CMSCrearNewsletter() {
                     <div className="bg-[#44580E]/10 rounded-xl p-4 mt-6">
                       <div className="flex items-center justify-between">
                         <span className="font-medium text-[#44580E]">Total de destinatarios</span>
-                        <span className="text-2xl font-bold text-[#44580E]">{totalRecipients}</span>
+                        <span className="text-2xl font-bold text-[#44580E]">{totalRecipients > 0 ? totalRecipients.toLocaleString() : '...'}</span>
                       </div>
                     </div>
                   )}

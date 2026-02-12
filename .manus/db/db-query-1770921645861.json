@@ -1,0 +1,17 @@
+{
+  "query": "SELECT \n  (SELECT COUNT(*) FROM newsletter_subscribers WHERE status = 'active') as active_subs,\n  (SELECT COUNT(*) FROM newsletter_subscribers) as total_subs,\n  (SELECT COALESCE(SUM(subscriber_count), 0) FROM subscriber_lists) as sum_list_counts,\n  (SELECT COUNT(*) FROM list_subscribers) as total_memberships,\n  (SELECT COUNT(DISTINCT subscriber_id) FROM list_subscribers) as unique_subs_in_lists\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT \n  (SELECT COUNT(*) FROM newsletter_subscribers WHERE status = 'active') as active_subs,\n  (SELECT COUNT(*) FROM newsletter_subscribers) as total_subs,\n  (SELECT COALESCE(SUM(subscriber_count), 0) FROM subscriber_lists) as sum_list_counts,\n  (SELECT COUNT(*) FROM list_subscribers) as total_memberships,\n  (SELECT COUNT(DISTINCT subscriber_id) FROM list_subscribers) as unique_subs_in_lists\n",
+  "rows": [
+    {
+      "active_subs": "4799",
+      "total_subs": "4806",
+      "sum_list_counts": "9391",
+      "total_memberships": "9391",
+      "unique_subs_in_lists": "4806"
+    }
+  ],
+  "messages": [],
+  "stdout": "active_subs\ttotal_subs\tsum_list_counts\ttotal_memberships\tunique_subs_in_lists\n4799\t4806\t9391\t9391\t4806\n",
+  "stderr": "",
+  "execution_time_ms": 373
+}

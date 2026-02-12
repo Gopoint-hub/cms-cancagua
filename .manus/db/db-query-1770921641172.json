@@ -1,0 +1,16 @@
+{
+  "query": "SELECT \n  (SELECT COUNT(*) FROM newsletter_subscribers WHERE status = 'active') as active_subscribers,\n  (SELECT COUNT(*) FROM newsletter_subscribers) as total_subscribers,\n  (SELECT SUM(subscriber_count) FROM subscriber_lists) as sum_of_list_counts,\n  (SELECT COUNT(*) FROM list_subscribers) as total_list_memberships\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user kmGoXqmAzDGYCHX.75a102e4d6cb --database h57JzrJUFhgVF2g2BrDxyQ --execute SELECT \n  (SELECT COUNT(*) FROM newsletter_subscribers WHERE status = 'active') as active_subscribers,\n  (SELECT COUNT(*) FROM newsletter_subscribers) as total_subscribers,\n  (SELECT SUM(subscriber_count) FROM subscriber_lists) as sum_of_list_counts,\n  (SELECT COUNT(*) FROM list_subscribers) as total_list_memberships\n",
+  "rows": [
+    {
+      "active_subscribers": "4799",
+      "total_subscribers": "4806",
+      "sum_of_list_counts": "9391",
+      "total_list_memberships": "9391"
+    }
+  ],
+  "messages": [],
+  "stdout": "active_subscribers\ttotal_subscribers\tsum_of_list_counts\ttotal_list_memberships\n4799\t4806\t9391\t9391\n",
+  "stderr": "",
+  "execution_time_ms": 384
+}
