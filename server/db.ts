@@ -927,6 +927,32 @@ export async function getUniqueSubscriberCountForLists(listIds: number[]): Promi
   return result[0]?.count || 0;
 }
 
+export async function getUniqueActiveSubscribersForLists(listIds: number[]) {
+  const db = await getDb();
+  if (!db || listIds.length === 0) return [];
+  const { newsletterSubscribers, listSubscribers } = await import("../drizzle/schema");
+  return await db.selectDistinct({
+    id: newsletterSubscribers.id,
+    email: newsletterSubscribers.email,
+    name: newsletterSubscribers.name,
+  })
+    .from(newsletterSubscribers)
+    .innerJoin(listSubscribers, eq(newsletterSubscribers.id, listSubscribers.subscriberId))
+    .where(
+      and(
+        inArray(listSubscribers.listId, listIds),
+        eq(newsletterSubscribers.status, 'active')
+      )
+    );
+}
+
+export async function bulkCreateNewsletterSends(sends: { newsletterId: number; subscriberId: number; status: string }[]) {
+  const db = await getDb();
+  if (!db || sends.length === 0) return;
+  const { newsletterSends } = await import("../drizzle/schema");
+  await db.insert(newsletterSends).values(sends);
+}
+
 export async function getTotalUniqueActiveSubscribers(): Promise<number> {
   const db = await getDb();
   if (!db) return 0;

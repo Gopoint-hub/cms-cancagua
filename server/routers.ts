@@ -2018,26 +2018,15 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           throw new TRPCError({ code: "BAD_REQUEST", message: "Este newsletter ya se está enviando" });
         }
 
-        // Obtener suscriptores de las listas seleccionadas
-        const allSubscribers: any[] = [];
-        const seenEmails = new Set<string>();
-
-        for (const listId of input.listIds) {
-          const subscribers = await db.getSubscribersInList(listId);
-          for (const sub of subscribers) {
-            if (sub.status === 'active' && !seenEmails.has(sub.email)) {
-              seenEmails.add(sub.email);
-              allSubscribers.push(sub);
-            }
-          }
-        }
+        // Obtener suscriptores únicos activos de todas las listas en una sola query (con deduplicación en DB)
+        const allSubscribers = await db.getUniqueActiveSubscribersForLists(input.listIds);
 
         if (allSubscribers.length === 0) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "No hay suscriptores activos en las listas seleccionadas" });
         }
 
         // Actualizar estado a 'sending' y guardar recipientCount inmediatamente
-        await db.updateNewsletter(input.newsletterId, { 
+        await db.updateNewsletter(input.newsletterId, {
           status: 'sending',
           recipientCount: allSubscribers.length,
         });
@@ -2054,67 +2043,85 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
             const { ENV } = await import("./_core/env");
             const appUrl = ENV.appUrl || 'https://cancagua-cms.manus.space';
 
-            const emails = allSubscribers.map(sub => {
-              const encodedEmail = Buffer.from(sub.email).toString('base64');
-              const unsubscribeUrl = `${appUrl}/api/unsubscribe?email=${encodedEmail}`;
-              
-              let htmlWithUnsub = htmlContent;
-              
-              if (htmlWithUnsub.includes('{{unsubscribe_url}}')) {
-                htmlWithUnsub = htmlWithUnsub.replace(/\{\{unsubscribe_url\}\}/g, unsubscribeUrl);
-              }
-              
-              if (!htmlWithUnsub.includes('/api/unsubscribe') && !htmlWithUnsub.includes('darse de baja')) {
-                const unsubFooter = `
-                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
-                  <tr>
-                    <td align="center" style="font-family: 'Fira Sans', Arial, sans-serif; font-size: 12px; color: #999999; padding: 8px 0;">
-                      <a href="${unsubscribeUrl}" style="color: #999999; text-decoration: underline;">Darse de baja de este newsletter</a>
-                    </td>
-                  </tr>
-                </table>`;
-                
-                if (htmlWithUnsub.includes('</body>')) {
-                  htmlWithUnsub = htmlWithUnsub.replace('</body>', `${unsubFooter}</body>`);
-                } else if (htmlWithUnsub.includes('</html>')) {
-                  htmlWithUnsub = htmlWithUnsub.replace('</html>', `${unsubFooter}</html>`);
-                } else {
-                  htmlWithUnsub += unsubFooter;
+            // Procesar en chunks para evitar acumular toda la memoria de una vez
+            const CHUNK_SIZE = 500;
+            let totalSent = 0;
+            let totalFailed = 0;
+
+            console.log(`[Newsletter BG] Iniciando envío de ${allSubscribers.length} emails para newsletter ${newsletterId} en chunks de ${CHUNK_SIZE}`);
+
+            for (let i = 0; i < allSubscribers.length; i += CHUNK_SIZE) {
+              const chunk = allSubscribers.slice(i, i + CHUNK_SIZE);
+              const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
+              const totalChunks = Math.ceil(allSubscribers.length / CHUNK_SIZE);
+
+              // Construir emails solo para este chunk (evita acumular 4000+ HTMLs en memoria)
+              const chunkEmails = chunk.map(sub => {
+                const encodedEmail = Buffer.from(sub.email).toString('base64');
+                const unsubscribeUrl = `${appUrl}/api/unsubscribe?email=${encodedEmail}`;
+
+                let htmlWithUnsub = htmlContent;
+
+                if (htmlWithUnsub.includes('{{unsubscribe_url}}')) {
+                  htmlWithUnsub = htmlWithUnsub.replace(/\{\{unsubscribe_url\}\}/g, unsubscribeUrl);
                 }
-              }
-              
-              return {
-                to: sub.email,
-                subject,
-                html: htmlWithUnsub,
-                text: htmlToPlainText(htmlWithUnsub),
-              };
-            });
 
-            console.log(`[Newsletter BG] Iniciando envío de ${emails.length} emails para newsletter ${newsletterId}`);
+                if (!htmlWithUnsub.includes('/api/unsubscribe') && !htmlWithUnsub.includes('darse de baja')) {
+                  const unsubFooter = `
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
+                    <tr>
+                      <td align="center" style="font-family: 'Fira Sans', Arial, sans-serif; font-size: 12px; color: #999999; padding: 8px 0;">
+                        <a href="${unsubscribeUrl}" style="color: #999999; text-decoration: underline;">Darse de baja de este newsletter</a>
+                      </td>
+                    </tr>
+                  </table>`;
 
-            const result = await sendBulkEmails({
-              emails,
-              senderName,
-            });
+                  if (htmlWithUnsub.includes('</body>')) {
+                    htmlWithUnsub = htmlWithUnsub.replace('</body>', `${unsubFooter}</body>`);
+                  } else if (htmlWithUnsub.includes('</html>')) {
+                    htmlWithUnsub = htmlWithUnsub.replace('</html>', `${unsubFooter}</html>`);
+                  } else {
+                    htmlWithUnsub += unsubFooter;
+                  }
+                }
 
-            // Registrar envíos individuales
-            for (const sub of allSubscribers) {
-              await db.createNewsletterSend({
+                return {
+                  to: sub.email,
+                  subject,
+                  html: htmlWithUnsub,
+                  text: htmlToPlainText(htmlWithUnsub),
+                };
+              });
+
+              console.log(`[Newsletter BG] Chunk ${chunkNum}/${totalChunks}: enviando ${chunkEmails.length} emails`);
+
+              const chunkResult = await sendBulkEmails({ emails: chunkEmails, senderName });
+              totalSent += chunkResult.sent;
+              totalFailed += chunkResult.failed;
+
+              // Registrar envíos en bulk (una sola query por chunk)
+              await db.bulkCreateNewsletterSends(chunk.map(sub => ({
                 newsletterId,
                 subscriberId: sub.id,
-                status: result.sent > 0 ? 'sent' : 'failed',
-              });
+                status: chunkResult.sent > 0 ? 'sent' : 'failed',
+              })));
+
+              console.log(`[Newsletter BG] Chunk ${chunkNum}/${totalChunks} completado. Acumulado: enviados=${totalSent}, fallidos=${totalFailed}`);
+
+              // Pausa entre chunks para no saturar la API
+              if (i + CHUNK_SIZE < allSubscribers.length) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
             }
 
-            // Actualizar newsletter con resultados
+            // Actualizar newsletter con resultados finales
             await db.updateNewsletter(newsletterId, {
-              status: result.sent > 0 ? 'sent' : 'failed',
+              status: totalSent > 0 ? 'sent' : 'failed',
               sentAt: new Date(),
               recipientCount: allSubscribers.length,
             });
 
-            console.log(`[Newsletter BG] Envío completado para newsletter ${newsletterId}. Enviados: ${result.sent}, Fallidos: ${result.failed}`);
+            console.log(`[Newsletter BG] Envío completado para newsletter ${newsletterId}. Enviados: ${totalSent}, Fallidos: ${totalFailed}`);
           } catch (bgError: any) {
             console.error(`[Newsletter BG] Error en envío background para newsletter ${newsletterId}:`, bgError);
             await db.updateNewsletter(newsletterId, {
