@@ -1,7 +1,6 @@
 import { eq, gte, and, desc, sql, asc, like, or, isNull, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -61,7 +60,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     if (user.role !== undefined) {
       values.role = user.role;
       updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId || (user.email && authorizedAdminEmails.includes(user.email))) {
+    } else if (user.email && authorizedAdminEmails.includes(user.email)) {
       values.role = 'admin';
       updateSet.role = 'admin';
     }

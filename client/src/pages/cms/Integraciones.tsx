@@ -52,7 +52,7 @@ export default function CMSIntegraciones() {
                                 <Database className="h-5 w-5 text-amber-500" />
                                 Base de Datos
                             </CardTitle>
-                            <CardDescription>MySQL (Manus)</CardDescription>
+                            <CardDescription>MySQL (TiDB)</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <div className="flex items-center gap-2 text-sm">

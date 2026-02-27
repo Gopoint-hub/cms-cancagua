@@ -4,7 +4,6 @@ import { createServer } from "http";
 import net from "net";
 import cors from "cors";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -42,6 +41,7 @@ async function startServer() {
   const allowedOrigins = [
     "https://cancagua.cl",
     "https://www.cancagua.cl",
+    "https://cms.cancagua.cl",
     "http://localhost:5173",
     "http://localhost:3000",
   ];
@@ -49,7 +49,7 @@ async function startServer() {
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.some(allowed => origin.startsWith(allowed) || origin.includes("manus.computer"))) {
+      if (allowedOrigins.some(allowed => origin.startsWith(allowed) || origin.includes(".onrender.com"))) {
         return callback(null, true);
       }
       callback(null, false);
@@ -59,8 +59,6 @@ async function startServer() {
     allowedHeaders: ["Content-Type", "Authorization"],
   }));
 
-  // OAuth callback under /api/oauth/callback
-  registerOAuthRoutes(app);
   // Webhook para Skedu (Módulo Concierge)
   app.use("/api/webhooks/skedu", conciergeWebhook);
   // Unsubscribe route for newsletters
@@ -81,14 +79,14 @@ async function startServer() {
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const port = process.env.RENDER ? preferredPort : await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${port}/`);
   });
 }
 

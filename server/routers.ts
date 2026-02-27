@@ -421,7 +421,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
-        const { storagePut } = await import("./storage");
+        const { cloudinaryPut: storagePut } = await import("./cloudinaryStorage");
         const buffer = Buffer.from(input.imageData, 'base64');
         const extension = input.mimeType.split('/')[1];
         const randomSuffix = Math.random().toString(36).substring(7);
@@ -2052,7 +2052,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           try {
             const { sendBulkEmails, htmlToPlainText } = await import("./email");
             const { ENV } = await import("./_core/env");
-            const appUrl = ENV.appUrl || 'https://cancagua-cms.manus.space';
+            const appUrl = ENV.appUrl || 'https://cms.cancagua.cl';
 
             const emails = allSubscribers.map(sub => {
               const encodedEmail = Buffer.from(sub.email).toString('base64');
@@ -2161,7 +2161,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
-        const { storagePut } = await import("./storage");
+        const { cloudinaryPut: storagePut } = await import("./cloudinaryStorage");
 
         // Extraer el tipo de imagen y datos del base64
         const matches = input.imageData.match(/^data:image\/(\w+);base64,(.+)$/);
@@ -2194,7 +2194,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
-        const { storagePut } = await import("./storage");
+        const { cloudinaryPut: storagePut } = await import("./cloudinaryStorage");
 
         try {
           // Hacer fetch de la página
@@ -2383,7 +2383,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
-        const { storagePut } = await import("./storage");
+        const { cloudinaryPut: storagePut } = await import("./cloudinaryStorage");
         const { transcribeAudio } = await import("./_core/voiceTranscription");
 
         // Extraer el audio del base64
@@ -4081,7 +4081,7 @@ Example output: {"key1": "Hello world"}`;
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         
-        const { storagePut } = await import("./storage");
+        const { cloudinaryPut: storagePut } = await import("./cloudinaryStorage");
         
         // Extraer el tipo de imagen y datos del base64
         const matches = input.imageData.match(/^data:image\/(\w+);base64,(.+)$/);
