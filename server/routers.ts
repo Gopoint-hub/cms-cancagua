@@ -3112,8 +3112,8 @@ Devuelve un JSON con este formato:
         deliveryMethod: z.enum(["email", "whatsapp", "download"]).default("email"),
       }))
       .mutation(async ({ input, ctx }) => {
-        const { createTransaction, generateBuyOrder, generateSessionId } = await import("./webpay");
-        
+        const { createTransaction, generateGiftCardBuyOrder, generateSessionId } = await import("./webpay");
+
         // Generar código único para la gift card
         const code = `GC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
         
@@ -3144,7 +3144,7 @@ Devuelve un JSON con este formato:
         }
         
         // Generar identificadores para WebPay
-        const buyOrder = generateBuyOrder(giftCard.id);
+        const buyOrder = generateGiftCardBuyOrder(giftCard.id);
         const sessionId = generateSessionId();
         
         // Determinar la URL de retorno
@@ -3273,9 +3273,17 @@ Devuelve un JSON con este formato:
               return {
                 success: true,
                 status: "approved",
-                giftCardId: giftCard.id,
-                giftCardCode: giftCard.code,
-                amount: giftCard.amount,
+                giftCard: {
+                  id: giftCard.id,
+                  code: giftCard.code,
+                  amount: giftCard.amount,
+                  recipientName: giftCard.recipientName,
+                  recipientEmail: giftCard.recipientEmail,
+                  senderName: giftCard.senderName,
+                  senderEmail: giftCard.senderEmail,
+                  personalMessage: giftCard.personalMessage,
+                  backgroundImage: giftCard.backgroundImage,
+                },
                 message: "¡Pago exitoso! Tu Gift Card ha sido enviada.",
               };
             } else {
@@ -3288,8 +3296,8 @@ Devuelve un JSON con este formato:
               return {
                 success: false,
                 status: "rejected",
-                giftCardId: giftCard.id,
-                message: "El pago fue rechazado. Por favor, intenta nuevamente.",
+                giftCard: null,
+                message: "El pago fue rechazado. Por favor, intenta con otra tarjeta o verifica los fondos disponibles.",
               };
             }
           } catch (error: any) {
@@ -3369,6 +3377,13 @@ Devuelve un JSON con este formato:
       .query(async ({ ctx }) => {
         if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
+        }
+        // Auto-cleanup: marcar como abandonadas las gift cards pendientes por más de 30 minutos
+        try {
+          const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+          await db.markAbandonedGiftCards(thirtyMinutesAgo);
+        } catch (e) {
+          console.error("Error en auto-cleanup de gift cards:", e);
         }
         return await db.getAllGiftCards();
       }),

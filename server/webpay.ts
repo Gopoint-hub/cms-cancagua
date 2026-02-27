@@ -145,6 +145,14 @@ export function generateBuyOrder(saleId: number): string {
 }
 
 /**
+ * Generar un buyOrder único para Gift Cards
+ */
+export function generateGiftCardBuyOrder(giftCardId: number): string {
+  const timestamp = Date.now().toString(36).slice(-4);
+  return `GC-${giftCardId}-${timestamp}`.substring(0, 26);
+}
+
+/**
  * Generar un sessionId único
  */
 export function generateSessionId(): string {
