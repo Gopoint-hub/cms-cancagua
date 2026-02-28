@@ -173,14 +173,19 @@ export async function generateGiftCardPDF(data: GiftCardData): Promise<Buffer> {
           .text(`Para: ${data.recipientName}`, 30, 200);
       }
 
-      // Mensaje personalizado (si existe)
+      // Mensaje personalizado (si existe) - limitado a 150 caracteres y con altura máxima
       if (data.message) {
+        const truncatedMessage = data.message.length > 150
+          ? data.message.slice(0, 150).trimEnd() + "..."
+          : data.message;
         doc
           .fontSize(11)
           .font("Helvetica-Oblique")
           .fillColor("#E0E0E0")
-          .text(`"${data.message}"`, 30, 235, {
+          .text(`"${truncatedMessage}"`, 30, 235, {
             width: 300,
+            height: 95,
+            ellipsis: true,
             align: "left",
           });
       }

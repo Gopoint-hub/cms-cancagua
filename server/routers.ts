@@ -2972,7 +2972,7 @@ Devuelve un JSON con este formato:
         recipientPhone: z.string().optional(),
         senderName: z.string().optional(),
         senderEmail: z.string().email().optional(),
-        personalMessage: z.string().optional(),
+        personalMessage: z.string().max(150).optional(),
         deliveryMethod: z.enum(["email", "whatsapp", "download"]).default("email"),
       }))
       .mutation(async ({ input }) => {
@@ -3115,7 +3115,7 @@ Devuelve un JSON con este formato:
         recipientPhone: z.string().optional(),
         senderName: z.string().optional(),
         senderEmail: z.string().email().optional(),
-        personalMessage: z.string().optional(),
+        personalMessage: z.string().max(150).optional(),
         deliveryMethod: z.enum(["email", "whatsapp", "download"]).default("email"),
       }))
       .mutation(async ({ input, ctx }) => {
