@@ -1,9 +1,12 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
+// Storage helpers - uses Cloudinary (primary) or Manus Forge proxy (legacy fallback)
 
 import { ENV } from './_core/env';
 
 type StorageConfig = { baseUrl: string; apiKey: string };
+
+function hasForgeConfig(): boolean {
+  return !!(ENV.forgeApiUrl && ENV.forgeApiKey);
+}
 
 function getStorageConfig(): StorageConfig {
   const baseUrl = ENV.forgeApiUrl;
@@ -72,6 +75,12 @@ export async function storagePut(
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream"
 ): Promise<{ key: string; url: string }> {
+  // Use Cloudinary when Forge proxy is not configured
+  if (!hasForgeConfig()) {
+    const { cloudinaryPut } = await import("./cloudinaryStorage");
+    return cloudinaryPut(relKey, data, contentType);
+  }
+
   const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
   const uploadUrl = buildUploadUrl(baseUrl, key);
@@ -93,6 +102,12 @@ export async function storagePut(
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
+  // Use Cloudinary when Forge proxy is not configured
+  if (!hasForgeConfig()) {
+    const { cloudinaryGet } = await import("./cloudinaryStorage");
+    return cloudinaryGet(relKey);
+  }
+
   const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
   return {
