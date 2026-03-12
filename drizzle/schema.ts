@@ -434,20 +434,24 @@ export const quoteItems = mysqlTable("quote_items", {
   id: int("id").autoincrement().primaryKey(),
   quoteId: int("quote_id").references(() => quotes.id, { onDelete: "cascade" }).notNull(),
   productId: int("product_id"),
-  productName: text("product_name").notNull(),
+  productName: varchar("product_name", { length: 255 }),
   description: text("description"),
-  quantity: int("quantity").notNull(),
+  quantity: int("quantity").notNull().default(1),
   unitPrice: int("unit_price").notNull(),
   // Descuento por línea
   discountType: mysqlEnum("discount_type", ["percentage", "fixed"]).default("percentage"),
   discountValue: int("discount_value").default(0),
+  discountPercent: int("discount_percent").default(0),
+  // Subtotal antes de descuento
+  subtotal: int("subtotal").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
   // Total después de descuento
-  total: int("total").notNull(),
+  total: int("total"),
   // Orden para itinerario (drag & drop)
-  sortOrder: int("sort_order").default(0).notNull(),
+  sortOrder: int("sort_order"),
   // Hora del itinerario (opcional, texto libre ej: "10:30")
   scheduleTime: varchar("schedule_time", { length: 10 }),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export type QuoteItem = typeof quoteItems.$inferSelect;

@@ -1098,11 +1098,14 @@ export async function createQuoteItem(item: any) {
   const db = await getDb();
   if (!db) return;
   const { quoteItems } = await import("../drizzle/schema");
-  // Sanitize: scheduleTime must be string or null, productId null if 0 or invalid
+  // Sanitize fields to match DB schema
+  const subtotal = item.subtotal ?? (item.quantity * item.unitPrice) ?? 0;
   const sanitized = {
     ...item,
     scheduleTime: item.scheduleTime ? String(item.scheduleTime) : null,
     productId: item.productId || null,
+    subtotal,
+    discountPercent: item.discountPercent ?? item.discountValue ?? 0,
   };
   await db.insert(quoteItems).values(sanitized);
 }
@@ -2091,16 +2094,18 @@ export async function updateQuoteItems(quoteId: number, items: Array<{
     await db.insert(quoteItems).values(
       items.map(item => ({
         quoteId,
-        productId: item.productId,
+        productId: item.productId || null,
         productName: item.productName,
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discountType: (item.discountType as any) || "percentage",
         discountValue: item.discountValue || 0,
+        discountPercent: (item as any).discountPercent ?? item.discountValue ?? 0,
+        subtotal: (item as any).subtotal ?? (item.quantity * item.unitPrice),
         total: item.total,
         sortOrder: item.sortOrder,
-        scheduleTime: item.scheduleTime,
+        scheduleTime: item.scheduleTime ? String(item.scheduleTime) : null,
       }))
     );
   }
@@ -2193,16 +2198,18 @@ export async function duplicateQuote(quoteId: number, newName?: string): Promise
     await db.insert(quoteItems).values(
       items.map(item => ({
         quoteId: newQuoteId,
-        productId: item.productId,
+        productId: item.productId || null,
         productName: item.productName,
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discountType: item.discountType,
         discountValue: item.discountValue,
+        discountPercent: (item as any).discountPercent ?? item.discountValue ?? 0,
+        subtotal: (item as any).subtotal ?? (item.quantity * item.unitPrice),
         total: item.total,
         sortOrder: item.sortOrder,
-        scheduleTime: item.scheduleTime,
+        scheduleTime: item.scheduleTime ? String(item.scheduleTime) : null,
       }))
     );
   }
