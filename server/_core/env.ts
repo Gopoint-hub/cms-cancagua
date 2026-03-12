@@ -29,7 +29,10 @@ export const ENV = {
   // Contact email for reservations
   contactEmail: process.env.CONTACT_EMAIL ?? "contacto@cancagua.cl",
   
-  // Manus built-in APIs (LLM, storage, etc.)
+  // Manus built-in APIs (LLM, storage, etc.) - legacy
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+
+  // Google Gemini API
+  googleApiKey: process.env.GOOGLE_API_KEY ?? "",
 };
