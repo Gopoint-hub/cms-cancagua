@@ -433,7 +433,7 @@ export type InsertQuote = typeof quotes.$inferInsert;
 export const quoteItems = mysqlTable("quote_items", {
   id: int("id").autoincrement().primaryKey(),
   quoteId: int("quote_id").references(() => quotes.id, { onDelete: "cascade" }).notNull(),
-  productId: int("product_id").references(() => corporateProducts.id),
+  productId: int("product_id"),
   productName: text("product_name").notNull(),
   description: text("description"),
   quantity: int("quantity").notNull(),

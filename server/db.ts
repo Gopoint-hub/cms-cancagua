@@ -1098,7 +1098,13 @@ export async function createQuoteItem(item: any) {
   const db = await getDb();
   if (!db) return;
   const { quoteItems } = await import("../drizzle/schema");
-  await db.insert(quoteItems).values(item);
+  // Sanitize: scheduleTime must be string or null, productId null if 0 or invalid
+  const sanitized = {
+    ...item,
+    scheduleTime: item.scheduleTime ? String(item.scheduleTime) : null,
+    productId: item.productId || null,
+  };
+  await db.insert(quoteItems).values(sanitized);
 }
 
 export async function deleteQuoteItems(quoteId: number) {
