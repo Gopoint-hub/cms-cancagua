@@ -180,8 +180,9 @@ export async function fetchMetaAdsMetrics(startDate: string, endDate: string): P
   // Fetch campaign details from main account
   const campaignData = await callMcpTool("meta_ads_get_insights", {
     ad_account_id: META_ADS_ACCOUNT_TODOS,
+    object_id: META_ADS_ACCOUNT_TODOS,
     level: "campaign",
-    time_range: JSON.stringify({ since: startDate, until: endDate }),
+    time_range: `{"since":"${startDate}","until":"${endDate}"}`,
     fields: "campaign_name,campaign_id,impressions,clicks,spend,actions,objective",
   });
 
@@ -225,9 +226,31 @@ export async function fetchMetaAdsMetrics(startDate: string, endDate: string): P
 async function fetchMetaAccountInsights(accountId: string, startDate: string, endDate: string) {
   const data = await callMcpTool("meta_ads_get_account_insights", {
     ad_account_id: accountId,
-    time_range: JSON.stringify({ since: startDate, until: endDate }),
+    time_range: `{"since":"${startDate}","until":"${endDate}"}`,
     fields: "impressions,clicks,spend,actions",
   });
+
+  // If account insights fail, try with get_insights using object_id
+  if (!data?.data?.[0]) {
+    const fallback = await callMcpTool("meta_ads_get_insights", {
+      ad_account_id: accountId,
+      object_id: accountId,
+      time_range: `{"since":"${startDate}","until":"${endDate}"}`,
+      fields: "impressions,clicks,spend,actions",
+    });
+    if (fallback?.data?.[0]) {
+      const d = fallback.data[0];
+      const actions = d.actions || [];
+      return {
+        impressions: parseInt(d.impressions || "0"),
+        clicks: parseInt(d.clicks || "0"),
+        spend: parseFloat(d.spend || "0"),
+        purchases: parseInt(actions.find((a: any) => a.action_type === "purchase")?.value || "0"),
+        landingPageViews: parseInt(actions.find((a: any) => a.action_type === "landing_page_view")?.value || "0"),
+      };
+    }
+    return null;
+  }
 
   if (!data?.data?.[0]) return null;
 
@@ -359,19 +382,20 @@ export async function fetchSkeduMetrics(startDate: string, endDate: string): Pro
   try {
     const data = await getSkeduEvents({ startDate, endDate });
 
-    if (!data?.Data) return null;
+    const items = data?.Data || data?.data || [];
+    if (!Array.isArray(items) || items.length === 0) return null;
 
-    const bookings: SkeduSale[] = data.Data.map((b: any) => ({
+    const bookings: SkeduSale[] = items.map((b: any) => ({
       id: b.UUID || b.ID || "",
-      serviceName: b.ServiceName || b.Service?.Name || "Sin servicio",
-      clientName: b.ClientName || b.Client?.Name || "Sin cliente",
-      date: b.StartsAt || b.Date || "",
-      status: b.Status || "unknown",
-      price: b.Price || b.Amount || 0,
+      serviceName: b.Service?.Name || b.Variant?.Name || "Sin servicio",
+      clientName: b.Fields?.["Exención de responsabilidad "] || "Sin cliente",
+      date: b.StartsAt || "",
+      status: b.IsConfirmed ? "confirmed" : (b.DeletedAt ? "cancelled" : "pending"),
+      price: b.SessionPriceWithDiscount || b.SessionPrice || 0,
     }));
 
-    const confirmed = bookings.filter(b => b.status === "confirmed" || b.status === "completed" || b.status === "Confirmed");
-    const cancelled = bookings.filter(b => b.status === "cancelled" || b.status === "Cancelled");
+    const confirmed = bookings.filter(b => b.status === "confirmed");
+    const cancelled = bookings.filter(b => b.status === "cancelled");
 
     // Service breakdown
     const serviceMap = new Map<string, { count: number; revenue: number }>();
