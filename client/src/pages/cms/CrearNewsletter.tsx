@@ -55,6 +55,13 @@ const EMAIL_TYPES = [
     placeholder: "Ej: Quiero dar la bienvenida a nuevos suscriptores con un código de descuento del 15%..."
   },
   { 
+    id: "html", 
+    icon: "💻", 
+    title: "HTML Propio", 
+    description: "Pega tu código HTML",
+    placeholder: "Pega aquí tu código HTML completo..."
+  },
+  { 
     id: "custom", 
     icon: "✨", 
     title: "Personalizado", 
@@ -570,7 +577,7 @@ export default function CMSCrearNewsletter() {
   const canProceedToStep = (step: number): boolean => {
     switch (step) {
       case 2: return selectedType !== null;
-      case 3: return requestText.trim().length > 0;
+      case 3: return selectedType === 'html' ? htmlContent.trim().length > 0 : requestText.trim().length > 0;
       case 4: return htmlContent.length > 0;
       case 5: return true;
       default: return true;
@@ -579,9 +586,13 @@ export default function CMSCrearNewsletter() {
 
   const goToNextStep = () => {
     if (currentStep === 2 && canProceedToStep(3)) {
-      // Al pasar del paso 2 al 3, generar el diseño
-      handleGenerateDesign();
-      setCurrentStep(3);
+      if (selectedType === 'html') {
+        setCurrentStep(3);
+      } else {
+        // Al pasar del paso 2 al 3, generar el diseño
+        handleGenerateDesign();
+        setCurrentStep(3);
+      }
     } else if (currentStep < totalSteps && canProceedToStep(currentStep + 1)) {
       setCurrentStep(currentStep + 1);
     }
@@ -728,107 +739,34 @@ export default function CMSCrearNewsletter() {
                   {EMAIL_TYPES.find(t => t.id === selectedType)?.icon}
                   {EMAIL_TYPES.find(t => t.id === selectedType)?.title}
                 </div>
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">Describe tu solicitud</h2>
-                <p className="text-gray-500">Escribe o dicta qué necesitas para tu email</p>
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                  {selectedType === 'html' ? 'Pega tu código HTML' : 'Describe tu solicitud'}
+                </h2>
+                <p className="text-gray-500">
+                  {selectedType === 'html' ? 'Pega el código HTML completo de tu email' : 'Escribe o dicta qué necesitas para tu email'}
+                </p>
               </div>
 
-              {/* 
-                OCULTO TEMPORALMENTE - Importar desde URL
-                Pendiente: Implementar SSR en cancagua.cl para que el scraping funcione correctamente.
-                La funcionalidad está lista en el backend (extractFromUrl, uploadImage).
-                Restaurar este bloque cuando SSR esté implementado.
-                Fecha: 24 Enero 2026
-              */}
-              {/* <Card className="border-[#44580E]/20 bg-[#44580E]/5">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Link2 className="w-4 h-4 text-[#44580E]" />
-                    Importar desde URL (opcional)
-                  </CardTitle>
-                  <CardDescription>
-                    Pega un link de Cancagua y extraeremos automáticamente el contenido e imágenes
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex gap-2">
-                    <Input
-                      value={sourceUrl}
-                      onChange={(e) => setSourceUrl(e.target.value)}
-                      placeholder="https://cancagua.cl/eventos/taller-wim-hof"
-                      disabled={isExtractingUrl}
-                      className="flex-1"
+              {selectedType === 'html' ? (
+                <Card>
+                  <CardContent className="pt-6">
+                    <Textarea
+                      value={htmlContent}
+                      onChange={(e) => setHtmlContent(e.target.value)}
+                      placeholder="<!DOCTYPE html>&#10;<html>&#10;  <head>...</head>&#10;  <body>...</body>&#10;</html>"
+                      className="min-h-[400px] font-mono text-sm resize-y"
                     />
-                    <Button
-                      onClick={handleExtractUrl}
-                      disabled={isExtractingUrl || !sourceUrl.trim()}
-                      className="bg-[#44580E] hover:bg-[#3a4c0c]"
-                    >
-                      {isExtractingUrl ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <>
-                          <ExternalLink className="w-4 h-4 mr-2" />
-                          Extraer
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  
-                  {extractedData && (
-                    <div className="mt-4 p-4 bg-white rounded-lg border border-[#44580E]/20">
-                      <div className="flex items-start gap-4">
-                        {extractedData.images[0] && (
-                          <img 
-                            src={extractedData.images[0]} 
-                            alt="Preview" 
-                            className="w-24 h-24 object-cover rounded-lg flex-shrink-0"
-                          />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-semibold text-gray-900 truncate">{extractedData.title}</h4>
-                          <p className="text-sm text-gray-500 line-clamp-2 mt-1">{extractedData.description}</p>
-                          <div className="flex gap-3 mt-2 text-xs text-gray-400">
-                            {extractedData.eventDate && (
-                              <span className="flex items-center gap-1">
-                                <Calendar className="w-3 h-3" />
-                                {extractedData.eventDate}
-                              </span>
-                            )}
-                            {extractedData.duration && (
-                              <span className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {extractedData.duration}
-                              </span>
-                            )}
-                            {extractedData.price && (
-                              <span className="font-medium text-[#44580E]">{extractedData.price}</span>
-                            )}
-                            <span className="flex items-center gap-1">
-                              <FileText className="w-3 h-3" />
-                              {extractedData.images.length} imágenes
-                            </span>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setExtractedData(null);
-                            setSourceUrl("");
-                          }}
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card> */}
-
-              <Card>
-                <CardContent className="pt-6 space-y-4">
-                  {/* Textarea con botón de micrófono */}
-                  <div className="relative">
+                    <p className="text-xs text-gray-500 mt-2">
+                      Pega aquí el código HTML completo. Puedes generarlo con herramientas como Claude o ChatGPT.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  <Card>
+                    <CardContent className="pt-6 space-y-4">
+                      {/* Textarea con botón de micrófono */}
+                      <div className="relative">
                     <Textarea
                       value={requestText}
                       onChange={(e) => setRequestText(e.target.value)}
@@ -996,6 +934,8 @@ export default function CMSCrearNewsletter() {
                   </Button>
                 </CardContent>
               </Card>
+              </>
+              )}
             </div>
           )}
 
@@ -1015,18 +955,20 @@ export default function CMSCrearNewsletter() {
                         <CardDescription>Vista previa de tu email</CardDescription>
                       </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setHtmlContent("");
-                        handleGenerateDesign();
-                      }}
-                      disabled={isGenerating}
-                    >
-                      <RefreshCw className={`w-4 h-4 mr-2 ${isGenerating ? "animate-spin" : ""}`} />
-                      Regenerar
-                    </Button>
+                    {selectedType !== 'html' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setHtmlContent("");
+                          handleGenerateDesign();
+                        }}
+                        disabled={isGenerating}
+                      >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${isGenerating ? "animate-spin" : ""}`} />
+                        Regenerar
+                      </Button>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -1052,7 +994,7 @@ export default function CMSCrearNewsletter() {
               </Card>
 
               {/* Campo para pedir cambios */}
-              {htmlContent && !isGenerating && (
+              {htmlContent && !isGenerating && selectedType !== 'html' && (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
