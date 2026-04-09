@@ -143,7 +143,7 @@ export default function CMSAnalytics() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Select value={month} onValueChange={(v) => handlePeriodChange("month", v)}>
+            <Select value={month} onValueChange={setMonth}>
               <SelectTrigger className="w-[140px]">
                 <SelectValue />
               </SelectTrigger>
@@ -154,7 +154,7 @@ export default function CMSAnalytics() {
               </SelectContent>
             </Select>
 
-            <Select value={year} onValueChange={(v) => handlePeriodChange("year", v)}>
+            <Select value={year} onValueChange={setYear}>
               <SelectTrigger className="w-[100px]">
                 <SelectValue />
               </SelectTrigger>
@@ -453,7 +453,46 @@ function GoogleAdsCampaignsTable({ campaigns }: { campaigns: any[] }) {
   );
 }
 
+function SortableHead({ label, sortKey, currentSort, onSort, align = "left" }: {
+  label: string;
+  sortKey: string;
+  currentSort: { key: string; dir: "asc" | "desc" };
+  onSort: (key: string) => void;
+  align?: "left" | "right";
+}) {
+  const isActive = currentSort.key === sortKey;
+  return (
+    <TableHead
+      className={`cursor-pointer select-none hover:text-foreground ${align === "right" ? "text-right" : ""}`}
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {isActive && (
+          <span className="text-[10px]">{currentSort.dir === "asc" ? "▲" : "▼"}</span>
+        )}
+      </span>
+    </TableHead>
+  );
+}
+
 function GoogleAdsKeywordsTable({ keywords }: { keywords: any[] }) {
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "cost", dir: "desc" });
+
+  const handleSort = (key: string) => {
+    setSort(prev => ({
+      key,
+      dir: prev.key === key && prev.dir === "desc" ? "asc" : "desc",
+    }));
+  };
+
+  const sorted = [...keywords].sort((a, b) => {
+    const valA = a[sort.key] ?? "";
+    const valB = b[sort.key] ?? "";
+    const cmp = typeof valA === "string" ? valA.localeCompare(valB) : valA - valB;
+    return sort.dir === "asc" ? cmp : -cmp;
+  });
+
   return (
     <Card>
       <CardHeader>
@@ -461,7 +500,7 @@ function GoogleAdsKeywordsTable({ keywords }: { keywords: any[] }) {
           <Search className="h-4 w-4 text-amber-500" />
           Keywords Google Ads
         </CardTitle>
-        <CardDescription>Palabras clave que generan tráfico pagado</CardDescription>
+        <CardDescription>Palabras clave que generan tráfico pagado — clic en columna para ordenar</CardDescription>
       </CardHeader>
       <CardContent>
         {keywords.length === 0 ? (
@@ -471,17 +510,17 @@ function GoogleAdsKeywordsTable({ keywords }: { keywords: any[] }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Keyword</TableHead>
-                  <TableHead>Campaña</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Impr.</TableHead>
-                  <TableHead className="text-right">Clics</TableHead>
-                  <TableHead className="text-right">Costo</TableHead>
-                  <TableHead className="text-right">Conv.</TableHead>
+                  <SortableHead label="Keyword" sortKey="keyword" currentSort={sort} onSort={handleSort} />
+                  <SortableHead label="Campaña" sortKey="campaign" currentSort={sort} onSort={handleSort} />
+                  <SortableHead label="Tipo" sortKey="matchType" currentSort={sort} onSort={handleSort} />
+                  <SortableHead label="Impr." sortKey="impressions" currentSort={sort} onSort={handleSort} align="right" />
+                  <SortableHead label="Clics" sortKey="clicks" currentSort={sort} onSort={handleSort} align="right" />
+                  <SortableHead label="Costo" sortKey="cost" currentSort={sort} onSort={handleSort} align="right" />
+                  <SortableHead label="Conv." sortKey="conversions" currentSort={sort} onSort={handleSort} align="right" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {keywords.map((k: any, i: number) => (
+                {sorted.map((k: any, i: number) => (
                   <TableRow key={i}>
                     <TableCell className="text-sm font-medium">{k.keyword}</TableCell>
                     <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate">{k.campaign}</TableCell>
