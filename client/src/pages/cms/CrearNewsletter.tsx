@@ -1059,8 +1059,8 @@ export default function CMSCrearNewsletter() {
                 </CardContent>
               </Card>
 
-              {/* Campo para pedir cambios */}
-              {htmlContent && !isGenerating && selectedType !== 'html' && (
+              {/* Campo para pedir cambios por IA */}
+              {htmlContent && !isGenerating && (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -1158,6 +1158,28 @@ export default function CMSCrearNewsletter() {
                         )}
                       </Button>
                     </form>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Editor de código manual para HTML Propio */}
+              {htmlContent && !isGenerating && selectedType === 'html' && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      Editor Manual de Código
+                    </CardTitle>
+                    <CardDescription>
+                      También puedes editar directamente el código HTML aquí
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Textarea
+                      value={htmlContent}
+                      onChange={(e) => setHtmlContent(e.target.value)}
+                      className="min-h-[200px] font-mono text-xs resize-y"
+                    />
                   </CardContent>
                 </Card>
               )}
