@@ -98,29 +98,29 @@ export default function CMSAnalytics() {
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
   const [year, setYear] = useState(String(now.getFullYear()));
-  const [shouldFetch, setShouldFetch] = useState(false);
 
+  const periodKey = `${year}-${month}`;
   const startDate = `${year}-${month}-01`;
   const endDate = `${year}-${month}-${getDaysInMonth(parseInt(year), parseInt(month))}`;
 
-  const { data, isLoading, isFetching, refetch } = trpc.analytics.getDashboard.useQuery(
-    { startDate, endDate },
-    { enabled: shouldFetch, refetchOnWindowFocus: false, staleTime: Infinity }
+  // Cargar datos desde caché (BD) al entrar y al cambiar mes
+  const { data: cached, isLoading: loadingCache } = trpc.analytics.getCached.useQuery(
+    { periodKey },
+    { refetchOnWindowFocus: false }
   );
 
-  const handleLoad = () => {
-    if (shouldFetch) {
-      refetch();
-    } else {
-      setShouldFetch(true);
-    }
+  // Mutation para actualizar desde APIs externas
+  const refreshMutation = trpc.analytics.refresh.useMutation();
+
+  const handleRefresh = () => {
+    refreshMutation.mutate({ startDate, endDate, periodKey });
   };
 
-  const handlePeriodChange = (type: "month" | "year", val: string) => {
-    if (type === "month") setMonth(val);
-    else setYear(val);
-    setShouldFetch(false);
-  };
+  // Usar datos del refresh si acaba de ejecutarse, sino usar caché
+  const data = refreshMutation.data || cached?.data || null;
+  const lastUpdated = refreshMutation.data ? new Date() : cached?.updatedAt ? new Date(cached.updatedAt) : null;
+  const isLoading = loadingCache;
+  const isRefreshing = refreshMutation.isPending;
 
   const monthLabel = MONTHS.find(m => m.value === month)?.label || month;
 
@@ -160,37 +160,33 @@ export default function CMSAnalytics() {
               </SelectContent>
             </Select>
 
-            <Button onClick={handleLoad} disabled={isLoading || isFetching}>
-              {isLoading || isFetching ? (
+            <Button onClick={handleRefresh} disabled={isRefreshing}>
+              {isRefreshing ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : (
                 <RefreshCw className="h-4 w-4 mr-2" />
               )}
-              Cargar datos
+              Actualizar
             </Button>
           </div>
         </div>
 
-        {/* Empty State */}
-        {!data && !isLoading && (
+        {/* Loading from cache */}
+        {isLoading && (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-              <BarChart3 className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Selecciona un período</h3>
-              <p className="text-muted-foreground max-w-md">
-                Elige el mes y año, luego presiona <strong>"Cargar datos"</strong> para consultar
-                Google Ads, Meta Ads, Search Console y Skedu.
-              </p>
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+              <p className="text-muted-foreground">Cargando datos...</p>
             </CardContent>
           </Card>
         )}
 
-        {/* Loading */}
-        {(isLoading || isFetching) && (
+        {/* Refreshing from APIs */}
+        {isRefreshing && (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
-              <p className="text-muted-foreground">Consultando APIs externas...</p>
+            <CardContent className="flex flex-col items-center justify-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+              <p className="text-muted-foreground">Actualizando desde APIs externas...</p>
               <p className="text-xs text-muted-foreground mt-1">
                 Google Ads, Meta Ads, Search Console, Skedu y DataForSEO
               </p>
@@ -198,9 +194,29 @@ export default function CMSAnalytics() {
           </Card>
         )}
 
+        {/* Empty State */}
+        {!data && !isLoading && !isRefreshing && (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <BarChart3 className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Sin datos para {monthLabel} {year}</h3>
+              <p className="text-muted-foreground max-w-md">
+                Presiona <strong>"Actualizar"</strong> para consultar Google Ads, Meta Ads, Search Console y Skedu.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Dashboard Content */}
-        {data && !isLoading && !isFetching && (
+        {data && !isLoading && (
           <>
+            {/* Last updated indicator */}
+            {lastUpdated && (
+              <p className="text-xs text-muted-foreground">
+                Última actualización: {lastUpdated.toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </p>
+            )}
+
             {/* KPI Summary */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
               <KpiCard

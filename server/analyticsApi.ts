@@ -436,21 +436,26 @@ export interface KeywordTrend {
 }
 
 export async function fetchKeywordTrends(): Promise<KeywordTrend[]> {
+  // Keywords agrupadas por servicio real de Cancagua
   const keywords = [
-    "termas frutillar",
-    "spa frutillar",
-    "biopiscinas",
-    "hot tubs frutillar",
-    "spa sur de chile",
-    "termas puerto varas",
-    "spa lago llanquihue",
-    "masajes frutillar",
-    "cancagua",
-    "termas region de los lagos",
-    "spa patagonia chile",
-    "aguas termales chile",
-    "gift card spa chile",
-    "retiro bienestar chile",
+    // Biopiscinas (servicio principal)
+    "biopiscinas", "biopiscinas frutillar", "piscinas termales frutillar",
+    // Hot Tubs
+    "hot tub frutillar", "hot tubs sur de chile", "jacuzzi frutillar",
+    // Masajes
+    "masajes frutillar", "masaje relajante frutillar", "masaje descontracturante sur chile",
+    // Spa general
+    "spa frutillar", "spa puerto varas", "spa sur de chile", "spa lago llanquihue",
+    // Termas / Aguas termales
+    "termas frutillar", "termas puerto varas", "termas region de los lagos", "aguas termales chile",
+    // Sauna
+    "sauna frutillar", "sauna sur chile",
+    // Gift Cards
+    "gift card spa chile", "regalo spa sur chile",
+    // Marca
+    "cancagua", "cancagua spa",
+    // Eventos
+    "eventos frutillar", "evento corporativo frutillar",
   ];
 
   const data = await callMcpTool("dataforseo_keyword_search_volume", {
