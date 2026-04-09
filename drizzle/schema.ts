@@ -528,7 +528,7 @@ export const giftCards = mysqlTable("gift_cards", {
   webpayResponseCode: int("webpay_response_code"), // Código de respuesta (0 = aprobado)
   deliveryMethod: mysqlEnum("delivery_method", ["email", "whatsapp", "download"]).default("email").notNull(),
   deliveredAt: timestamp("delivered_at"), // Fecha de entrega
-  expiresAt: timestamp("expires_at").notNull(), // Fecha de expiración (1 año por defecto)
+  expiresAt: timestamp("expires_at").notNull(), // Fecha de expiración (3 meses por defecto)
   redeemedAt: timestamp("redeemed_at"), // Fecha de uso completo
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

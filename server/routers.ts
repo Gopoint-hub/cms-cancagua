@@ -3139,7 +3139,7 @@ Devuelve un JSON con este formato:
           deliveryMethod: input.deliveryMethod,
           purchaseStatus: "pending" as const,
           status: "active" as const,
-          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 año
+          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 3 meses
         };
         
         const createdGiftCard = await db.createGiftCard(giftCardData);

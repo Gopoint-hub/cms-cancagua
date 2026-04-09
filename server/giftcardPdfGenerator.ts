@@ -202,7 +202,7 @@ export async function generateGiftCardPDF(data: GiftCardData): Promise<Buffer> {
         .fontSize(9)
         .font("Helvetica")
         .fillColor("#AAAAAA")
-        .text("Válida por 1 año | Cancagua Spa & Retreat Center", 30, 360);
+        .text("Válida por 3 meses desde su compra | Cancagua Spa & Retreat Center", 30, 360);
 
       doc.end();
     } catch (error) {
