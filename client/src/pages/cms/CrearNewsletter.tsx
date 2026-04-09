@@ -777,7 +777,7 @@ export default function CMSCrearNewsletter() {
               {selectedType === 'html' ? (
                 <Card>
                   <CardContent className="pt-6">
-                    <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-[#44580E]/30 rounded-xl bg-[#44580E]/5 mb-6 transition-colors hover:bg-[#44580E]/10">
+                    <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-[#44580E]/30 rounded-xl bg-[#44580E]/5 mb-2 transition-colors hover:bg-[#44580E]/10">
                       <FileText className="w-12 h-12 text-[#44580E] mb-4" />
                       <h3 className="text-lg font-medium text-gray-900 mb-2">Sube tu archivo HTML</h3>
                       <p className="text-sm text-gray-500 text-center mb-6 max-w-md">
@@ -807,24 +807,6 @@ export default function CMSCrearNewsletter() {
                         </div>
                       )}
                     </div>
-                    
-                    <div className="relative my-6">
-                      <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-gray-200" /></div>
-                      <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-500">O PEGA EL CÓDIGO</span></div>
-                    </div>
-
-                    <Textarea
-                      value={htmlContent}
-                      onChange={(e) => {
-                        setHtmlContent(e.target.value);
-                        if (htmlFileName && e.target.value === '') setHtmlFileName(null);
-                      }}
-                      placeholder="<!DOCTYPE html>&#10;<html>&#10;  <head>...</head>&#10;  <body>...</body>&#10;</html>"
-                      className="min-h-[400px] font-mono text-sm resize-y"
-                    />
-                    <p className="text-xs text-gray-500 mt-2">
-                      Pega aquí el código HTML completo. Puedes generarlo con herramientas como Claude o ChatGPT.
-                    </p>
                   </CardContent>
                 </Card>
               ) : (
