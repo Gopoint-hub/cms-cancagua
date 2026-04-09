@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -112,11 +112,16 @@ export default function CMSAnalytics() {
   // Mutation para actualizar desde APIs externas
   const refreshMutation = trpc.analytics.refresh.useMutation();
 
+  // Reset mutation data when period changes
+  useEffect(() => {
+    refreshMutation.reset();
+  }, [periodKey]);
+
   const handleRefresh = () => {
     refreshMutation.mutate({ startDate, endDate, periodKey });
   };
 
-  // Usar datos del refresh si acaba de ejecutarse, sino usar caché
+  // Usar datos del refresh si acaba de ejecutarse para este período, sino usar caché
   const data = refreshMutation.data || cached?.data || null;
   const lastUpdated = refreshMutation.data ? new Date() : cached?.updatedAt ? new Date(cached.updatedAt) : null;
   const isLoading = loadingCache;
@@ -266,6 +271,11 @@ export default function CMSAnalytics() {
             <div className="grid lg:grid-cols-2 gap-6">
               <GoogleAdsCampaignsTable campaigns={data.googleAds?.campaigns || []} />
               <MetaAdsCampaignsTable campaigns={data.metaAds?.campaigns || []} />
+            </div>
+
+            {/* Keywords Google Ads */}
+            <div className="grid lg:grid-cols-1 gap-6">
+              <GoogleAdsKeywordsTable keywords={data.googleAds?.keywords || []} />
             </div>
 
             {/* Search & Keywords */}
@@ -432,6 +442,58 @@ function GoogleAdsCampaignsTable({ campaigns }: { campaigns: any[] }) {
                     <TableCell className="text-right text-sm">{formatNumber(c.clicks)}</TableCell>
                     <TableCell className="text-right text-sm">{formatCLP(c.cost)}</TableCell>
                     <TableCell className="text-right text-sm font-medium">{formatNumber(c.conversions)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function GoogleAdsKeywordsTable({ keywords }: { keywords: any[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Search className="h-4 w-4 text-amber-500" />
+          Keywords Google Ads
+        </CardTitle>
+        <CardDescription>Palabras clave que generan tráfico pagado</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {keywords.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">Sin datos de keywords</p>
+        ) : (
+          <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Keyword</TableHead>
+                  <TableHead>Campaña</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead className="text-right">Impr.</TableHead>
+                  <TableHead className="text-right">Clics</TableHead>
+                  <TableHead className="text-right">Costo</TableHead>
+                  <TableHead className="text-right">Conv.</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {keywords.map((k: any, i: number) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-sm font-medium">{k.keyword}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate">{k.campaign}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {k.matchType === "BROAD" ? "Amplia" : k.matchType === "PHRASE" ? "Frase" : k.matchType === "EXACT" ? "Exacta" : k.matchType}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right text-sm">{formatNumber(k.impressions)}</TableCell>
+                    <TableCell className="text-right text-sm">{formatNumber(k.clicks)}</TableCell>
+                    <TableCell className="text-right text-sm">{formatCLP(k.cost)}</TableCell>
+                    <TableCell className="text-right text-sm font-medium">{formatNumber(k.conversions)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

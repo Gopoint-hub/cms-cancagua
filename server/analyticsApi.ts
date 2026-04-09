@@ -91,6 +91,16 @@ async function callMaton(path: string, method = "GET", body?: any): Promise<any>
 // Google Ads
 // ==========================================
 
+export interface GoogleAdsKeyword {
+  keyword: string;
+  matchType: string;
+  campaign: string;
+  impressions: number;
+  clicks: number;
+  cost: number;
+  conversions: number;
+}
+
 export interface GoogleAdsCampaign {
   name: string;
   status: string;
@@ -107,19 +117,25 @@ export interface GoogleAdsMetrics {
   totalCost: number;
   totalConversions: number;
   campaigns: GoogleAdsCampaign[];
+  keywords: GoogleAdsKeyword[];
 }
 
 export async function fetchGoogleAdsMetrics(startDate: string, endDate: string): Promise<GoogleAdsMetrics | null> {
-  const query = `SELECT campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${startDate}' AND '${endDate}' AND campaign.status != 'REMOVED' ORDER BY metrics.cost_micros DESC`;
+  // Fetch campaigns and keywords in parallel
+  const [campaignData, keywordData] = await Promise.all([
+    callMcpTool("google_ads_gaql_query", {
+      customer_id: GOOGLE_ADS_CUSTOMER_ID,
+      query: `SELECT campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date BETWEEN '${startDate}' AND '${endDate}' AND campaign.status != 'REMOVED' ORDER BY metrics.cost_micros DESC`,
+    }),
+    callMcpTool("google_ads_gaql_query", {
+      customer_id: GOOGLE_ADS_CUSTOMER_ID,
+      query: `SELECT campaign.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM keyword_view WHERE segments.date BETWEEN '${startDate}' AND '${endDate}' ORDER BY metrics.cost_micros DESC LIMIT 30`,
+    }),
+  ]);
 
-  const data = await callMcpTool("google_ads_gaql_query", {
-    customer_id: GOOGLE_ADS_CUSTOMER_ID,
-    query,
-  });
+  if (!campaignData?.[0]?.results) return null;
 
-  if (!data?.[0]?.results) return null;
-
-  const campaigns: GoogleAdsCampaign[] = data[0].results.map((r: any) => {
+  const campaigns: GoogleAdsCampaign[] = campaignData[0].results.map((r: any) => {
     const costMicros = parseInt(r.metrics?.costMicros || "0");
     return {
       name: r.campaign?.name || "Sin nombre",
@@ -132,7 +148,19 @@ export async function fetchGoogleAdsMetrics(startDate: string, endDate: string):
     };
   });
 
-  // Filter out campaigns with 0 cost and 0 impressions
+  const keywords: GoogleAdsKeyword[] = (keywordData?.[0]?.results || []).map((r: any) => {
+    const costMicros = parseInt(r.metrics?.costMicros || "0");
+    return {
+      keyword: r.adGroupCriterion?.keyword?.text || "",
+      matchType: r.adGroupCriterion?.keyword?.matchType || "",
+      campaign: r.campaign?.name || "",
+      impressions: parseInt(r.metrics?.impressions || "0"),
+      clicks: parseInt(r.metrics?.clicks || "0"),
+      cost: costMicros / 1_000_000,
+      conversions: r.metrics?.conversions || 0,
+    };
+  }).filter((k: GoogleAdsKeyword) => k.impressions > 0);
+
   const activeCampaigns = campaigns.filter(c => c.impressions > 0 || c.cost > 0);
 
   return {
@@ -141,6 +169,7 @@ export async function fetchGoogleAdsMetrics(startDate: string, endDate: string):
     totalCost: activeCampaigns.reduce((s, c) => s + c.cost, 0),
     totalConversions: activeCampaigns.reduce((s, c) => s + c.conversions, 0),
     campaigns: activeCampaigns,
+    keywords,
   };
 }
 
@@ -171,34 +200,48 @@ export interface MetaAdsMetrics {
 }
 
 export async function fetchMetaAdsMetrics(startDate: string, endDate: string): Promise<MetaAdsMetrics | null> {
-  // Fetch insights from both accounts
-  const [todosInsights, ignacioInsights] = await Promise.all([
+  // Fetch account insights and campaign list in parallel
+  const [todosInsights, ignacioInsights, campaignList] = await Promise.all([
     fetchMetaAccountInsights(META_ADS_ACCOUNT_TODOS, startDate, endDate),
     fetchMetaAccountInsights(META_ADS_ACCOUNT_IGNACIO, startDate, endDate),
+    callMcpTool("meta_ads_list_campaigns", {
+      ad_account_id: META_ADS_ACCOUNT_TODOS,
+      status_filter: "ALL",
+    }),
   ]);
 
-  // Fetch campaign details from main account
-  const campaignData = await callMcpTool("meta_ads_get_insights", {
+  // Build campaign name map from list
+  const campaignNames = new Map<string, { name: string; objective: string }>();
+  if (campaignList?.data) {
+    for (const c of campaignList.data) {
+      campaignNames.set(c.id, { name: c.name || "Sin nombre", objective: c.objective || "" });
+    }
+  }
+
+  // Get per-campaign insights
+  const campaignInsights = await callMcpTool("meta_ads_get_insights", {
     ad_account_id: META_ADS_ACCOUNT_TODOS,
     object_id: META_ADS_ACCOUNT_TODOS,
     level: "campaign",
     time_range: `{"since":"${startDate}","until":"${endDate}"}`,
-    fields: "campaign_name,campaign_id,impressions,clicks,spend,actions,objective",
+    fields: "campaign_id,impressions,clicks,spend,actions",
   });
 
   const campaigns: MetaAdsCampaign[] = [];
-  if (campaignData?.data) {
-    for (const c of campaignData.data) {
+  if (campaignInsights?.data) {
+    for (const c of campaignInsights.data) {
       const actions = c.actions || [];
       const purchases = actions.find((a: any) => a.action_type === "purchase")?.value || 0;
       const linkClicks = actions.find((a: any) => a.action_type === "link_click")?.value || 0;
       const lpViews = actions.find((a: any) => a.action_type === "landing_page_view")?.value || 0;
+      const campId = c.campaign_id || "";
+      const campInfo = campaignNames.get(campId);
 
       campaigns.push({
-        id: c.campaign_id || "",
-        name: c.campaign_name || "Sin nombre",
+        id: campId,
+        name: campInfo?.name || "Sin nombre",
         status: "ACTIVE",
-        objective: c.objective || "",
+        objective: campInfo?.objective || "",
         impressions: parseInt(c.impressions || "0"),
         clicks: parseInt(c.clicks || "0"),
         spend: parseFloat(c.spend || "0"),
@@ -391,7 +434,7 @@ export async function fetchSkeduMetrics(startDate: string, endDate: string): Pro
       clientName: b.Fields?.["Exención de responsabilidad "] || "Sin cliente",
       date: b.StartsAt || "",
       status: b.IsConfirmed ? "confirmed" : (b.DeletedAt ? "cancelled" : "pending"),
-      price: b.SessionPriceWithDiscount || b.SessionPrice || 0,
+      price: b.SessionPrice || b.SessionPriceWithDiscount || 0,
     }));
 
     const confirmed = bookings.filter(b => b.status === "confirmed");
