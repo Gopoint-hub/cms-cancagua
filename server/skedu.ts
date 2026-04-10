@@ -16,7 +16,9 @@ const getHeaders = () => {
     "X-Skedu-App-ID": appId,
     "X-Skedu-App-Secret": secret,
     "Content-Type": "application/json",
-    "User-Agent": "CancaguaCMS/1.0",
+    "User-Agent": "Mozilla/5.0 (compatible; CancaguaCMS/1.0; +https://cms.cancagua.cl)",
+    "Accept": "application/json",
+    "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
   };
 };
 

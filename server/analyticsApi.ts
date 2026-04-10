@@ -436,11 +436,49 @@ export interface SkeduMetrics {
   bookings: SkeduSale[];
 }
 
+async function fetchSkeduDirect(startDate: string, endDate: string): Promise<any[]> {
+  const appId = process.env.SKEDU_APP_ID || "e0fd2e66-64ce-4b44-82e1-2740581b8872";
+  const secret = process.env.SKEDU_APP_SECRET || "4b46a0a5-8e03-436a-8b11-880a4d86b48b";
+  const storeUUID = "c5e0a893-7eff-42b8-815a-296b1a9c345d";
+
+  const params = new URLSearchParams({
+    StoreUUID: storeUUID,
+    limit: "1500",
+    "StartsAt~ge": startDate.includes("T") ? startDate : `${startDate}T00:00:00Z`,
+    "StartsAt~lt": endDate.includes("T") ? endDate : `${endDate}T23:59:59Z`,
+  });
+
+  const resp = await fetch(`https://api.getskedu.com/appointments?${params}`, {
+    headers: {
+      "X-Skedu-App-ID": appId,
+      "X-Skedu-App-Secret": secret,
+      "User-Agent": "Mozilla/5.0 (compatible; CancaguaCMS/1.0; +https://cms.cancagua.cl)",
+      "Accept": "application/json",
+      "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
+    },
+  });
+
+  if (!resp.ok) {
+    console.error(`[Skedu Direct] Error ${resp.status}`);
+    return [];
+  }
+
+  const data = await resp.json();
+  return data?.Data || data?.data || [];
+}
+
 export async function fetchSkeduMetrics(startDate: string, endDate: string): Promise<SkeduMetrics | null> {
   try {
-    const data = await getSkeduEvents({ startDate, endDate });
+    // Try via getSkeduEvents (axios), fallback to direct fetch
+    let items: any[] = [];
+    try {
+      const data = await getSkeduEvents({ startDate, endDate });
+      items = data?.Data || data?.data || [];
+    } catch (e) {
+      console.warn("[Analytics] Skedu axios failed, trying direct fetch...");
+      items = await fetchSkeduDirect(startDate, endDate);
+    }
 
-    const items = data?.Data || data?.data || [];
     if (!Array.isArray(items) || items.length === 0) return null;
 
     const bookings: SkeduSale[] = items.map((b: any) => ({
