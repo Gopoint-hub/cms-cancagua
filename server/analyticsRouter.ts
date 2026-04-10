@@ -34,11 +34,40 @@ export const analyticsRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
-      const data = await fetchDashboardData(input.startDate, input.endDate);
+      // Obtener datos anteriores de la BD para preservar lo que falle
+      const previous = await db.getAnalyticsCache(input.periodKey);
+      const prevData = previous?.data || null;
 
-      // Guardar en BD (sobreescribe si ya existe)
-      await db.upsertAnalyticsCache(input.periodKey, data);
+      // Consultar APIs externas
+      const freshData = await fetchDashboardData(input.startDate, input.endDate);
 
-      return data;
+      // Merge: si una fuente retorna null, mantener dato anterior
+      const merged = {
+        ...freshData,
+        googleAds: freshData.googleAds || prevData?.googleAds || null,
+        metaAds: freshData.metaAds || prevData?.metaAds || null,
+        searchConsole: freshData.searchConsole || prevData?.searchConsole || null,
+        searchPages: freshData.searchPages.length > 0 ? freshData.searchPages : (prevData?.searchPages || []),
+        skedu: freshData.skedu || prevData?.skedu || null,
+        keywordTrends: freshData.keywordTrends.length > 0 ? freshData.keywordTrends : (prevData?.keywordTrends || []),
+      };
+
+      // Recalcular summary con datos mergeados
+      const totalInvestment = (merged.googleAds?.totalCost || 0) + (merged.metaAds?.totalSpend || 0);
+      const totalRevenue = merged.skedu?.totalRevenue || 0;
+      const totalConversions = (merged.googleAds?.totalConversions || 0) + (merged.metaAds?.totalPurchases || 0);
+
+      merged.summary = {
+        totalInvestment,
+        totalRevenue,
+        roas: totalInvestment > 0 ? totalRevenue / totalInvestment : 0,
+        totalConversions,
+        costPerConversion: totalConversions > 0 ? totalInvestment / totalConversions : 0,
+      };
+
+      // Guardar en BD (sobreescribe)
+      await db.upsertAnalyticsCache(input.periodKey, merged);
+
+      return merged;
     }),
 });
