@@ -279,6 +279,11 @@ function AnnualView() {
             <CardHeader>
               <CardTitle className="text-base">Ventas mes a mes</CardTitle>
               <CardDescription>{year} vs {compareYear}</CardDescription>
+              {(compareYear === "2025" || year === "2025") && (
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-3 py-1.5 mt-2">
+                  Nota: Skedu no tiene precios cargados en las reservas de Ene-Sep 2025. Los montos de ventas de esos meses aparecen en $0 por falta de datos en origen, no por ausencia de ventas reales.
+                </p>
+              )}
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={350}>
@@ -342,6 +347,11 @@ function AnnualView() {
               <CardHeader>
                 <CardTitle className="text-base">ROAS mensual</CardTitle>
                 <CardDescription>Retorno por peso invertido</CardDescription>
+                {(compareYear === "2025" || year === "2025") && (
+                  <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-3 py-1.5 mt-2">
+                    ROAS 2025 afectado: sin precios en Skedu de Ene-Sep, el cálculo solo refleja Oct-Dic.
+                  </p>
+                )}
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={280}>
@@ -363,6 +373,11 @@ function AnnualView() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Detalle mensual {year}</CardTitle>
+              {year === "2025" && (
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-3 py-1.5 mt-2">
+                  Ventas Ene-Sep 2025 en $0: Skedu no tenía precios configurados en esos meses. Las reservas existen pero sin monto. Desde Oct 2025 los precios están cargados correctamente.
+                </p>
+              )}
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
