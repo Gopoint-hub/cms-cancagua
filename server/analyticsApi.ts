@@ -210,41 +210,56 @@ export async function fetchMetaAdsMetrics(startDate: string, endDate: string): P
     }),
   ]);
 
-  // Build campaign name map from list
-  const campaignNames = new Map<string, { name: string; objective: string }>();
+  // Build campaign list with names
+  const campaignInfoMap = new Map<string, { name: string; objective: string; status: string }>();
   if (campaignList?.data) {
     for (const c of campaignList.data) {
-      campaignNames.set(c.id, { name: c.name || "Sin nombre", objective: c.objective || "" });
+      campaignInfoMap.set(c.id, {
+        name: c.name || "Sin nombre",
+        objective: c.objective || "",
+        status: c.effective_status || c.status || "UNKNOWN",
+      });
     }
   }
 
-  // Get per-campaign insights
-  const campaignInsights = await callMcpTool("meta_ads_get_insights", {
-    ad_account_id: META_ADS_ACCOUNT_TODOS,
-    object_id: META_ADS_ACCOUNT_TODOS,
-    level: "campaign",
-    time_range: `{"since":"${startDate}","until":"${endDate}"}`,
-    fields: "campaign_id,impressions,clicks,spend,actions",
-  });
-
+  // Get insights for each campaign individually (meta_ads_get_insights doesn't return campaign_id at campaign level)
   const campaigns: MetaAdsCampaign[] = [];
-  if (campaignInsights?.data) {
-    for (const c of campaignInsights.data) {
-      const actions = c.actions || [];
+  const campaignIds = Array.from(campaignInfoMap.keys());
+
+  // Fetch insights in batches of 5 to avoid rate limiting
+  for (let i = 0; i < campaignIds.length; i += 5) {
+    const batch = campaignIds.slice(i, i + 5);
+    const results = await Promise.all(
+      batch.map(campId =>
+        callMcpTool("meta_ads_get_insights", {
+          ad_account_id: META_ADS_ACCOUNT_TODOS,
+          object_id: campId,
+          time_range: `{"since":"${startDate}","until":"${endDate}"}`,
+          fields: "impressions,clicks,spend,actions",
+        }).catch(() => null)
+      )
+    );
+
+    for (let j = 0; j < batch.length; j++) {
+      const campId = batch[j];
+      const data = results[j];
+      const info = campaignInfoMap.get(campId)!;
+      const d = data?.data?.[0];
+      if (!d) continue;
+
+      const actions = d.actions || [];
       const purchases = actions.find((a: any) => a.action_type === "purchase")?.value || 0;
       const linkClicks = actions.find((a: any) => a.action_type === "link_click")?.value || 0;
       const lpViews = actions.find((a: any) => a.action_type === "landing_page_view")?.value || 0;
-      const campId = c.campaign_id || "";
-      const campInfo = campaignNames.get(campId);
 
       campaigns.push({
         id: campId,
-        name: campInfo?.name || "Sin nombre",
-        status: "ACTIVE",
-        objective: campInfo?.objective || "",
-        impressions: parseInt(c.impressions || "0"),
-        clicks: parseInt(c.clicks || "0"),
-        spend: parseFloat(c.spend || "0"),
+        name: info.name,
+        status: info.status,
+        objective: info.objective,
+        impressions: parseInt(d.impressions || "0"),
+        clicks: parseInt(d.clicks || "0"),
+        spend: parseFloat(d.spend || "0"),
         purchases: parseInt(purchases),
         linkClicks: parseInt(linkClicks),
         landingPageViews: parseInt(lpViews),

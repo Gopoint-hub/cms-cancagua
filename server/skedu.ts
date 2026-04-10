@@ -67,7 +67,7 @@ export async function getSkeduEvents(params?: {
     // Sintaxis específica requerida por Skedu: Parámetros con comparadores ~ge y ~lt
     const skeduParams: any = {
       StoreUUID: STORE_UUID,
-      limit: 100,
+      limit: 500,
       offset: 0,
     };
 
