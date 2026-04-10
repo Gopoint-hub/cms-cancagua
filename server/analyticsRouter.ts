@@ -3,6 +3,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { fetchDashboardData } from "./analyticsApi";
 import * as db from "./db";
+import { getDb } from "./db";
+import { analyticsCache } from "../drizzle/schema";
+import { like } from "drizzle-orm";
 
 export const analyticsRouter = router({
   /** Carga datos desde la BD (instantáneo, sin llamar APIs) */
@@ -69,5 +72,30 @@ export const analyticsRouter = router({
       await db.upsertAnalyticsCache(input.periodKey, merged);
 
       return merged;
+    }),
+
+  /** Datos anuales: todos los meses de un año desde la BD */
+  getAnnual: protectedProcedure
+    .input(z.object({
+      year: z.string(), // "2026"
+    }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const database = await getDb();
+      if (!database) return [];
+      const rows = await database
+        .select()
+        .from(analyticsCache)
+        .where(like(analyticsCache.periodKey, `${input.year}-%`));
+
+      return rows
+        .map(r => ({
+          periodKey: r.periodKey,
+          data: JSON.parse(r.data),
+          updatedAt: r.updatedAt,
+        }))
+        .sort((a, b) => a.periodKey.localeCompare(b.periodKey));
     }),
 });

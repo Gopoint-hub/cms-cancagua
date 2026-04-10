@@ -8,13 +8,14 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from "recharts";
 import {
   TrendingUp, DollarSign, Eye, MousePointerClick, Search,
   RefreshCw, BarChart3, Target, ShoppingCart, Loader2,
-  ArrowUpRight, ArrowDownRight, Globe, Megaphone,
+  ArrowUpRight, ArrowDownRight, Globe, Megaphone, Calendar,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { SEOHead } from "@/components/SEOHead";
@@ -95,6 +96,328 @@ function KpiCard({ title, value, subtitle, icon: Icon, color = "text-primary" }:
 // ==========================================
 
 export default function CMSAnalytics() {
+  const [view, setView] = useState<"mensual" | "anual">("mensual");
+
+  return (
+    <DashboardLayout>
+      <SEOHead title="Analytics | Cancagua CMS" description="Dashboard de analytics" noindex />
+      <div className="space-y-6">
+        {/* Tabs */}
+        <div className="flex gap-1 bg-muted p-1 rounded-lg w-fit">
+          <button
+            onClick={() => setView("mensual")}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === "mensual" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <Calendar className="h-4 w-4 inline mr-2" />
+            Mensual
+          </button>
+          <button
+            onClick={() => setView("anual")}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === "anual" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <BarChart3 className="h-4 w-4 inline mr-2" />
+            Anual
+          </button>
+        </div>
+
+        {view === "mensual" ? <MonthlyView /> : <AnnualView />}
+      </div>
+    </DashboardLayout>
+  );
+}
+
+// ==========================================
+// Annual View
+// ==========================================
+
+const MONTH_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+function AnnualView() {
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [compareYear, setCompareYear] = useState(String(new Date().getFullYear() - 1));
+
+  const { data: currentData, isLoading: loading1 } = trpc.analytics.getAnnual.useQuery(
+    { year },
+    { refetchOnWindowFocus: false }
+  );
+  const { data: compareData, isLoading: loading2 } = trpc.analytics.getAnnual.useQuery(
+    { year: compareYear },
+    { refetchOnWindowFocus: false }
+  );
+
+  const isLoading = loading1 || loading2;
+
+  // Build chart data
+  const chartData = MONTH_LABELS.map((label, i) => {
+    const mm = String(i + 1).padStart(2, "0");
+    const current = currentData?.find(d => d.periodKey === `${year}-${mm}`)?.data;
+    const compare = compareData?.find(d => d.periodKey === `${compareYear}-${mm}`)?.data;
+
+    return {
+      mes: label,
+      [`Ventas ${year}`]: current?.skedu?.totalRevenue || 0,
+      [`Ventas ${compareYear}`]: compare?.skedu?.totalRevenue || 0,
+      [`Reservas ${year}`]: current?.skedu?.confirmedBookings || 0,
+      [`Reservas ${compareYear}`]: compare?.skedu?.confirmedBookings || 0,
+      [`Inversión ${year}`]: current?.summary?.totalInvestment || 0,
+      [`Inversión ${compareYear}`]: compare?.summary?.totalInvestment || 0,
+      [`GAds Clics ${year}`]: current?.googleAds?.totalClicks || 0,
+      [`GAds Clics ${compareYear}`]: compare?.googleAds?.totalClicks || 0,
+      [`SEO Clics ${year}`]: current?.searchConsole?.totalClicks || 0,
+      [`SEO Clics ${compareYear}`]: compare?.searchConsole?.totalClicks || 0,
+      [`ROAS ${year}`]: current?.summary?.roas || 0,
+      [`ROAS ${compareYear}`]: compare?.summary?.roas || 0,
+    };
+  });
+
+  // Totals
+  const totalCurrent = (currentData || []).reduce((acc, d) => ({
+    revenue: acc.revenue + (d.data?.skedu?.totalRevenue || 0),
+    bookings: acc.bookings + (d.data?.skedu?.confirmedBookings || 0),
+    investment: acc.investment + (d.data?.summary?.totalInvestment || 0),
+    conversions: acc.conversions + (d.data?.summary?.totalConversions || 0),
+  }), { revenue: 0, bookings: 0, investment: 0, conversions: 0 });
+
+  const totalCompare = (compareData || []).reduce((acc, d) => ({
+    revenue: acc.revenue + (d.data?.skedu?.totalRevenue || 0),
+    bookings: acc.bookings + (d.data?.skedu?.confirmedBookings || 0),
+    investment: acc.investment + (d.data?.summary?.totalInvestment || 0),
+    conversions: acc.conversions + (d.data?.summary?.totalConversions || 0),
+  }), { revenue: 0, bookings: 0, investment: 0, conversions: 0 });
+
+  const pctChange = (curr: number, prev: number) => {
+    if (prev === 0) return curr > 0 ? "+100%" : "—";
+    const pct = ((curr - prev) / prev) * 100;
+    return `${pct > 0 ? "+" : ""}${pct.toFixed(0)}%`;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Comparativa Anual</h1>
+          <p className="text-muted-foreground">Evolución mes a mes con comparación interanual</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={year} onValueChange={setYear}>
+            <SelectTrigger className="w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {getYears().map(y => <SelectItem key={y.value} value={y.value}>{y.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <span className="text-muted-foreground text-sm">vs</span>
+          <Select value={compareYear} onValueChange={setCompareYear}>
+            <SelectTrigger className="w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {getYears().map(y => <SelectItem key={y.value} value={y.value}>{y.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <Card><CardContent className="flex items-center justify-center py-16">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </CardContent></Card>
+      ) : (
+        <>
+          {/* KPI Comparison */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">Ventas Totales</p>
+                <p className="text-2xl font-bold">{formatCLP(totalCurrent.revenue)}</p>
+                <p className="text-xs mt-1">
+                  <span className={totalCurrent.revenue >= totalCompare.revenue ? "text-green-600" : "text-red-500"}>
+                    {pctChange(totalCurrent.revenue, totalCompare.revenue)}
+                  </span>
+                  {" "}vs {compareYear}: {formatCLP(totalCompare.revenue)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">Reservas</p>
+                <p className="text-2xl font-bold">{formatNumber(totalCurrent.bookings)}</p>
+                <p className="text-xs mt-1">
+                  <span className={totalCurrent.bookings >= totalCompare.bookings ? "text-green-600" : "text-red-500"}>
+                    {pctChange(totalCurrent.bookings, totalCompare.bookings)}
+                  </span>
+                  {" "}vs {compareYear}: {formatNumber(totalCompare.bookings)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">Inversión Ads</p>
+                <p className="text-2xl font-bold">{formatCLP(totalCurrent.investment)}</p>
+                <p className="text-xs mt-1">
+                  vs {compareYear}: {formatCLP(totalCompare.investment)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">ROAS Promedio</p>
+                <p className="text-2xl font-bold">
+                  {totalCurrent.investment > 0 ? `${(totalCurrent.revenue / totalCurrent.investment).toFixed(1)}x` : "—"}
+                </p>
+                <p className="text-xs mt-1">
+                  vs {compareYear}: {totalCompare.investment > 0 ? `${(totalCompare.revenue / totalCompare.investment).toFixed(1)}x` : "—"}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Revenue Chart */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Ventas mes a mes</CardTitle>
+              <CardDescription>{year} vs {compareYear}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={chartData} barGap={2}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="mes" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v/1000000).toFixed(0)}M`} />
+                  <Tooltip formatter={(v: number) => formatCLP(v)} />
+                  <Legend />
+                  <Bar dataKey={`Ventas ${year}`} fill="#22c55e" radius={[4,4,0,0]} />
+                  <Bar dataKey={`Ventas ${compareYear}`} fill="#d1d5db" radius={[4,4,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Bookings Chart */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Reservas confirmadas mes a mes</CardTitle>
+              <CardDescription>{year} vs {compareYear}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="mes" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey={`Reservas ${year}`} stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 4 }} />
+                  <Line type="monotone" dataKey={`Reservas ${compareYear}`} stroke="#d1d5db" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Investment & ROAS */}
+          <div className="grid lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Inversión en Ads</CardTitle>
+                <CardDescription>{year} vs {compareYear}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={280}>
+                  <AreaChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="mes" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v/1000000).toFixed(0)}M`} />
+                    <Tooltip formatter={(v: number) => formatCLP(v)} />
+                    <Legend />
+                    <Area type="monotone" dataKey={`Inversión ${year}`} stroke="#f59e0b" fill="#fef3c7" strokeWidth={2} />
+                    <Area type="monotone" dataKey={`Inversión ${compareYear}`} stroke="#d1d5db" fill="#f3f4f6" strokeWidth={1.5} strokeDasharray="5 5" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">ROAS mensual</CardTitle>
+                <CardDescription>Retorno por peso invertido</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="mes" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v.toFixed(0)}x`} />
+                    <Tooltip formatter={(v: number) => `${v.toFixed(1)}x`} />
+                    <Legend />
+                    <Line type="monotone" dataKey={`ROAS ${year}`} stroke="#22c55e" strokeWidth={2.5} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey={`ROAS ${compareYear}`} stroke="#d1d5db" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Detailed Monthly Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Detalle mensual {year}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Mes</TableHead>
+                      <TableHead className="text-right">Ventas</TableHead>
+                      <TableHead className="text-right">Reservas</TableHead>
+                      <TableHead className="text-right">Inversión</TableHead>
+                      <TableHead className="text-right">ROAS</TableHead>
+                      <TableHead className="text-right">GAds Clics</TableHead>
+                      <TableHead className="text-right">SEO Clics</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {MONTH_LABELS.map((label, i) => {
+                      const mm = String(i + 1).padStart(2, "0");
+                      const d = currentData?.find(x => x.periodKey === `${year}-${mm}`)?.data;
+                      if (!d) return (
+                        <TableRow key={i}>
+                          <TableCell className="text-sm">{label}</TableCell>
+                          <TableCell className="text-right text-sm text-muted-foreground" colSpan={6}>Sin datos</TableCell>
+                        </TableRow>
+                      );
+                      const inv = d.summary?.totalInvestment || 0;
+                      const rev = d.skedu?.totalRevenue || 0;
+                      return (
+                        <TableRow key={i}>
+                          <TableCell className="text-sm font-medium">{label}</TableCell>
+                          <TableCell className="text-right text-sm">{formatCLP(rev)}</TableCell>
+                          <TableCell className="text-right text-sm">{d.skedu?.confirmedBookings || 0}</TableCell>
+                          <TableCell className="text-right text-sm">{formatCLP(inv)}</TableCell>
+                          <TableCell className="text-right text-sm font-medium">{inv > 0 ? `${(rev/inv).toFixed(1)}x` : "—"}</TableCell>
+                          <TableCell className="text-right text-sm">{formatNumber(d.googleAds?.totalClicks || 0)}</TableCell>
+                          <TableCell className="text-right text-sm">{formatNumber(d.searchConsole?.totalClicks || 0)}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// Monthly View
+// ==========================================
+
+function MonthlyView() {
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
   const [year, setYear] = useState(String(now.getFullYear()));
@@ -130,20 +453,18 @@ export default function CMSAnalytics() {
   const monthLabel = MONTHS.find(m => m.value === month)?.label || month;
 
   return (
-    <DashboardLayout>
-      <SEOHead title="Analytics | Cancagua CMS" description="Dashboard de analytics" noindex />
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
-            <p className="text-muted-foreground">
-              Cruce de datos: campañas, ventas y tendencias de búsqueda
-            </p>
-          </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Reporte Mensual</h1>
+          <p className="text-muted-foreground">
+            Cruce de datos: campañas, ventas y tendencias de búsqueda
+          </p>
+        </div>
 
-          <div className="flex items-center gap-2">
-            <Select value={month} onValueChange={setMonth}>
+        <div className="flex items-center gap-2">
+          <Select value={month} onValueChange={setMonth}>
               <SelectTrigger className="w-[140px]">
                 <SelectValue />
               </SelectTrigger>
@@ -292,7 +613,6 @@ export default function CMSAnalytics() {
           </>
         )}
       </div>
-    </DashboardLayout>
   );
 }
 
