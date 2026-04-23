@@ -1248,7 +1248,12 @@ export default function CotizacionWizard() {
                       <GripVertical className="w-4 h-4 text-muted-foreground" />
                     </TableCell>
                     <TableCell>
-                      <span className="text-primary font-medium">{item.productName}</span>
+                      <Input
+                        type="text"
+                        value={item.productName}
+                        onChange={(e) => handleUpdateItem(index, "productName", e.target.value)}
+                        className="w-full text-primary font-medium"
+                      />
                     </TableCell>
                     <TableCell>
                       <Input
