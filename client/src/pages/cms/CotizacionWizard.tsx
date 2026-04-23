@@ -1368,7 +1368,7 @@ export default function CotizacionWizard() {
                 </TableHeader>
                 <TableBody>
                   {filteredProducts.map((product: any) => {
-                    const isAlreadyAdded = items.some(item => item.productId === product.id);
+                    const isAlreadyAdded = false; // Modificado para permitir duplicados
                     const isSelected = selectedProductIds.includes(product.id);
                     return (
                       <TableRow
