@@ -559,9 +559,9 @@ export default function CotizacionWizard() {
       const product = products.find((p: any) => p.id === productId);
       if (!product) continue;
 
-      // Skip if already in items
-      const exists = items.some(item => item.productId === product.id);
-      if (exists) continue;
+      // Comentado para permitir duplicados
+      // const exists = items.some(item => item.productId === product.id);
+      // if (exists) continue;
 
       newItems.push({
         productId: product.id,
