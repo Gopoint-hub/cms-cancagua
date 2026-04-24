@@ -3503,7 +3503,7 @@ Devuelve un JSON con este formato:
           recipientEmail: input.recipientEmail,
           senderName: input.senderName || "Cancagua (Manual)",
           senderEmail: input.senderEmail,
-          personalMessage: input.personalMessage,
+          personalMessage: input.personalMessage ? input.personalMessage.replace(/[^\x00-\x7F\xC0-\xFF\u00A1-\u017F]/g, "") : undefined,
           deliveryMethod: "email",
           purchaseStatus: "completed" as const,
           status: "active" as const,
