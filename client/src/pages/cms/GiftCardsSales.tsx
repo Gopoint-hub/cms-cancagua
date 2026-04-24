@@ -37,17 +37,32 @@ import {
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function GiftCardsSales() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedGiftCard, setSelectedGiftCard] = useState<any>(null);
   const [isResendDialogOpen, setIsResendDialogOpen] = useState(false);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [isRedeemDialogOpen, setIsRedeemDialogOpen] = useState(false);
+  const [redeemAmount, setRedeemAmount] = useState<number>(0);
+  const [filterTab, setFilterTab] = useState("all");
 
   // Queries
   const { data: giftCards, isLoading, refetch } = trpc.giftCardsAdmin.getAll.useQuery();
   
   // Mutations
+  const redeem = trpc.giftCards.redeem.useMutation({
+    onSuccess: () => {
+      toast.success("Gift card canjeada correctamente");
+      setIsRedeemDialogOpen(false);
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(`Error al canjear: ${error.message}`);
+    },
+  });
+
   const resendEmail = trpc.giftCardsAdmin.resendEmail.useMutation({
     onSuccess: () => {
       toast.success("Email reenviado correctamente");
@@ -119,6 +134,12 @@ export default function GiftCardsSales() {
     setIsDetailDialogOpen(true);
   };
 
+  const handleRedeem = (giftCard: any) => {
+    setSelectedGiftCard(giftCard);
+    setRedeemAmount(giftCard.balance);
+    setIsRedeemDialogOpen(true);
+  };
+
   const handleDownloadPDF = async (giftCard: any) => {
     try {
       const result = await generatePDF.mutateAsync({ giftCardId: giftCard.id });
@@ -153,27 +174,22 @@ export default function GiftCardsSales() {
   };
 
   // Filtrar gift cards
-  const [filterStatus, setFilterStatus] = useState("all");
-
   const filteredGiftCards = giftCards?.filter((gc: any) => {
-    // Primero filtro por búsqueda
-    const searchMatch = !searchTerm || (
-      gc.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      gc.recipientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      gc.recipientEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      gc.senderName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      gc.senderEmail?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    
-    if (!searchMatch) return false;
+    // Filtro por pestañas
+    if (filterTab === "completed" && (gc.purchaseStatus !== "completed" || gc.status === "redeemed")) return false;
+    if (filterTab === "used" && gc.status !== "redeemed") return false;
+    if (filterTab === "pending" && gc.purchaseStatus === "completed") return false;
 
-    // Luego filtro por estado
-    if (filterStatus === "all") return true;
-    if (filterStatus === "completadas") return gc.purchaseStatus === "completed" && gc.status === "active";
-    if (filterStatus === "usadas") return gc.status === "redeemed";
-    if (filterStatus === "fallidas") return ["rejected", "aborted", "timeout", "abandoned", "pending"].includes(gc.purchaseStatus) && gc.status !== "redeemed";
-    
-    return true;
+    // Filtro por búsqueda
+    if (!searchTerm) return true;
+    const search = searchTerm.toLowerCase();
+    return (
+      gc.code?.toLowerCase().includes(search) ||
+      gc.recipientName?.toLowerCase().includes(search) ||
+      gc.recipientEmail?.toLowerCase().includes(search) ||
+      gc.senderName?.toLowerCase().includes(search) ||
+      gc.senderEmail?.toLowerCase().includes(search)
+    );
   }) || [];
 
   // Estadísticas
@@ -275,7 +291,15 @@ export default function GiftCardsSales() {
         </CardHeader>
         <CardContent>
           {/* Search and Filters */}
-          <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4">
+          <div className="flex flex-col gap-4 mb-4">
+            <Tabs value={filterTab} onValueChange={setFilterTab}>
+              <TabsList>
+                <TabsTrigger value="all">Todas</TabsTrigger>
+                <TabsTrigger value="completed">Compradas</TabsTrigger>
+                <TabsTrigger value="used">Usadas</TabsTrigger>
+                <TabsTrigger value="pending">Pendientes/Fallidas</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -284,36 +308,6 @@ export default function GiftCardsSales() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9"
               />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button 
-                variant={filterStatus === "all" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterStatus("all")}
-              >
-                Todas
-              </Button>
-              <Button 
-                variant={filterStatus === "completadas" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterStatus("completadas")}
-              >
-                Compradas
-              </Button>
-              <Button 
-                variant={filterStatus === "usadas" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterStatus("usadas")}
-              >
-                Usadas
-              </Button>
-              <Button 
-                variant={filterStatus === "fallidas" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterStatus("fallidas")}
-              >
-                Pendientes/Fallidas
-              </Button>
             </div>
           </div>
 
@@ -364,8 +358,11 @@ export default function GiftCardsSales() {
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatPrecio(giftCard.amount)}
+                        {giftCard.balance < giftCard.amount && <div className="text-xs text-muted-foreground">Saldo: {formatPrecio(giftCard.balance)}</div>}
                       </TableCell>
-                      <TableCell>{getStatusBadge(giftCard.purchaseStatus)}</TableCell>
+                      <TableCell>
+                        {giftCard.status === "redeemed" ? <Badge className="bg-purple-100 text-purple-800"><CheckCircle className="w-3 h-3 mr-1" /> Usada</Badge> : getStatusBadge(giftCard.purchaseStatus)}
+                      </TableCell>
                       <TableCell>{getDeliveryBadge(giftCard.deliveredAt)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -377,8 +374,16 @@ export default function GiftCardsSales() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {giftCard.purchaseStatus === "completed" && (
+                          {giftCard.purchaseStatus === "completed" && giftCard.status !== "redeemed" && (
                             <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRedeem(giftCard)}
+                                title="Canjear"
+                              >
+                                <CheckCircle className="h-4 w-4 text-green-600" />
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -533,6 +538,49 @@ export default function GiftCardsSales() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Redeem Dialog */}
+      <Dialog open={isRedeemDialogOpen} onOpenChange={setIsRedeemDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Canjear Gift Card</DialogTitle>
+            <DialogDescription>
+              Ingresa el monto a descontar del saldo actual.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedGiftCard && (
+            <div className="space-y-4 py-4">
+              <div className="flex justify-between items-center bg-muted p-3 rounded">
+                <span>Saldo actual:</span>
+                <span className="font-bold text-lg">{formatPrecio(selectedGiftCard.balance)}</span>
+              </div>
+              <div className="space-y-2">
+                <label>Monto a canjear (CLP)</label>
+                <Input 
+                  type="number" 
+                  value={redeemAmount} 
+                  onChange={(e) => setRedeemAmount(Number(e.target.value))}
+                  max={selectedGiftCard.balance}
+                  min={1}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRedeemDialogOpen(false)}>Cancelar</Button>
+            <Button 
+              onClick={() => {
+                if (selectedGiftCard) {
+                  redeem.mutate({ code: selectedGiftCard.code, amount: redeemAmount });
+                }
+              }}
+              disabled={redeem.isPending || redeemAmount <= 0 || redeemAmount > (selectedGiftCard?.balance || 0)}
+            >
+              {redeem.isPending ? "Canjeando..." : "Confirmar Canje"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

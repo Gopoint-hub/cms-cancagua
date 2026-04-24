@@ -1,6 +1,6 @@
 import { eq, gte, and, desc, sql, asc, like, or, isNull, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, analyticsCache } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -2490,6 +2490,33 @@ export async function getMaintenanceStats() {
     else if (s.status === "completed") result.completed = count;
     else if (s.status === "requires_follow_up") result.requiresFollowUp = count;
   });
-  
+
   return result;
+}
+
+// ============================================
+// ANALYTICS CACHE
+// ============================================
+
+export async function getAnalyticsCache(periodKey: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(analyticsCache).where(eq(analyticsCache.periodKey, periodKey)).limit(1);
+  if (!rows[0]) return null;
+  return {
+    data: JSON.parse(rows[0].data),
+    updatedAt: rows[0].updatedAt,
+  };
+}
+
+export async function upsertAnalyticsCache(periodKey: string, data: any) {
+  const db = await getDb();
+  if (!db) return;
+  const jsonData = JSON.stringify(data);
+  const existing = await db.select({ id: analyticsCache.id }).from(analyticsCache).where(eq(analyticsCache.periodKey, periodKey)).limit(1);
+  if (existing[0]) {
+    await db.update(analyticsCache).set({ data: jsonData }).where(eq(analyticsCache.id, existing[0].id));
+  } else {
+    await db.insert(analyticsCache).values({ periodKey, data: jsonData });
+  }
 }

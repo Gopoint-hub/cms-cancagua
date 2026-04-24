@@ -8,12 +8,15 @@ import * as db from "./db";
 import { generateQuoteNumber, calculateValidUntil } from "./quoteHelpers";
 import { invokeLLM } from "./_core/llm";
 import { conciergeRouter } from "./conciergeRouter";
+import { analyticsRouter } from "./analyticsRouter";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   // Módulo Concierge - Sistema de ventas para afiliados
   concierge: conciergeRouter,
+  // Módulo Analytics - Dashboard con datos de Google Ads, Meta Ads, Search Console, Skedu
+  analytics: analyticsRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
 

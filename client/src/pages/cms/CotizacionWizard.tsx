@@ -559,9 +559,9 @@ export default function CotizacionWizard() {
       const product = products.find((p: any) => p.id === productId);
       if (!product) continue;
 
-      // Skip if already in items
-      const exists = items.some(item => item.productId === product.id);
-      if (exists) continue;
+      // Comentado para permitir duplicados
+      // const exists = items.some(item => item.productId === product.id);
+      // if (exists) continue;
 
       newItems.push({
         productId: product.id,
@@ -1248,7 +1248,12 @@ export default function CotizacionWizard() {
                       <GripVertical className="w-4 h-4 text-muted-foreground" />
                     </TableCell>
                     <TableCell>
-                      <span className="text-primary font-medium">{item.productName}</span>
+                      <Input
+                        type="text"
+                        value={item.productName}
+                        onChange={(e) => handleUpdateItem(index, "productName", e.target.value)}
+                        className="w-full text-primary font-medium"
+                      />
                     </TableCell>
                     <TableCell>
                       <Input
@@ -1368,7 +1373,7 @@ export default function CotizacionWizard() {
                 </TableHeader>
                 <TableBody>
                   {filteredProducts.map((product: any) => {
-                    const isAlreadyAdded = items.some(item => item.productId === product.id);
+                    const isAlreadyAdded = false; // Modificado para permitir duplicados
                     const isSelected = selectedProductIds.includes(product.id);
                     return (
                       <TableRow

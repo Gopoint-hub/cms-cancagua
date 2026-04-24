@@ -912,3 +912,19 @@ export const conciergeSellerMetrics = mysqlTable("concierge_seller_metrics", {
 
 export type ConciergeSellerMetric = typeof conciergeSellerMetrics.$inferSelect;
 export type InsertConciergeSellerMetric = typeof conciergeSellerMetrics.$inferInsert;
+
+/**
+ * Cache de datos de analytics por mes.
+ * Guarda el JSON completo del dashboard para evitar llamar a las APIs externas cada vez.
+ */
+export const analyticsCache = mysqlTable("analytics_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Clave del período: "2026-04" */
+  periodKey: varchar("period_key", { length: 7 }).notNull().unique(),
+  /** JSON con todos los datos del dashboard */
+  data: text("data").notNull(),
+  /** Cuándo se actualizó por última vez */
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AnalyticsCache = typeof analyticsCache.$inferSelect;

@@ -16,6 +16,9 @@ const getHeaders = () => {
     "X-Skedu-App-ID": appId,
     "X-Skedu-App-Secret": secret,
     "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (compatible; CancaguaCMS/1.0; +https://cms.cancagua.cl)",
+    "Accept": "application/json",
+    "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
   };
 };
 
@@ -66,7 +69,7 @@ export async function getSkeduEvents(params?: {
     // Sintaxis específica requerida por Skedu: Parámetros con comparadores ~ge y ~lt
     const skeduParams: any = {
       StoreUUID: STORE_UUID,
-      limit: 100,
+      limit: 500,
       offset: 0,
     };
 
