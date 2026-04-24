@@ -3475,6 +3475,97 @@ Devuelve un JSON con este formato:
           count: result.count
         };
       }),
+
+    createManual: protectedProcedure
+      .input(z.object({
+        amount: z.number().min(5000),
+        backgroundImage: z.string().default("default"),
+        recipientName: z.string(),
+        recipientEmail: z.string().email(),
+        senderName: z.string().optional(),
+        senderEmail: z.string().email().optional(),
+        personalMessage: z.string().max(150).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
+        }
+
+        // Generar código único
+        const code = `GC-MANUAL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+        
+        const giftCardData = {
+          code,
+          amount: input.amount,
+          balance: input.amount,
+          backgroundImage: input.backgroundImage,
+          recipientName: input.recipientName,
+          recipientEmail: input.recipientEmail,
+          senderName: input.senderName || "Cancagua (Manual)",
+          senderEmail: input.senderEmail,
+          personalMessage: input.personalMessage,
+          deliveryMethod: "email",
+          purchaseStatus: "completed" as const,
+          status: "active" as const,
+          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 3 meses
+          paymentMethod: "manual_gift",
+          paymentReference: `MANUAL-${ctx.user.id}`,
+        };
+
+        const created = await db.createGiftCard(giftCardData);
+        // Intentar obtenerla por código para asegurar ID
+        const giftCard = await db.getGiftCardByCode(code);
+
+        if (!giftCard) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error al crear gift card en DB" });
+        }
+
+        // Registrar transacción de compra
+        await db.createGiftCardTransaction({
+          giftCardId: giftCard.id,
+          transactionType: "purchase",
+          amount: giftCard.amount,
+          balanceBefore: 0,
+          balanceAfter: giftCard.amount,
+          notes: `Creada manualmente por ${ctx.user.name || ctx.user.email}`,
+        });
+
+        // Enviar email con la gift card
+        try {
+          const { sendGiftCardEmail } = await import("./_core/email");
+          const { generateGiftCardPDF } = await import("./giftcardPdfGenerator");
+          
+          const pdfBuffer = await generateGiftCardPDF({
+            amount: giftCard.amount,
+            recipientName: giftCard.recipientName || "Destinatario",
+            recipientEmail: giftCard.recipientEmail || "",
+            message: giftCard.personalMessage || undefined,
+            backgroundImage: giftCard.backgroundImage || "/images/giftcard-backgrounds/spa-green.jpg",
+            code: giftCard.code,
+          });
+          
+          const emailTo = giftCard.recipientEmail || giftCard.senderEmail;
+          if (emailTo) {
+            await sendGiftCardEmail({
+              to: emailTo,
+              recipientName: giftCard.recipientName || "Estimado/a",
+              senderName: giftCard.senderName,
+              amount: giftCard.amount,
+              code: giftCard.code,
+              message: giftCard.personalMessage,
+              pdfBuffer,
+            });
+            
+            await db.updateGiftCard(giftCard.id, {
+              deliveredAt: new Date(),
+            });
+          }
+        } catch (emailError) {
+          console.error("Error enviando email de gift card manual:", emailError);
+        }
+
+        return { success: true, giftCard };
+      }),
   }),
 
   // Eventos (público)

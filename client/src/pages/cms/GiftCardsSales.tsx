@@ -32,12 +32,16 @@ import {
   XCircle,
   Clock,
   Loader2,
-  Send
+  Send,
+  PlusCircle
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 export default function GiftCardsSales() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -47,11 +51,41 @@ export default function GiftCardsSales() {
   const [isRedeemDialogOpen, setIsRedeemDialogOpen] = useState(false);
   const [redeemAmount, setRedeemAmount] = useState<number>(0);
   const [filterTab, setFilterTab] = useState("all");
+  const [isCreateManualDialogOpen, setIsCreateManualDialogOpen] = useState(false);
+  const [manualGiftCard, setManualGiftCard] = useState({
+    amount: 50000,
+    recipientName: "",
+    recipientEmail: "",
+    senderName: "",
+    senderEmail: "",
+    personalMessage: "",
+    backgroundImageId: "spa-green",
+  });
 
   // Queries
   const { data: giftCards, isLoading, refetch } = trpc.giftCardsAdmin.getAll.useQuery();
+  const { data: backgroundImages } = trpc.giftCards.getBackgroundImages.useQuery();
   
   // Mutations
+  const createManual = trpc.giftCardsAdmin.createManual.useMutation({
+    onSuccess: () => {
+      toast.success("Gift card creada y enviada correctamente");
+      setIsCreateManualDialogOpen(false);
+      setManualGiftCard({
+        amount: 50000,
+        recipientName: "",
+        recipientEmail: "",
+        senderName: "",
+        senderEmail: "",
+        personalMessage: "",
+        backgroundImageId: "spa-green",
+      });
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(`Error al crear gift card: ${error.message}`);
+    },
+  });
   const redeem = trpc.giftCards.redeem.useMutation({
     onSuccess: () => {
       toast.success("Gift card canjeada correctamente");
@@ -213,6 +247,13 @@ export default function GiftCardsSales() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button 
+            variant="default"
+            onClick={() => setIsCreateManualDialogOpen(true)}
+          >
+            <PlusCircle className="w-4 h-4 mr-2" />
+            Nueva Gift Card
+          </Button>
           <Button 
             variant="outline" 
             onClick={() => markAbandoned.mutate()}
@@ -579,6 +620,145 @@ export default function GiftCardsSales() {
               disabled={redeem.isPending || redeemAmount <= 0 || redeemAmount > (selectedGiftCard?.balance || 0)}
             >
               {redeem.isPending ? "Canjeando..." : "Confirmar Canje"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Manual Gift Card Dialog */}
+      <Dialog open={isCreateManualDialogOpen} onOpenChange={setIsCreateManualDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Crear Nueva Gift Card</DialogTitle>
+            <DialogDescription>
+              Genera una gift card manualmente. Se enviará automáticamente por email al destinatario.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-6 py-4">
+            {/* Monto y Diseño */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="manual-amount">Monto (CLP)</Label>
+                <Input 
+                  id="manual-amount"
+                  type="number"
+                  value={manualGiftCard.amount}
+                  onChange={(e) => setManualGiftCard({...manualGiftCard, amount: Number(e.target.value)})}
+                  min={5000}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Diseño</Label>
+                <RadioGroup 
+                  value={manualGiftCard.backgroundImageId} 
+                  onValueChange={(val) => setManualGiftCard({...manualGiftCard, backgroundImageId: val})}
+                  className="grid grid-cols-3 gap-2"
+                >
+                  {backgroundImages?.map((img) => (
+                    <Label
+                      key={img.id}
+                      htmlFor={`img-${img.id}`}
+                      className={`relative aspect-video rounded border-2 cursor-pointer transition-all ${
+                        manualGiftCard.backgroundImageId === img.id ? "border-primary" : "border-transparent opacity-60"
+                      }`}
+                    >
+                      <RadioGroupItem value={img.id} id={`img-${img.id}`} className="sr-only" />
+                      <img src={img.url} alt={img.name} className="w-full h-full object-cover rounded" />
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+            </div>
+
+            {/* Destinatario */}
+            <div className="grid grid-cols-2 gap-4 border-t pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="dest-name">Nombre Destinatario *</Label>
+                <Input 
+                  id="dest-name"
+                  placeholder="Ej: Juan Pérez"
+                  value={manualGiftCard.recipientName}
+                  onChange={(e) => setManualGiftCard({...manualGiftCard, recipientName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dest-email">Email Destinatario *</Label>
+                <Input 
+                  id="dest-email"
+                  type="email"
+                  placeholder="juan@ejemplo.com"
+                  value={manualGiftCard.recipientEmail}
+                  onChange={(e) => setManualGiftCard({...manualGiftCard, recipientEmail: e.target.value})}
+                />
+              </div>
+            </div>
+
+            {/* Remitente */}
+            <div className="grid grid-cols-2 gap-4 border-t pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="send-name">Nombre Remitente (Opcional)</Label>
+                <Input 
+                  id="send-name"
+                  placeholder="Ej: María García"
+                  value={manualGiftCard.senderName}
+                  onChange={(e) => setManualGiftCard({...manualGiftCard, senderName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="send-email">Email Remitente (Opcional)</Label>
+                <Input 
+                  id="send-email"
+                  type="email"
+                  placeholder="maria@ejemplo.com"
+                  value={manualGiftCard.senderEmail}
+                  onChange={(e) => setManualGiftCard({...manualGiftCard, senderEmail: e.target.value})}
+                />
+              </div>
+            </div>
+
+            {/* Mensaje */}
+            <div className="space-y-2 border-t pt-4">
+              <Label htmlFor="manual-msg">Mensaje Personalizado (Max 150 caracteres)</Label>
+              <Textarea 
+                id="manual-msg"
+                placeholder="¡Feliz cumpleaños! Que disfrutes mucho tu momento en Cancagua."
+                maxLength={150}
+                value={manualGiftCard.personalMessage}
+                onChange={(e) => setManualGiftCard({...manualGiftCard, personalMessage: e.target.value})}
+              />
+              <p className="text-right text-xs text-muted-foreground">{manualGiftCard.personalMessage.length}/150</p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateManualDialogOpen(false)}>Cancelar</Button>
+            <Button 
+              onClick={() => {
+                const bgUrl = backgroundImages?.find(img => img.id === manualGiftCard.backgroundImageId)?.url || "default";
+                createManual.mutate({
+                  amount: manualGiftCard.amount,
+                  backgroundImage: bgUrl,
+                  recipientName: manualGiftCard.recipientName,
+                  recipientEmail: manualGiftCard.recipientEmail,
+                  senderName: manualGiftCard.senderName || undefined,
+                  senderEmail: manualGiftCard.senderEmail || undefined,
+                  personalMessage: manualGiftCard.personalMessage || undefined,
+                });
+              }}
+              disabled={createManual.isPending || !manualGiftCard.recipientName || !manualGiftCard.recipientEmail || manualGiftCard.amount < 5000}
+            >
+              {createManual.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creando...
+                </>
+              ) : (
+                <>
+                  <Gift className="mr-2 h-4 w-4" />
+                  Crear y Enviar Gift Card
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
