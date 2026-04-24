@@ -153,16 +153,27 @@ export default function GiftCardsSales() {
   };
 
   // Filtrar gift cards
+  const [filterStatus, setFilterStatus] = useState("all");
+
   const filteredGiftCards = giftCards?.filter((gc: any) => {
-    if (!searchTerm) return true;
-    const search = searchTerm.toLowerCase();
-    return (
-      gc.code?.toLowerCase().includes(search) ||
-      gc.recipientName?.toLowerCase().includes(search) ||
-      gc.recipientEmail?.toLowerCase().includes(search) ||
-      gc.senderName?.toLowerCase().includes(search) ||
-      gc.senderEmail?.toLowerCase().includes(search)
+    // Primero filtro por búsqueda
+    const searchMatch = !searchTerm || (
+      gc.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      gc.recipientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      gc.recipientEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      gc.senderName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      gc.senderEmail?.toLowerCase().includes(searchTerm.toLowerCase())
     );
+    
+    if (!searchMatch) return false;
+
+    // Luego filtro por estado
+    if (filterStatus === "all") return true;
+    if (filterStatus === "completadas") return gc.purchaseStatus === "completed" && gc.status === "active";
+    if (filterStatus === "usadas") return gc.status === "redeemed";
+    if (filterStatus === "fallidas") return ["rejected", "aborted", "timeout", "abandoned", "pending"].includes(gc.purchaseStatus) && gc.status !== "redeemed";
+    
+    return true;
   }) || [];
 
   // Estadísticas
@@ -263,8 +274,8 @@ export default function GiftCardsSales() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Search */}
-          <div className="flex items-center gap-4 mb-4">
+          {/* Search and Filters */}
+          <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -273,6 +284,36 @@ export default function GiftCardsSales() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9"
               />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant={filterStatus === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilterStatus("all")}
+              >
+                Todas
+              </Button>
+              <Button 
+                variant={filterStatus === "completadas" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilterStatus("completadas")}
+              >
+                Compradas
+              </Button>
+              <Button 
+                variant={filterStatus === "usadas" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilterStatus("usadas")}
+              >
+                Usadas
+              </Button>
+              <Button 
+                variant={filterStatus === "fallidas" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilterStatus("fallidas")}
+              >
+                Pendientes/Fallidas
+              </Button>
             </div>
           </div>
 
