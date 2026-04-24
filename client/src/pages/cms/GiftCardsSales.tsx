@@ -254,19 +254,6 @@ export default function GiftCardsSales() {
             <PlusCircle className="w-4 h-4 mr-2" />
             Nueva Gift Card
           </Button>
-          <Button 
-            variant="outline" 
-            onClick={() => markAbandoned.mutate()}
-            disabled={markAbandoned.isPending || stats.pending === 0}
-            title="Marcar como abandonadas las gift cards pendientes por más de 30 minutos"
-          >
-            {markAbandoned.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <XCircle className="w-4 h-4 mr-2" />
-            )}
-            Limpiar Pendientes
-          </Button>
           <Button variant="outline" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Actualizar
