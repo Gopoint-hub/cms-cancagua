@@ -3491,8 +3491,10 @@ Devuelve un JSON con este formato:
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
         }
 
-        // Generar código único
-        const code = `GC-MANUAL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+        // Generar código único (máx 20 caracteres para cumplir con el esquema)
+        const timestamp = Date.now().toString(36).toUpperCase();
+        const randomPart = Math.random().toString(36).substring(2, 5).toUpperCase();
+        const code = `GC-M-${timestamp}-${randomPart}`;
         
         const giftCardData = {
           code,
@@ -3501,9 +3503,10 @@ Devuelve un JSON con este formato:
           backgroundImage: input.backgroundImage,
           recipientName: input.recipientName,
           recipientEmail: input.recipientEmail,
+          recipientPhone: null,
           senderName: input.senderName || "Cancagua (Manual)",
-          senderEmail: input.senderEmail,
-          personalMessage: input.personalMessage ? input.personalMessage.replace(/[^\x00-\x7F\xC0-\xFF\u00A1-\u017F]/g, "") : undefined,
+          senderEmail: input.senderEmail || null,
+          personalMessage: input.personalMessage ? input.personalMessage.replace(/[^\x00-\x7F\xC0-\xFF\u00A1-\u017F]/g, "") : null,
           deliveryMethod: "email",
           purchaseStatus: "completed" as const,
           status: "active" as const,
