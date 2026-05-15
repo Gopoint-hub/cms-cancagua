@@ -342,6 +342,7 @@ export async function sendWelcomeEmail(
  */
 export async function sendGiftCardEmail(params: {
   to: string;
+  cc?: string[];
   recipientName: string;
   senderName?: string | null;
   amount: number;
@@ -361,6 +362,11 @@ export async function sendGiftCardEmail(params: {
       ? `<strong>${params.senderName}</strong> te ha enviado` 
       : "Has recibido";
 
+    const ccRecipients = Array.from(new Set([
+      "contacto@cancagua.cl",
+      ...(params.cc || []),
+    ].filter((email): email is string => Boolean(email) && email !== params.to)));
+
     const messageSection = params.message 
       ? `
         <div style="margin: 24px 0; padding: 20px; background-color: #f0fdf4; border-left: 4px solid #0f766e; border-radius: 4px;">
@@ -373,7 +379,7 @@ export async function sendGiftCardEmail(params: {
     const { data, error } = await client.emails.send({
       from: FROM_EMAIL,
       to: [params.to],
-      cc: ["contacto@cancagua.cl"],
+      cc: ccRecipients,
       subject: `🎁 ¡Has recibido una Gift Card de Cancagua por ${formattedAmount}!`,
       attachments: [
         {

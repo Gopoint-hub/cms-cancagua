@@ -1332,6 +1332,14 @@ export async function getGiftCardByBuyOrder(buyOrder: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+export async function getGiftCardByWebpayToken(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { giftCards } = await import("../drizzle/schema");
+  const result = await db.select().from(giftCards).where(eq(giftCards.webpayToken, token)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
 /**
  * Marcar gift cards pendientes antiguas como abandonadas
  * @param olderThan - Fecha límite: gift cards creadas antes de esta fecha serán marcadas como abandonadas

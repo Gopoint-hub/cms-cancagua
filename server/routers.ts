@@ -3214,6 +3214,62 @@ Devuelve un JSON con este formato:
         // Caso 1: Pago exitoso o rechazado (viene token_ws)
         if (input.token_ws) {
           try {
+            const existingGiftCard = await db.getGiftCardByWebpayToken(input.token_ws);
+            if (existingGiftCard?.purchaseStatus === "completed") {
+              if (!existingGiftCard.deliveredAt) {
+                try {
+                  const { sendGiftCardEmail } = await import("./_core/email");
+                  const { generateGiftCardPDF } = await import("./giftcardPdfGenerator");
+                  const pdfBuffer = await generateGiftCardPDF({
+                    amount: existingGiftCard.amount,
+                    recipientName: existingGiftCard.recipientName || "Destinatario",
+                    recipientEmail: existingGiftCard.recipientEmail || "",
+                    message: existingGiftCard.personalMessage || undefined,
+                    backgroundImage: existingGiftCard.backgroundImage || "/images/giftcard-backgrounds/spa-green.jpg",
+                    code: existingGiftCard.code,
+                  });
+                  const emailTo = existingGiftCard.recipientEmail || existingGiftCard.senderEmail;
+                  if (emailTo) {
+                    const emailCc = existingGiftCard.senderEmail && existingGiftCard.senderEmail !== emailTo
+                      ? [existingGiftCard.senderEmail]
+                      : [];
+                    const emailResult = await sendGiftCardEmail({
+                      to: emailTo,
+                      cc: emailCc,
+                      recipientName: existingGiftCard.recipientName || "Estimado/a",
+                      senderName: existingGiftCard.senderName,
+                      amount: existingGiftCard.amount,
+                      code: existingGiftCard.code,
+                      message: existingGiftCard.personalMessage,
+                      pdfBuffer,
+                    });
+                    if (emailResult.success) {
+                      await db.updateGiftCard(existingGiftCard.id, { deliveredAt: new Date() });
+                    }
+                  }
+                } catch (emailError) {
+                  console.error("Error reintentando email de gift card completada:", emailError);
+                }
+              }
+
+              return {
+                success: true,
+                status: "approved",
+                giftCard: {
+                  id: existingGiftCard.id,
+                  code: existingGiftCard.code,
+                  amount: existingGiftCard.amount,
+                  recipientName: existingGiftCard.recipientName,
+                  recipientEmail: existingGiftCard.recipientEmail,
+                  senderName: existingGiftCard.senderName,
+                  senderEmail: existingGiftCard.senderEmail,
+                  personalMessage: existingGiftCard.personalMessage,
+                  backgroundImage: existingGiftCard.backgroundImage,
+                },
+                message: "Pago ya confirmado. Tu Gift Card está disponible.",
+              };
+            }
+
             const result = await commitTransaction(input.token_ws);
             
             // Buscar la gift card por buyOrder
@@ -3261,8 +3317,12 @@ Devuelve un JSON con este formato:
                 
                 const emailTo = giftCard.recipientEmail || giftCard.senderEmail;
                 if (emailTo) {
-                  await sendGiftCardEmail({
+                  const emailCc = giftCard.senderEmail && giftCard.senderEmail !== emailTo
+                    ? [giftCard.senderEmail]
+                    : [];
+                  const emailResult = await sendGiftCardEmail({
                     to: emailTo,
+                    cc: emailCc,
                     recipientName: giftCard.recipientName || "Estimado/a",
                     senderName: giftCard.senderName,
                     amount: giftCard.amount,
@@ -3270,6 +3330,10 @@ Devuelve un JSON con este formato:
                     message: giftCard.personalMessage,
                     pdfBuffer,
                   });
+
+                  if (!emailResult.success) {
+                    throw new Error(emailResult.error || "Resend no pudo enviar el email");
+                  }
                   
                   await db.updateGiftCard(giftCard.id, {
                     deliveredAt: new Date(),
@@ -3432,8 +3496,12 @@ Devuelve un JSON con este formato:
             code: giftCard.code,
           });
 
-          await sendGiftCardEmail({
+          const emailCc = giftCard.senderEmail && giftCard.senderEmail !== emailTo
+            ? [giftCard.senderEmail]
+            : [];
+          const emailResult = await sendGiftCardEmail({
             to: emailTo,
+            cc: emailCc,
             recipientName: giftCard.recipientName || "Estimado/a",
             senderName: giftCard.senderName,
             amount: giftCard.amount,
@@ -3441,6 +3509,10 @@ Devuelve un JSON con este formato:
             message: giftCard.personalMessage,
             pdfBuffer,
           });
+
+          if (!emailResult.success) {
+            throw new Error(emailResult.error || "Resend no pudo enviar el email");
+          }
 
           await db.updateGiftCard(giftCard.id, {
             deliveredAt: new Date(),
