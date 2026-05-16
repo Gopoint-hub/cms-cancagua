@@ -17,8 +17,24 @@ function getResendClient(): Resend {
   return resend;
 }
 
-const FROM_EMAIL = "Cancagua <noreply@cancagua.cl>";
-const SUPPORT_EMAIL = "soporte@cancagua.cl";
+const FROM_EMAIL = ENV.resendFromEmail;
+const SUPPORT_EMAIL = "contacto@cancagua.cl";
+const VERIFIED_EMAIL_DOMAIN = "cancagua.cl";
+
+function getEmailDomain(emailOrSender: string): string {
+  const match = emailOrSender.match(/<([^>]+)>/);
+  const email = (match?.[1] || emailOrSender).trim();
+  return email.split("@")[1]?.toLowerCase() || "";
+}
+
+function assertVerifiedSenderDomain(sender: string): void {
+  const domain = getEmailDomain(sender);
+  if (domain !== VERIFIED_EMAIL_DOMAIN) {
+    throw new Error(`RESEND_FROM_EMAIL debe usar el dominio verificado @${VERIFIED_EMAIL_DOMAIN}. Valor actual: ${sender}`);
+  }
+}
+
+assertVerifiedSenderDomain(FROM_EMAIL);
 
 interface EmailResult {
   success: boolean;
