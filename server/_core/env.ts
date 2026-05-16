@@ -17,6 +17,7 @@ export const ENV = {
   
   // Email (Resend)
   resendApiKey: process.env.RESEND_API_KEY ?? "",
+  resendFromEmail: process.env.RESEND_FROM_EMAIL ?? "Cancagua <contacto@cancagua.cl>",
   
   // WebPay (Transbank)
   webpayApiKey: process.env.WEBPAY_API_KEY ?? "",
