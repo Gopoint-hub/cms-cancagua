@@ -1,4 +1,4 @@
-import { eq, gte, and, desc, sql, asc, like, or, isNull, inArray } from "drizzle-orm";
+import { eq, gte, lte, and, desc, sql, asc, like, or, isNull, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, analyticsCache } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -1849,12 +1849,13 @@ export async function getMarketingROIReport(params: { startDate: Date; endDate: 
   const prevStartDate = new Date(prevEndDate.getTime() - rangeMs);
 
   const fetchPeriodData = async (start: Date, end: Date) => {
-    // 1. Obtener inversiones
+    // 1. Obtener inversiones cuyo rango SE SOLAPA con [start, end]
+    //    (no exigir contención total: una campaña que cruza el límite del mes debe contarse)
     const investments = await db.select()
       .from(marketingInvestments)
       .where(and(
-        gte(marketingInvestments.startDate, start),
-        sql`${marketingInvestments.endDate} <= ${end}`
+        lte(marketingInvestments.startDate, end),
+        gte(marketingInvestments.endDate, start),
       ));
 
     // 2. Obtener ventas

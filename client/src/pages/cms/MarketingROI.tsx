@@ -64,9 +64,15 @@ export default function CMSMarketingROI() {
         description: "",
     });
 
+    // Normaliza una fecha local a UTC midnight del MISMO día calendario local.
+    // Evita que `startOfMonth`/`endOfMonth` (hora local) corten inversiones guardadas
+    // con `new Date('yyyy-MM-dd')` (UTC midnight) en el borde del mes.
+    const toUTCDayStart = (d: Date) => new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0));
+    const toUTCDayEnd = (d: Date) => new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999));
+
     const { data: report, refetch: refetchReport } = trpc.marketing.getROIReport.useQuery({
-        startDate: dateRange.start,
-        endDate: dateRange.end,
+        startDate: toUTCDayStart(dateRange.start),
+        endDate: toUTCDayEnd(dateRange.end),
     });
 
     const { data: investments, refetch: refetchInvestments } = trpc.marketing.getAllInvestments.useQuery();
@@ -96,11 +102,13 @@ export default function CMSMarketingROI() {
             toast.error("El monto debe ser mayor a 0");
             return;
         }
+        // Parsear 'yyyy-MM-dd' como medianoche LOCAL (no UTC) para evitar que
+        // una inversión del día 1 quede registrada como del último día del mes anterior.
         createInvestment.mutate({
             ...newInvestment,
             channel: newInvestment.channel as any,
-            startDate: new Date(newInvestment.startDate),
-            endDate: new Date(newInvestment.endDate),
+            startDate: new Date(newInvestment.startDate + "T00:00:00"),
+            endDate: new Date(newInvestment.endDate + "T23:59:59"),
         });
     };
 
