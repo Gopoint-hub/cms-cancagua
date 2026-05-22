@@ -3,8 +3,12 @@ import { Resend } from 'resend';
 // Inicializar Resend con API key del entorno
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Configuración del remitente base
-const BASE_EMAIL = 'info@cancagua.cl';
+// Configuración del remitente base — lee del .env o usa fallback
+function parseEmailAddress(formatted: string): string {
+  const match = formatted.match(/<([^>]+)>/);
+  return match ? match[1] : formatted;
+}
+const BASE_EMAIL = parseEmailAddress(process.env.RESEND_FROM_EMAIL || 'Cancagua <contacto@cancagua.cl>');
 const DEFAULT_FROM_NAME = 'Cancagua';
 
 // Nombres de remitente predefinidos por tipo de email
