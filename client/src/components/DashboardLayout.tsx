@@ -26,7 +26,7 @@ import {
   FileText, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/collapsible";
 
 // Definición de categorías y sus items de menú
-export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda";
+export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "masajes";
 
 interface MenuItem {
   icon: any;
@@ -151,6 +151,23 @@ export const categories: Category[] = [
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
       { icon: RefreshCw, label: "Integraciones", path: "/cms/integraciones" },
       { icon: Settings, label: "Configuración", path: "/cms/configuracion" },
+    ],
+  },
+  {
+    id: "masajes",
+    label: "Masajes",
+    icon: Sparkles,
+    description: "Área de Masajes & Spa",
+    color: "bg-rose-500",
+    roles: ["super_admin", "admin", "editor"],
+    items: [
+      { icon: LayoutDashboard, label: "Dashboard", path: "/cms/masajes" },
+      { icon: CalendarCheck, label: "Agenda", path: "/cms/masajes/agenda" },
+      { icon: Users, label: "Terapeutas", path: "/cms/masajes/terapeutas" },
+      { icon: Sparkles, label: "Técnicas", path: "/cms/masajes/tecnicas" },
+      { icon: Package, label: "Inventario", path: "/cms/masajes/inventario" },
+      { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes" },
+      { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics" },
     ],
   },
   {

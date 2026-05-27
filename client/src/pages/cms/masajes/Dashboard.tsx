@@ -1,0 +1,191 @@
+import { trpc } from "@/lib/trpc";
+import DashboardLayout from "@/components/DashboardLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { format, startOfDay, endOfDay } from "date-fns";
+import { es } from "date-fns/locale";
+import { CalendarCheck, AlertTriangle, Users, Clock, Package } from "lucide-react";
+import { Link } from "wouter";
+
+export default function MasajesDashboard() {
+  const today = format(new Date(), "yyyy-MM-dd");
+  const { data: bookings, isLoading: loadingBookings } = trpc.masajes.agenda.getByDateRange.useQuery(
+    { from: today, to: today }
+  );
+  const { data: lowStock, isLoading: loadingStock } = trpc.masajes.inventario.getLowStock.useQuery();
+  const { data: therapists, isLoading: loadingTherapists } = trpc.masajes.terapeutas.getAll.useQuery();
+
+  const confirmed = bookings?.filter(b => b.status === "confirmed" || b.status === "pending") ?? [];
+  const activeTherapists = therapists?.filter(t => t.active === 1) ?? [];
+
+  return (
+    <DashboardLayout>
+      <div className="p-6 space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-wide">Área de Masajes</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
+          </p>
+        </div>
+
+        {/* KPIs del día */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <CalendarCheck className="w-4 h-4" /> Reservas hoy
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingBookings ? <Skeleton className="h-8 w-12" /> : (
+                <span className="text-3xl font-bold">{confirmed.length}</span>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Users className="w-4 h-4" /> Terapeutas activos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingTherapists ? <Skeleton className="h-8 w-12" /> : (
+                <span className="text-3xl font-bold">{activeTherapists.length}</span>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Package className="w-4 h-4" /> Alertas de stock
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingStock ? <Skeleton className="h-8 w-12" /> : (
+                <span className={`text-3xl font-bold ${(lowStock?.length ?? 0) > 0 ? "text-destructive" : ""}`}>
+                  {lowStock?.length ?? 0}
+                </span>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Clock className="w-4 h-4" /> Próximo masaje
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingBookings ? <Skeleton className="h-8 w-16" /> : (
+                <span className="text-3xl font-bold">
+                  {confirmed[0]?.startTime ?? "—"}
+                </span>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Agenda del día */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center justify-between">
+                Reservas de hoy
+                <Link href="/cms/masajes/agenda">
+                  <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver agenda completa →</span>
+                </Link>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingBookings ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full" />)}
+                </div>
+              ) : confirmed.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">Sin reservas para hoy</p>
+              ) : (
+                <div className="space-y-3">
+                  {confirmed.map(b => (
+                    <div key={b.id} className="flex items-start justify-between border rounded-lg p-3">
+                      <div>
+                        <p className="font-medium text-sm">{b.clientName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {b.techniqueName} · {b.duration} min · {b.roomName}
+                        </p>
+                        {b.therapistName && (
+                          <p className="text-xs text-muted-foreground">Terapeuta: {b.therapistName}</p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold">{b.startTime}</p>
+                        <Badge variant={b.status === "confirmed" ? "default" : "secondary"} className="text-xs mt-1">
+                          {b.status === "confirmed" ? "Confirmada" : "Pendiente"}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Alertas de stock */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center justify-between">
+                {(lowStock?.length ?? 0) > 0 && <AlertTriangle className="w-4 h-4 text-destructive mr-2 inline" />}
+                Stock bajo
+                <Link href="/cms/masajes/inventario">
+                  <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver inventario →</span>
+                </Link>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingStock ? (
+                <div className="space-y-2">
+                  {[1, 2].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : (lowStock?.length ?? 0) === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">Todo el stock está en orden ✓</p>
+              ) : (
+                <div className="space-y-2">
+                  {lowStock!.map(s => (
+                    <div key={s.id} className="flex items-center justify-between border border-destructive/30 rounded-lg p-3 bg-destructive/5">
+                      <span className="text-sm font-medium">{s.name}</span>
+                      <span className="text-sm text-destructive font-semibold">
+                        {s.currentStock} {s.unit} (mín: {s.minimumStock})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Links rápidos */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {[
+            { href: "/cms/masajes/agenda", label: "Agenda" },
+            { href: "/cms/masajes/terapeutas", label: "Terapeutas" },
+            { href: "/cms/masajes/tecnicas", label: "Técnicas" },
+            { href: "/cms/masajes/inventario", label: "Inventario" },
+            { href: "/cms/masajes/clientes", label: "Clientes" },
+            { href: "/cms/masajes/analytics", label: "Ventas" },
+          ].map(link => (
+            <Link key={link.href} href={link.href}>
+              <Card className="cursor-pointer hover:border-primary transition-colors">
+                <CardContent className="p-4 text-center">
+                  <span className="text-sm font-medium">{link.label}</span>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}

@@ -1,4 +1,4 @@
-import { date, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { date, decimal, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -928,3 +928,135 @@ export const analyticsCache = mysqlTable("analytics_cache", {
 });
 
 export type AnalyticsCache = typeof analyticsCache.$inferSelect;
+
+// ============================================================
+// MÓDULO MASAJES
+// ============================================================
+
+export const massageTechniques = mysqlTable("massage_techniques", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  durations: varchar("durations", { length: 50 }).default("50,80,110").notNull(), // CSV: "50,80,110"
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageTechnique = typeof massageTechniques.$inferSelect;
+export type InsertMassageTechnique = typeof massageTechniques.$inferInsert;
+
+export const massageTherapists = mysqlTable("massage_therapists", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  type: mysqlEnum("type", ["inhouse", "freelance"]).notNull(),
+  phone: varchar("phone", { length: 20 }),
+  email: varchar("email", { length: 320 }),
+  contractType: varchar("contract_type", { length: 100 }),
+  // Para freelance: minutos de anticipación necesarios para llamar
+  leadTimeMinutes: int("lead_time_minutes").default(120),
+  // Para inhouse: turno actual (am/pm, rota semanalmente)
+  currentShift: mysqlEnum("current_shift", ["am", "pm"]).default("am"),
+  // Notas de disponibilidad y preferencias para priorizar llamados
+  notes: text("notes"),
+  // Prioridad de llamado (1 = primera, más bajo = más prioritario)
+  callPriority: int("call_priority").default(99),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageTherapist = typeof massageTherapists.$inferSelect;
+export type InsertMassageTherapist = typeof massageTherapists.$inferInsert;
+
+export const massageTherapistTechniques = mysqlTable("massage_therapist_techniques", {
+  id: int("id").autoincrement().primaryKey(),
+  therapistId: int("therapist_id").notNull(),
+  techniqueId: int("technique_id").notNull(),
+});
+
+export const massageTherapistSchedules = mysqlTable("massage_therapist_schedules", {
+  id: int("id").autoincrement().primaryKey(),
+  therapistId: int("therapist_id").notNull(),
+  dayOfWeek: int("day_of_week").notNull(), // 0=Domingo, 1=Lunes ... 6=Sábado
+  startTime: varchar("start_time", { length: 5 }).notNull(), // "10:00"
+  endTime: varchar("end_time", { length: 5 }).notNull(),     // "19:00"
+  available: int("available").default(1).notNull(),
+  // Bloqueos por rango de fechas (licencias, vacaciones)
+  blockFrom: date("block_from"),
+  blockTo: date("block_to"),
+  blockReason: varchar("block_reason", { length: 255 }),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageTherapistSchedule = typeof massageTherapistSchedules.$inferSelect;
+
+export const massageRooms = mysqlTable("massage_rooms", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  type: mysqlEnum("type", ["individual", "double"]).notNull(),
+  capacity: int("capacity").notNull(), // 1 o 2
+  active: int("active").default(1).notNull(),
+});
+
+export type MassageRoom = typeof massageRooms.$inferSelect;
+
+export const massageBookings = mysqlTable("massage_bookings", {
+  id: int("id").autoincrement().primaryKey(),
+  // Datos del cliente
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }),
+  clientPhone: varchar("client_phone", { length: 20 }),
+  clientOrigin: varchar("client_origin", { length: 100 }), // Localización/origen del cliente
+  // Servicio
+  techniqueId: int("technique_id").notNull(),
+  therapistId: int("therapist_id"),
+  roomId: int("room_id").notNull(),
+  duration: int("duration").notNull(), // 50, 80 o 110
+  // Fecha y hora
+  bookingDate: date("booking_date").notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(), // "10:00"
+  endTime: varchar("end_time", { length: 5 }).notNull(),     // "11:30"
+  // Estado y pago
+  status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
+  paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "refunded"]).default("pending").notNull(),
+  amountPaid: decimal("amount_paid", { precision: 10, scale: 2 }),
+  discountCode: varchar("discount_code", { length: 50 }),
+  notes: text("notes"),
+  // Cross-sell: servicios adicionales contratados
+  crossSellServices: text("cross_sell_services"), // JSON array
+  // Reagendamiento
+  rescheduleCount: int("reschedule_count").default(0).notNull(),
+  originalBookingId: int("original_booking_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageBooking = typeof massageBookings.$inferSelect;
+export type InsertMassageBooking = typeof massageBookings.$inferInsert;
+
+export const massageSupplies = mysqlTable("massage_supplies", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 200 }).notNull(),
+  unit: varchar("unit", { length: 50 }).notNull(), // "ml", "unidades", "kg"
+  currentStock: decimal("current_stock", { precision: 10, scale: 2 }).default("0").notNull(),
+  minimumStock: decimal("minimum_stock", { precision: 10, scale: 2 }).default("0").notNull(), // Umbral de alerta
+  notes: text("notes"),
+  active: int("active").default(1).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageSupply = typeof massageSupplies.$inferSelect;
+export type InsertMassageSupply = typeof massageSupplies.$inferInsert;
+
+export const massageTechniqueRecipes = mysqlTable("massage_technique_recipes", {
+  id: int("id").autoincrement().primaryKey(),
+  techniqueId: int("technique_id").notNull(),
+  supplyId: int("supply_id").notNull(),
+  quantityPer50min: decimal("quantity_per_50min", { precision: 8, scale: 3 }).notNull(),
+  // Las cantidades para 80 y 110 min se calculan proporcionalmente si son null
+  quantityPer80min: decimal("quantity_per_80min", { precision: 8, scale: 3 }),
+  quantityPer110min: decimal("quantity_per_110min", { precision: 8, scale: 3 }),
+});
+
+export type MassageTechniqueRecipe = typeof massageTechniqueRecipes.$inferSelect;
