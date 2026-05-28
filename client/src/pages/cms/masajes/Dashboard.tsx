@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarCheck, AlertTriangle, Users, Clock, Package } from "lucide-react";
+import { CalendarCheck, Users, Clock, TrendingUp } from "lucide-react";
 import { Link } from "wouter";
 
 export default function MasajesDashboard() {
@@ -18,6 +18,9 @@ export default function MasajesDashboard() {
 
   const confirmed = bookings?.filter(b => b.status === "confirmed" || b.status === "pending") ?? [];
   const activeTherapists = therapists?.filter(t => t.active === 1) ?? [];
+  const todayRevenue = bookings
+    ?.filter(b => b.paymentStatus === "paid" && b.status !== "cancelled")
+    .reduce((sum, b) => sum + Number(b.amountPaid ?? 0), 0) ?? 0;
 
   return (
     <DashboardLayout>
@@ -60,13 +63,13 @@ export default function MasajesDashboard() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Package className="w-4 h-4" /> Alertas de stock
+                <TrendingUp className="w-4 h-4" /> Ventas del día
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {loadingStock ? <Skeleton className="h-8 w-12" /> : (
-                <span className={`text-3xl font-bold ${(lowStock?.length ?? 0) > 0 ? "text-destructive" : ""}`}>
-                  {lowStock?.length ?? 0}
+              {loadingBookings ? <Skeleton className="h-8 w-24" /> : (
+                <span className="text-3xl font-bold text-green-600">
+                  $ {todayRevenue.toLocaleString("es-CL")}
                 </span>
               )}
             </CardContent>

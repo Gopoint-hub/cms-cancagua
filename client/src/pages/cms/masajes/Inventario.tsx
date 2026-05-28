@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,79 +9,165 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Plus, Edit, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Edit, AlertTriangle, Package, Save } from "lucide-react";
 
-type SupplyForm = {
+const DRAFT_NEW_KEY = "masajes:draft:insumo-nuevo";
+const DRAFT_RECEIVE_KEY = "masajes:draft:insumo-recibir";
+
+type NewSupplyForm = {
   name: string;
   unit: string;
   currentStock: string;
   minimumStock: string;
+  purchasedAt: string;
+  openedAt: string;
   notes: string;
 };
 
-const emptyForm: SupplyForm = { name: "", unit: "", currentStock: "0", minimumStock: "0", notes: "" };
+type ReceiveForm = {
+  supplyId: string;
+  stockReceived: string;
+  purchasedAt: string;
+  openedAt: string;
+  notes: string;
+};
+
+type EditForm = {
+  name: string;
+  unit: string;
+  currentStock: string;
+  minimumStock: string;
+  purchasedAt: string;
+  openedAt: string;
+  notes: string;
+};
+
+const emptyNew: NewSupplyForm = { name: "", unit: "", currentStock: "0", minimumStock: "0", purchasedAt: "", openedAt: "", notes: "" };
+const emptyReceive: ReceiveForm = { supplyId: "", stockReceived: "", purchasedAt: "", openedAt: "", notes: "" };
 
 export default function MasajesInventario() {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<number | null>(null);
-  const [form, setForm] = useState<SupplyForm>(emptyForm);
-  const [adjustId, setAdjustId] = useState<number | null>(null);
-  const [adjustDelta, setAdjustDelta] = useState("");
-  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [newForm, setNewForm] = useState<NewSupplyForm>(emptyNew);
+  const [receiveForm, setReceiveForm] = useState<ReceiveForm>(emptyReceive);
+  const [editForm, setEditForm] = useState<EditForm>({ name: "", unit: "", currentStock: "0", minimumStock: "0", purchasedAt: "", openedAt: "", notes: "" });
+  const [tab, setTab] = useState<"nuevo" | "recibir">("nuevo");
 
   const { data: supplies, isLoading } = trpc.masajes.inventario.getAll.useQuery();
 
+  // Auto-save drafts
+  useEffect(() => {
+    if (open && !editingId && tab === "nuevo") localStorage.setItem(DRAFT_NEW_KEY, JSON.stringify(newForm));
+  }, [newForm, open, editingId, tab]);
+
+  useEffect(() => {
+    if (open && !editingId && tab === "recibir") localStorage.setItem(DRAFT_RECEIVE_KEY, JSON.stringify(receiveForm));
+  }, [receiveForm, open, editingId, tab]);
+
   const createMut = trpc.masajes.inventario.create.useMutation({
-    onSuccess: () => { utils.masajes.inventario.getAll.invalidate(); toast.success("Insumo creado"); setOpen(false); },
-    onError: e => toast.error(e.message),
-  });
-  const updateMut = trpc.masajes.inventario.update.useMutation({
-    onSuccess: () => { utils.masajes.inventario.getAll.invalidate(); toast.success("Insumo actualizado"); setOpen(false); },
-    onError: e => toast.error(e.message),
-  });
-  const adjustMut = trpc.masajes.inventario.adjustStock.useMutation({
     onSuccess: () => {
       utils.masajes.inventario.getAll.invalidate();
       utils.masajes.inventario.getLowStock.invalidate();
-      toast.success("Stock ajustado");
-      setAdjustOpen(false);
-      setAdjustDelta("");
+      toast.success("Insumo creado");
+      localStorage.removeItem(DRAFT_NEW_KEY);
+      setOpen(false);
+    },
+    onError: e => toast.error(e.message),
+  });
+  const receiveMut = trpc.masajes.inventario.receiveStock.useMutation({
+    onSuccess: () => {
+      utils.masajes.inventario.getAll.invalidate();
+      utils.masajes.inventario.getLowStock.invalidate();
+      toast.success("Stock actualizado");
+      localStorage.removeItem(DRAFT_RECEIVE_KEY);
+      setOpen(false);
+    },
+    onError: e => toast.error(e.message),
+  });
+  const updateMut = trpc.masajes.inventario.update.useMutation({
+    onSuccess: () => {
+      utils.masajes.inventario.getAll.invalidate();
+      utils.masajes.inventario.getLowStock.invalidate();
+      toast.success("Insumo actualizado");
+      setOpen(false);
     },
     onError: e => toast.error(e.message),
   });
 
-  const openCreate = () => { setEditing(null); setForm(emptyForm); setOpen(true); };
+  const openCreate = () => {
+    setEditingId(null);
+    const savedNew = localStorage.getItem(DRAFT_NEW_KEY);
+    const savedReceive = localStorage.getItem(DRAFT_RECEIVE_KEY);
+    setNewForm(savedNew ? { ...emptyNew, ...JSON.parse(savedNew) } : emptyNew);
+    setReceiveForm(savedReceive ? { ...emptyReceive, ...JSON.parse(savedReceive) } : emptyReceive);
+    setTab("nuevo");
+    setOpen(true);
+  };
+
   const openEdit = (s: any) => {
-    setEditing(s.id);
-    setForm({
-      name: s.name, unit: s.unit,
+    setEditingId(s.id);
+    setEditForm({
+      name: s.name,
+      unit: s.unit,
       currentStock: String(s.currentStock ?? "0"),
       minimumStock: String(s.minimumStock ?? "0"),
+      purchasedAt: s.purchasedAt ?? "",
+      openedAt: s.openedAt ?? "",
       notes: s.notes ?? "",
     });
     setOpen(true);
   };
 
-  const openAdjust = (id: number) => {
-    setAdjustId(id);
-    setAdjustDelta("");
-    setAdjustOpen(true);
+  const handleSaveNew = () => {
+    if (!newForm.name.trim() || !newForm.unit.trim()) {
+      toast.error("Nombre y unidad son requeridos");
+      return;
+    }
+    createMut.mutate({
+      name: newForm.name.trim(),
+      unit: newForm.unit.trim(),
+      currentStock: newForm.currentStock || "0",
+      minimumStock: newForm.minimumStock || "0",
+      purchasedAt: newForm.purchasedAt || undefined,
+      openedAt: newForm.openedAt || undefined,
+      notes: newForm.notes || undefined,
+    });
   };
 
-  const handleSave = () => {
-    if (editing) updateMut.mutate({ id: editing, ...form });
-    else createMut.mutate(form);
+  const handleReceive = () => {
+    if (!receiveForm.supplyId || !receiveForm.stockReceived) {
+      toast.error("Selecciona un insumo e ingresa la cantidad recibida");
+      return;
+    }
+    receiveMut.mutate({
+      id: Number(receiveForm.supplyId),
+      stockReceived: receiveForm.stockReceived,
+      purchasedAt: receiveForm.purchasedAt || undefined,
+      openedAt: receiveForm.openedAt || undefined,
+      notes: receiveForm.notes || undefined,
+    });
   };
 
-  const handleAdjust = (sign: "+" | "-") => {
-    if (!adjustId || !adjustDelta) return;
-    const delta = sign === "+" ? adjustDelta : `-${adjustDelta}`;
-    adjustMut.mutate({ id: adjustId, delta });
+  const handleUpdate = () => {
+    if (!editingId) return;
+    updateMut.mutate({
+      id: editingId,
+      name: editForm.name,
+      unit: editForm.unit,
+      currentStock: editForm.currentStock,
+      minimumStock: editForm.minimumStock,
+      purchasedAt: editForm.purchasedAt || undefined,
+      openedAt: editForm.openedAt || undefined,
+      notes: editForm.notes || undefined,
+    });
   };
 
   const isLow = (s: any) => Number(s.currentStock) <= Number(s.minimumStock);
+
+  const selectedSupply = supplies?.find(s => String(s.id) === receiveForm.supplyId);
 
   return (
     <DashboardLayout>
@@ -91,7 +177,7 @@ export default function MasajesInventario() {
             <h1 className="text-2xl font-semibold tracking-wide">Inventario</h1>
             <p className="text-muted-foreground text-sm mt-1">Control de insumos y materiales de masaje</p>
           </div>
-          <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nuevo insumo</Button>
+          <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Agregar / Recibir</Button>
         </div>
 
         {isLoading ? (
@@ -114,22 +200,17 @@ export default function MasajesInventario() {
                           </Badge>
                         )}
                       </div>
-                      <div className="flex items-center gap-4 mt-1 text-sm">
-                        <span className={`font-medium ${isLow(s) && s.active === 1 ? "text-destructive" : "text-foreground"}`}>
-                          Stock actual: <strong>{s.currentStock} {s.unit}</strong>
+                      <div className="flex items-center gap-4 mt-1 text-sm flex-wrap">
+                        <span className={`font-medium ${isLow(s) && s.active === 1 ? "text-destructive" : ""}`}>
+                          Actual: <strong>{s.currentStock} {s.unit}</strong>
                         </span>
-                        <span className="text-muted-foreground">
-                          Mínimo: {s.minimumStock} {s.unit}
-                        </span>
+                        <span className="text-muted-foreground">Mínimo: {s.minimumStock} {s.unit}</span>
+                        {s.purchasedAt && <span className="text-muted-foreground text-xs">Compra: {s.purchasedAt}</span>}
+                        {s.openedAt && <span className="text-muted-foreground text-xs">Apertura: {s.openedAt}</span>}
                       </div>
                       {s.notes && <p className="text-xs text-muted-foreground mt-1 italic">{s.notes}</p>}
                     </div>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="outline" onClick={() => openAdjust(s.id)}>
-                        Ajustar
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => openEdit(s)}><Edit className="w-4 h-4" /></Button>
-                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => openEdit(s)}><Edit className="w-4 h-4" /></Button>
                   </div>
                 </CardContent>
               </Card>
@@ -138,77 +219,161 @@ export default function MasajesInventario() {
         )}
       </div>
 
-      {/* Modal crear/editar */}
+      {/* Modal crear / recibir / editar */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Editar insumo" : "Nuevo insumo"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label>Nombre *</Label>
-              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-            </div>
-            <div>
-              <Label>Unidad de medida *</Label>
-              <Input value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} placeholder="ml, g, unidades..." />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Stock actual</Label>
-                <Input type="number" value={form.currentStock} onChange={e => setForm(f => ({ ...f, currentStock: e.target.value }))} />
+        <DialogContent className="max-w-lg">
+          {editingId ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Editar insumo</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <Label>Nombre *</Label>
+                    <Input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Unidad</Label>
+                    <Input value={editForm.unit} onChange={e => setEditForm(f => ({ ...f, unit: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Stock mínimo</Label>
+                    <Input type="number" value={editForm.minimumStock} onChange={e => setEditForm(f => ({ ...f, minimumStock: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Stock actual</Label>
+                    <Input type="number" value={editForm.currentStock} onChange={e => setEditForm(f => ({ ...f, currentStock: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Fecha de compra</Label>
+                    <Input type="date" value={editForm.purchasedAt} onChange={e => setEditForm(f => ({ ...f, purchasedAt: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Fecha apertura envase</Label>
+                    <Input type="date" value={editForm.openedAt} onChange={e => setEditForm(f => ({ ...f, openedAt: e.target.value }))} />
+                  </div>
+                  <div className="col-span-2">
+                    <Label>Notas (merma, pérdida, etc.)</Label>
+                    <Textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
+                  </div>
+                </div>
               </div>
-              <div>
-                <Label>Stock mínimo</Label>
-                <Input type="number" value={form.minimumStock} onChange={e => setForm(f => ({ ...f, minimumStock: e.target.value }))} />
-              </div>
-            </div>
-            <div>
-              <Label>Notas</Label>
-              <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={createMut.isPending || updateMut.isPending}>
-              {editing ? "Guardar cambios" : "Crear insumo"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                <Button onClick={handleUpdate} disabled={updateMut.isPending}>Guardar cambios</Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Package className="w-4 h-4" />Insumos
+                  <span className="text-xs font-normal text-muted-foreground flex items-center gap-1 ml-2"><Save className="w-3 h-3" />Borrador guardado</span>
+                </DialogTitle>
+              </DialogHeader>
+              <Tabs value={tab} onValueChange={v => setTab(v as any)}>
+                <TabsList className="w-full">
+                  <TabsTrigger value="nuevo" className="flex-1">Nuevo insumo</TabsTrigger>
+                  <TabsTrigger value="recibir" className="flex-1">Recibir stock existente</TabsTrigger>
+                </TabsList>
 
-      {/* Modal ajuste de stock */}
-      <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
-        <DialogContent className="max-w-xs">
-          <DialogHeader>
-            <DialogTitle>Ajustar stock</DialogTitle>
-          </DialogHeader>
-          <div className="py-2 space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Ingresa la cantidad a agregar o descontar del stock actual.
-            </p>
-            <div>
-              <Label>Cantidad</Label>
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={adjustDelta}
-                onChange={e => setAdjustDelta(e.target.value)}
-                placeholder="0"
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setAdjustOpen(false)}>Cancelar</Button>
-            <Button variant="outline" className="text-destructive border-destructive hover:bg-destructive/10"
-              onClick={() => handleAdjust("-")} disabled={adjustMut.isPending || !adjustDelta}>
-              <ArrowDown className="w-4 h-4 mr-1" />Descontar
-            </Button>
-            <Button onClick={() => handleAdjust("+")} disabled={adjustMut.isPending || !adjustDelta}>
-              <ArrowUp className="w-4 h-4 mr-1" />Agregar
-            </Button>
-          </DialogFooter>
+                {/* TAB: Nuevo insumo */}
+                <TabsContent value="nuevo" className="space-y-4 mt-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <Label>Nombre del insumo *</Label>
+                      <Input
+                        list="supply-names"
+                        value={newForm.name}
+                        onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))}
+                        placeholder="Aceite de masaje, toalla, etc."
+                      />
+                      <datalist id="supply-names">
+                        {supplies?.map(s => <option key={s.id} value={s.name} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <Label>Unidad de medida *</Label>
+                      <Input value={newForm.unit} onChange={e => setNewForm(f => ({ ...f, unit: e.target.value }))} placeholder="ml, g, unidades..." />
+                    </div>
+                    <div>
+                      <Label>Stock que llegó</Label>
+                      <Input type="number" value={newForm.currentStock} onChange={e => setNewForm(f => ({ ...f, currentStock: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label>Stock mínimo</Label>
+                      <Input type="number" value={newForm.minimumStock} onChange={e => setNewForm(f => ({ ...f, minimumStock: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label>Fecha de compra</Label>
+                      <Input type="date" value={newForm.purchasedAt} onChange={e => setNewForm(f => ({ ...f, purchasedAt: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label>Fecha apertura envase</Label>
+                      <Input type="date" value={newForm.openedAt} onChange={e => setNewForm(f => ({ ...f, openedAt: e.target.value }))} />
+                    </div>
+                    <div className="col-span-2">
+                      <Label>Notas (merma, pérdida, etc.)</Label>
+                      <Textarea value={newForm.notes} onChange={e => setNewForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                    <Button onClick={handleSaveNew} disabled={createMut.isPending}>Crear insumo</Button>
+                  </DialogFooter>
+                </TabsContent>
+
+                {/* TAB: Recibir stock existente */}
+                <TabsContent value="recibir" className="space-y-4 mt-4">
+                  <div>
+                    <Label>Insumo existente *</Label>
+                    <select
+                      className="w-full border rounded-md px-3 py-2 text-sm bg-background mt-1"
+                      value={receiveForm.supplyId}
+                      onChange={e => setReceiveForm(f => ({ ...f, supplyId: e.target.value }))}
+                    >
+                      <option value="">Seleccionar insumo...</option>
+                      {supplies?.filter(s => s.active === 1).map(s => (
+                        <option key={s.id} value={String(s.id)}>
+                          {s.name} — stock actual: {s.currentStock} {s.unit}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <Label>Cantidad recibida *{selectedSupply && ` (${selectedSupply.unit})`}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={receiveForm.stockReceived}
+                        onChange={e => setReceiveForm(f => ({ ...f, stockReceived: e.target.value }))}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <Label>Fecha de compra</Label>
+                      <Input type="date" value={receiveForm.purchasedAt} onChange={e => setReceiveForm(f => ({ ...f, purchasedAt: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label>Fecha apertura envase</Label>
+                      <Input type="date" value={receiveForm.openedAt} onChange={e => setReceiveForm(f => ({ ...f, openedAt: e.target.value }))} />
+                    </div>
+                    <div className="col-span-2">
+                      <Label>Notas</Label>
+                      <Textarea value={receiveForm.notes} onChange={e => setReceiveForm(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Proveedor, lote, etc." />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                    <Button onClick={handleReceive} disabled={receiveMut.isPending}>Confirmar recepción</Button>
+                  </DialogFooter>
+                </TabsContent>
+              </Tabs>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

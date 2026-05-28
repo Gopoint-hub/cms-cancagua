@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,11 +118,30 @@ export default function MasajesAgenda() {
     else createMut.mutate(data);
   };
 
+  // Auto-fill amount from technique price when technique or duration changes
+  const setTechnique = (techniqueId: string) => {
+    const technique = techniques?.find(t => String(t.id) === techniqueId);
+    let price = "";
+    if (technique) {
+      if (form.duration === 50 && technique.price50min) price = String(technique.price50min);
+      else if (form.duration === 80 && technique.price80min) price = String(technique.price80min);
+      else if (form.duration === 110 && technique.price110min) price = String(technique.price110min);
+    }
+    setForm(f => ({ ...f, techniqueId, amountPaid: price || f.amountPaid }));
+  };
+
   const setStart = (time: string) => {
     setForm(f => ({ ...f, startTime: time, endTime: calcEndTime(time, f.duration) }));
   };
   const setDuration = (d: number) => {
-    setForm(f => ({ ...f, duration: d, endTime: calcEndTime(f.startTime, d) }));
+    const technique = techniques?.find(t => String(t.id) === form.techniqueId);
+    let price = "";
+    if (technique) {
+      if (d === 50 && technique.price50min) price = String(technique.price50min);
+      else if (d === 80 && technique.price80min) price = String(technique.price80min);
+      else if (d === 110 && technique.price110min) price = String(technique.price110min);
+    }
+    setForm(f => ({ ...f, duration: d, endTime: calcEndTime(f.startTime, d), amountPaid: price || f.amountPaid }));
   };
 
   return (
@@ -219,7 +238,7 @@ export default function MasajesAgenda() {
             </div>
             <div>
               <Label>Técnica *</Label>
-              <Select value={form.techniqueId} onValueChange={v => setForm(f => ({ ...f, techniqueId: v }))}>
+              <Select value={form.techniqueId} onValueChange={setTechnique}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                 <SelectContent>
                   {techniques?.map(t => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}

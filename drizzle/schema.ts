@@ -938,6 +938,9 @@ export const massageTechniques = mysqlTable("massage_techniques", {
   name: varchar("name", { length: 100 }).notNull(),
   description: text("description"),
   durations: varchar("durations", { length: 50 }).default("50,80,110").notNull(), // CSV: "50,80,110"
+  price50min: decimal("price_50min", { precision: 10, scale: 0 }),
+  price80min: decimal("price_80min", { precision: 10, scale: 0 }),
+  price110min: decimal("price_110min", { precision: 10, scale: 0 }),
   active: int("active").default(1).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
@@ -1040,7 +1043,9 @@ export const massageSupplies = mysqlTable("massage_supplies", {
   name: varchar("name", { length: 200 }).notNull(),
   unit: varchar("unit", { length: 50 }).notNull(), // "ml", "unidades", "kg"
   currentStock: decimal("current_stock", { precision: 10, scale: 2 }).default("0").notNull(),
-  minimumStock: decimal("minimum_stock", { precision: 10, scale: 2 }).default("0").notNull(), // Umbral de alerta
+  minimumStock: decimal("minimum_stock", { precision: 10, scale: 2 }).default("0").notNull(),
+  purchasedAt: date("purchased_at"), // Fecha última compra
+  openedAt: date("opened_at"),       // Fecha apertura del envase
   notes: text("notes"),
   active: int("active").default(1).notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

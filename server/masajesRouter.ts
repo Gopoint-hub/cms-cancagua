@@ -34,12 +34,23 @@ const tecnicasRouter = router({
       name: z.string().min(2),
       description: z.string().optional(),
       durations: z.string().default("50,80,110"),
+      price50min: z.string().optional(),
+      price80min: z.string().optional(),
+      price110min: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.insert(massageTechniques).values(input);
+      const { name, description, durations, price50min, price80min, price110min } = input;
+      await db.insert(massageTechniques).values({
+        name,
+        description: description || null,
+        durations,
+        price50min: price50min || null,
+        price80min: price80min || null,
+        price110min: price110min || null,
+      });
       return { success: true };
     }),
 
@@ -49,6 +60,9 @@ const tecnicasRouter = router({
       name: z.string().optional(),
       description: z.string().optional(),
       durations: z.string().optional(),
+      price50min: z.string().optional(),
+      price80min: z.string().optional(),
+      price110min: z.string().optional(),
       active: z.number().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -198,6 +212,19 @@ const terapeutasRouter = router({
       return { ...therapist, techniques, schedules };
     }),
 
+  getSchedules: protectedProcedure
+    .input(z.object({ therapistId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return [];
+      return db
+        .select()
+        .from(massageTherapistSchedules)
+        .where(eq(massageTherapistSchedules.therapistId, input.therapistId))
+        .orderBy(asc(massageTherapistSchedules.dayOfWeek));
+    }),
+
   create: protectedProcedure
     .input(z.object({
       name: z.string().min(2),
@@ -215,7 +242,19 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const { techniqueIds, ...therapistData } = input;
+      const { techniqueIds, ...raw } = input;
+      // Sanitize: convert empty strings to null for optional fields
+      const therapistData = {
+        name: raw.name,
+        type: raw.type,
+        phone: raw.phone || null,
+        email: raw.email || null,
+        contractType: raw.contractType || null,
+        leadTimeMinutes: raw.leadTimeMinutes,
+        currentShift: raw.currentShift ?? null,
+        notes: raw.notes || null,
+        callPriority: raw.callPriority,
+      };
       const result = await db.insert(massageTherapists).values(therapistData);
       const insertId = (result as any).insertId as number;
 
@@ -246,7 +285,12 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const { id, techniqueIds, ...data } = input;
+      const { id, techniqueIds, ...raw } = input;
+      // Sanitize empty strings
+      const data: Record<string, any> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        data[k] = (typeof v === "string" && v === "") ? null : v;
+      }
       await db.update(massageTherapists).set(data).where(eq(massageTherapists.id, id));
 
       if (techniqueIds !== undefined) {
@@ -552,13 +596,46 @@ const inventarioRouter = router({
       unit: z.string(),
       currentStock: z.string().default("0"),
       minimumStock: z.string().default("0"),
+      purchasedAt: z.string().optional(),
+      openedAt: z.string().optional(),
       notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.insert(massageSupplies).values(input);
+      await db.insert(massageSupplies).values({
+        name: input.name,
+        unit: input.unit,
+        currentStock: input.currentStock,
+        minimumStock: input.minimumStock,
+        purchasedAt: (input.purchasedAt || null) as any,
+        openedAt: (input.openedAt || null) as any,
+        notes: input.notes || null,
+      });
+      return { success: true };
+    }),
+
+  receiveStock: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      stockReceived: z.string(),
+      purchasedAt: z.string().optional(),
+      openedAt: z.string().optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.update(massageSupplies)
+        .set({
+          currentStock: sql`${massageSupplies.currentStock} + ${input.stockReceived}`,
+          ...(input.purchasedAt ? { purchasedAt: input.purchasedAt as any } : {}),
+          ...(input.openedAt ? { openedAt: input.openedAt as any } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
+        })
+        .where(eq(massageSupplies.id, input.id));
       return { success: true };
     }),
 
@@ -569,6 +646,8 @@ const inventarioRouter = router({
       unit: z.string().optional(),
       currentStock: z.string().optional(),
       minimumStock: z.string().optional(),
+      purchasedAt: z.string().optional(),
+      openedAt: z.string().optional(),
       notes: z.string().optional(),
       active: z.number().optional(),
     }))
@@ -576,8 +655,13 @@ const inventarioRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const { id, ...data } = input;
-      await db.update(massageSupplies).set(data).where(eq(massageSupplies.id, id));
+      const { id, purchasedAt, openedAt, notes, ...rest } = input;
+      await db.update(massageSupplies).set({
+        ...rest,
+        purchasedAt: (purchasedAt || null) as any,
+        openedAt: (openedAt || null) as any,
+        notes: notes || null,
+      }).where(eq(massageSupplies.id, id));
       return { success: true };
     }),
 

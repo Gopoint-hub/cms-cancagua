@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,15 +10,24 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Edit, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save } from "lucide-react";
+
+const DRAFT_KEY = "masajes:draft:tecnica";
+const DURATIONS = [50, 80, 110];
 
 type TechniqueForm = {
   name: string;
   description: string;
-  durations: string;
+  durations: number[];
+  price50min: string;
+  price80min: string;
+  price110min: string;
 };
 
-const emptyForm: TechniqueForm = { name: "", description: "", durations: "50,80,110" };
+const emptyForm: TechniqueForm = {
+  name: "", description: "", durations: [50, 80, 110],
+  price50min: "", price80min: "", price110min: "",
+};
 
 type RecipeForm = {
   supplyId: string;
@@ -26,7 +35,6 @@ type RecipeForm = {
   quantityPer80min: string;
   quantityPer110min: string;
 };
-
 const emptyRecipe: RecipeForm = { supplyId: "", quantityPer50min: "", quantityPer80min: "", quantityPer110min: "" };
 
 export default function MasajesTecnicas() {
@@ -36,7 +44,6 @@ export default function MasajesTecnicas() {
   const [form, setForm] = useState<TechniqueForm>(emptyForm);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [recipeOpen, setRecipeOpen] = useState(false);
-  const [editingRecipe, setEditingRecipe] = useState<number | null>(null);
   const [recipeForm, setRecipeForm] = useState<RecipeForm>(emptyRecipe);
 
   const { data: techniques, isLoading } = trpc.masajes.tecnicas.getAll.useQuery();
@@ -46,8 +53,20 @@ export default function MasajesTecnicas() {
     { enabled: expandedId !== null }
   );
 
+  // Auto-save draft (solo en modo crear)
+  useEffect(() => {
+    if (open && !editing) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+    }
+  }, [form, open, editing]);
+
   const createMut = trpc.masajes.tecnicas.create.useMutation({
-    onSuccess: () => { utils.masajes.tecnicas.getAll.invalidate(); toast.success("Técnica creada"); setOpen(false); },
+    onSuccess: () => {
+      utils.masajes.tecnicas.getAll.invalidate();
+      toast.success("Técnica creada");
+      localStorage.removeItem(DRAFT_KEY);
+      setOpen(false);
+    },
     onError: e => toast.error(e.message),
   });
   const updateMut = trpc.masajes.tecnicas.update.useMutation({
@@ -59,34 +78,62 @@ export default function MasajesTecnicas() {
     onError: e => toast.error(e.message),
   });
   const upsertRecipeMut = trpc.masajes.tecnicas.upsertRecipe.useMutation({
-    onSuccess: () => { refetchRecipes(); toast.success("Receta guardada"); setRecipeOpen(false); },
+    onSuccess: () => { refetchRecipes(); toast.success("Insumo guardado en receta"); setRecipeOpen(false); },
     onError: e => toast.error(e.message),
   });
   const deleteRecipeMut = trpc.masajes.tecnicas.deleteRecipe.useMutation({
-    onSuccess: () => { refetchRecipes(); toast.success("Insumo eliminado de la receta"); },
+    onSuccess: () => { refetchRecipes(); toast.success("Insumo eliminado"); },
     onError: e => toast.error(e.message),
   });
 
-  const openCreate = () => { setEditing(null); setForm(emptyForm); setOpen(true); };
-  const openEdit = (t: any) => {
-    setEditing(t.id);
-    setForm({ name: t.name, description: t.description ?? "", durations: t.durations ?? "50,80,110" });
+  const openCreate = () => {
+    setEditing(null);
+    const saved = localStorage.getItem(DRAFT_KEY);
+    setForm(saved ? { ...emptyForm, ...JSON.parse(saved) } : emptyForm);
     setOpen(true);
   };
 
-  const handleSave = () => {
-    if (editing) updateMut.mutate({ id: editing, ...form });
-    else createMut.mutate(form);
+  const openEdit = (t: any) => {
+    setEditing(t.id);
+    const durs = (t.durations ?? "50,80,110").split(",").map(Number);
+    setForm({
+      name: t.name,
+      description: t.description ?? "",
+      durations: durs,
+      price50min: t.price50min ?? "",
+      price80min: t.price80min ?? "",
+      price110min: t.price110min ?? "",
+    });
+    setOpen(true);
   };
 
-  const openAddRecipe = () => {
-    setEditingRecipe(null);
-    setRecipeForm(emptyRecipe);
-    setRecipeOpen(true);
+  const toggleDuration = (d: number) => {
+    setForm(f => ({
+      ...f,
+      durations: f.durations.includes(d) ? f.durations.filter(x => x !== d) : [...f.durations, d].sort((a, b) => a - b),
+    }));
+  };
+
+  const handleSave = () => {
+    if (!form.name.trim()) { toast.error("El nombre es requerido"); return; }
+    if (form.durations.length === 0) { toast.error("Selecciona al menos una duración"); return; }
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim() || undefined,
+      durations: form.durations.join(","),
+      price50min: form.price50min || undefined,
+      price80min: form.price80min || undefined,
+      price110min: form.price110min || undefined,
+    };
+    if (editing) updateMut.mutate({ id: editing, ...payload });
+    else createMut.mutate(payload);
   };
 
   const handleSaveRecipe = () => {
-    if (!expandedId) return;
+    if (!expandedId || !recipeForm.supplyId || !recipeForm.quantityPer50min) {
+      toast.error("Completa insumo y cantidad para 50 min");
+      return;
+    }
     upsertRecipeMut.mutate({
       techniqueId: expandedId,
       supplyId: Number(recipeForm.supplyId),
@@ -102,7 +149,7 @@ export default function MasajesTecnicas() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-wide">Técnicas</h1>
-            <p className="text-muted-foreground text-sm mt-1">Tipos de masaje y sus recetas de insumos</p>
+            <p className="text-muted-foreground text-sm mt-1">Tipos de masaje, precios y recetas de insumos</p>
           </div>
           <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva técnica</Button>
         </div>
@@ -113,95 +160,145 @@ export default function MasajesTecnicas() {
           <Card><CardContent className="py-12 text-center text-muted-foreground">Sin técnicas. Agrega la primera.</CardContent></Card>
         ) : (
           <div className="space-y-3">
-            {techniques.map(t => (
-              <Card key={t.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold">{t.name}</span>
-                        {t.active === 0 && <Badge variant="secondary">Inactiva</Badge>}
-                        {t.durations && t.durations.split(",").map(d => (
-                          <Badge key={d} variant="outline" className="text-xs">{d.trim()} min</Badge>
-                        ))}
-                      </div>
-                      {t.description && <p className="text-sm text-muted-foreground mt-1">{t.description}</p>}
-                    </div>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}>
-                        {expandedId === t.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                        <span className="text-xs ml-1">Receta</span>
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => openEdit(t)}><Edit className="w-4 h-4" /></Button>
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
-                        onClick={() => { if (confirm("¿Eliminar técnica?")) deleteMut.mutate({ id: t.id }); }}>
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {expandedId === t.id && (
-                    <div className="mt-4 border-t pt-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-medium">Insumos requeridos</span>
-                        <Button size="sm" variant="outline" onClick={openAddRecipe}>
-                          <Plus className="w-3 h-3 mr-1" />Agregar insumo
-                        </Button>
-                      </div>
-                      {!recipes || recipes.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Sin insumos asignados a esta técnica.</p>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-5 gap-2 text-xs text-muted-foreground font-medium px-2">
-                            <span className="col-span-2">Insumo</span>
-                            <span>50 min</span>
-                            <span>80 min</span>
-                            <span>110 min</span>
-                          </div>
-                          {recipes.map(r => (
-                            <div key={r.id} className="grid grid-cols-5 gap-2 items-center text-sm border rounded-lg px-2 py-2">
-                              <span className="col-span-2 font-medium">{r.supplyName} ({r.unit})</span>
-                              <span>{r.quantityPer50min}</span>
-                              <span>{r.quantityPer80min ?? "—"}</span>
-                              <div className="flex items-center justify-between">
-                                <span>{r.quantityPer110min ?? "—"}</span>
-                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                                  onClick={() => deleteRecipeMut.mutate({ id: r.id })}>
-                                  <Trash2 className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            </div>
+            {techniques.map(t => {
+              const durs = (t.durations ?? "").split(",").map(s => s.trim()).filter(Boolean);
+              return (
+                <Card key={t.id}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold">{t.name}</span>
+                          {t.active === 0 && <Badge variant="secondary">Inactiva</Badge>}
+                          {durs.map(d => (
+                            <Badge key={d} variant="outline" className="text-xs">{d} min</Badge>
                           ))}
                         </div>
-                      )}
+                        {t.description && <p className="text-sm text-muted-foreground mt-1">{t.description}</p>}
+                        <div className="flex gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
+                          {t.price50min && <span>50 min: <strong>${Number(t.price50min).toLocaleString("es-CL")}</strong></span>}
+                          {t.price80min && <span>80 min: <strong>${Number(t.price80min).toLocaleString("es-CL")}</strong></span>}
+                          {t.price110min && <span>110 min: <strong>${Number(t.price110min).toLocaleString("es-CL")}</strong></span>}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}>
+                          {expandedId === t.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          <span className="text-xs ml-1">Insumos</span>
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => openEdit(t)}><Edit className="w-4 h-4" /></Button>
+                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
+                          onClick={() => { if (confirm("¿Eliminar técnica?")) deleteMut.mutate({ id: t.id }); }}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+
+                    {expandedId === t.id && (
+                      <div className="mt-4 border-t pt-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm font-medium">Insumos requeridos por sesión</span>
+                          <Button size="sm" variant="outline" onClick={() => { setRecipeForm(emptyRecipe); setRecipeOpen(true); }}>
+                            <Plus className="w-3 h-3 mr-1" />Agregar insumo
+                          </Button>
+                        </div>
+                        {!recipes || recipes.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">Sin insumos asignados.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-5 gap-2 text-xs text-muted-foreground font-medium px-2">
+                              <span className="col-span-2">Insumo</span>
+                              <span>50 min</span><span>80 min</span><span>110 min</span>
+                            </div>
+                            {recipes.map(r => (
+                              <div key={r.id} className="grid grid-cols-5 gap-2 items-center text-sm border rounded-lg px-2 py-2">
+                                <span className="col-span-2 font-medium">{r.supplyName} ({r.unit})</span>
+                                <span>{r.quantityPer50min}</span>
+                                <span>{r.quantityPer80min ?? "—"}</span>
+                                <div className="flex items-center justify-between">
+                                  <span>{r.quantityPer110min ?? "—"}</span>
+                                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                    onClick={() => deleteRecipeMut.mutate({ id: r.id })}>
+                                    <Trash2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* Modal técnica */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+      <Dialog open={open} onOpenChange={o => { setOpen(o); }}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editing ? "Editar técnica" : "Nueva técnica"}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              {editing ? "Editar técnica" : "Nueva técnica"}
+              {!editing && <span className="text-xs font-normal text-muted-foreground flex items-center gap-1"><Save className="w-3 h-3" />Borrador guardado automáticamente</span>}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
               <Label>Nombre *</Label>
-              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Masaje Relajante" />
             </div>
             <div>
               <Label>Descripción</Label>
               <Textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2} />
             </div>
             <div>
-              <Label>Duraciones disponibles (minutos, separadas por coma)</Label>
-              <Input value={form.durations} onChange={e => setForm(f => ({ ...f, durations: e.target.value }))} placeholder="50,80,110" />
+              <Label>Duraciones disponibles *</Label>
+              <div className="flex gap-2 mt-1">
+                {DURATIONS.map(d => (
+                  <Button
+                    key={d}
+                    type="button"
+                    size="sm"
+                    variant={form.durations.includes(d) ? "default" : "outline"}
+                    onClick={() => toggleDuration(d)}
+                  >
+                    {d} min
+                  </Button>
+                ))}
+              </div>
             </div>
+            <div>
+              <Label>Precio a público ($ CLP)</Label>
+              <div className="grid grid-cols-3 gap-3 mt-1">
+                {form.durations.includes(50) && (
+                  <div>
+                    <span className="text-xs text-muted-foreground">50 min</span>
+                    <Input value={form.price50min} onChange={e => setForm(f => ({ ...f, price50min: e.target.value }))} placeholder="0" />
+                  </div>
+                )}
+                {form.durations.includes(80) && (
+                  <div>
+                    <span className="text-xs text-muted-foreground">80 min</span>
+                    <Input value={form.price80min} onChange={e => setForm(f => ({ ...f, price80min: e.target.value }))} placeholder="0" />
+                  </div>
+                )}
+                {form.durations.includes(110) && (
+                  <div>
+                    <span className="text-xs text-muted-foreground">110 min</span>
+                    <Input value={form.price110min} onChange={e => setForm(f => ({ ...f, price110min: e.target.value }))} placeholder="0" />
+                  </div>
+                )}
+              </div>
+              {form.durations.length === 0 && <p className="text-xs text-muted-foreground mt-1">Selecciona una duración para ingresar precios.</p>}
+            </div>
+            {editing && (
+              <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-2">
+                Los insumos requeridos por sesión se configuran desde la lista, haciendo clic en "Insumos" de cada técnica.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
@@ -221,29 +318,36 @@ export default function MasajesTecnicas() {
           <div className="space-y-4 py-2">
             <div>
               <Label>Insumo *</Label>
-              <select
-                className="w-full border rounded-md px-3 py-2 text-sm bg-background"
-                value={recipeForm.supplyId}
-                onChange={e => setRecipeForm(f => ({ ...f, supplyId: e.target.value }))}
-              >
-                <option value="">Seleccionar insumo</option>
-                {supplies?.filter(s => s.active === 1).map(s => (
-                  <option key={s.id} value={String(s.id)}>{s.name} ({s.unit})</option>
-                ))}
-              </select>
+              {(!supplies || supplies.filter(s => s.active === 1).length === 0) ? (
+                <p className="text-sm text-muted-foreground mt-1">No hay insumos en inventario. Agrégalos primero desde la sección Inventario.</p>
+              ) : (
+                <select
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background mt-1"
+                  value={recipeForm.supplyId}
+                  onChange={e => setRecipeForm(f => ({ ...f, supplyId: e.target.value }))}
+                >
+                  <option value="">Seleccionar insumo</option>
+                  {supplies.filter(s => s.active === 1).map(s => (
+                    <option key={s.id} value={String(s.id)}>{s.name} ({s.unit})</option>
+                  ))}
+                </select>
+              )}
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <Label>Cant. 50 min *</Label>
-                <Input value={recipeForm.quantityPer50min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer50min: e.target.value }))} placeholder="0" />
-              </div>
-              <div>
-                <Label>Cant. 80 min</Label>
-                <Input value={recipeForm.quantityPer80min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer80min: e.target.value }))} placeholder="0" />
-              </div>
-              <div>
-                <Label>Cant. 110 min</Label>
-                <Input value={recipeForm.quantityPer110min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer110min: e.target.value }))} placeholder="0" />
+            <div>
+              <Label>Cantidad utilizada por sesión</Label>
+              <div className="grid grid-cols-3 gap-3 mt-1">
+                <div>
+                  <span className="text-xs text-muted-foreground">50 min *</span>
+                  <Input value={recipeForm.quantityPer50min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer50min: e.target.value }))} placeholder="0" />
+                </div>
+                <div>
+                  <span className="text-xs text-muted-foreground">80 min</span>
+                  <Input value={recipeForm.quantityPer80min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer80min: e.target.value }))} placeholder="0" />
+                </div>
+                <div>
+                  <span className="text-xs text-muted-foreground">110 min</span>
+                  <Input value={recipeForm.quantityPer110min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer110min: e.target.value }))} placeholder="0" />
+                </div>
               </div>
             </div>
           </div>
