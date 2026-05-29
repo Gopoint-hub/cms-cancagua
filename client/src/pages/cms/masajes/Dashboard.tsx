@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarCheck, Users, Clock, TrendingUp } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp } from "lucide-react";
 import { Link } from "wouter";
 
 export default function MasajesDashboard() {

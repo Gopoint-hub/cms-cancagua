@@ -20,6 +20,32 @@ const adminOrEditor = async (role: string) => {
   }
 };
 
+export const serializeDateOnly = (value: unknown): string | null => {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  return String(value).slice(0, 10);
+};
+
+type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & {
+  [P in K]: string | null;
+};
+
+const serializeDateFields = <T extends Record<string, unknown>, K extends keyof T>(
+  row: T,
+  fields: K[],
+): SerializedDateFields<T, K> => {
+  const serialized = { ...row };
+  for (const field of fields) {
+    (serialized as Record<keyof T, unknown>)[field] = serializeDateOnly(row[field]);
+  }
+  return serialized as SerializedDateFields<T, K>;
+};
+
 // ─── TÉCNICAS ────────────────────────────────────────────────
 const tecnicasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
@@ -406,7 +432,7 @@ const agendaRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return db
+      const rows = await db
         .select({
           id: massageBookings.id,
           clientName: massageBookings.clientName,
@@ -440,6 +466,7 @@ const agendaRouter = router({
           )
         )
         .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
+      return rows.map(row => serializeDateFields(row, ["bookingDate"]));
     }),
 
   // Slots disponibles para un día y duración
@@ -572,14 +599,15 @@ const inventarioRouter = router({
     await adminOrEditor(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
-    return db.select().from(massageSupplies).orderBy(asc(massageSupplies.name));
+    const rows = await db.select().from(massageSupplies).orderBy(asc(massageSupplies.name));
+    return rows.map(row => serializeDateFields(row, ["purchasedAt", "openedAt"]));
   }),
 
   getLowStock: protectedProcedure.query(async ({ ctx }) => {
     await adminOrEditor(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
-    return db
+    const rows = await db
       .select()
       .from(massageSupplies)
       .where(
@@ -588,6 +616,7 @@ const inventarioRouter = router({
           sql`${massageSupplies.currentStock} <= ${massageSupplies.minimumStock}`,
         )
       );
+    return rows.map(row => serializeDateFields(row, ["purchasedAt", "openedAt"]));
   }),
 
   create: protectedProcedure
@@ -714,7 +743,7 @@ const clientesRouter = router({
         .orderBy(desc(sql`MAX(${massageBookings.bookingDate})`))
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
-      return rows;
+      return rows.map(row => serializeDateFields(row, ["lastBookingDate"]));
     }),
 
   getHistory: protectedProcedure
@@ -723,7 +752,7 @@ const clientesRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return db
+      const rows = await db
         .select({
           id: massageBookings.id,
           bookingDate: massageBookings.bookingDate,
@@ -740,6 +769,7 @@ const clientesRouter = router({
         .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
         .where(eq(massageBookings.clientEmail, input.clientEmail))
         .orderBy(desc(massageBookings.bookingDate));
+      return rows.map(row => serializeDateFields(row, ["bookingDate"]));
     }),
 });
 

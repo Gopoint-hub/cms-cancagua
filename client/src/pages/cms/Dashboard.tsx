@@ -122,6 +122,9 @@ function AdminDashboard() {
     operations: [
       { label: "Reportes", value: "Ver", icon: BarChart3 },
     ],
+    masajes: [
+      { label: "Área de masajes", value: "Ver", icon: Store },
+    ],
     admin: [
       { label: "Usuarios", value: "Gestionar", icon: Users },
     ],
