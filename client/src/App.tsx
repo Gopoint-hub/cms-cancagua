@@ -40,6 +40,14 @@ import CMSLogin from "./pages/cms/Login";
 import CMSActivarCuenta from "./pages/cms/ActivarCuenta";
 import CMSRecuperarContrasena from "./pages/cms/RecuperarContrasena";
 import CMSRestablecerContrasena from "./pages/cms/RestablecerContrasena";
+// Módulo Masajes
+import MasajesDashboard from "./pages/cms/masajes/Dashboard";
+import MasajesAgenda from "./pages/cms/masajes/Agenda";
+import MasajesTerapeutas from "./pages/cms/masajes/Terapeutas";
+import MasajesTecnicas from "./pages/cms/masajes/Tecnicas";
+import MasajesInventario from "./pages/cms/masajes/Inventario";
+import MasajesClientes from "./pages/cms/masajes/Clientes";
+import MasajesAnalytics from "./pages/cms/masajes/Analytics";
 
 function Router() {
   return (
@@ -86,6 +94,14 @@ function Router() {
       <Route path="/cms/concierge/vendedores" component={CMSConciergeVendedores} />
       <Route path="/cms/concierge/mis-comisiones" component={CMSMisComisiones} />
       <Route path="/cms/ayuda/newsletters" component={CMSAyudaNewsletters} />
+      {/* Módulo Masajes */}
+      <Route path="/cms/masajes" component={MasajesDashboard} />
+      <Route path="/cms/masajes/agenda" component={MasajesAgenda} />
+      <Route path="/cms/masajes/terapeutas" component={MasajesTerapeutas} />
+      <Route path="/cms/masajes/tecnicas" component={MasajesTecnicas} />
+      <Route path="/cms/masajes/inventario" component={MasajesInventario} />
+      <Route path="/cms/masajes/clientes" component={MasajesClientes} />
+      <Route path="/cms/masajes/analytics" component={MasajesAnalytics} />
 
       {/* Fallback */}
       <Route path="/404" component={NotFound} />
