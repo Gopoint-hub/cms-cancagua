@@ -37,6 +37,11 @@ type RecipeForm = {
 };
 const emptyRecipe: RecipeForm = { supplyId: "", quantityPer50min: "", quantityPer80min: "", quantityPer110min: "" };
 
+const normalizeDecimalText = (value: string) => {
+  const match = value.replace(",", ".").match(/^-?\d*(?:\.\d*)?/);
+  return match?.[0] ?? "";
+};
+
 export default function MasajesTecnicas() {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
@@ -142,6 +147,8 @@ export default function MasajesTecnicas() {
       quantityPer110min: recipeForm.quantityPer110min || undefined,
     });
   };
+
+  const selectedSupply = supplies?.find(s => String(s.id) === recipeForm.supplyId);
 
   return (
     <DashboardLayout>
@@ -335,18 +342,38 @@ export default function MasajesTecnicas() {
             </div>
             <div>
               <Label>Cantidad utilizada por sesión</Label>
+              {selectedSupply && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Ingresa solo el numero. Unidad: {selectedSupply.unit}.
+                </p>
+              )}
               <div className="grid grid-cols-3 gap-3 mt-1">
                 <div>
                   <span className="text-xs text-muted-foreground">50 min *</span>
-                  <Input value={recipeForm.quantityPer50min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer50min: e.target.value }))} placeholder="0" />
+                  <Input
+                    inputMode="decimal"
+                    value={recipeForm.quantityPer50min}
+                    onChange={e => setRecipeForm(f => ({ ...f, quantityPer50min: normalizeDecimalText(e.target.value) }))}
+                    placeholder="0"
+                  />
                 </div>
                 <div>
                   <span className="text-xs text-muted-foreground">80 min</span>
-                  <Input value={recipeForm.quantityPer80min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer80min: e.target.value }))} placeholder="0" />
+                  <Input
+                    inputMode="decimal"
+                    value={recipeForm.quantityPer80min}
+                    onChange={e => setRecipeForm(f => ({ ...f, quantityPer80min: normalizeDecimalText(e.target.value) }))}
+                    placeholder="0"
+                  />
                 </div>
                 <div>
                   <span className="text-xs text-muted-foreground">110 min</span>
-                  <Input value={recipeForm.quantityPer110min} onChange={e => setRecipeForm(f => ({ ...f, quantityPer110min: e.target.value }))} placeholder="0" />
+                  <Input
+                    inputMode="decimal"
+                    value={recipeForm.quantityPer110min}
+                    onChange={e => setRecipeForm(f => ({ ...f, quantityPer110min: normalizeDecimalText(e.target.value) }))}
+                    placeholder="0"
+                  />
                 </div>
               </div>
             </div>

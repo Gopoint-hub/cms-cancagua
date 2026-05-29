@@ -31,6 +31,18 @@ export const serializeDateOnly = (value: unknown): string | null => {
   return String(value).slice(0, 10);
 };
 
+export const normalizeDecimalInput = (value: string): string => {
+  const normalized = value.trim().replace(",", ".");
+  const match = normalized.match(/^-?\d+(?:\.\d+)?/);
+  if (!match) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Ingresa una cantidad valida",
+    });
+  }
+  return match[0];
+};
+
 type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & {
   [P in K]: string | null;
 };
@@ -144,6 +156,11 @@ const tecnicasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const values = {
+        quantityPer50min: normalizeDecimalInput(input.quantityPer50min),
+        quantityPer80min: input.quantityPer80min ? normalizeDecimalInput(input.quantityPer80min) : null,
+        quantityPer110min: input.quantityPer110min ? normalizeDecimalInput(input.quantityPer110min) : null,
+      };
       const existing = await db
         .select()
         .from(massageTechniqueRecipes)
@@ -157,18 +174,18 @@ const tecnicasRouter = router({
       if (existing.length > 0) {
         await db.update(massageTechniqueRecipes)
           .set({
-            quantityPer50min: input.quantityPer50min,
-            quantityPer80min: input.quantityPer80min ?? null,
-            quantityPer110min: input.quantityPer110min ?? null,
+            quantityPer50min: values.quantityPer50min,
+            quantityPer80min: values.quantityPer80min,
+            quantityPer110min: values.quantityPer110min,
           })
           .where(eq(massageTechniqueRecipes.id, existing[0].id));
       } else {
         await db.insert(massageTechniqueRecipes).values({
           techniqueId: input.techniqueId,
           supplyId: input.supplyId,
-          quantityPer50min: input.quantityPer50min,
-          quantityPer80min: input.quantityPer80min ?? null,
-          quantityPer110min: input.quantityPer110min ?? null,
+          quantityPer50min: values.quantityPer50min,
+          quantityPer80min: values.quantityPer80min,
+          quantityPer110min: values.quantityPer110min,
         });
       }
       return { success: true };
