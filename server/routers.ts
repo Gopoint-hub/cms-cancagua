@@ -10,6 +10,7 @@ import { invokeLLM } from "./_core/llm";
 import { conciergeRouter } from "./conciergeRouter";
 import { analyticsRouter } from "./analyticsRouter";
 import { masajesRouter } from "./masajesRouter";
+import { clientesRouter } from "./clientesRouter";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -20,6 +21,7 @@ export const appRouter = router({
   analytics: analyticsRouter,
   // Módulo Masajes - Reservas, terapeutas, inventario y analítica del área de masajes
   masajes: masajesRouter,
+  clientes: clientesRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
 
