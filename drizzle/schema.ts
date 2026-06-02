@@ -100,6 +100,23 @@ export const clients = mysqlTable("clients", {
   utmSource: varchar("utm_source", { length: 100 }),
   utmMedium: varchar("utm_medium", { length: 100 }),
   utmCampaign: varchar("utm_campaign", { length: 100 }),
+  // BI fields — populated from Skedu income reports
+  totalVisitas: int("total_visitas").default(0),
+  totalGasto: decimal("total_gasto", { precision: 12, scale: 0 }).default("0"),
+  gasto2025: decimal("gasto_2025", { precision: 12, scale: 0 }).default("0"),
+  gasto2026: decimal("gasto_2026", { precision: 12, scale: 0 }).default("0"),
+  visitas2025: int("visitas_2025").default(0),
+  visitas2026: int("visitas_2026").default(0),
+  primerVisita: date("primer_visita"),
+  ultimaVisita: date("ultima_visita"),
+  serviciosUsados: text("servicios_usados"),  // JSON array
+  codigosUsados: text("codigos_usados"),       // JSON array
+  esLeal: int("es_leal").default(0),           // 1 = visited both 2025 and 2026
+  origen: varchar("origen", { length: 150 }),
+  idioma: varchar("idioma", { length: 10 }),
+  fechaNacimiento: date("fecha_nacimiento"),
+  genero: mysqlEnum("genero", ["M", "F", "nd"]).default("nd"),
+  ticketPromedio: decimal("ticket_promedio", { precision: 10, scale: 0 }).default("0"),
 });
 
 export type Client = typeof clients.$inferSelect;
