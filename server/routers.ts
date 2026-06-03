@@ -469,6 +469,16 @@ export const appRouter = router({
 
         const result = await db.createBooking(booking);
 
+        // Enviar email a contacto@cancagua.cl
+        const { sendContactFormEmail } = await import("./email");
+        await sendContactFormEmail({
+          nombre: input.name,
+          email: input.email,
+          telefono: input.phone,
+          mensaje: `SOLICITUD DE RESERVA\n\nServicio: ${input.serviceType}\nFecha preferida: ${input.preferredDate}\nNúmero de personas: ${input.numberOfPeople}${input.message ? `\n\nMensaje adicional:\n${input.message}` : ''}`,
+          origen: "Formulario de Reserva Web",
+        });
+
         // Enviar notificación al propietario
         const { notifyOwner } = await import("./_core/notification");
         await notifyOwner({

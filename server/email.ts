@@ -593,7 +593,7 @@ Este mensaje fue enviado desde el formulario de contacto de cancagua.cl`;
       subject: `📬 Nuevo mensaje de ${data.nombre} - Formulario de Contacto`,
       html: htmlContent,
       text: textContent,
-      replyTo: CONTACT_TO_EMAIL, // Responder a contacto@cancagua.cl, no al usuario
+      replyTo: data.email, // Responder directamente al cliente
       tags: [{ name: 'type', value: 'contact_form' }],
     });
 
