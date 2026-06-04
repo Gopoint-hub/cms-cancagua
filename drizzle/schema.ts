@@ -1058,14 +1058,45 @@ export type InsertMassageBooking = typeof massageBookings.$inferInsert;
 export const massageSupplies = mysqlTable("massage_supplies", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 200 }).notNull(),
-  unit: varchar("unit", { length: 50 }).notNull(), // "ml", "unidades", "kg"
+  unit: varchar("unit", { length: 50 }).notNull(),
+  categoria: mysqlEnum("categoria", ["insumo", "herramienta"]).default("insumo").notNull(),
+  ubicacion: varchar("ubicacion", { length: 200 }),
+  vidaUtilMeses: int("vida_util_meses"),
   currentStock: decimal("current_stock", { precision: 10, scale: 2 }).default("0").notNull(),
   minimumStock: decimal("minimum_stock", { precision: 10, scale: 2 }).default("0").notNull(),
-  purchasedAt: date("purchased_at"), // Fecha última compra
-  openedAt: date("opened_at"),       // Fecha apertura del envase
+  purchasedAt: date("purchased_at"),
+  openedAt: date("opened_at"),
   notes: text("notes"),
   active: int("active").default(1).notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const massageTherapistEvaluations = mysqlTable("massage_therapist_evaluations", {
+  id: int("id").autoincrement().primaryKey(),
+  therapistId: int("therapist_id").notNull(),
+  evaluatedBy: int("evaluated_by").notNull(),
+  period: varchar("period", { length: 7 }).notNull(), // "2026-01"
+  puntualidad: int("puntualidad").notNull().default(0),
+  tecnica: int("tecnica").notNull().default(0),
+  satisfaccionCliente: int("satisfaccion_cliente").notNull().default(0),
+  presentacionHigiene: int("presentacion_higiene").notNull().default(0),
+  comunicacion: int("comunicacion").notNull().default(0),
+  usoInsumos: int("uso_insumos").notNull().default(0),
+  comentarios: text("comentarios"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const massageTherapistDocuments = mysqlTable("massage_therapist_documents", {
+  id: int("id").autoincrement().primaryKey(),
+  therapistId: int("therapist_id").notNull(),
+  tipo: mysqlEnum("tipo", ["certificado", "boleta", "contrato", "otro"]).notNull().default("otro"),
+  nombre: varchar("nombre", { length: 300 }).notNull(),
+  descripcion: text("descripcion"),
+  archivoUrl: text("archivo_url"),
+  periodo: varchar("periodo", { length: 7 }),
+  uploadedBy: int("uploaded_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export type MassageSupply = typeof massageSupplies.$inferSelect;

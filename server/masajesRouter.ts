@@ -11,6 +11,8 @@ import {
   massageBookings,
   massageSupplies,
   massageTechniqueRecipes,
+  massageTherapistEvaluations,
+  massageTherapistDocuments,
 } from "../drizzle/schema";
 import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
 
@@ -273,7 +275,7 @@ const terapeutasRouter = router({
       name: z.string().min(2),
       type: z.enum(["inhouse", "freelance"]),
       phone: z.string().optional(),
-      email: z.string().email().optional(),
+      email: z.string().optional(),
       contractType: z.string().optional(),
       leadTimeMinutes: z.number().default(120),
       currentShift: z.enum(["am", "pm"]).optional(),
@@ -542,7 +544,7 @@ const agendaRouter = router({
   create: protectedProcedure
     .input(z.object({
       clientName: z.string().min(2),
-      clientEmail: z.string().email().optional(),
+      clientEmail: z.string().optional(),
       clientPhone: z.string().optional(),
       clientOrigin: z.string().optional(),
       techniqueId: z.number(),
@@ -640,6 +642,9 @@ const inventarioRouter = router({
     .input(z.object({
       name: z.string().min(2),
       unit: z.string(),
+      categoria: z.enum(["insumo", "herramienta"]).default("insumo"),
+      ubicacion: z.string().optional(),
+      vidaUtilMeses: z.number().optional(),
       currentStock: z.string().default("0"),
       minimumStock: z.string().default("0"),
       purchasedAt: z.string().optional(),
@@ -653,6 +658,9 @@ const inventarioRouter = router({
       await db.insert(massageSupplies).values({
         name: input.name,
         unit: input.unit,
+        categoria: input.categoria,
+        ubicacion: input.ubicacion || null,
+        vidaUtilMeses: input.vidaUtilMeses ?? null,
         currentStock: input.currentStock,
         minimumStock: input.minimumStock,
         purchasedAt: (input.purchasedAt || null) as any,
@@ -690,6 +698,9 @@ const inventarioRouter = router({
       id: z.number(),
       name: z.string().optional(),
       unit: z.string().optional(),
+      categoria: z.enum(["insumo", "herramienta"]).optional(),
+      ubicacion: z.string().optional(),
+      vidaUtilMeses: z.number().optional(),
       currentStock: z.string().optional(),
       minimumStock: z.string().optional(),
       purchasedAt: z.string().optional(),
@@ -701,9 +712,10 @@ const inventarioRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const { id, purchasedAt, openedAt, notes, ...rest } = input;
+      const { id, purchasedAt, openedAt, notes, ubicacion, ...rest } = input;
       await db.update(massageSupplies).set({
         ...rest,
+        ubicacion: ubicacion || null,
         purchasedAt: (purchasedAt || null) as any,
         openedAt: (openedAt || null) as any,
         notes: notes || null,
@@ -874,6 +886,113 @@ const analyticsRouter = router({
     }),
 });
 
+// ─── RRHH ────────────────────────────────────────────────────
+const rrhhRouter = router({
+  // Evaluaciones KPI mensuales
+  getEvaluations: protectedProcedure
+    .input(z.object({ therapistId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(massageTherapistEvaluations)
+        .where(eq(massageTherapistEvaluations.therapistId, input.therapistId))
+        .orderBy(desc(massageTherapistEvaluations.period));
+    }),
+
+  upsertEvaluation: protectedProcedure
+    .input(z.object({
+      therapistId: z.number(),
+      period: z.string().regex(/^\d{4}-\d{2}$/),
+      puntualidad: z.number().min(0).max(10),
+      tecnica: z.number().min(0).max(10),
+      satisfaccionCliente: z.number().min(0).max(10),
+      presentacionHigiene: z.number().min(0).max(10),
+      comunicacion: z.number().min(0).max(10),
+      usoInsumos: z.number().min(0).max(10),
+      comentarios: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { therapistId, period, comentarios, ...scores } = input;
+      const existing = await db.select({ id: massageTherapistEvaluations.id })
+        .from(massageTherapistEvaluations)
+        .where(and(
+          eq(massageTherapistEvaluations.therapistId, therapistId),
+          eq(massageTherapistEvaluations.period, period),
+        )).limit(1);
+      if (existing.length > 0) {
+        await db.update(massageTherapistEvaluations)
+          .set({ ...scores, satisfaccionCliente: scores.satisfaccionCliente, presentacionHigiene: scores.presentacionHigiene, comentarios: comentarios || null })
+          .where(eq(massageTherapistEvaluations.id, existing[0].id));
+      } else {
+        await db.insert(massageTherapistEvaluations).values({
+          therapistId, period, evaluatedBy: ctx.user.id ?? 0,
+          ...scores, satisfaccionCliente: scores.satisfaccionCliente, presentacionHigiene: scores.presentacionHigiene,
+          comentarios: comentarios || null,
+        });
+      }
+      return { success: true };
+    }),
+
+  deleteEvaluation: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.delete(massageTherapistEvaluations).where(eq(massageTherapistEvaluations.id, input.id));
+      return { success: true };
+    }),
+
+  // Documentos (certificados, boletas, contratos)
+  getDocuments: protectedProcedure
+    .input(z.object({ therapistId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(massageTherapistDocuments)
+        .where(eq(massageTherapistDocuments.therapistId, input.therapistId))
+        .orderBy(desc(massageTherapistDocuments.createdAt));
+    }),
+
+  addDocument: protectedProcedure
+    .input(z.object({
+      therapistId: z.number(),
+      tipo: z.enum(["certificado", "boleta", "contrato", "otro"]),
+      nombre: z.string().min(2),
+      descripcion: z.string().optional(),
+      archivoUrl: z.string().optional(),
+      periodo: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.insert(massageTherapistDocuments).values({
+        ...input,
+        descripcion: input.descripcion || null,
+        archivoUrl: input.archivoUrl || null,
+        periodo: input.periodo || null,
+        uploadedBy: ctx.user.id ?? 0,
+      });
+      return { success: true };
+    }),
+
+  deleteDocument: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.delete(massageTherapistDocuments).where(eq(massageTherapistDocuments.id, input.id));
+      return { success: true };
+    }),
+});
+
 // ─── ROUTER PRINCIPAL ─────────────────────────────────────────
 export const masajesRouter = router({
   tecnicas: tecnicasRouter,
@@ -883,4 +1002,5 @@ export const masajesRouter = router({
   inventario: inventarioRouter,
   clientes: clientesRouter,
   analytics: analyticsRouter,
+  rrhh: rrhhRouter,
 });
