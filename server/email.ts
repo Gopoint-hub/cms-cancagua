@@ -474,6 +474,7 @@ interface ContactFormData {
   telefono: string;
   mensaje: string;
   origen?: string;
+  toEmail?: string;
 }
 
 /**
@@ -589,8 +590,8 @@ Este mensaje fue enviado desde el formulario de contacto de cancagua.cl`;
 
     const { data: emailData, error } = await resend.emails.send({
       from: formatSender('Formulario Cancagua'),
-      to: [CONTACT_TO_EMAIL],
-      subject: `📬 Nuevo mensaje de ${data.nombre} - Formulario de Contacto`,
+      to: [data.toEmail || CONTACT_TO_EMAIL],
+      subject: `📬 Nuevo mensaje de ${data.nombre} - ${data.origen || 'Formulario de Contacto'}`,
       html: htmlContent,
       text: textContent,
       replyTo: data.email, // Responder directamente al cliente

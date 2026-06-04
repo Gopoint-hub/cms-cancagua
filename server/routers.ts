@@ -556,6 +556,7 @@ export const appRouter = router({
         email: z.string().email(),
         phone: z.string().min(8, "El teléfono es obligatorio"),
         message: z.string().min(10),
+        recipient: z.enum(["contacto", "eventos"]).optional(),
       }))
       .mutation(async ({ input }) => {
         // Importar funciones de email y WhatsApp
@@ -565,13 +566,15 @@ export const appRouter = router({
         // 1. Guardar en base de datos
         const result = await db.createContactMessage(input);
 
-        // 2. Enviar email a contacto@cancagua.cl
+        // 2. Enviar email al destinatario correspondiente
+        const isEventos = input.recipient === "eventos";
         const emailResult = await sendContactFormEmail({
           nombre: input.name,
           email: input.email,
           telefono: input.phone,
           mensaje: input.message,
-          origen: "Formulario de Contacto Web",
+          origen: isEventos ? "Formulario Eventos Empresas" : "Formulario de Contacto Web",
+          toEmail: isEventos ? "eventos@cancagua.cl" : undefined,
         });
 
         // 3. Generar mensaje y enlace de WhatsApp
