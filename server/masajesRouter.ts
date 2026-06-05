@@ -60,6 +60,14 @@ const serializeDateFields = <T extends Record<string, unknown>, K extends keyof 
   return serialized as SerializedDateFields<T, K>;
 };
 
+// Sanitiza precios escritos en formato CLP ($50.000 → "50000", 50000 → "50000")
+const sanitizePrice = (v?: string | null): string | null => {
+  if (!v) return null;
+  const cleaned = v.toString().replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.');
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : String(Math.round(num));
+};
+
 // ─── TÉCNICAS ────────────────────────────────────────────────
 const tecnicasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
@@ -87,9 +95,9 @@ const tecnicasRouter = router({
         name,
         description: description || null,
         durations,
-        price50min: price50min || null,
-        price80min: price80min || null,
-        price110min: price110min || null,
+        price50min: sanitizePrice(price50min),
+        price80min: sanitizePrice(price80min),
+        price110min: sanitizePrice(price110min),
       });
       return { success: true };
     }),
@@ -109,7 +117,13 @@ const tecnicasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const { id, ...data } = input;
+      const { id, price50min, price80min, price110min, ...rest } = input;
+      const data = {
+        ...rest,
+        price50min: price50min !== undefined ? sanitizePrice(price50min) : undefined,
+        price80min: price80min !== undefined ? sanitizePrice(price80min) : undefined,
+        price110min: price110min !== undefined ? sanitizePrice(price110min) : undefined,
+      };
       await db.update(massageTechniques).set(data).where(eq(massageTechniques.id, id));
       return { success: true };
     }),
