@@ -363,6 +363,19 @@ const terapeutasRouter = router({
       return { success: true };
     }),
 
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      // Eliminar registros relacionados primero
+      await db.delete(massageTherapistTechniques).where(eq(massageTherapistTechniques.therapistId, input.id));
+      await db.delete(massageTherapistSchedules).where(eq(massageTherapistSchedules.therapistId, input.id));
+      await db.delete(massageTherapists).where(eq(massageTherapists.id, input.id));
+      return { success: true };
+    }),
+
   // Actualizar horario de un día
   upsertSchedule: protectedProcedure
     .input(z.object({
@@ -749,6 +762,16 @@ const inventarioRouter = router({
       await db.update(massageSupplies)
         .set({ currentStock: sql`${massageSupplies.currentStock} + ${input.delta}` })
         .where(eq(massageSupplies.id, input.id));
+      return { success: true };
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.delete(massageSupplies).where(eq(massageSupplies.id, input.id));
       return { success: true };
     }),
 });
