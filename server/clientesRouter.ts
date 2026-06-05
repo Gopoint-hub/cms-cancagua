@@ -104,7 +104,7 @@ export const clientesRouter = router({
     const [nuevos30d] = await db.select({ n: sql<number>`COUNT(*)` }).from(clients)
       .where(gte(clients.createdAt, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)` as any));
 
-    return { ...totals[0] ?? totals, nuevos30d: nuevos30d?.n ?? 0 };
+    return { ...(totals ?? {}), nuevos30d: nuevos30d?.n ?? 0 };
   }),
 
   // ─── Datos para gráficos ───

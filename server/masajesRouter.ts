@@ -918,6 +918,7 @@ const masajesPublicRouter = router({
       }
       // WhatsApp de confirmación al cliente
       if (input.clientPhone) {
+        const clientPhone = input.clientPhone;
         (async () => {
           try {
             const [tech] = await db.select({ name: massageTechniques.name })
@@ -926,7 +927,7 @@ const masajesPublicRouter = router({
               weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
             }).format(new Date(input.bookingDate + "T12:00:00"));
             await sendWhatsApp(
-              input.clientPhone,
+              clientPhone,
               `¡Hola ${input.clientName}! 👋\n\nTu solicitud de reserva en *Cancagua Spa* fue recibida.\n\n📋 *${tech?.name ?? "Masaje"}* · ${input.duration} min\n📅 ${dateStr}\n🕐 ${input.startTime} hrs\n\nTe contactaremos pronto para confirmar y coordinar el pago. ¡Nos vemos! 🌿`
             );
           } catch (e) { console.error("[WHAPI] Error:", e); }
