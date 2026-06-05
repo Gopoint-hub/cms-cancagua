@@ -13,7 +13,8 @@ import { toast } from "sonner";
 import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save } from "lucide-react";
 
 const DRAFT_KEY = "masajes:draft:tecnica";
-const DURATIONS = [50, 80, 110];
+const DURATIONS = [20, 40, 50, 80, 110];
+const PRICE_FIELDS = ["price50min", "price80min", "price110min"] as const;
 
 type TechniqueForm = {
   name: string;
@@ -122,13 +123,15 @@ export default function MasajesTecnicas() {
   const handleSave = () => {
     if (!form.name.trim()) { toast.error("El nombre es requerido"); return; }
     if (form.durations.length === 0) { toast.error("Selecciona al menos una duración"); return; }
+    const sorted = [...form.durations].sort((a, b) => a - b);
     const payload = {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
-      durations: form.durations.join(","),
-      price50min: form.price50min || undefined,
-      price80min: form.price80min || undefined,
-      price110min: form.price110min || undefined,
+      durations: sorted.join(","),
+      // Mapeo posicional: 1ª duración → price50min, 2ª → price80min, 3ª → price110min
+      price50min: sorted.length >= 1 ? (form.price50min || undefined) : "0",
+      price80min: sorted.length >= 2 ? (form.price80min || undefined) : "0",
+      price110min: sorted.length >= 3 ? (form.price110min || undefined) : "0",
     };
     if (editing) updateMut.mutate({ id: editing, ...payload });
     else createMut.mutate(payload);
@@ -183,9 +186,12 @@ export default function MasajesTecnicas() {
                         </div>
                         {t.description && <p className="text-sm text-muted-foreground mt-1">{t.description}</p>}
                         <div className="flex gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
-                          {t.price50min && <span>50 min: <strong>${Number(t.price50min).toLocaleString("es-CL")}</strong></span>}
-                          {t.price80min && <span>80 min: <strong>${Number(t.price80min).toLocaleString("es-CL")}</strong></span>}
-                          {t.price110min && <span>110 min: <strong>${Number(t.price110min).toLocaleString("es-CL")}</strong></span>}
+                          {durs.map((d, i) => {
+                            const price = i === 0 ? t.price50min : i === 1 ? t.price80min : t.price110min;
+                            return price && Number(price) > 0 ? (
+                              <span key={d}>{d} min: <strong>${Number(price).toLocaleString("es-CL")}</strong></span>
+                            ) : null;
+                          })}
                         </div>
                       </div>
                       <div className="flex gap-1">
@@ -215,7 +221,7 @@ export default function MasajesTecnicas() {
                           <div className="space-y-2">
                             <div className="grid grid-cols-5 gap-2 text-xs text-muted-foreground font-medium px-2">
                               <span className="col-span-2">Insumo</span>
-                              <span>50 min</span><span>80 min</span><span>110 min</span>
+                              {durs.map(d => <span key={d}>{d} min</span>)}
                             </div>
                             {recipes.map(r => (
                               <div key={r.id} className="grid grid-cols-5 gap-2 items-center text-sm border rounded-lg px-2 py-2">
@@ -263,7 +269,7 @@ export default function MasajesTecnicas() {
             </div>
             <div>
               <Label>Duraciones disponibles *</Label>
-              <div className="flex gap-2 mt-1">
+              <div className="flex gap-2 mt-1 flex-wrap">
                 {DURATIONS.map(d => (
                   <Button
                     key={d}
@@ -280,24 +286,16 @@ export default function MasajesTecnicas() {
             <div>
               <Label>Precio a público ($ CLP)</Label>
               <div className="grid grid-cols-3 gap-3 mt-1">
-                {form.durations.includes(50) && (
-                  <div>
-                    <span className="text-xs text-muted-foreground">50 min</span>
-                    <Input value={form.price50min} onChange={e => setForm(f => ({ ...f, price50min: e.target.value }))} placeholder="0" />
+                {[...form.durations].sort((a, b) => a - b).map((d, i) => (
+                  <div key={d}>
+                    <span className="text-xs text-muted-foreground">{d} min</span>
+                    <Input
+                      value={form[PRICE_FIELDS[i]]}
+                      onChange={e => setForm(f => ({ ...f, [PRICE_FIELDS[i]]: e.target.value }))}
+                      placeholder="0"
+                    />
                   </div>
-                )}
-                {form.durations.includes(80) && (
-                  <div>
-                    <span className="text-xs text-muted-foreground">80 min</span>
-                    <Input value={form.price80min} onChange={e => setForm(f => ({ ...f, price80min: e.target.value }))} placeholder="0" />
-                  </div>
-                )}
-                {form.durations.includes(110) && (
-                  <div>
-                    <span className="text-xs text-muted-foreground">110 min</span>
-                    <Input value={form.price110min} onChange={e => setForm(f => ({ ...f, price110min: e.target.value }))} placeholder="0" />
-                  </div>
-                )}
+                ))}
               </div>
               {form.durations.length === 0 && <p className="text-xs text-muted-foreground mt-1">Selecciona una duración para ingresar precios.</p>}
             </div>
