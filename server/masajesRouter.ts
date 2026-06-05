@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
   massageTechniques,
@@ -548,7 +548,7 @@ const agendaRouter = router({
       const prep = 10;
 
       for (let t = start; t + input.duration <= end; t += 30) {
-        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "00")}:${String(t % 60).padStart(2, "00")}`;
         const slotEnd = t + input.duration;
 
         const availableRooms = rooms.filter(room => {
@@ -1030,6 +1030,75 @@ const rrhhRouter = router({
     }),
 });
 
+// ─── PÚBLICO (sin autenticación) ──────────────────────────────
+const masajesPublicRouter = router({
+  getTechnique: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [t] = await db.select().from(massageTechniques)
+        .where(and(eq(massageTechniques.id, input.id), eq(massageTechniques.active, 1)))
+        .limit(1);
+      return t ?? null;
+    }),
+
+  getSlots: publicProcedure
+    .input(z.object({ date: z.string(), duration: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const existingBookings = await db.select().from(massageBookings).where(
+        and(
+          eq(massageBookings.bookingDate, input.date as any),
+          sql`${massageBookings.status} NOT IN ('cancelled')`,
+        )
+      );
+      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      const slots: { time: string; roomId: number }[] = [];
+      const startMin = 10 * 60;
+      const endMin = 20 * 60 + 30;
+      const prep = 10;
+      for (let t = startMin; t + input.duration <= endMin; t += 30) {
+        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+        const slotEnd = t + input.duration;
+        const available = rooms.filter(room => !existingBookings.some(b => {
+          if (b.roomId !== room.id) return false;
+          const bStart = parseInt(b.startTime.split(":")[0]) * 60 + parseInt(b.startTime.split(":")[1]);
+          const bEnd = parseInt(b.endTime.split(":")[0]) * 60 + parseInt(b.endTime.split(":")[1]) + prep;
+          return t < bEnd && slotEnd > bStart;
+        }));
+        if (available.length > 0) slots.push({ time: timeStr, roomId: available[0].id });
+      }
+      return slots;
+    }),
+
+  book: publicProcedure
+    .input(z.object({
+      techniqueId: z.number(),
+      duration: z.number(),
+      bookingDate: z.string(),
+      startTime: z.string(),
+      endTime: z.string(),
+      roomId: z.number(),
+      clientName: z.string().min(2),
+      clientPhone: z.string().optional(),
+      clientEmail: z.string().optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.insert(massageBookings).values({
+        ...input,
+        bookingDate: input.bookingDate as any,
+        paymentStatus: "pending",
+        status: "pending",
+      });
+      return { success: true };
+    }),
+});
+
 // ─── ROUTER PRINCIPAL ─────────────────────────────────────────
 export const masajesRouter = router({
   tecnicas: tecnicasRouter,
@@ -1040,4 +1109,5 @@ export const masajesRouter = router({
   clientes: clientesRouter,
   analytics: analyticsRouter,
   rrhh: rrhhRouter,
+  public: masajesPublicRouter,
 });
