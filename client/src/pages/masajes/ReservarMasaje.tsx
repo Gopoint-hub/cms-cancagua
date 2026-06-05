@@ -21,12 +21,6 @@ const getPriceForDuration = (t: any, dur: number): number | null => {
   return vals[idx] ? Number(vals[idx]) : null;
 };
 
-const addMinutes = (time: string, mins: number): string => {
-  const [h, m] = time.split(":").map(Number);
-  const total = h * 60 + m + mins;
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-};
-
 const today = new Date().toISOString().split("T")[0];
 
 export default function ReservarMasaje() {
@@ -34,9 +28,8 @@ export default function ReservarMasaje() {
   const techniqueId = Number(id);
 
   const [duration, setDuration] = useState<number | null>(null);
-  const [therapistId, setTherapistId] = useState<number | null>(null);
   const [date, setDate] = useState("");
-  const [slot, setSlot] = useState<{ time: string; roomId: number } | null>(null);
+  const [slot, setSlot] = useState<{ time: string } | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -54,27 +47,21 @@ export default function ReservarMasaje() {
 
   const { data: disclaimer } = trpc.masajes.config.getDisclaimer.useQuery();
 
-  const { data: therapists, isLoading: loadingTherapists } = trpc.masajes.public.getTherapists.useQuery(
-    { techniqueId },
-    { enabled: !isNaN(techniqueId) && !!duration }
-  );
-
   const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getSlots.useQuery(
-    { date, duration: duration ?? 0, therapistId: therapistId ?? 0 },
-    { enabled: !!date && !!duration && !!therapistId }
+    { date, duration: duration ?? 0, techniqueId },
+    { enabled: !!date && !!duration && !isNaN(techniqueId) }
   );
 
   const bookMut = trpc.masajes.public.book.useMutation({
     onSuccess: () => {
-      const therapist = therapists?.find(t => t.id === therapistId);
-      setBookedInfo({ name, date, time: slot?.time, duration, technique: technique?.name, therapist: therapist?.name });
+      setBookedInfo({ name, date, time: slot?.time, duration, technique: technique?.name });
       setDone(true);
     },
     onError: (e) => toast.error(e.message),
   });
 
   const handleSubmit = () => {
-    if (!duration || !therapistId || !date || !slot || !name.trim()) {
+    if (!duration || !date || !slot || !name.trim()) {
       toast.error("Completa todos los campos requeridos");
       return;
     }
@@ -82,12 +69,9 @@ export default function ReservarMasaje() {
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
     bookMut.mutate({
       techniqueId,
-      therapistId,
       duration,
       bookingDate: date,
       startTime: slot.time,
-      endTime: addMinutes(slot.time, duration),
-      roomId: slot.roomId,
       clientName: name.trim(),
       clientPhone: phone.trim() || undefined,
       clientEmail: email.trim() || undefined,
@@ -127,7 +111,6 @@ export default function ReservarMasaje() {
         <div className="bg-stone-50 rounded-xl p-4 text-left space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-muted-foreground">Servicio</span><span className="font-medium">{bookedInfo.technique}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Duración</span><span className="font-medium">{bookedInfo.duration} min</span></div>
-          {bookedInfo.therapist && <div className="flex justify-between"><span className="text-muted-foreground">Terapeuta</span><span className="font-medium">{bookedInfo.therapist}</span></div>}
           <div className="flex justify-between"><span className="text-muted-foreground">Fecha</span><span className="font-medium capitalize">{format(new Date(bookedInfo.date + "T12:00:00"), "EEEE d 'de' MMMM", { locale: es })}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Hora</span><span className="font-medium">{bookedInfo.time} hrs</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Nombre</span><span className="font-medium">{bookedInfo.name}</span></div>
@@ -161,7 +144,7 @@ export default function ReservarMasaje() {
             {durs.map((d) => {
               const price = getPriceForDuration(technique, d);
               return (
-                <button key={d} onClick={() => { setDuration(d); setTherapistId(null); setSlot(null); setDisclaimerAccepted(false); }}
+                <button key={d} onClick={() => { setDuration(d); setDate(""); setSlot(null); setDisclaimerAccepted(false); }}
                   className={`flex flex-col items-center px-5 py-3 rounded-xl border-2 transition-colors ${duration === d ? "border-teal-600 bg-teal-50 text-teal-700" : "border-stone-200 hover:border-stone-300 text-foreground"}`}>
                   <span className="font-semibold text-sm">{d} min</span>
                   {price && <span className="text-xs mt-0.5 opacity-80">${price.toLocaleString("es-CL")}</span>}
@@ -171,51 +154,24 @@ export default function ReservarMasaje() {
           </div>
         </div>
 
-        {/* 2. Terapeuta */}
+        {/* 2. Fecha */}
         {duration && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />2. Elige tu terapeuta</p>
-            {loadingTherapists ? (
-              <div className="space-y-2">{[1, 2].map(i => <Skeleton key={i} className="h-14 w-full rounded-xl" />)}</div>
-            ) : !therapists || therapists.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hay terapeutas disponibles para esta técnica.</p>
-            ) : (
-              <div className="space-y-2">
-                {therapists.map(t => (
-                  <button key={t.id} onClick={() => { setTherapistId(t.id); setDate(""); setSlot(null); setDisclaimerAccepted(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-colors ${therapistId === t.id ? "border-teal-600 bg-teal-50" : "border-stone-200 hover:border-stone-300"}`}>
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${therapistId === t.id ? "bg-teal-600 text-white" : "bg-stone-100 text-stone-600"}`}>
-                      {t.name[0]}
-                    </div>
-                    <div>
-                      <p className={`font-medium text-sm ${therapistId === t.id ? "text-teal-900" : ""}`}>{t.name}</p>
-                      <p className="text-xs text-muted-foreground">{t.type === "inhouse" ? "Terapeuta inhouse" : "Terapeuta freelance"}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 3. Fecha */}
-        {therapistId && (
-          <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><Calendar className="w-4 h-4" />3. Elige la fecha</p>
+            <p className="text-sm font-medium flex items-center gap-1.5"><Calendar className="w-4 h-4" />2. Elige la fecha</p>
             <input type="date" min={today} value={date}
               onChange={e => { setDate(e.target.value); setSlot(null); setDisclaimerAccepted(false); }}
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-teal-500" />
           </div>
         )}
 
-        {/* 4. Horarios */}
-        {date && therapistId && (
+        {/* 3. Horarios */}
+        {date && duration && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><Clock className="w-4 h-4" />4. Elige el horario</p>
+            <p className="text-sm font-medium flex items-center gap-1.5"><Clock className="w-4 h-4" />3. Elige el horario</p>
             {loadingSlots ? (
               <div className="flex gap-2 flex-wrap">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-9 w-16 rounded-xl" />)}</div>
             ) : !slots || slots.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{therapists?.find(t => t.id === therapistId)?.name} no tiene disponibilidad este día. Prueba otra fecha.</p>
+              <p className="text-sm text-muted-foreground">No hay disponibilidad para esta fecha. Prueba otra fecha.</p>
             ) : (
               <div className="flex gap-2 flex-wrap">
                 {slots.map(s => (
@@ -229,10 +185,10 @@ export default function ReservarMasaje() {
           </div>
         )}
 
-        {/* 5. Datos cliente */}
+        {/* 4. Datos cliente */}
         {slot && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />5. Tus datos</p>
+            <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />4. Tus datos</p>
             <div className="space-y-3">
               <div>
                 <Label className="text-xs text-muted-foreground">Nombre completo *</Label>
@@ -257,7 +213,7 @@ export default function ReservarMasaje() {
           </div>
         )}
 
-        {/* 6. Exención de responsabilidad */}
+        {/* 5. Exención de responsabilidad */}
         {allInfoFilled && !disclaimerAccepted && (
           <div className="bg-white rounded-2xl border border-amber-200 p-5 space-y-4">
             <p className="text-sm font-medium flex items-center gap-1.5 text-amber-700">
@@ -272,7 +228,7 @@ export default function ReservarMasaje() {
           </div>
         )}
 
-        {/* 7. Checkboxes + resumen + confirmar */}
+        {/* 6. Checkboxes + resumen + confirmar */}
         {allInfoFilled && disclaimerAccepted && (
           <div className="space-y-3">
             <div className="bg-white rounded-2xl border p-5 space-y-3">
@@ -305,10 +261,6 @@ export default function ReservarMasaje() {
               <div className="flex justify-between">
                 <span className="text-teal-700">Servicio</span>
                 <span className="font-medium text-teal-900">{technique.name} · {duration} min</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-teal-700">Terapeuta</span>
-                <span className="font-medium text-teal-900">{therapists?.find(t => t.id === therapistId)?.name}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-teal-700">Fecha y hora</span>

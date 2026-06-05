@@ -818,6 +818,88 @@ const configRouter = router({
 // ─── PÚBLICO (sin autenticación) ──────────────────────────────
 const parseTimeMin = (t: string) => parseInt(t.split(":")[0]) * 60 + parseInt(t.split(":")[1]);
 
+const formatTimeMin = (total: number): string =>
+  `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+
+type AutomaticMassageTherapist = {
+  id: number;
+  name: string | null;
+  type: "inhouse" | "freelance";
+  callPriority: number | null;
+  scheduleStart: string;
+  scheduleEnd: string;
+};
+
+type AutomaticMassageBooking = {
+  therapistId: number | null;
+  roomId: number | null;
+  startTime: string;
+  endTime: string;
+};
+
+type AutomaticMassageRoom = { id: number };
+
+const overlaps = (startA: number, endA: number, startB: number, endB: number): boolean =>
+  startA < endB && endA > startB;
+
+export function selectAutomaticMassageAssignment(params: {
+  therapists: AutomaticMassageTherapist[];
+  bookings: AutomaticMassageBooking[];
+  rooms: AutomaticMassageRoom[];
+  startTime: string;
+  duration: number;
+  prepMinutes?: number;
+}): { therapist: AutomaticMassageTherapist; room: AutomaticMassageRoom; endTime: string } | null {
+  const prep = params.prepMinutes ?? 10;
+  const requestedStart = parseTimeMin(params.startTime);
+  const requestedEnd = requestedStart + params.duration;
+
+  const therapists = [...params.therapists].sort((a, b) => {
+    const typeA = a.type === "inhouse" ? 0 : 1;
+    const typeB = b.type === "inhouse" ? 0 : 1;
+    if (typeA !== typeB) return typeA - typeB;
+    const priorityA = a.callPriority ?? 99;
+    const priorityB = b.callPriority ?? 99;
+    if (priorityA !== priorityB) return priorityA - priorityB;
+    return (a.name ?? "").localeCompare(b.name ?? "");
+  });
+
+  for (const therapist of therapists) {
+    const scheduleStart = parseTimeMin(therapist.scheduleStart);
+    const scheduleEnd = parseTimeMin(therapist.scheduleEnd);
+    if (requestedStart < scheduleStart || requestedEnd > scheduleEnd) continue;
+
+    const therapistBusy = params.bookings.some((booking) => {
+      if (booking.therapistId !== therapist.id) return false;
+      return overlaps(
+        requestedStart,
+        requestedEnd,
+        parseTimeMin(booking.startTime),
+        parseTimeMin(booking.endTime) + prep,
+      );
+    });
+    if (therapistBusy) continue;
+
+    const room = params.rooms.find((candidateRoom) =>
+      !params.bookings.some((booking) => {
+        if (booking.roomId !== candidateRoom.id) return false;
+        return overlaps(
+          requestedStart,
+          requestedEnd,
+          parseTimeMin(booking.startTime),
+          parseTimeMin(booking.endTime) + prep,
+        );
+      })
+    );
+
+    if (room) {
+      return { therapist, room, endTime: formatTimeMin(requestedEnd) };
+    }
+  }
+
+  return null;
+}
+
 const masajesPublicRouter = router({
   getTechnique: publicProcedure
     .input(z.object({ id: z.number() }))
@@ -850,51 +932,57 @@ const masajesPublicRouter = router({
     }),
 
   getSlots: publicProcedure
-    .input(z.object({ date: z.string(), duration: z.number(), therapistId: z.number() }))
+    .input(z.object({ date: z.string(), duration: z.number().positive(), techniqueId: z.number() }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       const dayOfWeek = new Date(input.date + "T12:00:00").getDay();
-      const [schedule] = await db.select().from(massageTherapistSchedules)
+      const therapists = await db.select({
+        id: massageTherapists.id,
+        name: massageTherapists.name,
+        type: massageTherapists.type,
+        callPriority: massageTherapists.callPriority,
+        scheduleStart: massageTherapistSchedules.startTime,
+        scheduleEnd: massageTherapistSchedules.endTime,
+      })
+        .from(massageTherapistTechniques)
+        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+        .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
         .where(and(
-          eq(massageTherapistSchedules.therapistId, input.therapistId),
+          eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+          eq(massageTherapists.active, 1),
           eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
           eq(massageTherapistSchedules.available, 1)
-        )).limit(1);
-      if (!schedule) return [];
-      const schedStart = parseTimeMin(schedule.startTime);
-      const schedEnd = parseTimeMin(schedule.endTime);
+        ));
+      if (therapists.length === 0) return [];
+
       const allBookings = await db.select().from(massageBookings).where(
         and(eq(massageBookings.bookingDate, input.date as any), sql`${massageBookings.status} NOT IN ('cancelled')`)
       );
-      const therapistBookings = allBookings.filter(b => b.therapistId === input.therapistId);
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
-      const slots: { time: string; roomId: number }[] = [];
-      const prep = 10;
+      if (rooms.length === 0) return [];
+
+      const schedStart = Math.min(...therapists.map((t) => parseTimeMin(t.scheduleStart)));
+      const schedEnd = Math.max(...therapists.map((t) => parseTimeMin(t.scheduleEnd)));
+      const slots: { time: string }[] = [];
       for (let t = schedStart; t + input.duration <= schedEnd; t += 30) {
-        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
-        const slotEnd = t + input.duration;
-        const therapistBusy = therapistBookings.some(b => {
-          const bStart = parseTimeMin(b.startTime);
-          const bEnd = parseTimeMin(b.endTime) + prep;
-          return t < bEnd && slotEnd > bStart;
+        const timeStr = formatTimeMin(t);
+        const assignment = selectAutomaticMassageAssignment({
+          therapists,
+          bookings: allBookings,
+          rooms,
+          startTime: timeStr,
+          duration: input.duration,
         });
-        if (therapistBusy) continue;
-        const availableRoom = rooms.find(room => !allBookings.some(b => {
-          if (b.roomId !== room.id) return false;
-          const bStart = parseTimeMin(b.startTime);
-          const bEnd = parseTimeMin(b.endTime) + prep;
-          return t < bEnd && slotEnd > bStart;
-        }));
-        if (availableRoom) slots.push({ time: timeStr, roomId: availableRoom.id });
+        if (assignment) slots.push({ time: timeStr });
       }
       return slots;
     }),
 
   book: publicProcedure
     .input(z.object({
-      techniqueId: z.number(), therapistId: z.number(), duration: z.number(),
-      bookingDate: z.string(), startTime: z.string(), endTime: z.string(), roomId: z.number(),
+      techniqueId: z.number(), duration: z.number().positive(),
+      bookingDate: z.string(), startTime: z.string(),
       clientName: z.string().min(2), clientPhone: z.string().optional(),
       clientEmail: z.string().optional(), notes: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
@@ -903,8 +991,49 @@ const masajesPublicRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { subscribeNewsletter, ...bookingData } = input;
+      const dayOfWeek = new Date(input.bookingDate + "T12:00:00").getDay();
+      const therapists = await db.select({
+        id: massageTherapists.id,
+        name: massageTherapists.name,
+        type: massageTherapists.type,
+        callPriority: massageTherapists.callPriority,
+        scheduleStart: massageTherapistSchedules.startTime,
+        scheduleEnd: massageTherapistSchedules.endTime,
+      })
+        .from(massageTherapistTechniques)
+        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+        .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+        .where(and(
+          eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+          eq(massageTherapists.active, 1),
+          eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
+          eq(massageTherapistSchedules.available, 1)
+        ));
+      const allBookings = await db.select().from(massageBookings).where(
+        and(eq(massageBookings.bookingDate, input.bookingDate as any), sql`${massageBookings.status} NOT IN ('cancelled')`)
+      );
+      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      const assignment = selectAutomaticMassageAssignment({
+        therapists,
+        bookings: allBookings,
+        rooms,
+        startTime: input.startTime,
+        duration: input.duration,
+      });
+
+      if (!assignment) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
+        });
+      }
+
       await db.insert(massageBookings).values({
-        ...bookingData, bookingDate: input.bookingDate as any,
+        ...bookingData,
+        therapistId: assignment.therapist.id,
+        roomId: assignment.room.id,
+        endTime: assignment.endTime,
+        bookingDate: input.bookingDate as any,
         paymentStatus: "pending", status: "pending",
       });
       // Suscribir al newsletter
