@@ -60,7 +60,6 @@ const serializeDateFields = <T extends Record<string, unknown>, K extends keyof 
   return serialized as SerializedDateFields<T, K>;
 };
 
-// Sanitiza precios escritos en formato CLP ($50.000 → "50000", 50000 → "50000")
 const sanitizePrice = (v?: string | null): string | null => {
   if (!v) return null;
   const cleaned = v.toString().replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.');
@@ -138,7 +137,6 @@ const tecnicasRouter = router({
       return { success: true };
     }),
 
-  // Recetas de insumos por técnica
   getRecipes: protectedProcedure
     .input(z.object({ techniqueId: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -180,28 +178,20 @@ const tecnicasRouter = router({
       const existing = await db
         .select()
         .from(massageTechniqueRecipes)
-        .where(
-          and(
-            eq(massageTechniqueRecipes.techniqueId, input.techniqueId),
-            eq(massageTechniqueRecipes.supplyId, input.supplyId),
-          )
-        )
+        .where(and(
+          eq(massageTechniqueRecipes.techniqueId, input.techniqueId),
+          eq(massageTechniqueRecipes.supplyId, input.supplyId),
+        ))
         .limit(1);
       if (existing.length > 0) {
         await db.update(massageTechniqueRecipes)
-          .set({
-            quantityPer50min: values.quantityPer50min,
-            quantityPer80min: values.quantityPer80min,
-            quantityPer110min: values.quantityPer110min,
-          })
+          .set({ quantityPer50min: values.quantityPer50min, quantityPer80min: values.quantityPer80min, quantityPer110min: values.quantityPer110min })
           .where(eq(massageTechniqueRecipes.id, existing[0].id));
       } else {
         await db.insert(massageTechniqueRecipes).values({
           techniqueId: input.techniqueId,
           supplyId: input.supplyId,
-          quantityPer50min: values.quantityPer50min,
-          quantityPer80min: values.quantityPer80min,
-          quantityPer110min: values.quantityPer110min,
+          ...values,
         });
       }
       return { success: true };
@@ -228,8 +218,6 @@ const terapeutasRouter = router({
       .select()
       .from(massageTherapists)
       .orderBy(asc(massageTherapists.callPriority), asc(massageTherapists.name));
-
-    // Obtener técnicas por terapeuta
     const withTechniques = await Promise.all(
       therapists.map(async (t) => {
         const techniques = await db
@@ -249,25 +237,18 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return null;
-      const [therapist] = await db
-        .select()
-        .from(massageTherapists)
-        .where(eq(massageTherapists.id, input.id))
-        .limit(1);
+      const [therapist] = await db.select().from(massageTherapists).where(eq(massageTherapists.id, input.id)).limit(1);
       if (!therapist) return null;
-
       const techniques = await db
         .select({ id: massageTechniques.id, name: massageTechniques.name })
         .from(massageTherapistTechniques)
         .innerJoin(massageTechniques, eq(massageTherapistTechniques.techniqueId, massageTechniques.id))
         .where(eq(massageTherapistTechniques.therapistId, input.id));
-
       const schedules = await db
         .select()
         .from(massageTherapistSchedules)
         .where(eq(massageTherapistSchedules.therapistId, input.id))
         .orderBy(asc(massageTherapistSchedules.dayOfWeek));
-
       return { ...therapist, techniques, schedules };
     }),
 
@@ -277,9 +258,7 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return db
-        .select()
-        .from(massageTherapistSchedules)
+      return db.select().from(massageTherapistSchedules)
         .where(eq(massageTherapistSchedules.therapistId, input.therapistId))
         .orderBy(asc(massageTherapistSchedules.dayOfWeek));
     }),
@@ -302,25 +281,15 @@ const terapeutasRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { techniqueIds, ...raw } = input;
-      // Sanitize: convert empty strings to null for optional fields
       const therapistData = {
-        name: raw.name,
-        type: raw.type,
-        phone: raw.phone || null,
-        email: raw.email || null,
-        contractType: raw.contractType || null,
-        leadTimeMinutes: raw.leadTimeMinutes,
-        currentShift: raw.currentShift ?? null,
-        notes: raw.notes || null,
-        callPriority: raw.callPriority,
+        name: raw.name, type: raw.type, phone: raw.phone || null, email: raw.email || null,
+        contractType: raw.contractType || null, leadTimeMinutes: raw.leadTimeMinutes,
+        currentShift: raw.currentShift ?? null, notes: raw.notes || null, callPriority: raw.callPriority,
       };
       const result = await db.insert(massageTherapists).values(therapistData);
       const insertId = (result as any).insertId as number;
-
       if (techniqueIds && techniqueIds.length > 0) {
-        await db.insert(massageTherapistTechniques).values(
-          techniqueIds.map(tid => ({ therapistId: insertId, techniqueId: tid }))
-        );
+        await db.insert(massageTherapistTechniques).values(techniqueIds.map(tid => ({ therapistId: insertId, techniqueId: tid })));
       }
       return { success: true, id: insertId };
     }),
@@ -345,19 +314,13 @@ const terapeutasRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, techniqueIds, ...raw } = input;
-      // Sanitize empty strings
       const data: Record<string, any> = {};
-      for (const [k, v] of Object.entries(raw)) {
-        data[k] = (typeof v === "string" && v === "") ? null : v;
-      }
+      for (const [k, v] of Object.entries(raw)) { data[k] = (typeof v === "string" && v === "") ? null : v; }
       await db.update(massageTherapists).set(data).where(eq(massageTherapists.id, id));
-
       if (techniqueIds !== undefined) {
         await db.delete(massageTherapistTechniques).where(eq(massageTherapistTechniques.therapistId, id));
         if (techniqueIds.length > 0) {
-          await db.insert(massageTherapistTechniques).values(
-            techniqueIds.map(tid => ({ therapistId: id, techniqueId: tid }))
-          );
+          await db.insert(massageTherapistTechniques).values(techniqueIds.map(tid => ({ therapistId: id, techniqueId: tid })));
         }
       }
       return { success: true };
@@ -369,14 +332,12 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      // Eliminar registros relacionados primero
       await db.delete(massageTherapistTechniques).where(eq(massageTherapistTechniques.therapistId, input.id));
       await db.delete(massageTherapistSchedules).where(eq(massageTherapistSchedules.therapistId, input.id));
       await db.delete(massageTherapists).where(eq(massageTherapists.id, input.id));
       return { success: true };
     }),
 
-  // Actualizar horario de un día
   upsertSchedule: protectedProcedure
     .input(z.object({
       therapistId: z.number(),
@@ -389,17 +350,9 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const existing = await db
-        .select()
-        .from(massageTherapistSchedules)
-        .where(
-          and(
-            eq(massageTherapistSchedules.therapistId, input.therapistId),
-            eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek),
-          )
-        )
+      const existing = await db.select().from(massageTherapistSchedules)
+        .where(and(eq(massageTherapistSchedules.therapistId, input.therapistId), eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek)))
         .limit(1);
-
       if (existing.length > 0) {
         await db.update(massageTherapistSchedules)
           .set({ startTime: input.startTime, endTime: input.endTime, available: input.available })
@@ -410,7 +363,6 @@ const terapeutasRouter = router({
       return { success: true };
     }),
 
-  // Bloquear disponibilidad por rango de fechas
   blockAvailability: protectedProcedure
     .input(z.object({
       therapistId: z.number(),
@@ -424,18 +376,8 @@ const terapeutasRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.update(massageTherapistSchedules)
-        .set({
-          blockFrom: input.blockFrom as any,
-          blockTo: input.blockTo as any,
-          blockReason: input.blockReason,
-          available: 0,
-        })
-        .where(
-          and(
-            eq(massageTherapistSchedules.therapistId, input.therapistId),
-            eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek),
-          )
-        );
+        .set({ blockFrom: input.blockFrom as any, blockTo: input.blockTo as any, blockReason: input.blockReason, available: 0 })
+        .where(and(eq(massageTherapistSchedules.therapistId, input.therapistId), eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek)));
       return { success: true };
     }),
 });
@@ -450,9 +392,7 @@ const salasRouter = router({
   }),
 
   seed: protectedProcedure.mutation(async ({ ctx }) => {
-    if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") {
-      throw new TRPCError({ code: "FORBIDDEN" });
-    }
+    if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
     const existing = await db.select().from(massageRooms);
@@ -470,10 +410,7 @@ const salasRouter = router({
 // ─── AGENDA / RESERVAS ────────────────────────────────────────
 const agendaRouter = router({
   getByDateRange: protectedProcedure
-    .input(z.object({
-      from: z.string(), // "YYYY-MM-DD"
-      to: z.string(),
-    }))
+    .input(z.object({ from: z.string(), to: z.string() }))
     .query(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
@@ -505,65 +442,33 @@ const agendaRouter = router({
         .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
         .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
         .leftJoin(massageRooms, eq(massageBookings.roomId, massageRooms.id))
-        .where(
-          and(
-            gte(massageBookings.bookingDate, input.from as any),
-            lte(massageBookings.bookingDate, input.to as any),
-          )
-        )
+        .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any)))
         .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
       return rows.map(row => serializeDateFields(row, ["bookingDate"]));
     }),
 
-  // Slots disponibles para un día y duración
   getAvailableSlots: protectedProcedure
-    .input(z.object({
-      date: z.string(),     // "YYYY-MM-DD"
-      duration: z.number(), // 50, 80 o 110
-      techniqueId: z.number().optional(),
-    }))
+    .input(z.object({ date: z.string(), duration: z.number(), techniqueId: z.number().optional() }))
     .query(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-
-      // Reservas del día
-      const existingBookings = await db
-        .select()
-        .from(massageBookings)
-        .where(
-          and(
-            eq(massageBookings.bookingDate, input.date as any),
-            sql`${massageBookings.status} NOT IN ('cancelled')`,
-          )
-        );
-
-      // Salas activas
+      const existingBookings = await db.select().from(massageBookings).where(
+        and(eq(massageBookings.bookingDate, input.date as any), sql`${massageBookings.status} NOT IN ('cancelled')`)
+      );
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
-
-      // Horario: 10:00 a 20:30, bloques cada 30 min, preparación 10 min
       const slots: { time: string; availableRooms: number[] }[] = [];
-      const start = 10 * 60; // 10:00 en minutos
-      const end = 20 * 60 + 30; // 20:30
-      const prep = 10;
-
+      const start = 10 * 60; const end = 20 * 60 + 30; const prep = 10;
       for (let t = start; t + input.duration <= end; t += 30) {
-        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "00")}:${String(t % 60).padStart(2, "00")}`;
+        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
         const slotEnd = t + input.duration;
-
-        const availableRooms = rooms.filter(room => {
-          const overlap = existingBookings.some(b => {
-            if (b.roomId !== room.id) return false;
-            const bStart = parseInt(b.startTime.split(":")[0]) * 60 + parseInt(b.startTime.split(":")[1]);
-            const bEnd = parseInt(b.endTime.split(":")[0]) * 60 + parseInt(b.endTime.split(":")[1]) + prep;
-            return t < bEnd && slotEnd > bStart;
-          });
-          return !overlap;
-        });
-
-        if (availableRooms.length > 0) {
-          slots.push({ time: timeStr, availableRooms: availableRooms.map(r => r.id) });
-        }
+        const availableRooms = rooms.filter(room => !existingBookings.some(b => {
+          if (b.roomId !== room.id) return false;
+          const bStart = parseInt(b.startTime.split(":")[0]) * 60 + parseInt(b.startTime.split(":")[1]);
+          const bEnd = parseInt(b.endTime.split(":")[0]) * 60 + parseInt(b.endTime.split(":")[1]) + prep;
+          return t < bEnd && slotEnd > bStart;
+        }));
+        if (availableRooms.length > 0) slots.push({ time: timeStr, availableRooms: availableRooms.map(r => r.id) });
       }
       return slots;
     }),
@@ -591,25 +496,17 @@ const agendaRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.insert(massageBookings).values({
-        ...input,
-        bookingDate: input.bookingDate as any,
-      });
+      await db.insert(massageBookings).values({ ...input, bookingDate: input.bookingDate as any });
       return { success: true };
     }),
 
   updateStatus: protectedProcedure
-    .input(z.object({
-      id: z.number(),
-      status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]),
-    }))
+    .input(z.object({ id: z.number(), status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]) }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(massageBookings)
-        .set({ status: input.status })
-        .where(eq(massageBookings.id, input.id));
+      await db.update(massageBookings).set({ status: input.status }).where(eq(massageBookings.id, input.id));
       return { success: true };
     }),
 
@@ -653,87 +550,52 @@ const inventarioRouter = router({
     await adminOrEditor(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
-    const rows = await db
-      .select()
-      .from(massageSupplies)
-      .where(
-        and(
-          eq(massageSupplies.active, 1),
-          sql`${massageSupplies.currentStock} <= ${massageSupplies.minimumStock}`,
-        )
-      );
+    const rows = await db.select().from(massageSupplies).where(and(eq(massageSupplies.active, 1), sql`${massageSupplies.currentStock} <= ${massageSupplies.minimumStock}`));
     return rows.map(row => serializeDateFields(row, ["purchasedAt", "openedAt"]));
   }),
 
   create: protectedProcedure
     .input(z.object({
-      name: z.string().min(2),
-      unit: z.string(),
+      name: z.string().min(2), unit: z.string(),
       categoria: z.enum(["insumo", "herramienta"]).default("insumo"),
-      ubicacion: z.string().optional(),
-      vidaUtilMeses: z.number().optional(),
-      currentStock: z.string().default("0"),
-      minimumStock: z.string().default("0"),
-      purchasedAt: z.string().optional(),
-      openedAt: z.string().optional(),
-      notes: z.string().optional(),
+      ubicacion: z.string().optional(), vidaUtilMeses: z.number().optional(),
+      currentStock: z.string().default("0"), minimumStock: z.string().default("0"),
+      purchasedAt: z.string().optional(), openedAt: z.string().optional(), notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(massageSupplies).values({
-        name: input.name,
-        unit: input.unit,
-        categoria: input.categoria,
-        ubicacion: input.ubicacion || null,
-        vidaUtilMeses: input.vidaUtilMeses ?? null,
-        currentStock: input.currentStock,
-        minimumStock: input.minimumStock,
-        purchasedAt: (input.purchasedAt || null) as any,
-        openedAt: (input.openedAt || null) as any,
-        notes: input.notes || null,
+        name: input.name, unit: input.unit, categoria: input.categoria,
+        ubicacion: input.ubicacion || null, vidaUtilMeses: input.vidaUtilMeses ?? null,
+        currentStock: input.currentStock, minimumStock: input.minimumStock,
+        purchasedAt: (input.purchasedAt || null) as any, openedAt: (input.openedAt || null) as any, notes: input.notes || null,
       });
       return { success: true };
     }),
 
   receiveStock: protectedProcedure
-    .input(z.object({
-      id: z.number(),
-      stockReceived: z.string(),
-      purchasedAt: z.string().optional(),
-      openedAt: z.string().optional(),
-      notes: z.string().optional(),
-    }))
+    .input(z.object({ id: z.number(), stockReceived: z.string(), purchasedAt: z.string().optional(), openedAt: z.string().optional(), notes: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(massageSupplies)
-        .set({
-          currentStock: sql`${massageSupplies.currentStock} + ${input.stockReceived}`,
-          ...(input.purchasedAt ? { purchasedAt: input.purchasedAt as any } : {}),
-          ...(input.openedAt ? { openedAt: input.openedAt as any } : {}),
-          ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
-        })
-        .where(eq(massageSupplies.id, input.id));
+      await db.update(massageSupplies).set({
+        currentStock: sql`${massageSupplies.currentStock} + ${input.stockReceived}`,
+        ...(input.purchasedAt ? { purchasedAt: input.purchasedAt as any } : {}),
+        ...(input.openedAt ? { openedAt: input.openedAt as any } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
+      }).where(eq(massageSupplies.id, input.id));
       return { success: true };
     }),
 
   update: protectedProcedure
     .input(z.object({
-      id: z.number(),
-      name: z.string().optional(),
-      unit: z.string().optional(),
-      categoria: z.enum(["insumo", "herramienta"]).optional(),
-      ubicacion: z.string().optional(),
-      vidaUtilMeses: z.number().optional(),
-      currentStock: z.string().optional(),
-      minimumStock: z.string().optional(),
-      purchasedAt: z.string().optional(),
-      openedAt: z.string().optional(),
-      notes: z.string().optional(),
-      active: z.number().optional(),
+      id: z.number(), name: z.string().optional(), unit: z.string().optional(),
+      categoria: z.enum(["insumo", "herramienta"]).optional(), ubicacion: z.string().optional(),
+      vidaUtilMeses: z.number().optional(), currentStock: z.string().optional(), minimumStock: z.string().optional(),
+      purchasedAt: z.string().optional(), openedAt: z.string().optional(), notes: z.string().optional(), active: z.number().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
@@ -741,27 +603,19 @@ const inventarioRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, purchasedAt, openedAt, notes, ubicacion, ...rest } = input;
       await db.update(massageSupplies).set({
-        ...rest,
-        ubicacion: ubicacion || null,
-        purchasedAt: (purchasedAt || null) as any,
-        openedAt: (openedAt || null) as any,
-        notes: notes || null,
+        ...rest, ubicacion: ubicacion || null,
+        purchasedAt: (purchasedAt || null) as any, openedAt: (openedAt || null) as any, notes: notes || null,
       }).where(eq(massageSupplies.id, id));
       return { success: true };
     }),
 
   adjustStock: protectedProcedure
-    .input(z.object({
-      id: z.number(),
-      delta: z.string(), // positivo = ingreso, negativo = egreso
-    }))
+    .input(z.object({ id: z.number(), delta: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(massageSupplies)
-        .set({ currentStock: sql`${massageSupplies.currentStock} + ${input.delta}` })
-        .where(eq(massageSupplies.id, input.id));
+      await db.update(massageSupplies).set({ currentStock: sql`${massageSupplies.currentStock} + ${input.delta}` }).where(eq(massageSupplies.id, input.id));
       return { success: true };
     }),
 
@@ -779,11 +633,7 @@ const inventarioRouter = router({
 // ─── CLIENTES ─────────────────────────────────────────────────
 const clientesRouter = router({
   getAll: protectedProcedure
-    .input(z.object({
-      search: z.string().optional(),
-      limit: z.number().default(50),
-      offset: z.number().default(0),
-    }).optional())
+    .input(z.object({ search: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0) }).optional())
     .query(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
@@ -800,12 +650,7 @@ const clientesRouter = router({
         })
         .from(massageBookings)
         .where(sql`${massageBookings.status} != 'cancelled'`)
-        .groupBy(
-          massageBookings.clientName,
-          massageBookings.clientEmail,
-          massageBookings.clientPhone,
-          massageBookings.clientOrigin,
-        )
+        .groupBy(massageBookings.clientName, massageBookings.clientEmail, massageBookings.clientPhone, massageBookings.clientOrigin)
         .orderBy(desc(sql`MAX(${massageBookings.bookingDate})`))
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
@@ -842,82 +687,39 @@ const clientesRouter = router({
 // ─── ANALYTICS ────────────────────────────────────────────────
 const analyticsRouter = router({
   summary: protectedProcedure
-    .input(z.object({
-      from: z.string(),
-      to: z.string(),
-    }))
+    .input(z.object({ from: z.string(), to: z.string() }))
     .query(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return null;
+      const [totals] = await db.select({
+        totalBookings: sql<number>`COUNT(*)`,
+        totalRevenue: sql<string>`SUM(${massageBookings.amountPaid})`,
+        completedBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'completed' THEN 1 ELSE 0 END)`,
+        cancelledBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'cancelled' THEN 1 ELSE 0 END)`,
+      }).from(massageBookings).where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any)));
 
-      const [totals] = await db
-        .select({
-          totalBookings: sql<number>`COUNT(*)`,
-          totalRevenue: sql<string>`SUM(${massageBookings.amountPaid})`,
-          completedBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'completed' THEN 1 ELSE 0 END)`,
-          cancelledBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'cancelled' THEN 1 ELSE 0 END)`,
-        })
-        .from(massageBookings)
-        .where(
-          and(
-            gte(massageBookings.bookingDate, input.from as any),
-            lte(massageBookings.bookingDate, input.to as any),
-          )
-        );
-
-      const byTechnique = await db
-        .select({
-          techniqueName: massageTechniques.name,
-          count: sql<number>`COUNT(*)`,
-          revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
-        })
-        .from(massageBookings)
+      const byTechnique = await db.select({
+        techniqueName: massageTechniques.name,
+        count: sql<number>`COUNT(*)`,
+        revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
+      }).from(massageBookings)
         .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-        .where(
-          and(
-            gte(massageBookings.bookingDate, input.from as any),
-            lte(massageBookings.bookingDate, input.to as any),
-            sql`${massageBookings.status} != 'cancelled'`,
-          )
-        )
-        .groupBy(massageTechniques.name)
-        .orderBy(desc(sql`COUNT(*)`));
+        .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any), sql`${massageBookings.status} != 'cancelled'`))
+        .groupBy(massageTechniques.name).orderBy(desc(sql`COUNT(*)`));
 
-      const byDuration = await db
-        .select({
-          duration: massageBookings.duration,
-          count: sql<number>`COUNT(*)`,
-          revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
-        })
-        .from(massageBookings)
-        .where(
-          and(
-            gte(massageBookings.bookingDate, input.from as any),
-            lte(massageBookings.bookingDate, input.to as any),
-            sql`${massageBookings.status} != 'cancelled'`,
-          )
-        )
-        .groupBy(massageBookings.duration)
-        .orderBy(asc(massageBookings.duration));
+      const byDuration = await db.select({
+        duration: massageBookings.duration, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
+      }).from(massageBookings)
+        .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any), sql`${massageBookings.status} != 'cancelled'`))
+        .groupBy(massageBookings.duration).orderBy(asc(massageBookings.duration));
 
-      const byTherapist = await db
-        .select({
-          therapistName: massageTherapists.name,
-          count: sql<number>`COUNT(*)`,
-          revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
-        })
-        .from(massageBookings)
+      const byTherapist = await db.select({
+        therapistName: massageTherapists.name, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
+      }).from(massageBookings)
         .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
-        .where(
-          and(
-            gte(massageBookings.bookingDate, input.from as any),
-            lte(massageBookings.bookingDate, input.to as any),
-            sql`${massageBookings.status} != 'cancelled'`,
-          )
-        )
-        .groupBy(massageTherapists.name)
-        .orderBy(desc(sql`COUNT(*)`));
+        .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any), sql`${massageBookings.status} != 'cancelled'`))
+        .groupBy(massageTherapists.name).orderBy(desc(sql`COUNT(*)`));
 
       return { totals, byTechnique, byDuration, byTherapist };
     }),
@@ -925,7 +727,6 @@ const analyticsRouter = router({
 
 // ─── RRHH ────────────────────────────────────────────────────
 const rrhhRouter = router({
-  // Evaluaciones KPI mensuales
   getEvaluations: protectedProcedure
     .input(z.object({ therapistId: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -939,15 +740,10 @@ const rrhhRouter = router({
 
   upsertEvaluation: protectedProcedure
     .input(z.object({
-      therapistId: z.number(),
-      period: z.string().regex(/^\d{4}-\d{2}$/),
-      puntualidad: z.number().min(0).max(10),
-      tecnica: z.number().min(0).max(10),
-      satisfaccionCliente: z.number().min(0).max(10),
-      presentacionHigiene: z.number().min(0).max(10),
-      comunicacion: z.number().min(0).max(10),
-      usoInsumos: z.number().min(0).max(10),
-      comentarios: z.string().optional(),
+      therapistId: z.number(), period: z.string().regex(/^\d{4}-\d{2}$/),
+      puntualidad: z.number().min(0).max(10), tecnica: z.number().min(0).max(10),
+      satisfaccionCliente: z.number().min(0).max(10), presentacionHigiene: z.number().min(0).max(10),
+      comunicacion: z.number().min(0).max(10), usoInsumos: z.number().min(0).max(10), comentarios: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
@@ -956,10 +752,7 @@ const rrhhRouter = router({
       const { therapistId, period, comentarios, ...scores } = input;
       const existing = await db.select({ id: massageTherapistEvaluations.id })
         .from(massageTherapistEvaluations)
-        .where(and(
-          eq(massageTherapistEvaluations.therapistId, therapistId),
-          eq(massageTherapistEvaluations.period, period),
-        )).limit(1);
+        .where(and(eq(massageTherapistEvaluations.therapistId, therapistId), eq(massageTherapistEvaluations.period, period))).limit(1);
       if (existing.length > 0) {
         await db.update(massageTherapistEvaluations)
           .set({ ...scores, satisfaccionCliente: scores.satisfaccionCliente, presentacionHigiene: scores.presentacionHigiene, comentarios: comentarios || null })
@@ -967,8 +760,7 @@ const rrhhRouter = router({
       } else {
         await db.insert(massageTherapistEvaluations).values({
           therapistId, period, evaluatedBy: ctx.user.id ?? 0,
-          ...scores, satisfaccionCliente: scores.satisfaccionCliente, presentacionHigiene: scores.presentacionHigiene,
-          comentarios: comentarios || null,
+          ...scores, satisfaccionCliente: scores.satisfaccionCliente, presentacionHigiene: scores.presentacionHigiene, comentarios: comentarios || null,
         });
       }
       return { success: true };
@@ -984,7 +776,6 @@ const rrhhRouter = router({
       return { success: true };
     }),
 
-  // Documentos (certificados, boletas, contratos)
   getDocuments: protectedProcedure
     .input(z.object({ therapistId: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -998,23 +789,16 @@ const rrhhRouter = router({
 
   addDocument: protectedProcedure
     .input(z.object({
-      therapistId: z.number(),
-      tipo: z.enum(["certificado", "boleta", "contrato", "otro"]),
-      nombre: z.string().min(2),
-      descripcion: z.string().optional(),
-      archivoUrl: z.string().optional(),
-      periodo: z.string().optional(),
+      therapistId: z.number(), tipo: z.enum(["certificado", "boleta", "contrato", "otro"]),
+      nombre: z.string().min(2), descripcion: z.string().optional(), archivoUrl: z.string().optional(), periodo: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(massageTherapistDocuments).values({
-        ...input,
-        descripcion: input.descripcion || null,
-        archivoUrl: input.archivoUrl || null,
-        periodo: input.periodo || null,
-        uploadedBy: ctx.user.id ?? 0,
+        ...input, descripcion: input.descripcion || null, archivoUrl: input.archivoUrl || null,
+        periodo: input.periodo || null, uploadedBy: ctx.user.id ?? 0,
       });
       return { success: true };
     }),
@@ -1031,6 +815,8 @@ const rrhhRouter = router({
 });
 
 // ─── PÚBLICO (sin autenticación) ──────────────────────────────
+const parseTimeMin = (t: string) => parseInt(t.split(":")[0]) * 60 + parseInt(t.split(":")[1]);
+
 const masajesPublicRouter = router({
   getTechnique: publicProcedure
     .input(z.object({ id: z.number() }))
@@ -1043,32 +829,78 @@ const masajesPublicRouter = router({
       return t ?? null;
     }),
 
-  getSlots: publicProcedure
-    .input(z.object({ date: z.string(), duration: z.number() }))
+  getTherapists: publicProcedure
+    .input(z.object({ techniqueId: z.number() }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
-      const existingBookings = await db.select().from(massageBookings).where(
-        and(
-          eq(massageBookings.bookingDate, input.date as any),
-          sql`${massageBookings.status} NOT IN ('cancelled')`,
-        )
+      return db
+        .select({
+          id: massageTherapists.id,
+          name: massageTherapists.name,
+          type: massageTherapists.type,
+          contractType: massageTherapists.contractType,
+        })
+        .from(massageTherapistTechniques)
+        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+        .where(and(
+          eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+          eq(massageTherapists.active, 1)
+        ))
+        .orderBy(asc(massageTherapists.callPriority), asc(massageTherapists.name));
+    }),
+
+  getSlots: publicProcedure
+    .input(z.object({ date: z.string(), duration: z.number(), therapistId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const dayOfWeek = new Date(input.date + "T12:00:00").getDay();
+
+      const [schedule] = await db.select()
+        .from(massageTherapistSchedules)
+        .where(and(
+          eq(massageTherapistSchedules.therapistId, input.therapistId),
+          eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
+          eq(massageTherapistSchedules.available, 1)
+        ))
+        .limit(1);
+
+      if (!schedule) return [];
+
+      const schedStart = parseTimeMin(schedule.startTime);
+      const schedEnd = parseTimeMin(schedule.endTime);
+
+      const allBookings = await db.select().from(massageBookings).where(
+        and(eq(massageBookings.bookingDate, input.date as any), sql`${massageBookings.status} NOT IN ('cancelled')`)
       );
+
+      const therapistBookings = allBookings.filter(b => b.therapistId === input.therapistId);
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+
       const slots: { time: string; roomId: number }[] = [];
-      const startMin = 10 * 60;
-      const endMin = 20 * 60 + 30;
       const prep = 10;
-      for (let t = startMin; t + input.duration <= endMin; t += 30) {
+
+      for (let t = schedStart; t + input.duration <= schedEnd; t += 30) {
         const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
         const slotEnd = t + input.duration;
-        const available = rooms.filter(room => !existingBookings.some(b => {
+
+        const therapistBusy = therapistBookings.some(b => {
+          const bStart = parseTimeMin(b.startTime);
+          const bEnd = parseTimeMin(b.endTime) + prep;
+          return t < bEnd && slotEnd > bStart;
+        });
+        if (therapistBusy) continue;
+
+        const availableRoom = rooms.find(room => !allBookings.some(b => {
           if (b.roomId !== room.id) return false;
-          const bStart = parseInt(b.startTime.split(":")[0]) * 60 + parseInt(b.startTime.split(":")[1]);
-          const bEnd = parseInt(b.endTime.split(":")[0]) * 60 + parseInt(b.endTime.split(":")[1]) + prep;
+          const bStart = parseTimeMin(b.startTime);
+          const bEnd = parseTimeMin(b.endTime) + prep;
           return t < bEnd && slotEnd > bStart;
         }));
-        if (available.length > 0) slots.push({ time: timeStr, roomId: available[0].id });
+
+        if (availableRoom) slots.push({ time: timeStr, roomId: availableRoom.id });
       }
       return slots;
     }),
@@ -1076,6 +908,7 @@ const masajesPublicRouter = router({
   book: publicProcedure
     .input(z.object({
       techniqueId: z.number(),
+      therapistId: z.number(),
       duration: z.number(),
       bookingDate: z.string(),
       startTime: z.string(),
