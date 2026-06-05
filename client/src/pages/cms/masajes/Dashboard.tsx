@@ -207,6 +207,7 @@ export default function MasajesDashboard() {
             { href: "/cms/masajes/inventario", label: "Inventario" },
             { href: "/cms/masajes/clientes", label: "Clientes" },
             { href: "/cms/masajes/analytics", label: "Ventas" },
+            { href: "/cms/masajes/rrhh", label: "RRHH" },
           ].map(link => (
             <Link key={link.href} href={link.href}>
               <Card className="cursor-pointer hover:border-primary transition-colors">
