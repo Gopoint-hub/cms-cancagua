@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Edit, AlertTriangle, ArrowUp, Package, Wrench, MapPin, Save } from "lucide-react";
+import { Plus, Edit, AlertTriangle, ArrowUp, Package, Wrench, MapPin, Save, Trash2 } from "lucide-react";
 
 const DRAFT_NEW_KEY = "masajes:draft:insumo-nuevo";
 const DRAFT_RECEIVE_KEY = "masajes:draft:insumo-recibir";
@@ -89,6 +89,14 @@ export default function MasajesInventario() {
       utils.masajes.inventario.getLowStock.invalidate();
       toast.success("Actualizado correctamente");
       setOpen(false);
+    },
+    onError: e => toast.error(e.message),
+  });
+  const deleteMut = trpc.masajes.inventario.delete.useMutation({
+    onSuccess: () => {
+      utils.masajes.inventario.getAll.invalidate();
+      utils.masajes.inventario.getLowStock.invalidate();
+      toast.success("Eliminado correctamente");
     },
     onError: e => toast.error(e.message),
   });
@@ -199,7 +207,13 @@ export default function MasajesInventario() {
             </div>
             {s.notes && <p className="text-xs text-muted-foreground mt-1 italic">{s.notes}</p>}
           </div>
-          <Button size="sm" variant="ghost" onClick={() => openEdit(s)}><Edit className="w-4 h-4" /></Button>
+          <div className="flex gap-1">
+            <Button size="sm" variant="ghost" onClick={() => openEdit(s)}><Edit className="w-4 h-4" /></Button>
+            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => { if (confirm(`¿Eliminar "${s.name}"? Esta acción no se puede deshacer.`)) deleteMut.mutate({ id: s.id }); }}>
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>
