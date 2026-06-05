@@ -169,6 +169,7 @@ export const categories: Category[] = [
       { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes" },
       { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics" },
       { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh" },
+      { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion" },
     ],
   },
   {
