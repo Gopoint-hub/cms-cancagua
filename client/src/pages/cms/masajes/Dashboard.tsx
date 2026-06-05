@@ -1,15 +1,20 @@
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, startOfDay, endOfDay } from "date-fns";
+import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { Link } from "wouter";
+
+const STOCK_PAGE_SIZE = 5;
 
 export default function MasajesDashboard() {
   const today = format(new Date(), "yyyy-MM-dd");
+  const [stockPage, setStockPage] = useState(0);
   const { data: bookings, isLoading: loadingBookings } = trpc.masajes.agenda.getByDateRange.useQuery(
     { from: today, to: today }
   );
@@ -139,8 +144,13 @@ export default function MasajesDashboard() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center justify-between">
-                {(lowStock?.length ?? 0) > 0 && <AlertTriangle className="w-4 h-4 text-destructive mr-2 inline" />}
-                Stock bajo
+                <span className="flex items-center gap-1">
+                  {(lowStock?.length ?? 0) > 0 && <AlertTriangle className="w-4 h-4 text-destructive" />}
+                  Stock bajo
+                  {(lowStock?.length ?? 0) > 0 && (
+                    <Badge variant="destructive" className="text-xs ml-1">{lowStock!.length}</Badge>
+                  )}
+                </span>
                 <Link href="/cms/masajes/inventario">
                   <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver inventario →</span>
                 </Link>
@@ -149,22 +159,41 @@ export default function MasajesDashboard() {
             <CardContent>
               {loadingStock ? (
                 <div className="space-y-2">
-                  {[1, 2].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+                  {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-10 w-full" />)}
                 </div>
               ) : (lowStock?.length ?? 0) === 0 ? (
                 <p className="text-muted-foreground text-sm text-center py-8">Todo el stock está en orden ✓</p>
-              ) : (
-                <div className="space-y-2">
-                  {lowStock!.map(s => (
-                    <div key={s.id} className="flex items-center justify-between border border-destructive/30 rounded-lg p-3 bg-destructive/5">
-                      <span className="text-sm font-medium">{s.name}</span>
-                      <span className="text-sm text-destructive font-semibold">
-                        {s.currentStock} {s.unit} (mín: {s.minimumStock})
-                      </span>
+              ) : (() => {
+                const totalPages = Math.ceil(lowStock!.length / STOCK_PAGE_SIZE);
+                const paginated = lowStock!.slice(stockPage * STOCK_PAGE_SIZE, (stockPage + 1) * STOCK_PAGE_SIZE);
+                return (
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      {paginated.map(s => (
+                        <div key={s.id} className="flex items-center justify-between border border-destructive/30 rounded-lg p-3 bg-destructive/5">
+                          <span className="text-sm font-medium">{s.name}</span>
+                          <span className="text-sm text-destructive font-semibold whitespace-nowrap ml-2">
+                            {s.currentStock} {s.unit} (mín: {s.minimumStock})
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-between pt-1">
+                        <Button variant="ghost" size="sm" className="h-7 px-2" disabled={stockPage === 0} onClick={() => setStockPage(p => p - 1)}>
+                          <ChevronLeft className="w-4 h-4" />
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          {stockPage + 1} / {totalPages}
+                        </span>
+                        <Button variant="ghost" size="sm" className="h-7 px-2" disabled={stockPage === totalPages - 1} onClick={() => setStockPage(p => p + 1)}>
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </div>
