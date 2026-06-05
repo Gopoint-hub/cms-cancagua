@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save } from "lucide-react";
+import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save, Link2 } from "lucide-react";
 
 const DRAFT_KEY = "masajes:draft:tecnica";
 const DURATIONS = [20, 40, 50, 80, 110];
@@ -198,6 +198,14 @@ export default function MasajesTecnicas() {
                         <Button size="sm" variant="ghost" onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}>
                           {expandedId === t.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                           <span className="text-xs ml-1">Insumos</span>
+                        </Button>
+                        <Button size="sm" variant="ghost" title="Copiar link de reserva"
+                          onClick={() => {
+                            const url = `${window.location.origin}/reservar/masaje/${t.id}`;
+                            navigator.clipboard.writeText(url);
+                            toast.success("Link copiado");
+                          }}>
+                          <Link2 className="w-4 h-4" />
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => openEdit(t)}><Edit className="w-4 h-4" /></Button>
                         <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
