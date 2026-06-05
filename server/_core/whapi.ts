@@ -9,10 +9,12 @@ export type WhatsAppResult = {
 };
 
 function normalizePhone(phone: string): string {
-  // Elimina espacios, guiones y paréntesis; agrega 56 si es número chileno sin código país
-  const digits = phone.replace(/[\s\-().+]/g, "");
+  let digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.startsWith("56") && digits.length === 10) return "569" + digits.slice(2) + "@s.whatsapp.net";
   if (digits.startsWith("56")) return digits + "@s.whatsapp.net";
   if (digits.startsWith("9") && digits.length === 9) return "56" + digits + "@s.whatsapp.net";
+  if (digits.length === 8) return "569" + digits + "@s.whatsapp.net";
   return digits + "@s.whatsapp.net";
 }
 
