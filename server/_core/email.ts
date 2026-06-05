@@ -510,6 +510,175 @@ export async function sendGiftCardEmail(params: {
   }
 }
 
+type MassageNoticeEmailParams = {
+  to: string;
+  subject: string;
+  eyebrow: string;
+  heading: string;
+  intro: string;
+  details: { label: string; value?: unknown }[];
+  notes?: string | null;
+};
+
+async function sendMassageNoticeEmail(params: MassageNoticeEmailParams): Promise<EmailResult> {
+  try {
+    const client = getResendClient();
+    const detailRows = params.details
+      .filter((detail) => detail.value !== undefined && detail.value !== null && String(detail.value).trim() !== "")
+      .map((detail) => `
+                <p style="margin: 0 0 8px; color: #52525b;">${escapeHtml(detail.label)}: <strong>${escapeHtml(detail.value)}</strong></p>
+      `)
+      .join("");
+    const notesLine = params.notes
+      ? `<p style="margin: 16px 0 0; color: #52525b;">Notas: ${escapeHtml(params.notes)}</p>`
+      : "";
+
+    const { data, error } = await client.emails.send({
+      from: FROM_EMAIL,
+      to: [params.to],
+      subject: params.subject,
+      html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(params.eyebrow)}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 8px;">
+          <tr>
+            <td style="padding: 32px 40px; text-align: center; background-color: #0f766e; border-radius: 8px 8px 0 0;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">Cancagua Spa</h1>
+              <p style="margin: 8px 0 0; color: #ccfbf1; font-size: 14px;">${escapeHtml(params.eyebrow)}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <h2 style="margin: 0 0 16px; color: #18181b; font-size: 20px;">${escapeHtml(params.heading)}</h2>
+              <p style="margin: 0 0 24px; color: #52525b; font-size: 16px; line-height: 1.6;">
+                ${escapeHtml(params.intro)}
+              </p>
+              <div style="padding: 20px; background-color: #f0fdfa; border-radius: 8px; border: 1px solid #99f6e4;">
+                ${detailRows}
+                ${notesLine}
+              </div>
+              <p style="margin: 24px 0 0; color: #71717a; font-size: 14px; line-height: 1.6;">
+                Si necesitas ayuda, escríbenos a ${SUPPORT_EMAIL}.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+      `,
+    });
+
+    if (error) {
+      console.error("[Email] Failed to send massage notice:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, messageId: data?.id };
+  } catch (error) {
+    console.error("[Email] Error sending massage notice:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function sendMassageBookingReceivedEmail(params: {
+  to: string;
+  clientName: string;
+  techniqueName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+}): Promise<EmailResult> {
+  return sendMassageNoticeEmail({
+    to: params.to,
+    subject: "Solicitud de reserva recibida - Cancagua",
+    eyebrow: "Solicitud de reserva recibida",
+    heading: `Hola ${params.clientName}`,
+    intro: "Recibimos tu solicitud de reserva. Te contactaremos pronto para confirmar la disponibilidad final y coordinar el pago.",
+    details: [
+      { label: "Servicio", value: params.techniqueName },
+      { label: "Fecha", value: params.bookingDate },
+      { label: "Horario", value: `${params.startTime} - ${params.endTime} hrs` },
+      { label: "Duración", value: `${params.duration} min` },
+    ],
+  });
+}
+
+export async function sendMassageInternalBookingNotificationEmail(params: {
+  to: string;
+  clientName: string;
+  clientEmail?: string | null;
+  clientPhone?: string | null;
+  techniqueName: string;
+  therapistName?: string | null;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  notes?: string | null;
+}): Promise<EmailResult> {
+  return sendMassageNoticeEmail({
+    to: params.to,
+    subject: `Nueva solicitud de masaje - ${params.clientName}`,
+    eyebrow: "Nueva solicitud de masaje",
+    heading: "Nueva solicitud de masaje",
+    intro: "Se recibió una reserva desde el sitio. El sistema ya asignó terapeuta según técnica, disponibilidad y prioridad.",
+    details: [
+      { label: "Cliente", value: params.clientName },
+      { label: "Email cliente", value: params.clientEmail },
+      { label: "Teléfono cliente", value: params.clientPhone },
+      { label: "Servicio", value: params.techniqueName },
+      { label: "Terapeuta asignado", value: params.therapistName },
+      { label: "Fecha", value: params.bookingDate },
+      { label: "Horario", value: `${params.startTime} - ${params.endTime} hrs` },
+      { label: "Duración", value: `${params.duration} min` },
+    ],
+    notes: params.notes,
+  });
+}
+
+export async function sendMassageTherapistBookingRequestEmail(params: {
+  to: string;
+  therapistName: string;
+  clientName: string;
+  clientPhone?: string | null;
+  techniqueName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  notes?: string | null;
+}): Promise<EmailResult> {
+  return sendMassageNoticeEmail({
+    to: params.to,
+    subject: "Nueva solicitud de masaje asignada - Cancagua",
+    eyebrow: "Nueva solicitud asignada",
+    heading: `Hola ${params.therapistName}`,
+    intro: "Tienes una solicitud de masaje asignada. Está pendiente de confirmación y pago por parte del equipo.",
+    details: [
+      { label: "Cliente", value: params.clientName },
+      { label: "Teléfono cliente", value: params.clientPhone },
+      { label: "Servicio", value: params.techniqueName },
+      { label: "Fecha", value: params.bookingDate },
+      { label: "Horario", value: `${params.startTime} - ${params.endTime} hrs` },
+      { label: "Duración", value: `${params.duration} min` },
+    ],
+    notes: params.notes,
+  });
+}
+
 export async function sendMassageBookingConfirmationEmail(params: {
   to: string;
   clientName: string;

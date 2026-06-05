@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeDecimalInput, selectAutomaticMassageAssignment, serializeDateOnly } from "./masajesRouter";
+import {
+  buildPublicMassageBookingNotifications,
+  normalizeDecimalInput,
+  selectAutomaticMassageAssignment,
+  serializeDateOnly,
+} from "./masajesRouter";
 
 describe("serializeDateOnly", () => {
   it("serializes Date values as YYYY-MM-DD strings for React-safe rendering", () => {
@@ -73,5 +78,31 @@ describe("selectAutomaticMassageAssignment", () => {
     });
 
     expect(assignment?.therapist.id).toBe(2);
+  });
+});
+
+describe("buildPublicMassageBookingNotifications", () => {
+  it("builds client, internal, therapist, and WhatsApp notifications for a public booking", () => {
+    const notifications = buildPublicMassageBookingNotifications({
+      contactEmail: "contacto@cancagua.cl",
+      clientName: "Maria Gonzalez",
+      clientEmail: "maria@example.com",
+      clientPhone: "+56 9 1234 5678",
+      techniqueName: "Masaje relajacion",
+      therapistName: "Terapeuta Uno",
+      therapistEmail: "terapeuta@example.com",
+      bookingDate: "2026-06-06",
+      startTime: "12:00",
+      endTime: "12:50",
+      duration: 50,
+      notes: "Sin preferencia",
+    });
+
+    expect(notifications.clientEmail?.to).toBe("maria@example.com");
+    expect(notifications.internalEmail.to).toBe("contacto@cancagua.cl");
+    expect(notifications.therapistEmail?.to).toBe("terapeuta@example.com");
+    expect(notifications.clientWhatsApp?.phone).toBe("+56 9 1234 5678");
+    expect(notifications.internalEmail.clientPhone).toBe("+56 9 1234 5678");
+    expect(notifications.ownerNotification.title).toContain("Maria Gonzalez");
   });
 });

@@ -16,7 +16,15 @@ import {
   massageSettings,
   newsletterSubscribers,
 } from "../drizzle/schema";
-import { sendMassageBookingConfirmationEmail, sendMassageTherapistNotificationEmail } from "./_core/email";
+import {
+  sendMassageBookingConfirmationEmail,
+  sendMassageBookingReceivedEmail,
+  sendMassageInternalBookingNotificationEmail,
+  sendMassageTherapistBookingRequestEmail,
+  sendMassageTherapistNotificationEmail,
+} from "./_core/email";
+import { ENV } from "./_core/env";
+import { notifyOwner, type NotificationPayload } from "./_core/notification";
 import { sendWhatsApp } from "./_core/whapi";
 import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
 
@@ -824,6 +832,7 @@ const formatTimeMin = (total: number): string =>
 type AutomaticMassageTherapist = {
   id: number;
   name: string | null;
+  email?: string | null;
   type: "inhouse" | "freelance";
   callPriority: number | null;
   scheduleStart: string;
@@ -898,6 +907,156 @@ export function selectAutomaticMassageAssignment(params: {
   }
 
   return null;
+}
+
+type PublicMassageBookingNotificationInput = {
+  contactEmail: string;
+  clientName: string;
+  clientEmail?: string | null;
+  clientPhone?: string | null;
+  techniqueName: string;
+  therapistName?: string | null;
+  therapistEmail?: string | null;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  notes?: string | null;
+};
+
+type PublicMassageBookingNotifications = {
+  clientEmail?: Parameters<typeof sendMassageBookingReceivedEmail>[0];
+  internalEmail: Parameters<typeof sendMassageInternalBookingNotificationEmail>[0];
+  therapistEmail?: Parameters<typeof sendMassageTherapistBookingRequestEmail>[0];
+  clientWhatsApp?: { phone: string; message: string };
+  ownerNotification: NotificationPayload;
+};
+
+const formatMassageBookingHumanDate = (bookingDate: string): string =>
+  new Intl.DateTimeFormat("es-CL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Santiago",
+  }).format(new Date(`${bookingDate}T12:00:00`));
+
+export function buildPublicMassageBookingNotifications(
+  params: PublicMassageBookingNotificationInput,
+): PublicMassageBookingNotifications {
+  const contactEmail = params.contactEmail.trim() || "contacto@cancagua.cl";
+  const clientEmail = params.clientEmail?.trim() || null;
+  const clientPhone = params.clientPhone?.trim() || null;
+  const therapistEmail = params.therapistEmail?.trim() || null;
+  const therapistName = params.therapistName || "Terapeuta";
+  const humanDate = formatMassageBookingHumanDate(params.bookingDate);
+  const baseEmailData = {
+    clientName: params.clientName,
+    techniqueName: params.techniqueName,
+    bookingDate: params.bookingDate,
+    startTime: params.startTime,
+    endTime: params.endTime,
+    duration: params.duration,
+  };
+  const ownerContent = [
+    `Cliente: ${params.clientName}`,
+    clientEmail ? `Email: ${clientEmail}` : null,
+    clientPhone ? `Telefono: ${clientPhone}` : null,
+    `Servicio: ${params.techniqueName}`,
+    `Terapeuta asignado: ${therapistName}`,
+    `Fecha: ${params.bookingDate}`,
+    `Horario: ${params.startTime} - ${params.endTime} hrs`,
+    `Duracion: ${params.duration} min`,
+    params.notes ? `Notas: ${params.notes}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  return {
+    clientEmail: clientEmail
+      ? {
+          to: clientEmail,
+          ...baseEmailData,
+        }
+      : undefined,
+    internalEmail: {
+      to: contactEmail,
+      ...baseEmailData,
+      clientEmail,
+      clientPhone,
+      therapistName,
+      notes: params.notes,
+    },
+    therapistEmail: therapistEmail
+      ? {
+          to: therapistEmail,
+          therapistName,
+          clientName: params.clientName,
+          clientPhone,
+          techniqueName: params.techniqueName,
+          bookingDate: params.bookingDate,
+          startTime: params.startTime,
+          endTime: params.endTime,
+          duration: params.duration,
+          notes: params.notes,
+        }
+      : undefined,
+    clientWhatsApp: clientPhone
+      ? {
+          phone: clientPhone,
+          message: `Hola ${params.clientName}.\n\nTu solicitud de reserva en Cancagua Spa fue recibida.\n\n${params.techniqueName} · ${params.duration} min\n${humanDate}\n${params.startTime} hrs\n\nTe contactaremos pronto para confirmar y coordinar el pago.`,
+        }
+      : undefined,
+    ownerNotification: {
+      title: `Nueva reserva de masaje de ${params.clientName}`,
+      content: ownerContent.join("\n"),
+    },
+  };
+}
+
+async function runPublicMassageNotification(
+  label: string,
+  run: () => Promise<{ success: boolean; error?: string }>,
+): Promise<void> {
+  try {
+    const result = await run();
+    if (!result.success) {
+      console.error(`[Notification] ${label} failed: ${result.error ?? "unknown error"}`);
+    }
+  } catch (error) {
+    console.error(`[Notification] ${label} error:`, error);
+  }
+}
+
+async function sendPublicMassageBookingNotifications(
+  notifications: PublicMassageBookingNotifications,
+): Promise<void> {
+  const tasks: Promise<void>[] = [
+    notifications.clientEmail
+      ? runPublicMassageNotification("massage client email", () =>
+          sendMassageBookingReceivedEmail(notifications.clientEmail!)
+        )
+      : undefined,
+    runPublicMassageNotification("massage internal email", () =>
+      sendMassageInternalBookingNotificationEmail(notifications.internalEmail)
+    ),
+    notifications.therapistEmail
+      ? runPublicMassageNotification("massage therapist email", () =>
+          sendMassageTherapistBookingRequestEmail(notifications.therapistEmail!)
+        )
+      : undefined,
+    notifications.clientWhatsApp
+      ? runPublicMassageNotification("massage client WhatsApp", () =>
+          sendWhatsApp(notifications.clientWhatsApp!.phone, notifications.clientWhatsApp!.message)
+        )
+      : undefined,
+    runPublicMassageNotification("massage owner notification", async () => {
+      const delivered = await notifyOwner(notifications.ownerNotification);
+      return {
+        success: delivered,
+        error: delivered ? undefined : "Notification service rejected the request",
+      };
+    }),
+  ].filter((task): task is Promise<void> => Boolean(task));
+
+  await Promise.all(tasks);
 }
 
 const masajesPublicRouter = router({
@@ -995,6 +1154,7 @@ const masajesPublicRouter = router({
       const therapists = await db.select({
         id: massageTherapists.id,
         name: massageTherapists.name,
+        email: massageTherapists.email,
         type: massageTherapists.type,
         callPriority: massageTherapists.callPriority,
         scheduleStart: massageTherapistSchedules.startTime,
@@ -1036,6 +1196,27 @@ const masajesPublicRouter = router({
         bookingDate: input.bookingDate as any,
         paymentStatus: "pending", status: "pending",
       });
+
+      const [technique] = await db.select({ name: massageTechniques.name })
+        .from(massageTechniques)
+        .where(eq(massageTechniques.id, input.techniqueId))
+        .limit(1);
+      const notifications = buildPublicMassageBookingNotifications({
+        contactEmail: ENV.contactEmail,
+        clientName: input.clientName,
+        clientEmail: input.clientEmail,
+        clientPhone: input.clientPhone,
+        techniqueName: technique?.name ?? "Masaje",
+        therapistName: assignment.therapist.name,
+        therapistEmail: assignment.therapist.email,
+        bookingDate: input.bookingDate,
+        startTime: input.startTime,
+        endTime: assignment.endTime,
+        duration: input.duration,
+        notes: input.notes,
+      });
+      await sendPublicMassageBookingNotifications(notifications);
+
       // Suscribir al newsletter
       if (subscribeNewsletter && input.clientEmail) {
         try {
@@ -1044,23 +1225,6 @@ const masajesPublicRouter = router({
             source: "masajes_booking", status: "active",
           });
         } catch { /* email duplicado */ }
-      }
-      // WhatsApp de confirmación al cliente
-      if (input.clientPhone) {
-        const clientPhone = input.clientPhone;
-        (async () => {
-          try {
-            const [tech] = await db.select({ name: massageTechniques.name })
-              .from(massageTechniques).where(eq(massageTechniques.id, input.techniqueId)).limit(1);
-            const dateStr = new Intl.DateTimeFormat("es-CL", {
-              weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
-            }).format(new Date(input.bookingDate + "T12:00:00"));
-            await sendWhatsApp(
-              clientPhone,
-              `¡Hola ${input.clientName}! 👋\n\nTu solicitud de reserva en *Cancagua Spa* fue recibida.\n\n📋 *${tech?.name ?? "Masaje"}* · ${input.duration} min\n📅 ${dateStr}\n🕐 ${input.startTime} hrs\n\nTe contactaremos pronto para confirmar y coordinar el pago. ¡Nos vemos! 🌿`
-            );
-          } catch (e) { console.error("[WHAPI] Error:", e); }
-        })();
       }
       return { success: true };
     }),
