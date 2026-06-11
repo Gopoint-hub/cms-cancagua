@@ -171,13 +171,11 @@ export async function sendBookingConfirmations(bookingId: number) {
   }
 
   // WhatsApp al cliente
-  console.log("[Confirmaciones] clientPhone en DB:", booking.clientPhone);
   if (booking.clientPhone) {
-    const waResult = await sendWhatsApp(
+    await sendWhatsApp(
       booking.clientPhone,
       `✅ *¡Tu reserva está confirmada!* — Cancagua Spa\n\nHola ${booking.clientName}! Tu pago fue procesado exitosamente.\n\n*${techniqueName}* · ${booking.duration} min\n📅 ${humanDate}\n🕐 ${booking.startTime} hrs\n\nTe esperamos en Cancagua Spa. ¡Que disfrutes tu masaje!`
-    );
-    console.log("[Confirmaciones] WhatsApp cliente result:", JSON.stringify(waResult));
+    ).catch((e) => console.error("[Confirmaciones] WhatsApp cliente:", e));
   }
 
   // WhatsApp al terapeuta
