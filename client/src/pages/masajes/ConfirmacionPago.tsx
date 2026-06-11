@@ -18,7 +18,7 @@ export default function ConfirmacionPago() {
 
   useEffect(() => {
     if (!requestId && !ref) {
-      setLocation("/masajes");
+      setLocation("/");
     } else if (!requestId && ref) {
       const t = setTimeout(() => setReady(true), 1500);
       return () => clearTimeout(t);
@@ -76,7 +76,7 @@ function ApprovedView({ amount }: { amount?: number }) {
           </p>
         </div>
         <button
-          onClick={() => setLocation("/masajes")}
+          onClick={() => setLocation("/")}
           className="w-full py-3 px-6 bg-stone-800 text-white rounded-xl text-sm font-medium hover:bg-stone-700 transition-colors"
         >
           Volver al inicio
@@ -108,7 +108,7 @@ function RejectedView() {
             Intentar de nuevo
           </button>
           <button
-            onClick={() => setLocation("/masajes")}
+            onClick={() => setLocation("/")}
             className="w-full py-3 px-6 bg-white text-stone-700 border border-stone-300 rounded-xl text-sm font-medium hover:bg-stone-50 transition-colors"
           >
             Volver al inicio
