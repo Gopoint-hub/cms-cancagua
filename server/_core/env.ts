@@ -36,4 +36,7 @@ export const ENV = {
 
   // Google Gemini API
   googleApiKey: process.env.GOOGLE_API_KEY ?? "",
+
+  // WhatsApp (WHAPI)
+  whapiToken: process.env.WHAPI_CANCAGUA_TOKEN ?? "",
 };

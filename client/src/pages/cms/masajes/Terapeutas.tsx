@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Plus, Edit, Phone, Mail, Clock, Star, Save } from "lucide-react";
+import { Plus, Edit, Phone, Mail, Clock, Star, Save, Trash2 } from "lucide-react";
 
 const DRAFT_KEY = "masajes:draft:terapeuta";
 
@@ -110,6 +110,10 @@ export default function MasajesTerapeutas() {
     onError: e => toast.error(e.message),
   });
   const scheduleMut = trpc.masajes.terapeutas.upsertSchedule.useMutation({
+    onError: e => toast.error(e.message),
+  });
+  const deleteMut = trpc.masajes.terapeutas.delete.useMutation({
+    onSuccess: () => { utils.masajes.terapeutas.getAll.invalidate(); toast.success("Terapeuta eliminado"); },
     onError: e => toast.error(e.message),
   });
 
@@ -221,7 +225,13 @@ export default function MasajesTerapeutas() {
             )}
             {t.notes && <p className="text-xs text-muted-foreground mt-2 italic">"{t.notes}"</p>}
           </div>
-          <Button size="sm" variant="ghost" onClick={() => openEdit(t)}><Edit className="w-4 h-4" /></Button>
+          <div className="flex gap-1">
+            <Button size="sm" variant="ghost" onClick={() => openEdit(t)}><Edit className="w-4 h-4" /></Button>
+            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => { if (confirm(`¿Eliminar a ${t.name}? Esta acción no se puede deshacer.`)) deleteMut.mutate({ id: t.id }); }}>
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -1113,3 +1113,8 @@ export const massageTechniqueRecipes = mysqlTable("massage_technique_recipes", {
 });
 
 export type MassageTechniqueRecipe = typeof massageTechniqueRecipes.$inferSelect;
+
+export const massageSettings = mysqlTable("massage_settings", {
+  key: varchar("key", { length: 100 }).notNull().primaryKey(),
+  value: text("value").notNull(),
+});

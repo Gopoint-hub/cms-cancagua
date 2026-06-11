@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
   massageTechniques,
@@ -13,7 +13,11 @@ import {
   massageTechniqueRecipes,
   massageTherapistEvaluations,
   massageTherapistDocuments,
+  massageSettings,
+  newsletterSubscribers,
 } from "../drizzle/schema";
+import { sendMassageBookingConfirmationEmail, sendMassageTherapistNotificationEmail } from "./_core/email";
+import { sendWhatsApp } from "./_core/whapi";
 import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
 
 const adminOrEditor = async (role: string) => {
@@ -363,6 +367,19 @@ const terapeutasRouter = router({
       return { success: true };
     }),
 
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      // Eliminar registros relacionados primero
+      await db.delete(massageTherapistTechniques).where(eq(massageTherapistTechniques.therapistId, input.id));
+      await db.delete(massageTherapistSchedules).where(eq(massageTherapistSchedules.therapistId, input.id));
+      await db.delete(massageTherapists).where(eq(massageTherapists.id, input.id));
+      return { success: true };
+    }),
+
   // Actualizar horario de un día
   upsertSchedule: protectedProcedure
     .input(z.object({
@@ -618,10 +635,95 @@ const agendaRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // Detectar cambio a "paid" para enviar email de confirmación
+      let sendConfirmation = false;
+      if (input.paymentStatus === "paid") {
+        const [current] = await db.select({ paymentStatus: massageBookings.paymentStatus })
+          .from(massageBookings).where(eq(massageBookings.id, input.id)).limit(1);
+        if (current && current.paymentStatus !== "paid") sendConfirmation = true;
+      }
+
       const { id, bookingDate, ...data } = input;
       await db.update(massageBookings)
         .set({ ...data, ...(bookingDate ? { bookingDate: bookingDate as any } : {}) })
         .where(eq(massageBookings.id, id));
+
+      // Emails + WhatsApp de confirmación de pago (fire and forget)
+      if (sendConfirmation) {
+        (async () => {
+          try {
+            const [booking] = await db
+              .select({
+                clientName: massageBookings.clientName,
+                clientEmail: massageBookings.clientEmail,
+                clientPhone: massageBookings.clientPhone,
+                bookingDate: massageBookings.bookingDate,
+                startTime: massageBookings.startTime,
+                endTime: massageBookings.endTime,
+                duration: massageBookings.duration,
+                amountPaid: massageBookings.amountPaid,
+                notes: massageBookings.notes,
+                techniqueName: massageTechniques.name,
+                therapistName: massageTherapists.name,
+                therapistEmail: massageTherapists.email,
+                therapistPhone: massageTherapists.phone,
+              })
+              .from(massageBookings)
+              .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
+              .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
+              .where(eq(massageBookings.id, id))
+              .limit(1);
+
+            if (!booking) return;
+            const dateStr = String(booking.bookingDate).slice(0, 10);
+
+            // Email de confirmación al cliente
+            if (booking.clientEmail) {
+              await sendMassageBookingConfirmationEmail({
+                to: booking.clientEmail,
+                clientName: booking.clientName,
+                techniqueName: booking.techniqueName ?? "Masaje",
+                therapistName: booking.therapistName ?? undefined,
+                bookingDate: dateStr,
+                startTime: booking.startTime,
+                duration: booking.duration,
+                amountPaid: booking.amountPaid ? String(booking.amountPaid) : undefined,
+              });
+            }
+
+            // Email de aviso al terapeuta
+            if (booking.therapistEmail) {
+              await sendMassageTherapistNotificationEmail({
+                to: booking.therapistEmail,
+                therapistName: booking.therapistName ?? "Terapeuta",
+                clientName: booking.clientName,
+                clientPhone: booking.clientPhone,
+                techniqueName: booking.techniqueName ?? "Masaje",
+                bookingDate: dateStr,
+                startTime: booking.startTime,
+                endTime: booking.endTime,
+                duration: booking.duration,
+                notes: booking.notes,
+              });
+            }
+
+            // WhatsApp al terapeuta si tiene teléfono
+            if (booking.therapistPhone) {
+              const humanDate = new Intl.DateTimeFormat("es-CL", {
+                weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
+              }).format(new Date(dateStr + "T12:00:00"));
+              await sendWhatsApp(
+                booking.therapistPhone,
+                `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${booking.therapistName ?? ""}! Tienes una reserva de pago confirmado:\n\n*${booking.techniqueName ?? "Masaje"}* · ${booking.duration} min\n👤 Cliente: ${booking.clientName}${booking.clientPhone ? `\n📞 ${booking.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${booking.startTime} – ${booking.endTime} hrs`
+              );
+            }
+          } catch (e) {
+            console.error("[Notification] Error sending booking confirmations:", e);
+          }
+        })();
+      }
+
       return { success: true };
     }),
 });
@@ -749,6 +851,16 @@ const inventarioRouter = router({
       await db.update(massageSupplies)
         .set({ currentStock: sql`${massageSupplies.currentStock} + ${input.delta}` })
         .where(eq(massageSupplies.id, input.id));
+      return { success: true };
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.delete(massageSupplies).where(eq(massageSupplies.id, input.id));
       return { success: true };
     }),
 });
@@ -1007,6 +1119,201 @@ const rrhhRouter = router({
     }),
 });
 
+// ─── PÚBLICO (sin autenticación) ──────────────────────────────
+const parseTimeMin = (t: string) => parseInt(t.split(":")[0]) * 60 + parseInt(t.split(":")[1]);
+
+const masajesPublicRouter = router({
+  getTechnique: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [t] = await db.select().from(massageTechniques)
+        .where(and(eq(massageTechniques.id, input.id), eq(massageTechniques.active, 1)))
+        .limit(1);
+      return t ?? null;
+    }),
+
+  getTherapists: publicProcedure
+    .input(z.object({ techniqueId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db
+        .select({
+          id: massageTherapists.id,
+          name: massageTherapists.name,
+          type: massageTherapists.type,
+          contractType: massageTherapists.contractType,
+        })
+        .from(massageTherapistTechniques)
+        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+        .where(and(
+          eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+          eq(massageTherapists.active, 1)
+        ))
+        // Inhouse primero, luego freelance; dentro de cada grupo, por prioridad de llamado
+        .orderBy(
+          sql`CASE WHEN ${massageTherapists.type} = 'inhouse' THEN 0 ELSE 1 END`,
+          asc(massageTherapists.callPriority),
+          asc(massageTherapists.name)
+        );
+    }),
+
+  getSlots: publicProcedure
+    .input(z.object({ date: z.string(), duration: z.number(), therapistId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+
+      // Día de la semana de la fecha seleccionada
+      const dayOfWeek = new Date(input.date + "T12:00:00").getDay();
+
+      // Horario del terapeuta para ese día
+      const [schedule] = await db.select()
+        .from(massageTherapistSchedules)
+        .where(and(
+          eq(massageTherapistSchedules.therapistId, input.therapistId),
+          eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
+          eq(massageTherapistSchedules.available, 1)
+        ))
+        .limit(1);
+
+      if (!schedule) return []; // No trabaja ese día
+
+      const schedStart = parseTimeMin(schedule.startTime);
+      const schedEnd = parseTimeMin(schedule.endTime);
+
+      // Todas las reservas del día
+      const allBookings = await db.select().from(massageBookings).where(
+        and(
+          eq(massageBookings.bookingDate, input.date as any),
+          sql`${massageBookings.status} NOT IN ('cancelled')`,
+        )
+      );
+
+      const therapistBookings = allBookings.filter(b => b.therapistId === input.therapistId);
+      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+
+      const slots: { time: string; roomId: number }[] = [];
+      const prep = 10;
+
+      for (let t = schedStart; t + input.duration <= schedEnd; t += 30) {
+        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+        const slotEnd = t + input.duration;
+
+        // Terapeuta ocupado en este slot
+        const therapistBusy = therapistBookings.some(b => {
+          const bStart = parseTimeMin(b.startTime);
+          const bEnd = parseTimeMin(b.endTime) + prep;
+          return t < bEnd && slotEnd > bStart;
+        });
+        if (therapistBusy) continue;
+
+        // Sala disponible
+        const availableRoom = rooms.find(room => !allBookings.some(b => {
+          if (b.roomId !== room.id) return false;
+          const bStart = parseTimeMin(b.startTime);
+          const bEnd = parseTimeMin(b.endTime) + prep;
+          return t < bEnd && slotEnd > bStart;
+        }));
+
+        if (availableRoom) slots.push({ time: timeStr, roomId: availableRoom.id });
+      }
+      return slots;
+    }),
+
+  book: publicProcedure
+    .input(z.object({
+      techniqueId: z.number(),
+      therapistId: z.number(),
+      duration: z.number(),
+      bookingDate: z.string(),
+      startTime: z.string(),
+      endTime: z.string(),
+      roomId: z.number(),
+      clientName: z.string().min(2),
+      clientPhone: z.string().optional(),
+      clientEmail: z.string().optional(),
+      notes: z.string().optional(),
+      subscribeNewsletter: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { subscribeNewsletter, ...bookingData } = input;
+      await db.insert(massageBookings).values({
+        ...bookingData,
+        bookingDate: input.bookingDate as any,
+        paymentStatus: "pending",
+        status: "pending",
+      });
+      // Suscribir al newsletter si el cliente lo solicitó
+      if (subscribeNewsletter && input.clientEmail) {
+        try {
+          await db.insert(newsletterSubscribers).values({
+            email: input.clientEmail,
+            name: input.clientName,
+            source: "masajes_booking",
+            status: "active",
+          });
+        } catch {
+          // Email duplicado: ignorar silenciosamente
+        }
+      }
+      // WhatsApp de confirmación al cliente (fire and forget)
+      if (input.clientPhone) {
+        (async () => {
+          try {
+            const [tech] = await db.select({ name: massageTechniques.name })
+              .from(massageTechniques).where(eq(massageTechniques.id, input.techniqueId)).limit(1);
+            const techName = tech?.name ?? "masaje";
+            const dateStr = new Intl.DateTimeFormat("es-CL", {
+              weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
+            }).format(new Date(input.bookingDate + "T12:00:00"));
+            await sendWhatsApp(
+              input.clientPhone,
+              `¡Hola ${input.clientName}! 👋\n\nTu solicitud de reserva en *Cancagua Spa* fue recibida correctamente.\n\n📋 *${techName}* · ${input.duration} min\n📅 ${dateStr}\n🕐 ${input.startTime} hrs\n\nTe contactaremos pronto para confirmar y coordinar el pago. ¡Nos vemos! 🌿`
+            );
+          } catch (e) {
+            console.error("[WHAPI] Error sending booking WhatsApp:", e);
+          }
+        })();
+      }
+      return { success: true };
+    }),
+});
+
+// ─── CONFIGURACIÓN ────────────────────────────────────────────
+const DEFAULT_DISCLAIMER = "Cancagua no se responsabiliza por lesiones preexistentes ni por reacciones alérgicas a los productos utilizados durante el servicio. El cliente declara estar en condiciones físicas adecuadas para recibir el tratamiento. En caso de condiciones médicas especiales (embarazo, lesiones, enfermedades crónicas), se recomienda consultar con un médico antes de agendar.";
+
+const configRouter = router({
+  getDisclaimer: publicProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return DEFAULT_DISCLAIMER;
+    try {
+      const [row] = await db.select().from(massageSettings).where(eq(massageSettings.key, "disclaimer")).limit(1);
+      return row?.value ?? DEFAULT_DISCLAIMER;
+    } catch {
+      return DEFAULT_DISCLAIMER;
+    }
+  }),
+
+  updateDisclaimer: protectedProcedure
+    .input(z.object({ value: z.string().min(10) }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.insert(massageSettings)
+        .values({ key: "disclaimer", value: input.value })
+        .onDuplicateKeyUpdate({ set: { value: input.value } });
+      return { success: true };
+    }),
+});
+
 // ─── ROUTER PRINCIPAL ─────────────────────────────────────────
 export const masajesRouter = router({
   tecnicas: tecnicasRouter,
@@ -1017,4 +1324,6 @@ export const masajesRouter = router({
   clientes: clientesRouter,
   analytics: analyticsRouter,
   rrhh: rrhhRouter,
+  public: masajesPublicRouter,
+  config: configRouter,
 });
