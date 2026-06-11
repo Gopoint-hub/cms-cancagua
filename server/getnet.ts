@@ -48,7 +48,7 @@ export async function createGetnetSession(
         total: amountCLP,
       },
     },
-    expiration: "+00:30:00",
+    expiration: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().replace("Z", "+00:00"),
     returnUrl: `${ENV.frontendUrl}/masajes/reserva/confirmacion?ref=${reference}`,
     notificationUrl: `${ENV.appUrl}/api/webhooks/getnet`,
     ipAddress: "127.0.0.1",
