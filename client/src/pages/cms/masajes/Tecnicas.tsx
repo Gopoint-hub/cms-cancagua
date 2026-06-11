@@ -230,7 +230,7 @@ export default function MasajesTecnicas() {
                           <div className="space-y-2">
                             <div className="grid grid-cols-5 gap-2 text-xs text-muted-foreground font-medium px-2">
                               <span className="col-span-2">Insumo</span>
-                              <span>50 min</span><span>80 min</span><span>110 min</span>
+                              {durs.map(d => <span key={d}>{d} min</span>)}
                             </div>
                             {recipes.map(r => (
                               <div key={r.id} className="grid grid-cols-5 gap-2 items-center text-sm border rounded-lg px-2 py-2">
@@ -293,7 +293,7 @@ export default function MasajesTecnicas() {
             </div>
             <div>
               <Label>Duraciones disponibles *</Label>
-              <div className="flex gap-2 mt-1">
+              <div className="flex gap-2 mt-1 flex-wrap">
                 {DURATIONS.map(d => (
                   <Button
                     key={d}

@@ -4,6 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -21,13 +22,30 @@ const getPriceForDuration = (t: any, dur: number): number | null => {
   return vals[idx] ? Number(vals[idx]) : null;
 };
 
-const addMinutes = (time: string, mins: number): string => {
-  const [h, m] = time.split(":").map(Number);
-  const total = h * 60 + m + mins;
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-};
-
 const today = new Date().toISOString().split("T")[0];
+
+const countryCodes = [
+  { value: "56", label: "+56 Chile" },
+  { value: "54", label: "+54 Argentina" },
+  { value: "51", label: "+51 Perú" },
+  { value: "55", label: "+55 Brasil" },
+  { value: "57", label: "+57 Colombia" },
+  { value: "52", label: "+52 México" },
+  { value: "1", label: "+1 EE.UU." },
+  { value: "598", label: "+598 Uruguay" },
+  { value: "595", label: "+595 Paraguay" },
+  { value: "591", label: "+591 Bolivia" },
+  { value: "34", label: "+34 España" },
+];
+
+const buildInternationalPhone = (countryCode: string, phone: string): string | undefined => {
+  const trimmed = phone.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("+") || trimmed.startsWith("00")) return trimmed;
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return undefined;
+  return `+${countryCode}${digits}`;
+};
 
 export default function ReservarMasaje() {
   const { id } = useParams<{ id: string }>();
@@ -35,8 +53,9 @@ export default function ReservarMasaje() {
 
   const [duration, setDuration] = useState<number | null>(null);
   const [date, setDate] = useState("");
-  const [slot, setSlot] = useState<{ time: string; roomId: number; therapistId: number } | null>(null);
+  const [slot, setSlot] = useState<{ time: string } | null>(null);
   const [name, setName] = useState("");
+  const [countryCode, setCountryCode] = useState("56");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
@@ -51,7 +70,7 @@ export default function ReservarMasaje() {
 
   const { data: disclaimer } = trpc.masajes.config.getDisclaimer.useQuery();
 
-  const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getAvailableSlots.useQuery(
+  const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getSlots.useQuery(
     { date, duration: duration ?? 0, techniqueId },
     { enabled: !!date && !!duration && !isNaN(techniqueId) }
   );
@@ -73,14 +92,11 @@ export default function ReservarMasaje() {
 
     initPaymentMut.mutate({
       techniqueId,
-      therapistId: slot.therapistId,
       duration,
       bookingDate: date,
       startTime: slot.time,
-      endTime: addMinutes(slot.time, duration),
-      roomId: slot.roomId,
       clientName: name.trim(),
-      clientPhone: phone.trim() || undefined,
+      clientPhone: buildInternationalPhone(countryCode, phone),
       clientEmail: email.trim() || undefined,
       notes: notes.trim() || undefined,
       subscribeNewsletter: subscribeNewsletter || undefined,
@@ -178,12 +194,31 @@ export default function ReservarMasaje() {
                 <Label className="text-xs text-muted-foreground">Nombre completo *</Label>
                 <Input value={name} onChange={e => setName(e.target.value)} placeholder="María González" className="mt-1 rounded-xl" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
                   <Label className="text-xs text-muted-foreground">Teléfono</Label>
-                  <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+56 9 ..." className="mt-1 rounded-xl" />
+                  <div className="mt-1 grid grid-cols-[136px_1fr] gap-2">
+                    <Select value={countryCode} onValueChange={setCountryCode}>
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {countryCodes.map((country) => (
+                          <SelectItem key={country.value} value={country.value}>{country.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      placeholder="9 1234 5678"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      className="rounded-xl"
+                    />
+                  </div>
                 </div>
-                <div>
+                <div className="sm:col-span-2">
                   <Label className="text-xs text-muted-foreground">Email</Label>
                   <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" className="mt-1 rounded-xl" />
                 </div>
@@ -203,13 +238,10 @@ export default function ReservarMasaje() {
             <p className="text-sm font-medium flex items-center gap-1.5 text-amber-700">
               <ShieldAlert className="w-4 h-4" />Exención de responsabilidad
             </p>
-            <p className="text-sm text-stone-700 leading-relaxed">
+            <p className="text-sm text-stone-700 leading-relaxed whitespace-pre-wrap">
               {disclaimer ?? "Cargando..."}
             </p>
-            <Button
-              className="w-full h-11 rounded-xl bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={() => setDisclaimerAccepted(true)}
-            >
+            <Button className="w-full h-11 rounded-xl bg-amber-600 hover:bg-amber-700 text-white" onClick={() => setDisclaimerAccepted(true)}>
               <Check className="w-4 h-4 mr-2" />Acepto
             </Button>
           </div>
@@ -218,23 +250,21 @@ export default function ReservarMasaje() {
         {/* 6. Checkboxes + resumen + pago */}
         {allInfoFilled && disclaimerAccepted && (
           <div className="space-y-3">
-            {/* Checkboxes */}
             <div className="bg-white rounded-2xl border p-5 space-y-3">
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${termsAccepted ? "bg-teal-600 border-teal-600" : "border-red-400 bg-red-50"}`}
-                  onClick={() => setTermsAccepted(!termsAccepted)}>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <div onClick={() => setTermsAccepted(!termsAccepted)}
+                  className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${termsAccepted ? "bg-teal-600 border-teal-600" : "border-red-400 bg-red-50"}`}>
                   {termsAccepted && <Check className="w-3 h-3 text-white" />}
                 </div>
                 <span className="text-sm text-stone-700" onClick={() => setTermsAccepted(!termsAccepted)}>
-                  He leído y acepto los{" "}
-                  <span className="text-teal-600 underline">Términos y Condiciones</span>
+                  He leído y acepto los <span className="text-teal-600 underline">Términos y Condiciones</span>
                   <span className="text-red-500 ml-0.5">*</span>
                 </span>
               </label>
 
               <label className="flex items-start gap-3 cursor-pointer">
-                <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${subscribeNewsletter ? "bg-teal-600 border-teal-600" : "border-stone-300"}`}
-                  onClick={() => setSubscribeNewsletter(!subscribeNewsletter)}>
+                <div onClick={() => setSubscribeNewsletter(!subscribeNewsletter)}
+                  className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${subscribeNewsletter ? "bg-teal-600 border-teal-600" : "border-stone-300"}`}>
                   {subscribeNewsletter && <Check className="w-3 h-3 text-white" />}
                 </div>
                 <span className="text-sm text-stone-700" onClick={() => setSubscribeNewsletter(!subscribeNewsletter)}>

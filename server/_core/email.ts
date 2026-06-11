@@ -42,6 +42,25 @@ interface EmailResult {
   error?: string;
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatClp(value?: string | number | null): string {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount) || amount <= 0) return "";
+  return new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    minimumFractionDigits: 0,
+  }).format(amount);
+}
+
 /**
  * Send invitation email to new user
  */
@@ -491,9 +510,258 @@ export async function sendGiftCardEmail(params: {
   }
 }
 
-/**
- * Send notification email to the therapist when a booking payment is confirmed
- */
+type MassageNoticeEmailParams = {
+  to: string;
+  subject: string;
+  eyebrow: string;
+  heading: string;
+  intro: string;
+  details: { label: string; value?: unknown }[];
+  notes?: string | null;
+};
+
+async function sendMassageNoticeEmail(params: MassageNoticeEmailParams): Promise<EmailResult> {
+  try {
+    const client = getResendClient();
+    const detailRows = params.details
+      .filter((detail) => detail.value !== undefined && detail.value !== null && String(detail.value).trim() !== "")
+      .map((detail) => `
+                <p style="margin: 0 0 8px; color: #52525b;">${escapeHtml(detail.label)}: <strong>${escapeHtml(detail.value)}</strong></p>
+      `)
+      .join("");
+    const notesLine = params.notes
+      ? `<p style="margin: 16px 0 0; color: #52525b;">Notas: ${escapeHtml(params.notes)}</p>`
+      : "";
+
+    const { data, error } = await client.emails.send({
+      from: FROM_EMAIL,
+      to: [params.to],
+      subject: params.subject,
+      html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(params.eyebrow)}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 8px;">
+          <tr>
+            <td style="padding: 32px 40px; text-align: center; background-color: #0f766e; border-radius: 8px 8px 0 0;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">Cancagua Spa</h1>
+              <p style="margin: 8px 0 0; color: #ccfbf1; font-size: 14px;">${escapeHtml(params.eyebrow)}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <h2 style="margin: 0 0 16px; color: #18181b; font-size: 20px;">${escapeHtml(params.heading)}</h2>
+              <p style="margin: 0 0 24px; color: #52525b; font-size: 16px; line-height: 1.6;">
+                ${escapeHtml(params.intro)}
+              </p>
+              <div style="padding: 20px; background-color: #f0fdfa; border-radius: 8px; border: 1px solid #99f6e4;">
+                ${detailRows}
+                ${notesLine}
+              </div>
+              <p style="margin: 24px 0 0; color: #71717a; font-size: 14px; line-height: 1.6;">
+                Si necesitas ayuda, escríbenos a ${SUPPORT_EMAIL}.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+      `,
+    });
+
+    if (error) {
+      console.error("[Email] Failed to send massage notice:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, messageId: data?.id };
+  } catch (error) {
+    console.error("[Email] Error sending massage notice:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function sendMassageBookingReceivedEmail(params: {
+  to: string;
+  clientName: string;
+  techniqueName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+}): Promise<EmailResult> {
+  return sendMassageNoticeEmail({
+    to: params.to,
+    subject: "Solicitud de reserva recibida - Cancagua",
+    eyebrow: "Solicitud de reserva recibida",
+    heading: `Hola ${params.clientName}`,
+    intro: "Recibimos tu solicitud de reserva. Te contactaremos pronto para confirmar la disponibilidad final y coordinar el pago.",
+    details: [
+      { label: "Servicio", value: params.techniqueName },
+      { label: "Fecha", value: params.bookingDate },
+      { label: "Horario", value: `${params.startTime} - ${params.endTime} hrs` },
+      { label: "Duración", value: `${params.duration} min` },
+    ],
+  });
+}
+
+export async function sendMassageInternalBookingNotificationEmail(params: {
+  to: string;
+  clientName: string;
+  clientEmail?: string | null;
+  clientPhone?: string | null;
+  techniqueName: string;
+  therapistName?: string | null;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  notes?: string | null;
+}): Promise<EmailResult> {
+  return sendMassageNoticeEmail({
+    to: params.to,
+    subject: `Nueva solicitud de masaje - ${params.clientName}`,
+    eyebrow: "Nueva solicitud de masaje",
+    heading: "Nueva solicitud de masaje",
+    intro: "Se recibió una reserva desde el sitio. El sistema ya asignó terapeuta según técnica, disponibilidad y prioridad.",
+    details: [
+      { label: "Cliente", value: params.clientName },
+      { label: "Email cliente", value: params.clientEmail },
+      { label: "Teléfono cliente", value: params.clientPhone },
+      { label: "Servicio", value: params.techniqueName },
+      { label: "Terapeuta asignado", value: params.therapistName },
+      { label: "Fecha", value: params.bookingDate },
+      { label: "Horario", value: `${params.startTime} - ${params.endTime} hrs` },
+      { label: "Duración", value: `${params.duration} min` },
+    ],
+    notes: params.notes,
+  });
+}
+
+export async function sendMassageTherapistBookingRequestEmail(params: {
+  to: string;
+  therapistName: string;
+  clientName: string;
+  clientPhone?: string | null;
+  techniqueName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  notes?: string | null;
+}): Promise<EmailResult> {
+  return sendMassageNoticeEmail({
+    to: params.to,
+    subject: "Nueva solicitud de masaje asignada - Cancagua",
+    eyebrow: "Nueva solicitud asignada",
+    heading: `Hola ${params.therapistName}`,
+    intro: "Tienes una solicitud de masaje asignada. Está pendiente de confirmación y pago por parte del equipo.",
+    details: [
+      { label: "Cliente", value: params.clientName },
+      { label: "Teléfono cliente", value: params.clientPhone },
+      { label: "Servicio", value: params.techniqueName },
+      { label: "Fecha", value: params.bookingDate },
+      { label: "Horario", value: `${params.startTime} - ${params.endTime} hrs` },
+      { label: "Duración", value: `${params.duration} min` },
+    ],
+    notes: params.notes,
+  });
+}
+
+export async function sendMassageBookingConfirmationEmail(params: {
+  to: string;
+  clientName: string;
+  techniqueName: string;
+  therapistName?: string;
+  bookingDate: string;
+  startTime: string;
+  duration: number;
+  amountPaid?: string;
+}): Promise<EmailResult> {
+  try {
+    const client = getResendClient();
+    const formattedAmount = formatClp(params.amountPaid);
+    const therapistLine = params.therapistName
+      ? `<p style="margin: 0 0 8px; color: #52525b;">Terapeuta: <strong>${escapeHtml(params.therapistName)}</strong></p>`
+      : "";
+    const amountLine = formattedAmount
+      ? `<p style="margin: 0 0 8px; color: #52525b;">Monto pagado: <strong>${formattedAmount}</strong></p>`
+      : "";
+
+    const { data, error } = await client.emails.send({
+      from: FROM_EMAIL,
+      to: [params.to],
+      subject: "Reserva de masaje confirmada - Cancagua",
+      html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reserva confirmada</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f4f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 100%; max-width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 8px;">
+          <tr>
+            <td style="padding: 32px 40px; text-align: center; background-color: #0f766e; border-radius: 8px 8px 0 0;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">Cancagua Spa</h1>
+              <p style="margin: 8px 0 0; color: #ccfbf1; font-size: 14px;">Reserva de masaje confirmada</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <h2 style="margin: 0 0 16px; color: #18181b; font-size: 20px;">Hola ${escapeHtml(params.clientName)}</h2>
+              <p style="margin: 0 0 24px; color: #52525b; font-size: 16px; line-height: 1.6;">
+                Tu reserva fue confirmada correctamente. Te esperamos en Cancagua.
+              </p>
+              <div style="padding: 20px; background-color: #f0fdfa; border-radius: 8px; border: 1px solid #99f6e4;">
+                <p style="margin: 0 0 8px; color: #52525b;">Servicio: <strong>${escapeHtml(params.techniqueName)}</strong></p>
+                ${therapistLine}
+                <p style="margin: 0 0 8px; color: #52525b;">Fecha: <strong>${escapeHtml(params.bookingDate)}</strong></p>
+                <p style="margin: 0 0 8px; color: #52525b;">Hora: <strong>${escapeHtml(params.startTime)} hrs</strong></p>
+                <p style="margin: 0 0 8px; color: #52525b;">Duración: <strong>${params.duration} min</strong></p>
+                ${amountLine}
+              </div>
+              <p style="margin: 24px 0 0; color: #71717a; font-size: 14px; line-height: 1.6;">
+                Si necesitas modificar tu reserva, contáctanos respondiendo este correo o escribiendo a ${SUPPORT_EMAIL}.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+      `,
+    });
+
+    if (error) {
+      console.error("[Email] Failed to send massage booking confirmation:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, messageId: data?.id };
+  } catch (error) {
+    console.error("[Email] Error sending massage booking confirmation:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function sendMassageTherapistNotificationEmail(params: {
   to: string;
   therapistName: string;
@@ -515,7 +783,7 @@ export async function sendMassageTherapistNotificationEmail(params: {
 
     const { data, error } = await client.emails.send({
       from: FROM_EMAIL,
-      to: params.to,
+      to: [params.to],
       subject: `📅 Nueva reserva confirmada — ${params.techniqueName} · ${formattedDate}`,
       html: `
 <!DOCTYPE html>
@@ -563,110 +831,14 @@ export async function sendMassageTherapistNotificationEmail(params: {
       `,
     });
 
-    if (error) return { success: false, error: error.message };
-    return { success: true, messageId: data?.id };
-  } catch (error) {
-    console.error("[Email] Error sending therapist notification:", error);
-    return { success: false, error: String(error) };
-  }
-}
-
-/**
- * Send massage booking confirmation email when payment is verified
- */
-export async function sendMassageBookingConfirmationEmail(params: {
-  to: string;
-  clientName: string;
-  techniqueName: string;
-  therapistName?: string;
-  bookingDate: string;
-  startTime: string;
-  duration: number;
-  amountPaid?: string | null;
-}): Promise<EmailResult> {
-  try {
-    const client = getResendClient();
-    const formattedDate = new Intl.DateTimeFormat("es-CL", {
-      weekday: "long", year: "numeric", month: "long", day: "numeric",
-      timeZone: "America/Santiago",
-    }).format(new Date(params.bookingDate + "T12:00:00"));
-    const formattedAmount = params.amountPaid
-      ? new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 0 }).format(Number(params.amountPaid))
-      : null;
-
-    const { data, error } = await client.emails.send({
-      from: FROM_EMAIL,
-      to: params.to,
-      subject: `✅ Pago confirmado — ${params.techniqueName} · Cancagua Spa`,
-      html: `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f4f4f5;">
-  <table role="presentation" style="width:100%;border-collapse:collapse;">
-    <tr><td align="center" style="padding:40px 16px;">
-      <table role="presentation" style="width:100%;max-width:560px;border-collapse:collapse;background:#ffffff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-        <tr>
-          <td style="padding:36px 40px 24px;text-align:center;background:#0f766e;border-radius:12px 12px 0 0;">
-            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:600;">Cancagua Spa</h1>
-            <p style="margin:8px 0 0;color:#99f6e4;font-size:14px;">Frutillar, Chile</p>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:36px 40px;">
-            <div style="text-align:center;margin-bottom:24px;">
-              <div style="display:inline-block;width:56px;height:56px;background:#dcfce7;border-radius:50%;text-align:center;line-height:56px;font-size:28px;">✅</div>
-            </div>
-            <h2 style="margin:0 0 8px;color:#18181b;font-size:20px;font-weight:600;text-align:center;">¡Pago confirmado!</h2>
-            <p style="margin:0 0 28px;color:#52525b;font-size:15px;line-height:1.6;text-align:center;">
-              Hola <strong>${params.clientName}</strong>, tu reserva ha sido confirmada.
-            </p>
-            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:20px 24px;margin-bottom:24px;">
-              <table role="presentation" style="width:100%;border-collapse:collapse;">
-                <tr>
-                  <td style="padding:6px 0;color:#15803d;font-size:13px;font-weight:600;width:120px;">Servicio</td>
-                  <td style="padding:6px 0;color:#14532d;font-size:14px;font-weight:500;">${params.techniqueName} · ${params.duration} min</td>
-                </tr>
-                ${params.therapistName ? `<tr><td style="padding:6px 0;color:#15803d;font-size:13px;font-weight:600;">Terapeuta</td><td style="padding:6px 0;color:#14532d;font-size:14px;">${params.therapistName}</td></tr>` : ""}
-                <tr>
-                  <td style="padding:6px 0;color:#15803d;font-size:13px;font-weight:600;">Fecha</td>
-                  <td style="padding:6px 0;color:#14532d;font-size:14px;text-transform:capitalize;">${formattedDate}</td>
-                </tr>
-                <tr>
-                  <td style="padding:6px 0;color:#15803d;font-size:13px;font-weight:600;">Hora</td>
-                  <td style="padding:6px 0;color:#14532d;font-size:14px;">${params.startTime} hrs</td>
-                </tr>
-                ${formattedAmount ? `<tr><td style="padding:6px 0;color:#15803d;font-size:13px;font-weight:600;">Total pagado</td><td style="padding:6px 0;color:#14532d;font-size:14px;font-weight:600;">${formattedAmount}</td></tr>` : ""}
-              </table>
-            </div>
-            <p style="margin:0 0 16px;color:#52525b;font-size:14px;line-height:1.6;">
-              Te esperamos con todo listo para tu experiencia. Si necesitas reagendar o tienes alguna consulta, escríbenos a
-              <a href="mailto:contacto@cancagua.cl" style="color:#0f766e;">contacto@cancagua.cl</a>.
-            </p>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:20px 40px;background:#fafafa;border-radius:0 0 12px 12px;text-align:center;">
-            <p style="margin:0;color:#71717a;font-size:12px;">
-              © ${new Date().getFullYear()} Cancagua Spa · Frutillar, Chile
-            </p>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>
-      `,
-    });
-
     if (error) {
-      console.error("[Email] Failed to send booking confirmation:", error);
+      console.error("[Email] Failed to send massage therapist notification:", error);
       return { success: false, error: error.message };
     }
+
     return { success: true, messageId: data?.id };
   } catch (error) {
-    console.error("[Email] Error sending booking confirmation:", error);
+    console.error("[Email] Error sending massage therapist notification:", error);
     return { success: false, error: String(error) };
   }
 }

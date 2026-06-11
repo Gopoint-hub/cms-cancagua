@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Save, Eye, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -32,7 +31,7 @@ export default function MasajesConfiguracion() {
       <div className="p-6 space-y-6 max-w-3xl">
         <div>
           <h1 className="text-2xl font-semibold tracking-wide">Configuración — Masajes</h1>
-          <p className="text-muted-foreground text-sm mt-1">Ajustes generales del módulo de masajes</p>
+          <p className="text-muted-foreground text-sm mt-1">Ajustes generales del módulo de masajes y spa</p>
         </div>
 
         <Card>
@@ -44,8 +43,8 @@ export default function MasajesConfiguracion() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Este texto se muestra al cliente antes de confirmar su reserva. Debe aceptarlo haciendo clic en "Acepto" para poder continuar.
-              {!canEdit && <span className="ml-1 text-amber-600">Solo admin y superadmin pueden editar este texto.</span>}
+              Este texto se muestra al cliente antes de confirmar su reserva. Debe presionar "Acepto" para poder continuar con la reserva.
+              {!canEdit && <span className="ml-1 text-amber-600 font-medium"> Solo admin y superadmin pueden editar.</span>}
             </p>
 
             {isLoading ? (
@@ -59,7 +58,7 @@ export default function MasajesConfiguracion() {
                 </div>
 
                 {preview ? (
-                  <div className="border rounded-xl p-4 bg-amber-50 border-amber-200 text-sm text-amber-900 leading-relaxed whitespace-pre-wrap">
+                  <div className="border border-amber-200 rounded-xl p-4 bg-amber-50 text-sm text-amber-900 leading-relaxed whitespace-pre-wrap">
                     {text}
                   </div>
                 ) : (

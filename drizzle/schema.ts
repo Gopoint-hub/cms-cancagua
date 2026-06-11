@@ -1075,14 +1075,14 @@ export const massageSupplies = mysqlTable("massage_supplies", {
 export const massageTherapistEvaluations = mysqlTable("massage_therapist_evaluations", {
   id: int("id").autoincrement().primaryKey(),
   therapistId: int("therapist_id").notNull(),
+  period: varchar("period", { length: 7 }).notNull(), // "2024-01"
   evaluatedBy: int("evaluated_by").notNull(),
-  period: varchar("period", { length: 7 }).notNull(), // "2026-01"
-  puntualidad: int("puntualidad").notNull().default(0),
-  tecnica: int("tecnica").notNull().default(0),
-  satisfaccionCliente: int("satisfaccion_cliente").notNull().default(0),
-  presentacionHigiene: int("presentacion_higiene").notNull().default(0),
-  comunicacion: int("comunicacion").notNull().default(0),
-  usoInsumos: int("uso_insumos").notNull().default(0),
+  puntualidad: int("puntualidad").notNull(), // 0-10
+  tecnica: int("tecnica").notNull(),
+  satisfaccionCliente: int("satisfaccion_cliente").notNull(),
+  presentacionHigiene: int("presentacion_higiene").notNull(),
+  comunicacion: int("comunicacion").notNull(),
+  usoInsumos: int("uso_insumos").notNull(),
   comentarios: text("comentarios"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

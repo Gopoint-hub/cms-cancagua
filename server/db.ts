@@ -946,7 +946,11 @@ export async function getUniqueActiveSubscribersForLists(listIds: number[]) {
     );
 }
 
-export async function bulkCreateNewsletterSends(sends: { newsletterId: number; subscriberId: number; status: string }[]) {
+type NewsletterSendStatus = "pending" | "sent" | "failed" | "bounced";
+
+export async function bulkCreateNewsletterSends(
+  sends: { newsletterId: number; subscriberId: number; status: NewsletterSendStatus }[]
+) {
   const db = await getDb();
   if (!db || sends.length === 0) return;
   const { newsletterSends } = await import("../drizzle/schema");
@@ -1099,7 +1103,7 @@ export async function createQuoteItem(item: any) {
   if (!db) return;
   const { quoteItems } = await import("../drizzle/schema");
   // Sanitize fields to match DB schema
-  const subtotal = item.subtotal ?? (item.quantity * item.unitPrice) ?? 0;
+  const subtotal = item.subtotal ?? item.quantity * item.unitPrice;
   const sanitized = {
     ...item,
     scheduleTime: item.scheduleTime ? String(item.scheduleTime) : null,

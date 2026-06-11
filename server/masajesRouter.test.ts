@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeDecimalInput, serializeDateOnly } from "./masajesRouter";
+import {
+  buildPublicMassageBookingNotifications,
+  normalizeDecimalInput,
+  selectAutomaticMassageAssignment,
+  serializeDateOnly,
+} from "./masajesRouter";
 
 describe("serializeDateOnly", () => {
   it("serializes Date values as YYYY-MM-DD strings for React-safe rendering", () => {
@@ -20,5 +25,84 @@ describe("normalizeDecimalInput", () => {
 
   it("rejects values that do not contain a valid number", () => {
     expect(() => normalizeDecimalInput("ml")).toThrow("Ingresa una cantidad valida");
+  });
+});
+
+describe("selectAutomaticMassageAssignment", () => {
+  const rooms = [{ id: 10 }];
+
+  it("prioritizes an available inhouse therapist over freelance therapists", () => {
+    const assignment = selectAutomaticMassageAssignment({
+      therapists: [
+        { id: 2, name: "Freelance Alta", type: "freelance", callPriority: 1, scheduleStart: "10:00", scheduleEnd: "18:00" },
+        { id: 1, name: "Inhouse", type: "inhouse", callPriority: 99, scheduleStart: "10:00", scheduleEnd: "18:00" },
+      ],
+      bookings: [],
+      rooms,
+      startTime: "12:00",
+      duration: 50,
+    });
+
+    expect(assignment?.therapist.id).toBe(1);
+    expect(assignment?.room.id).toBe(10);
+  });
+
+  it("falls back to freelance priority order when inhouse therapists are busy", () => {
+    const assignment = selectAutomaticMassageAssignment({
+      therapists: [
+        { id: 1, name: "Inhouse", type: "inhouse", callPriority: 99, scheduleStart: "10:00", scheduleEnd: "18:00" },
+        { id: 2, name: "Freelance Baja", type: "freelance", callPriority: 5, scheduleStart: "10:00", scheduleEnd: "18:00" },
+        { id: 3, name: "Freelance Alta", type: "freelance", callPriority: 1, scheduleStart: "10:00", scheduleEnd: "18:00" },
+      ],
+      bookings: [
+        { therapistId: 1, roomId: 20, startTime: "11:30", endTime: "13:00" },
+      ],
+      rooms: [{ id: 20 }, { id: 21 }],
+      startTime: "12:00",
+      duration: 50,
+    });
+
+    expect(assignment?.therapist.id).toBe(3);
+  });
+
+  it("ignores therapists whose schedule does not cover the full requested service", () => {
+    const assignment = selectAutomaticMassageAssignment({
+      therapists: [
+        { id: 1, name: "Inhouse Corto", type: "inhouse", callPriority: 1, scheduleStart: "10:00", scheduleEnd: "12:30" },
+        { id: 2, name: "Freelance Disponible", type: "freelance", callPriority: 1, scheduleStart: "10:00", scheduleEnd: "14:00" },
+      ],
+      bookings: [],
+      rooms,
+      startTime: "12:00",
+      duration: 80,
+    });
+
+    expect(assignment?.therapist.id).toBe(2);
+  });
+});
+
+describe("buildPublicMassageBookingNotifications", () => {
+  it("builds client, internal, therapist, and WhatsApp notifications for a public booking", () => {
+    const notifications = buildPublicMassageBookingNotifications({
+      contactEmail: "contacto@cancagua.cl",
+      clientName: "Maria Gonzalez",
+      clientEmail: "maria@example.com",
+      clientPhone: "+56 9 1234 5678",
+      techniqueName: "Masaje relajacion",
+      therapistName: "Terapeuta Uno",
+      therapistEmail: "terapeuta@example.com",
+      bookingDate: "2026-06-06",
+      startTime: "12:00",
+      endTime: "12:50",
+      duration: 50,
+      notes: "Sin preferencia",
+    });
+
+    expect(notifications.clientEmail?.to).toBe("maria@example.com");
+    expect(notifications.internalEmail.to).toBe("contacto@cancagua.cl");
+    expect(notifications.therapistEmail?.to).toBe("terapeuta@example.com");
+    expect(notifications.clientWhatsApp?.phone).toBe("+56 9 1234 5678");
+    expect(notifications.internalEmail.clientPhone).toBe("+56 9 1234 5678");
+    expect(notifications.ownerNotification.title).toContain("Maria Gonzalez");
   });
 });
