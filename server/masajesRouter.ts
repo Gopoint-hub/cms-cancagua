@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { createGetnetSession, getGetnetSessionInfo } from "./getnet";
 import {
   massageTechniques,
   massageTherapists,
@@ -1160,6 +1161,101 @@ const masajesPublicRouter = router({
         );
     }),
 
+  // Versión pública: asigna terapeuta automáticamente según disponibilidad y prioridad
+  getAvailableSlots: publicProcedure
+    .input(z.object({ date: z.string(), duration: z.number(), techniqueId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const dayOfWeek = new Date(input.date + "T12:00:00").getDay();
+
+      // Terapeutas activos para esta técnica, ordenados por prioridad (inhouse primero)
+      const qualifiedTherapists = await db
+        .select({ id: massageTherapists.id })
+        .from(massageTherapistTechniques)
+        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+        .where(and(
+          eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+          eq(massageTherapists.active, 1)
+        ))
+        .orderBy(
+          sql`CASE WHEN ${massageTherapists.type} = 'inhouse' THEN 0 ELSE 1 END`,
+          asc(massageTherapists.callPriority),
+          asc(massageTherapists.name)
+        );
+
+      if (qualifiedTherapists.length === 0) return [];
+
+      const therapistIds = qualifiedTherapists.map(t => t.id);
+
+      // Horarios del día para todos los terapeutas calificados
+      const schedules = await db.select()
+        .from(massageTherapistSchedules)
+        .where(and(
+          sql`${massageTherapistSchedules.therapistId} IN (${sql.join(therapistIds.map(id => sql`${id}`), sql`, `)})`,
+          eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
+          eq(massageTherapistSchedules.available, 1)
+        ));
+
+      const scheduleByTherapist = new Map(schedules.map(s => [s.therapistId, s]));
+
+      const allBookings = await db.select().from(massageBookings).where(
+        and(
+          eq(massageBookings.bookingDate, input.date as any),
+          sql`${massageBookings.status} NOT IN ('cancelled')`
+        )
+      );
+
+      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      const prep = 10;
+
+      // Rango de tiempo: unión de todos los horarios disponibles
+      const allStarts = schedules.map(s => parseTimeMin(s.startTime));
+      const allEnds = schedules.map(s => parseTimeMin(s.endTime));
+      const globalStart = Math.min(...allStarts);
+      const globalEnd = Math.max(...allEnds);
+
+      const slots: { time: string; roomId: number; therapistId: number }[] = [];
+      const seenTimes = new Set<string>();
+
+      for (let t = globalStart; t + input.duration <= globalEnd; t += 30) {
+        if (seenTimes.has(`${t}`)) continue;
+
+        const slotEnd = t + input.duration;
+        const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+
+        // Sala disponible para este slot
+        const availableRoom = rooms.find(room => !allBookings.some(b => {
+          if (b.roomId !== room.id) return false;
+          const bStart = parseTimeMin(b.startTime);
+          const bEnd = parseTimeMin(b.endTime) + prep;
+          return t < bEnd && slotEnd > bStart;
+        }));
+        if (!availableRoom) continue;
+
+        // Primer terapeuta disponible en este horario (respeta orden de prioridad)
+        const assignedTherapist = qualifiedTherapists.find(th => {
+          const sched = scheduleByTherapist.get(th.id);
+          if (!sched) return false;
+          if (t < parseTimeMin(sched.startTime) || slotEnd > parseTimeMin(sched.endTime)) return false;
+          return !allBookings.some(b => {
+            if (b.therapistId !== th.id) return false;
+            const bStart = parseTimeMin(b.startTime);
+            const bEnd = parseTimeMin(b.endTime) + prep;
+            return t < bEnd && slotEnd > bStart;
+          });
+        });
+
+        if (assignedTherapist) {
+          slots.push({ time: timeStr, roomId: availableRoom.id, therapistId: assignedTherapist.id });
+          seenTimes.add(`${t}`);
+        }
+      }
+
+      return slots;
+    }),
+
   getSlots: publicProcedure
     .input(z.object({ date: z.string(), duration: z.number(), therapistId: z.number() }))
     .query(async ({ input }) => {
@@ -1262,7 +1358,8 @@ const masajesPublicRouter = router({
         }
       }
       // WhatsApp de confirmación al cliente (fire and forget)
-      if (input.clientPhone) {
+      const clientPhoneForWA = input.clientPhone;
+      if (clientPhoneForWA) {
         (async () => {
           try {
             const [tech] = await db.select({ name: massageTechniques.name })
@@ -1272,7 +1369,7 @@ const masajesPublicRouter = router({
               weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
             }).format(new Date(input.bookingDate + "T12:00:00"));
             await sendWhatsApp(
-              input.clientPhone,
+              clientPhoneForWA,
               `¡Hola ${input.clientName}! 👋\n\nTu solicitud de reserva en *Cancagua Spa* fue recibida correctamente.\n\n📋 *${techName}* · ${input.duration} min\n📅 ${dateStr}\n🕐 ${input.startTime} hrs\n\nTe contactaremos pronto para confirmar y coordinar el pago. ¡Nos vemos! 🌿`
             );
           } catch (e) {
@@ -1281,6 +1378,113 @@ const masajesPublicRouter = router({
         })();
       }
       return { success: true };
+    }),
+
+  initPayment: publicProcedure
+    .input(z.object({
+      techniqueId: z.number(),
+      therapistId: z.number(),
+      duration: z.number(),
+      bookingDate: z.string(),
+      startTime: z.string(),
+      endTime: z.string(),
+      roomId: z.number(),
+      clientName: z.string().min(2),
+      clientPhone: z.string().optional(),
+      clientEmail: z.string().optional(),
+      notes: z.string().optional(),
+      subscribeNewsletter: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // Obtener técnica para precio y nombre
+      const [technique] = await db.select({
+        name: massageTechniques.name,
+        price50min: massageTechniques.price50min,
+        price80min: massageTechniques.price80min,
+        price110min: massageTechniques.price110min,
+      }).from(massageTechniques).where(eq(massageTechniques.id, input.techniqueId)).limit(1);
+
+      if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Técnica no encontrada" });
+
+      const priceRaw =
+        input.duration === 50 ? technique.price50min :
+        input.duration === 80 ? technique.price80min :
+        technique.price110min;
+
+      if (!priceRaw) throw new TRPCError({ code: "BAD_REQUEST", message: "Sin precio configurado para esta duración" });
+
+      const amountCLP = parseInt(String(priceRaw), 10);
+
+      // Crear reserva en estado "pending"
+      const { subscribeNewsletter, ...bookingData } = input;
+      const [result] = await db.insert(massageBookings).values({
+        ...bookingData,
+        bookingDate: input.bookingDate as any,
+        paymentStatus: "pending",
+        status: "pending",
+        amountPaid: String(amountCLP) as any,
+      }).$returningId();
+
+      const bookingId = result.id;
+
+      // Suscribir al newsletter si el cliente lo solicitó
+      if (subscribeNewsletter && input.clientEmail) {
+        try {
+          await db.insert(newsletterSubscribers).values({
+            email: input.clientEmail,
+            name: input.clientName,
+            source: "masajes_booking",
+            status: "active",
+          });
+        } catch {
+          // Email duplicado: ignorar
+        }
+      }
+
+      // Crear sesión de pago en Getnet
+      const description = `${technique.name} · ${input.duration} min`;
+      let getnetResult;
+      try {
+        getnetResult = await createGetnetSession({
+          bookingId,
+          description,
+          amountCLP,
+          clientName: input.clientName,
+          clientEmail: input.clientEmail,
+          clientPhone: input.clientPhone,
+        });
+      } catch (e) {
+        // Si Getnet falla, eliminar la reserva para no dejar huérfana
+        await db.delete(massageBookings).where(eq(massageBookings.id, bookingId));
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error al iniciar pago. Intenta de nuevo." });
+      }
+
+      // Guardar requestId de Getnet en la reserva
+      await db.update(massageBookings)
+        .set({ getnetRequestId: getnetResult.requestId })
+        .where(eq(massageBookings.id, bookingId));
+
+      return { processUrl: getnetResult.processUrl, bookingId };
+    }),
+
+  checkPaymentStatus: publicProcedure
+    .input(z.object({ requestId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const info = await getGetnetSessionInfo(input.requestId);
+        return {
+          status: info.status,
+          message: info.message,
+          amount: info.amount,
+          currency: info.currency,
+          reference: info.reference,
+        };
+      } catch (e) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error al verificar el pago" });
+      }
     }),
 });
 

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { CheckCircle, Calendar, Clock, User, ShieldAlert, Check } from "lucide-react";
+import { Calendar, Clock, User, ShieldAlert, Check } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -34,19 +34,15 @@ export default function ReservarMasaje() {
   const techniqueId = Number(id);
 
   const [duration, setDuration] = useState<number | null>(null);
-  const [therapistId, setTherapistId] = useState<number | null>(null);
   const [date, setDate] = useState("");
-  const [slot, setSlot] = useState<{ time: string; roomId: number } | null>(null);
+  const [slot, setSlot] = useState<{ time: string; roomId: number; therapistId: number } | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
-  // Disclaimer + checkboxes
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [subscribeNewsletter, setSubscribeNewsletter] = useState(false);
-  const [done, setDone] = useState(false);
-  const [bookedInfo, setBookedInfo] = useState<any>(null);
 
   const { data: technique, isLoading } = trpc.masajes.public.getTechnique.useQuery(
     { id: techniqueId },
@@ -55,35 +51,29 @@ export default function ReservarMasaje() {
 
   const { data: disclaimer } = trpc.masajes.config.getDisclaimer.useQuery();
 
-  const { data: therapists, isLoading: loadingTherapists } = trpc.masajes.public.getTherapists.useQuery(
-    { techniqueId },
-    { enabled: !isNaN(techniqueId) && !!duration }
+  const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getAvailableSlots.useQuery(
+    { date, duration: duration ?? 0, techniqueId },
+    { enabled: !!date && !!duration && !isNaN(techniqueId) }
   );
 
-  const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getSlots.useQuery(
-    { date, duration: duration ?? 0, therapistId: therapistId ?? 0 },
-    { enabled: !!date && !!duration && !!therapistId }
-  );
-
-  const bookMut = trpc.masajes.public.book.useMutation({
-    onSuccess: () => {
-      const therapist = therapists?.find(t => t.id === therapistId);
-      setBookedInfo({ name, date, time: slot?.time, duration, technique: technique?.name, therapist: therapist?.name });
-      setDone(true);
+  const initPaymentMut = trpc.masajes.public.initPayment.useMutation({
+    onSuccess: (data) => {
+      window.location.href = data.processUrl;
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => toast.error(e.message ?? "Error al iniciar el pago. Intenta de nuevo."),
   });
 
   const handleSubmit = () => {
-    if (!duration || !therapistId || !date || !slot || !name.trim()) {
+    if (!duration || !date || !slot || !name.trim()) {
       toast.error("Completa todos los campos requeridos");
       return;
     }
     if (!disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
-    bookMut.mutate({
+
+    initPaymentMut.mutate({
       techniqueId,
-      therapistId,
+      therapistId: slot.therapistId,
       duration,
       bookingDate: date,
       startTime: slot.time,
@@ -114,30 +104,6 @@ export default function ReservarMasaje() {
   );
 
   const durs = getDurations(technique);
-
-  if (done && bookedInfo) return (
-    <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-sm border p-8 w-full max-w-md text-center space-y-4">
-        <div className="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center mx-auto">
-          <CheckCircle className="w-8 h-8 text-teal-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">¡Reserva recibida!</h2>
-          <p className="text-muted-foreground text-sm mt-1">Te contactaremos para confirmar tu hora y el pago.</p>
-        </div>
-        <div className="bg-stone-50 rounded-xl p-4 text-left space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-muted-foreground">Servicio</span><span className="font-medium">{bookedInfo.technique}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Duración</span><span className="font-medium">{bookedInfo.duration} min</span></div>
-          {bookedInfo.therapist && <div className="flex justify-between"><span className="text-muted-foreground">Terapeuta</span><span className="font-medium">{bookedInfo.therapist}</span></div>}
-          <div className="flex justify-between"><span className="text-muted-foreground">Fecha</span><span className="font-medium capitalize">{format(new Date(bookedInfo.date + "T12:00:00"), "EEEE d 'de' MMMM", { locale: es })}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Hora</span><span className="font-medium">{bookedInfo.time} hrs</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Nombre</span><span className="font-medium">{bookedInfo.name}</span></div>
-        </div>
-        <p className="text-xs text-muted-foreground">Cancagua Spa · Frutillar, Chile</p>
-      </div>
-    </div>
-  );
-
   const allInfoFilled = slot && name.trim();
 
   return (
@@ -162,7 +128,7 @@ export default function ReservarMasaje() {
             {durs.map((d) => {
               const price = getPriceForDuration(technique, d);
               return (
-                <button key={d} onClick={() => { setDuration(d); setTherapistId(null); setSlot(null); setDisclaimerAccepted(false); }}
+                <button key={d} onClick={() => { setDuration(d); setDate(""); setSlot(null); setDisclaimerAccepted(false); }}
                   className={`flex flex-col items-center px-5 py-3 rounded-xl border-2 transition-colors ${duration === d ? "border-teal-600 bg-teal-50 text-teal-700" : "border-stone-200 hover:border-stone-300 text-foreground"}`}>
                   <span className="font-semibold text-sm">{d} min</span>
                   {price && <span className="text-xs mt-0.5 opacity-80">${price.toLocaleString("es-CL")}</span>}
@@ -172,51 +138,24 @@ export default function ReservarMasaje() {
           </div>
         </div>
 
-        {/* 2. Terapeuta */}
+        {/* 2. Fecha */}
         {duration && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />2. Elige tu terapeuta</p>
-            {loadingTherapists ? (
-              <div className="space-y-2">{[1, 2].map(i => <Skeleton key={i} className="h-14 w-full rounded-xl" />)}</div>
-            ) : !therapists || therapists.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hay terapeutas disponibles para esta técnica.</p>
-            ) : (
-              <div className="space-y-2">
-                {therapists.map(t => (
-                  <button key={t.id} onClick={() => { setTherapistId(t.id); setDate(""); setSlot(null); setDisclaimerAccepted(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-colors ${therapistId === t.id ? "border-teal-600 bg-teal-50" : "border-stone-200 hover:border-stone-300"}`}>
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${therapistId === t.id ? "bg-teal-600 text-white" : "bg-stone-100 text-stone-600"}`}>
-                      {t.name[0]}
-                    </div>
-                    <div>
-                      <p className={`font-medium text-sm ${therapistId === t.id ? "text-teal-900" : ""}`}>{t.name}</p>
-                      <p className="text-xs text-muted-foreground">{t.type === "inhouse" ? "Terapeuta inhouse" : "Terapeuta freelance"}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 3. Fecha */}
-        {therapistId && (
-          <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><Calendar className="w-4 h-4" />3. Elige la fecha</p>
+            <p className="text-sm font-medium flex items-center gap-1.5"><Calendar className="w-4 h-4" />2. Elige la fecha</p>
             <input type="date" min={today} value={date}
               onChange={e => { setDate(e.target.value); setSlot(null); setDisclaimerAccepted(false); }}
               className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-teal-500" />
           </div>
         )}
 
-        {/* 4. Horarios */}
-        {date && therapistId && (
+        {/* 3. Horarios */}
+        {date && duration && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><Clock className="w-4 h-4" />4. Elige el horario</p>
+            <p className="text-sm font-medium flex items-center gap-1.5"><Clock className="w-4 h-4" />3. Elige el horario</p>
             {loadingSlots ? (
               <div className="flex gap-2 flex-wrap">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-9 w-16 rounded-xl" />)}</div>
             ) : !slots || slots.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{therapists?.find(t => t.id === therapistId)?.name} no tiene disponibilidad este día. Prueba otra fecha.</p>
+              <p className="text-sm text-muted-foreground">No hay disponibilidad para esta fecha. Prueba con otro día.</p>
             ) : (
               <div className="flex gap-2 flex-wrap">
                 {slots.map(s => (
@@ -230,10 +169,10 @@ export default function ReservarMasaje() {
           </div>
         )}
 
-        {/* 5. Datos cliente */}
+        {/* 4. Datos cliente */}
         {slot && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />5. Tus datos</p>
+            <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />4. Tus datos</p>
             <div className="space-y-3">
               <div>
                 <Label className="text-xs text-muted-foreground">Nombre completo *</Label>
@@ -258,7 +197,7 @@ export default function ReservarMasaje() {
           </div>
         )}
 
-        {/* 6. Exención de responsabilidad */}
+        {/* 5. Exención de responsabilidad */}
         {allInfoFilled && !disclaimerAccepted && (
           <div className="bg-white rounded-2xl border border-amber-200 p-5 space-y-4">
             <p className="text-sm font-medium flex items-center gap-1.5 text-amber-700">
@@ -276,13 +215,12 @@ export default function ReservarMasaje() {
           </div>
         )}
 
-        {/* 7. Checkboxes + resumen + confirmar */}
+        {/* 6. Checkboxes + resumen + pago */}
         {allInfoFilled && disclaimerAccepted && (
           <div className="space-y-3">
             {/* Checkboxes */}
             <div className="bg-white rounded-2xl border p-5 space-y-3">
-              {/* T&C - visualmente obligatorio */}
-              <label className={`flex items-start gap-3 cursor-pointer group`}>
+              <label className="flex items-start gap-3 cursor-pointer group">
                 <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${termsAccepted ? "bg-teal-600 border-teal-600" : "border-red-400 bg-red-50"}`}
                   onClick={() => setTermsAccepted(!termsAccepted)}>
                   {termsAccepted && <Check className="w-3 h-3 text-white" />}
@@ -294,7 +232,6 @@ export default function ReservarMasaje() {
                 </span>
               </label>
 
-              {/* Newsletter - opcional */}
               <label className="flex items-start gap-3 cursor-pointer">
                 <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${subscribeNewsletter ? "bg-teal-600 border-teal-600" : "border-stone-300"}`}
                   onClick={() => setSubscribeNewsletter(!subscribeNewsletter)}>
@@ -313,10 +250,6 @@ export default function ReservarMasaje() {
                 <span className="font-medium text-teal-900">{technique.name} · {duration} min</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-teal-700">Terapeuta</span>
-                <span className="font-medium text-teal-900">{therapists?.find(t => t.id === therapistId)?.name}</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-teal-700">Fecha y hora</span>
                 <span className="font-medium text-teal-900 capitalize">
                   {format(new Date(date + "T12:00:00"), "d MMM", { locale: es })} · {slot.time} hrs
@@ -333,14 +266,13 @@ export default function ReservarMasaje() {
             <Button
               className="w-full h-12 text-base rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50"
               onClick={handleSubmit}
-              disabled={bookMut.isPending || !termsAccepted}
+              disabled={initPaymentMut.isPending || !termsAccepted}
             >
-              {bookMut.isPending ? "Enviando reserva..." : "Confirmar reserva"}
+              {initPaymentMut.isPending ? "Preparando pago..." : "Ir a pagar →"}
             </Button>
             {!termsAccepted && (
               <p className="text-xs text-center text-red-500">Debes aceptar los Términos y Condiciones para continuar.</p>
             )}
-            <p className="text-xs text-center text-muted-foreground">Tu reserva queda pendiente de confirmación por nuestro equipo.</p>
           </div>
         )}
       </div>

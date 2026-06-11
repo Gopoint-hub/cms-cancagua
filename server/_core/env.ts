@@ -24,7 +24,12 @@ export const ENV = {
   webpayCommerceCode: process.env.WEBPAY_COMMERCE_CODE ?? "",
   webpayEnvironment: process.env.WEBPAY_ENVIRONMENT ?? "integration",
 
-  // Frontend URL (for WebPay return URL)
+  // Getnet (Web Checkout)
+  getnetLogin: process.env.GETNET_LOGIN ?? "",
+  getnetSecretKey: process.env.GETNET_SECRET_KEY ?? "",
+  getnetBaseUrl: process.env.GETNET_BASE_URL ?? "https://checkout.test.getnet.cl",
+
+  // Frontend URL (for payment return URLs)
   frontendUrl: process.env.FRONTEND_URL ?? "https://cancagua.cl",
 
   // Contact email for reservations

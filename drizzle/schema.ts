@@ -1040,6 +1040,7 @@ export const massageBookings = mysqlTable("massage_bookings", {
   // Estado y pago
   status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
   paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "refunded"]).default("pending").notNull(),
+  getnetRequestId: varchar("getnet_request_id", { length: 64 }),
   amountPaid: decimal("amount_paid", { precision: 10, scale: 2 }),
   discountCode: varchar("discount_code", { length: 50 }),
   notes: text("notes"),
