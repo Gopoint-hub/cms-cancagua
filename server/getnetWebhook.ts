@@ -105,7 +105,10 @@ export async function sendBookingConfirmations(bookingId: number) {
 
   if (!booking) return;
 
-  const dateStr = String(booking.bookingDate).slice(0, 10);
+  const raw = booking.bookingDate;
+  const dateStr = raw instanceof Date
+    ? raw.toISOString().slice(0, 10)
+    : String(raw).slice(0, 10);
   const techniqueName = booking.techniqueName ?? "Masaje";
   const therapistName = booking.therapistName ?? "Terapeuta";
 
