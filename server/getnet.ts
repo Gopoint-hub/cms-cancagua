@@ -63,6 +63,7 @@ export async function createGetnetSession(
     };
   }
 
+  console.log("[Getnet] createSession payload:", JSON.stringify(body));
   const res = await fetch(`${ENV.getnetBaseUrl}/api/session/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -71,6 +72,7 @@ export async function createGetnetSession(
 
   if (!res.ok) {
     const text = await res.text();
+    console.error("[Getnet] createSession failed:", res.status, text);
     throw new Error(`Getnet createSession error ${res.status}: ${text}`);
   }
 

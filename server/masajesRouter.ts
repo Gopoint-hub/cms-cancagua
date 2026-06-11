@@ -1323,7 +1323,7 @@ const masajesPublicRouter = router({
       try {
         const session = await createGetnetSession({
           bookingId,
-          description: `${technique.name} - ${input.duration} min`,
+          description: technique.name.replace(/[^\x20-\x7E]/g, "").trim().slice(0, 80) || "Reserva de masaje",
           amountCLP: price,
           clientName: input.clientName,
           clientEmail: input.clientEmail,
