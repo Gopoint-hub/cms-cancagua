@@ -1323,7 +1323,7 @@ const masajesPublicRouter = router({
       try {
         const session = await createGetnetSession({
           bookingId,
-          description: `${technique.name} · ${input.duration} min`,
+          description: `${technique.name} - ${input.duration} min`,
           amountCLP: price,
           clientName: input.clientName,
           clientEmail: input.clientEmail,
