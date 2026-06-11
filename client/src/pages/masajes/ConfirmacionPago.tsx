@@ -14,25 +14,20 @@ export default function ConfirmacionPago() {
   const requestId = getQueryParam("requestId") || getQueryParam("request_id");
   const ref = getQueryParam("ref");
 
-  const [resolvedRequestId, setResolvedRequestId] = useState(requestId);
-  const [ready, setReady] = useState(!!requestId);
+  const [ready, setReady] = useState(!!requestId || !!ref);
 
   useEffect(() => {
-    if (requestId) {
-      setResolvedRequestId(requestId);
-      setReady(true);
-    } else if (ref) {
-      // Si sólo tenemos ref (masaje-{id}), dar un momento antes de consultar
+    if (!requestId && !ref) {
+      setLocation("/masajes");
+    } else if (!requestId && ref) {
       const t = setTimeout(() => setReady(true), 1500);
       return () => clearTimeout(t);
-    } else {
-      setLocation("/masajes");
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data, isLoading, isError } = trpc.masajes.public.checkPaymentStatus.useQuery(
-    { requestId: resolvedRequestId },
-    { enabled: ready && !!resolvedRequestId, retry: 3, retryDelay: 2000 }
+    { requestId: requestId || undefined, ref: ref || undefined },
+    { enabled: ready && (!!requestId || !!ref), retry: 3, retryDelay: 2000 }
   );
 
   if (!ready || isLoading) return <LoadingView />;

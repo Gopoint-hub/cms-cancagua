@@ -1344,10 +1344,27 @@ const masajesPublicRouter = router({
     }),
 
   checkPaymentStatus: publicProcedure
-    .input(z.object({ requestId: z.string() }))
+    .input(z.object({ requestId: z.string().optional(), ref: z.string().optional() }))
     .query(async ({ input }) => {
-      if (!input.requestId) throw new TRPCError({ code: "BAD_REQUEST", message: "requestId requerido" });
-      const result = await getGetnetSessionInfo(input.requestId);
+      let resolvedRequestId = input.requestId;
+
+      if (!resolvedRequestId && input.ref) {
+        const match = input.ref.match(/^masaje-(\d+)$/);
+        if (match) {
+          const db = await getDb();
+          if (db) {
+            const [booking] = await db
+              .select({ getnetRequestId: massageBookings.getnetRequestId })
+              .from(massageBookings)
+              .where(eq(massageBookings.id, parseInt(match[1])))
+              .limit(1);
+            resolvedRequestId = booking?.getnetRequestId ?? undefined;
+          }
+        }
+      }
+
+      if (!resolvedRequestId) throw new TRPCError({ code: "BAD_REQUEST", message: "requestId requerido" });
+      const result = await getGetnetSessionInfo(resolvedRequestId);
       return { status: result.status, amount: result.amount, currency: result.currency };
     }),
 });
