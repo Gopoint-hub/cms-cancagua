@@ -49,7 +49,7 @@ export async function createGetnetSession(
       },
     },
     expiration: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().replace("Z", "+00:00"),
-    returnUrl: `${ENV.frontendUrl}/masajes/reserva/confirmacion?ref=${reference}`,
+    returnUrl: `${ENV.appUrl}/masajes/reserva/confirmacion?ref=${reference}`,
     notificationUrl: `${ENV.appUrl}/api/webhooks/getnet`,
     ipAddress: "127.0.0.1",
     userAgent: "CancaguaWebApp/1.0",

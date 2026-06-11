@@ -1298,7 +1298,7 @@ const masajesPublicRouter = router({
       }
 
       const { subscribeNewsletter, ...bookingData } = input;
-      const insertResult = await db.insert(massageBookings).values({
+      const [inserted] = await db.insert(massageBookings).values({
         ...bookingData,
         therapistId: assignment.therapist.id,
         roomId: assignment.room.id,
@@ -1306,8 +1306,8 @@ const masajesPublicRouter = router({
         bookingDate: input.bookingDate as any,
         paymentStatus: "pending",
         status: "pending",
-      });
-      const bookingId = (insertResult as any).insertId as number;
+      }).$returningId();
+      const bookingId = inserted.id;
 
       if (subscribeNewsletter && input.clientEmail) {
         try {
