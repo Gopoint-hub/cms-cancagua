@@ -11,6 +11,7 @@ import { serveStatic, setupVite } from "./vite";
 import conciergeWebhook from "../conciergeWebhook";
 import getnetWebhook from "../getnetWebhook";
 import unsubscribeRouter from "../unsubscribeRoute";
+import freelanceApprovalRouter from "../freelanceApproval";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -66,6 +67,8 @@ async function startServer() {
   app.use("/api/webhooks/skedu", conciergeWebhook);
   // Webhook para Getnet (Módulo Masajes)
   app.use("/api/webhooks/getnet", getnetWebhook);
+  // Aprobación de terapeutas freelance (Tamara) y confirmación de terapeutas
+  app.use("/api/masajes", freelanceApprovalRouter);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
   // tRPC API

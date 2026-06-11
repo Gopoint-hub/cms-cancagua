@@ -981,6 +981,8 @@ export const massageTherapists = mysqlTable("massage_therapists", {
   notes: text("notes"),
   // Prioridad de llamado (1 = primera, más bajo = más prioritario)
   callPriority: int("call_priority").default(99),
+  // Administradora del área (recibe aprobaciones de terapeutas freelance)
+  isManager: int("is_manager").default(0).notNull(),
   active: int("active").default(1).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
@@ -1041,6 +1043,10 @@ export const massageBookings = mysqlTable("massage_bookings", {
   status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
   paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "refunded"]).default("pending").notNull(),
   getnetRequestId: varchar("getnet_request_id", { length: 64 }),
+  // Flujo de aprobación para terapeutas freelance
+  freelanceApprovalStatus: varchar("freelance_approval_status", { length: 30 }),
+  adminApprovalToken: varchar("admin_approval_token", { length: 64 }),
+  therapistConfirmationToken: varchar("therapist_confirmation_token", { length: 64 }),
   amountPaid: decimal("amount_paid", { precision: 10, scale: 2 }),
   discountCode: varchar("discount_code", { length: 50 }),
   notes: text("notes"),

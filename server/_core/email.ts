@@ -842,3 +842,87 @@ export async function sendMassageTherapistNotificationEmail(params: {
     return { success: false, error: String(error) };
   }
 }
+
+export async function sendFreelanceApprovalRequestEmail(params: {
+  to: string;
+  managerName?: string;
+  clientName: string;
+  techniqueName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  therapistName: string;
+  approveUrl: string;
+  rejectUrl: string;
+}): Promise<EmailResult> {
+  try {
+    const client = getResendClient();
+    const { data, error } = await client.emails.send({
+      from: FROM_EMAIL,
+      to: [params.to],
+      subject: `Aprobación requerida — Terapeuta freelance asignado`,
+      html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+  <table role="presentation" style="width:100%;border-collapse:collapse">
+    <tr><td align="center" style="padding:40px 0">
+      <table role="presentation" style="width:100%;max-width:600px;border-collapse:collapse;background:#fff;border-radius:8px">
+        <tr>
+          <td style="padding:32px 40px;text-align:center;background:#0f766e;border-radius:8px 8px 0 0">
+            <h1 style="margin:0;color:#fff;font-size:24px;font-weight:600">Cancagua Spa</h1>
+            <p style="margin:8px 0 0;color:#ccfbf1;font-size:14px">Aprobación de terapeuta freelance</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px">
+            <h2 style="margin:0 0 16px;color:#18181b;font-size:20px">Hola ${escapeHtml(params.managerName ?? "Tamara")}</h2>
+            <p style="margin:0 0 24px;color:#52525b;font-size:16px;line-height:1.6">
+              Se asignó un terapeuta <strong>FREELANCE</strong> a una reserva confirmada y requiere tu aprobación antes de notificarle.
+            </p>
+            <div style="padding:20px;background:#f0fdfa;border-radius:8px;border:1px solid #99f6e4;margin-bottom:24px">
+              <p style="margin:0 0 8px;color:#52525b">Cliente: <strong>${escapeHtml(params.clientName)}</strong></p>
+              <p style="margin:0 0 8px;color:#52525b">Servicio: <strong>${escapeHtml(params.techniqueName)} · ${params.duration} min</strong></p>
+              <p style="margin:0 0 8px;color:#52525b">Fecha: <strong>${escapeHtml(params.bookingDate)}</strong></p>
+              <p style="margin:0 0 8px;color:#52525b">Horario: <strong>${escapeHtml(params.startTime)} – ${escapeHtml(params.endTime)} hrs</strong></p>
+              <p style="margin:0;color:#52525b">Terapeuta propuesto: <strong>${escapeHtml(params.therapistName)}</strong></p>
+            </div>
+            <p style="margin:0 0 20px;color:#52525b;font-size:15px">¿Apruebas esta asignación?</p>
+            <table role="presentation" style="width:100%;border-collapse:collapse">
+              <tr>
+                <td style="padding-right:8px">
+                  <a href="${params.approveUrl}" style="display:block;text-align:center;padding:14px;background:#10b981;color:#fff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600">
+                    ✅ Sí, aprobar
+                  </a>
+                </td>
+                <td style="padding-left:8px">
+                  <a href="${params.rejectUrl}" style="display:block;text-align:center;padding:14px;background:#ef4444;color:#fff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600">
+                    ❌ No, rechazar
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+    });
+
+    if (error) {
+      console.error("[Email] Failed to send freelance approval email:", error);
+      return { success: false, error: error.message };
+    }
+    return { success: true, messageId: data?.id };
+  } catch (error) {
+    console.error("[Email] Error sending freelance approval email:", error);
+    return { success: false, error: String(error) };
+  }
+}

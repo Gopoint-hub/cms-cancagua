@@ -10,6 +10,7 @@ import {
 } from "./_core/email";
 import { sendWhatsApp } from "./_core/whapi";
 import { ENV } from "./_core/env";
+import { sendFreelanceApprovalRequest } from "./freelanceApproval";
 
 const router = Router();
 
@@ -96,6 +97,7 @@ export async function sendBookingConfirmations(bookingId: number) {
       therapistName: massageTherapists.name,
       therapistEmail: massageTherapists.email,
       therapistPhone: massageTherapists.phone,
+      therapistType: massageTherapists.type,
     })
     .from(massageBookings)
     .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
@@ -154,22 +156,6 @@ export async function sendBookingConfirmations(bookingId: number) {
     ...internalData,
   }).catch((e) => console.error("[Confirmaciones] Email terapias:", e));
 
-  // Email al terapeuta
-  if (booking.therapistEmail) {
-    await sendMassageTherapistNotificationEmail({
-      to: booking.therapistEmail,
-      therapistName,
-      clientName: booking.clientName,
-      clientPhone: booking.clientPhone,
-      techniqueName,
-      bookingDate: dateStr,
-      startTime: booking.startTime,
-      endTime: booking.endTime ?? "",
-      duration: booking.duration,
-      notes: booking.notes,
-    }).catch((e) => console.error("[Confirmaciones] Email terapeuta:", e));
-  }
-
   // WhatsApp al cliente
   if (booking.clientPhone) {
     await sendWhatsApp(
@@ -178,12 +164,33 @@ export async function sendBookingConfirmations(bookingId: number) {
     ).catch((e) => console.error("[Confirmaciones] WhatsApp cliente:", e));
   }
 
-  // WhatsApp al terapeuta
-  if (booking.therapistPhone) {
-    await sendWhatsApp(
-      booking.therapistPhone,
-      `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva de pago confirmado:\n\n*${techniqueName}* · ${booking.duration} min\n👤 Cliente: ${booking.clientName}${booking.clientPhone ? `\n📞 ${booking.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${booking.startTime} – ${booking.endTime} hrs`
-    ).catch((e) => console.error("[Confirmaciones] WhatsApp terapeuta:", e));
+  if (booking.therapistType === "freelance") {
+    // Freelance: notificar a admin para aprobación antes de contactar al terapeuta
+    sendFreelanceApprovalRequest(bookingId).catch((e) =>
+      console.error("[Confirmaciones] Error en aprobación freelance:", e)
+    );
+  } else {
+    // Inhouse: notificar al terapeuta directamente
+    if (booking.therapistEmail) {
+      await sendMassageTherapistNotificationEmail({
+        to: booking.therapistEmail,
+        therapistName,
+        clientName: booking.clientName,
+        clientPhone: booking.clientPhone,
+        techniqueName,
+        bookingDate: dateStr,
+        startTime: booking.startTime,
+        endTime: booking.endTime ?? "",
+        duration: booking.duration,
+        notes: booking.notes,
+      }).catch((e) => console.error("[Confirmaciones] Email terapeuta:", e));
+    }
+    if (booking.therapistPhone) {
+      await sendWhatsApp(
+        booking.therapistPhone,
+        `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva de pago confirmado:\n\n*${techniqueName}* · ${booking.duration} min\n👤 Cliente: ${booking.clientName}${booking.clientPhone ? `\n📞 ${booking.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${booking.startTime} – ${booking.endTime} hrs`
+      ).catch((e) => console.error("[Confirmaciones] WhatsApp terapeuta:", e));
+    }
   }
 }
 
