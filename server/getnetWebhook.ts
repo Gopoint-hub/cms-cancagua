@@ -12,6 +12,8 @@ import { sendWhatsApp } from "./_core/whapi";
 import { ENV } from "./_core/env";
 import { sendFreelanceApprovalRequest } from "./freelanceApproval";
 
+console.log("[SERVER] getnetWebhook v3 cargado — freelance approval activo");
+
 const router = Router();
 
 const MASAJES_ADMIN_EMAIL = "terapias@cancagua.cl";
@@ -26,7 +28,6 @@ router.post("/", async (req: Request, res: Response) => {
   const requestId = body.requestId;
   const status = body.status?.status ?? "";
   const date = body.status?.date ?? "";
-  // Getnet puede poner la firma en status o en payment[0].status
   const signature = body.status?.signature ?? body.payment?.[0]?.status?.signature ?? "";
 
   if (!requestId || !status || !date) {
@@ -34,7 +35,6 @@ router.post("/", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Payload incompleto" });
   }
 
-  // Validar firma solo si viene — en test environment a veces no viene
   if (signature && !validateGetnetWebhookSignature(requestId, status, date, signature)) {
     console.error("[Getnet Webhook] Firma inválida para requestId:", requestId);
     return res.status(401).json({ error: "Firma inválida" });
@@ -80,11 +80,14 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 export async function sendBookingConfirmations(bookingId: number) {
+  console.log(`[sendBookingConfirmations] Iniciando para booking ${bookingId}`);
   const db = await getDb();
   if (!db) return;
 
-  const [booking] = await db
+  // ── Query 1: datos básicos del booking ──────────────────────────────────────
+  const [bookingData] = await db
     .select({
+      therapistId: massageBookings.therapistId,
       clientName: massageBookings.clientName,
       clientEmail: massageBookings.clientEmail,
       clientPhone: massageBookings.clientPhone,
@@ -92,107 +95,138 @@ export async function sendBookingConfirmations(bookingId: number) {
       startTime: massageBookings.startTime,
       endTime: massageBookings.endTime,
       duration: massageBookings.duration,
+      techniqueId: massageBookings.techniqueId,
       notes: massageBookings.notes,
-      techniqueName: massageTechniques.name,
-      therapistName: massageTherapists.name,
-      therapistEmail: massageTherapists.email,
-      therapistPhone: massageTherapists.phone,
-      therapistType: massageTherapists.type,
     })
     .from(massageBookings)
-    .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-    .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
     .where(eq(massageBookings.id, bookingId))
     .limit(1);
 
-  if (!booking) return;
+  if (!bookingData) {
+    console.warn(`[sendBookingConfirmations] No se encontró booking ${bookingId}`);
+    return;
+  }
 
-  const raw = booking.bookingDate;
-  const dateStr = raw instanceof Date
-    ? raw.toISOString().slice(0, 10)
-    : String(raw).slice(0, 10);
-  const techniqueName = booking.techniqueName ?? "Masaje";
-  const therapistName = booking.therapistName ?? "Terapeuta";
+  // ── Query 2: tipo de terapeuta (query separada para evitar ambigüedad de JOIN) ─
+  let therapistType: "inhouse" | "freelance" | null = null;
+  let therapistName = "Terapeuta";
+  let therapistEmail: string | null = null;
+  let therapistPhone: string | null = null;
 
+  if (bookingData.therapistId) {
+    const [th] = await db
+      .select({
+        type: massageTherapists.type,
+        name: massageTherapists.name,
+        email: massageTherapists.email,
+        phone: massageTherapists.phone,
+      })
+      .from(massageTherapists)
+      .where(eq(massageTherapists.id, bookingData.therapistId))
+      .limit(1);
+
+    if (th) {
+      therapistType = th.type;
+      therapistName = th.name;
+      therapistEmail = th.email ?? null;
+      therapistPhone = th.phone ?? null;
+    }
+  }
+
+  console.log(`[sendBookingConfirmations] booking=${bookingId} therapistId=${bookingData.therapistId} therapistType=${therapistType}`);
+
+  // ── Query 3: nombre de la técnica ───────────────────────────────────────────
+  let techniqueName = "Masaje";
+  if (bookingData.techniqueId) {
+    const [tq] = await db
+      .select({ name: massageTechniques.name })
+      .from(massageTechniques)
+      .where(eq(massageTechniques.id, bookingData.techniqueId))
+      .limit(1);
+    if (tq) techniqueName = tq.name;
+  }
+
+  // ── Formato de fecha ────────────────────────────────────────────────────────
+  const raw = bookingData.bookingDate;
+  const dateStr = raw instanceof Date ? raw.toISOString().slice(0, 10) : String(raw).slice(0, 10);
   const humanDate = new Intl.DateTimeFormat("es-CL", {
     weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
   }).format(new Date(dateStr + "T12:00:00"));
 
   const internalData = {
-    clientName: booking.clientName,
+    clientName: bookingData.clientName,
     techniqueName,
     bookingDate: dateStr,
-    startTime: booking.startTime,
-    endTime: booking.endTime ?? "",
-    duration: booking.duration,
-    clientEmail: booking.clientEmail,
-    clientPhone: booking.clientPhone,
+    startTime: bookingData.startTime,
+    endTime: bookingData.endTime ?? "",
+    duration: bookingData.duration,
+    clientEmail: bookingData.clientEmail,
+    clientPhone: bookingData.clientPhone,
     therapistName,
-    notes: booking.notes,
+    notes: bookingData.notes,
   };
 
-  // Email al cliente
-  if (booking.clientEmail) {
+  // ── Emails a cliente y administración (siempre) ─────────────────────────────
+  if (bookingData.clientEmail) {
     await sendMassageBookingConfirmationEmail({
-      to: booking.clientEmail,
-      clientName: booking.clientName,
+      to: bookingData.clientEmail,
+      clientName: bookingData.clientName,
       techniqueName,
       therapistName,
       bookingDate: dateStr,
-      startTime: booking.startTime,
-      duration: booking.duration,
+      startTime: bookingData.startTime,
+      duration: bookingData.duration,
     }).catch((e) => console.error("[Confirmaciones] Email cliente:", e));
   }
 
-  // Email a recepción (contacto@cancagua.cl)
   await sendMassageInternalBookingNotificationEmail({
     to: ENV.contactEmail || "contacto@cancagua.cl",
     ...internalData,
   }).catch((e) => console.error("[Confirmaciones] Email recepción:", e));
 
-  // Email a admin masajes (terapias@cancagua.cl)
   await sendMassageInternalBookingNotificationEmail({
     to: MASAJES_ADMIN_EMAIL,
     ...internalData,
   }).catch((e) => console.error("[Confirmaciones] Email terapias:", e));
 
-  // WhatsApp al cliente
-  if (booking.clientPhone) {
+  // ── WhatsApp al cliente (siempre) ───────────────────────────────────────────
+  if (bookingData.clientPhone) {
     await sendWhatsApp(
-      booking.clientPhone,
-      `✅ *¡Tu reserva está confirmada!* — Cancagua Spa\n\nHola ${booking.clientName}! Tu pago fue procesado exitosamente.\n\n*${techniqueName}* · ${booking.duration} min\n📅 ${humanDate}\n🕐 ${booking.startTime} hrs\n\nTe esperamos en Cancagua Spa. ¡Que disfrutes tu masaje!`
+      bookingData.clientPhone,
+      `✅ *¡Tu reserva está confirmada!* — Cancagua Spa\n\nHola ${bookingData.clientName}! Tu pago fue procesado exitosamente.\n\n*${techniqueName}* · ${bookingData.duration} min\n📅 ${humanDate}\n🕐 ${bookingData.startTime} hrs\n\nTe esperamos en Cancagua Spa. ¡Que disfrutes tu masaje!`
     ).catch((e) => console.error("[Confirmaciones] WhatsApp cliente:", e));
   }
 
-  console.log(`[Confirmaciones] therapistType para booking ${bookingId}:`, booking.therapistType);
-
-  if (booking.therapistType === "freelance") {
-    // Freelance: notificar a admin para aprobación antes de contactar al terapeuta
+  // ── Notificación al terapeuta según tipo ─────────────────────────────────────
+  if (therapistType === "freelance") {
+    console.log(`[sendBookingConfirmations] booking=${bookingId} → FREELANCE: enviando solicitud de aprobación al admin`);
     sendFreelanceApprovalRequest(bookingId).catch((e) =>
       console.error("[Confirmaciones] Error en aprobación freelance:", e)
     );
-  } else if (booking.therapistType === "inhouse") {
-    // Inhouse: notificar al terapeuta directamente
-    if (booking.therapistEmail) {
+  } else if (therapistType === "inhouse") {
+    console.log(`[sendBookingConfirmations] booking=${bookingId} → INHOUSE: notificando terapeuta directamente`);
+    if (therapistEmail) {
       await sendMassageTherapistNotificationEmail({
-        to: booking.therapistEmail,
+        to: therapistEmail,
         therapistName,
-        clientName: booking.clientName,
-        clientPhone: booking.clientPhone,
+        clientName: bookingData.clientName,
+        clientPhone: bookingData.clientPhone,
         techniqueName,
         bookingDate: dateStr,
-        startTime: booking.startTime,
-        endTime: booking.endTime ?? "",
-        duration: booking.duration,
-        notes: booking.notes,
+        startTime: bookingData.startTime,
+        endTime: bookingData.endTime ?? "",
+        duration: bookingData.duration,
+        notes: bookingData.notes,
       }).catch((e) => console.error("[Confirmaciones] Email terapeuta:", e));
     }
-    if (booking.therapistPhone) {
+    if (therapistPhone) {
       await sendWhatsApp(
-        booking.therapistPhone,
-        `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva de pago confirmado:\n\n*${techniqueName}* · ${booking.duration} min\n👤 Cliente: ${booking.clientName}${booking.clientPhone ? `\n📞 ${booking.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${booking.startTime} – ${booking.endTime} hrs`
+        therapistPhone,
+        `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva de pago confirmado:\n\n*${techniqueName}* · ${bookingData.duration} min\n👤 Cliente: ${bookingData.clientName}${bookingData.clientPhone ? `\n📞 ${bookingData.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${bookingData.startTime} – ${bookingData.endTime} hrs`
       ).catch((e) => console.error("[Confirmaciones] WhatsApp terapeuta:", e));
     }
+  } else {
+    console.warn(`[sendBookingConfirmations] booking=${bookingId} therapistType=${therapistType} → sin notificación al terapeuta`);
   }
 }
 
