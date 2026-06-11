@@ -164,12 +164,14 @@ export async function sendBookingConfirmations(bookingId: number) {
     ).catch((e) => console.error("[Confirmaciones] WhatsApp cliente:", e));
   }
 
+  console.log(`[Confirmaciones] therapistType para booking ${bookingId}:`, booking.therapistType);
+
   if (booking.therapistType === "freelance") {
     // Freelance: notificar a admin para aprobación antes de contactar al terapeuta
     sendFreelanceApprovalRequest(bookingId).catch((e) =>
       console.error("[Confirmaciones] Error en aprobación freelance:", e)
     );
-  } else {
+  } else if (booking.therapistType === "inhouse") {
     // Inhouse: notificar al terapeuta directamente
     if (booking.therapistEmail) {
       await sendMassageTherapistNotificationEmail({

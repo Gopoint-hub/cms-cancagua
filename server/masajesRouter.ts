@@ -510,7 +510,7 @@ const agendaRouter = router({
               notes: massageBookings.notes,
               techniqueName: massageTechniques.name,
               therapistName: massageTherapists.name, therapistEmail: massageTherapists.email,
-              therapistPhone: massageTherapists.phone,
+              therapistPhone: massageTherapists.phone, therapistType: massageTherapists.type,
             })
             .from(massageBookings)
             .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
@@ -531,26 +531,35 @@ const agendaRouter = router({
               });
             }
 
-            // Email al terapeuta
-            if (booking.therapistEmail) {
-              await sendMassageTherapistNotificationEmail({
-                to: booking.therapistEmail, therapistName: booking.therapistName ?? "Terapeuta",
-                clientName: booking.clientName, clientPhone: booking.clientPhone,
-                techniqueName: booking.techniqueName ?? "Masaje",
-                bookingDate: dateStr, startTime: booking.startTime, endTime: booking.endTime,
-                duration: booking.duration, notes: booking.notes,
-              });
-            }
+            const therapistType = booking.therapistType;
+            const humanDate = new Intl.DateTimeFormat("es-CL", {
+              weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
+            }).format(new Date(dateStr + "T12:00:00"));
 
-            // WhatsApp al terapeuta
-            if (booking.therapistPhone) {
-              const humanDate = new Intl.DateTimeFormat("es-CL", {
-                weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
-              }).format(new Date(dateStr + "T12:00:00"));
-              await sendWhatsApp(
-                booking.therapistPhone,
-                `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${booking.therapistName ?? ""}! Tienes una reserva de pago confirmado:\n\n*${booking.techniqueName ?? "Masaje"}* · ${booking.duration} min\n👤 ${booking.clientName}${booking.clientPhone ? `\n📞 ${booking.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${booking.startTime} – ${booking.endTime} hrs`
+            if (therapistType === "freelance") {
+              // Freelance: requiere aprobación de admin antes de notificar
+              const { sendFreelanceApprovalRequest } = await import("./freelanceApproval");
+              await sendFreelanceApprovalRequest(id).catch((e) =>
+                console.error("[Notification] Error aprobación freelance:", e)
               );
+            } else if (therapistType === "inhouse") {
+              // Email al terapeuta
+              if (booking.therapistEmail) {
+                await sendMassageTherapistNotificationEmail({
+                  to: booking.therapistEmail, therapistName: booking.therapistName ?? "Terapeuta",
+                  clientName: booking.clientName, clientPhone: booking.clientPhone,
+                  techniqueName: booking.techniqueName ?? "Masaje",
+                  bookingDate: dateStr, startTime: booking.startTime, endTime: booking.endTime,
+                  duration: booking.duration, notes: booking.notes,
+                });
+              }
+              // WhatsApp al terapeuta
+              if (booking.therapistPhone) {
+                await sendWhatsApp(
+                  booking.therapistPhone,
+                  `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${booking.therapistName ?? ""}! Tienes una reserva de pago confirmado:\n\n*${booking.techniqueName ?? "Masaje"}* · ${booking.duration} min\n👤 ${booking.clientName}${booking.clientPhone ? `\n📞 ${booking.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${booking.startTime} – ${booking.endTime} hrs`
+                );
+              }
             }
           } catch (e) {
             console.error("[Notification] Error sending confirmations:", e);
