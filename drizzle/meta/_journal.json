@@ -78,6 +78,13 @@
       "when": 1749657600000,
       "tag": "0011_getnet_request_id",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1781191487854,
+      "tag": "0012_loud_maverick",
+      "breakpoints": true
     }
   ]
 }
