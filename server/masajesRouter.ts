@@ -28,7 +28,7 @@ import {
 import { ENV } from "./_core/env";
 import { notifyOwner, type NotificationPayload } from "./_core/notification";
 import { sendWhatsApp } from "./_core/whapi";
-import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, or, isNull, inArray } from "drizzle-orm";
 
 const adminOrEditor = async (role: string) => {
   if (role !== "super_admin" && role !== "admin" && role !== "editor") {
@@ -386,6 +386,38 @@ const agendaRouter = router({
       .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
       return rows.map(row => serializeDateFields(row, ["bookingDate"]));
     }),
+
+  getPendingManualAssignment: protectedProcedure.query(async ({ ctx }) => {
+    await adminOrEditor(ctx.user.role);
+    const db = await getDb();
+    if (!db) return [];
+    const rows = await db.select({
+      id: massageBookings.id,
+      clientName: massageBookings.clientName,
+      clientPhone: massageBookings.clientPhone,
+      techniqueName: massageTechniques.name,
+      duration: massageBookings.duration,
+      bookingDate: massageBookings.bookingDate,
+      startTime: massageBookings.startTime,
+      endTime: massageBookings.endTime,
+      freelanceApprovalStatus: massageBookings.freelanceApprovalStatus,
+      notes: massageBookings.notes,
+    })
+    .from(massageBookings)
+    .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
+    .where(
+      and(
+        eq(massageBookings.paymentStatus, "paid"),
+        sql`${massageBookings.status} NOT IN ('cancelled', 'completed')`,
+        or(
+          isNull(massageBookings.therapistId),
+          inArray(massageBookings.freelanceApprovalStatus, ["admin_rejected", "therapist_rejected"])
+        )
+      )
+    )
+    .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
+    return rows.map(row => serializeDateFields(row, ["bookingDate"]));
+  }),
 
   getAvailableSlots: protectedProcedure
     .input(z.object({ date: z.string(), duration: z.number(), techniqueId: z.number().optional() }))

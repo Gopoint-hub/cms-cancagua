@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, ChevronLeft, ChevronRight, UserX } from "lucide-react";
 import { Link } from "wouter";
 
 const STOCK_PAGE_SIZE = 5;
@@ -20,6 +20,8 @@ export default function MasajesDashboard() {
   );
   const { data: lowStock, isLoading: loadingStock } = trpc.masajes.inventario.getLowStock.useQuery();
   const { data: therapists, isLoading: loadingTherapists } = trpc.masajes.terapeutas.getAll.useQuery();
+
+  const { data: pendingAssignment, isLoading: loadingPending } = trpc.masajes.agenda.getPendingManualAssignment.useQuery();
 
   const confirmed = bookings?.filter(b => b.status === "confirmed" || b.status === "pending") ?? [];
   const activeTherapists = therapists?.filter(t => t.active === 1) ?? [];
@@ -95,6 +97,55 @@ export default function MasajesDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Asignación manual pendiente */}
+        {(loadingPending || (pendingAssignment && pendingAssignment.length > 0)) && (
+          <Card className="border-amber-300 bg-amber-50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-amber-800">
+                <UserX className="w-5 h-5" />
+                Asignación manual pendiente
+                {!loadingPending && pendingAssignment && (
+                  <Badge variant="outline" className="ml-1 border-amber-400 text-amber-800 bg-amber-100">
+                    {pendingAssignment.length}
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingPending ? (
+                <div className="space-y-2">
+                  {[1, 2].map(i => <Skeleton key={i} className="h-14 w-full" />)}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {pendingAssignment!.map(b => {
+                    const reason =
+                      b.freelanceApprovalStatus === "admin_rejected" ? "Admin rechazó freelance" :
+                      b.freelanceApprovalStatus === "therapist_rejected" ? "Terapeuta rechazó reserva" :
+                      "Sin terapeuta asignado";
+                    return (
+                      <div key={b.id} className="flex items-center justify-between border border-amber-200 rounded-lg p-3 bg-white">
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm truncate">{b.clientName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {b.techniqueName} · {b.duration} min · {b.bookingDate} {b.startTime}
+                          </p>
+                          <p className="text-xs text-amber-700 mt-0.5">{reason}</p>
+                        </div>
+                        <Link href="/cms/masajes/agenda">
+                          <Button variant="outline" size="sm" className="ml-3 shrink-0 text-xs border-amber-400 hover:bg-amber-100">
+                            Asignar
+                          </Button>
+                        </Link>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Agenda del día */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
