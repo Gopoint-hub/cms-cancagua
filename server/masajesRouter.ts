@@ -3,6 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { createGetnetSession, getGetnetSessionInfo } from "./getnet";
+import { sendBookingConfirmations } from "./getnetWebhook";;
 import {
   massageTechniques,
   massageTherapists,
@@ -1365,6 +1366,27 @@ const masajesPublicRouter = router({
 
       if (!resolvedRequestId) throw new TRPCError({ code: "BAD_REQUEST", message: "requestId requerido" });
       const result = await getGetnetSessionInfo(resolvedRequestId);
+
+      // Fallback: si el webhook no llegó, confirmar la reserva aquí
+      if (result.status === "APPROVED") {
+        const db = await getDb();
+        if (db) {
+          const [existing] = await db
+            .select({ id: massageBookings.id, paymentStatus: massageBookings.paymentStatus })
+            .from(massageBookings)
+            .where(eq(massageBookings.getnetRequestId, resolvedRequestId))
+            .limit(1);
+          if (existing && existing.paymentStatus !== "paid") {
+            await db.update(massageBookings)
+              .set({ paymentStatus: "paid", status: "confirmed" })
+              .where(eq(massageBookings.id, existing.id));
+            sendBookingConfirmations(existing.id).catch((e) =>
+              console.error("[checkPaymentStatus] Error en notificaciones:", e)
+            );
+          }
+        }
+      }
+
       return { status: result.status, amount: result.amount, currency: result.currency };
     }),
 });
