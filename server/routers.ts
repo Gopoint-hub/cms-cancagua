@@ -479,13 +479,6 @@ export const appRouter = router({
           origen: "Formulario de Reserva Web",
         });
 
-        // Enviar notificación al propietario
-        const { notifyOwner } = await import("./_core/notification");
-        await notifyOwner({
-          title: `Nueva reserva de ${input.name}`,
-          content: `Servicio: ${input.serviceType}\nFecha: ${input.preferredDate}\nPersonas: ${input.numberOfPeople}\nEmail: ${input.email}\nTeléfono: ${input.phone}${input.message ? `\nMensaje: ${input.message}` : ''}`,
-        });
-
         return result;
       }),
 
@@ -586,13 +579,6 @@ export const appRouter = router({
           origen: "Formulario de Contacto Web",
         });
         const whatsappLink = generateWhatsAppLink(whatsappMessage);
-
-        // 4. Enviar notificación al propietario
-        const { notifyOwner } = await import("./_core/notification");
-        await notifyOwner({
-          title: `Nuevo mensaje de contacto: ${input.name}`,
-          content: `Nombre: ${input.name}\nEmail: ${input.email}\nTeléfono: ${input.phone}\n\nMensaje:\n${input.message}`,
-        });
 
         return {
           success: true,
@@ -1914,23 +1900,35 @@ NO incluyas marcadores de código. Devuelve SOLO el JSON válido.`;
         });
 
         const content = response.choices[0].message.content;
-        let rawContent = typeof content === 'string' ? content : '';
+        const rawContent = typeof content === 'string' ? content : '';
 
-        // Limpiar marcadores de código si la IA los incluyó
-        rawContent = rawContent.replace(/^```json\s*/i, '').replace(/^```html\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/g, '').trim();
+        // La IA a veces antepone texto conversacional o envuelve el JSON en ```json
+        const { extractJsonObject, extractHtmlContent } = await import("./llmContent");
 
-        // Intentar parsear como JSON
         let htmlContent = '';
         let suggestedSubject = '';
 
-        try {
-          const parsed = JSON.parse(rawContent);
-          htmlContent = parsed.htmlContent || '';
-          suggestedSubject = parsed.subject || '';
-        } catch {
-          // Si no es JSON válido, asumir que es HTML puro
-          htmlContent = rawContent;
-          suggestedSubject = '';
+        const parsed = extractJsonObject(
+          rawContent,
+          (obj) => typeof obj.htmlContent === 'string' && obj.htmlContent.trim().length > 0
+        );
+        if (parsed && typeof parsed.htmlContent === 'string' && parsed.htmlContent.trim()) {
+          htmlContent = parsed.htmlContent;
+          suggestedSubject = typeof parsed.subject === 'string' ? parsed.subject : '';
+        } else if (!/"htmlContent"\s*:/.test(rawContent)) {
+          // La IA pudo devolver HTML directo en vez de JSON. Pero si la respuesta
+          // menciona el campo "htmlContent" y aun así no se pudo parsear, es JSON
+          // truncado/corrupto: extraer ese HTML entregaría escapes literales (\" \n),
+          // así que es mejor caer al error y pedir regenerar.
+          htmlContent = extractHtmlContent(rawContent) || '';
+        }
+
+        if (!htmlContent.includes('<')) {
+          console.error('generateDesign: respuesta de IA sin HTML reconocible:', rawContent.slice(0, 500));
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "La IA devolvió una respuesta inválida. Intenta regenerar el diseño.",
+          });
         }
 
         return { htmlContent, suggestedSubject };
@@ -1974,10 +1972,19 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
         });
 
         const content = response.choices[0].message.content;
-        let htmlContent = typeof content === 'string' ? content : '';
+        const rawContent = typeof content === 'string' ? content : '';
 
-        // Limpiar marcadores de código si la IA los incluyó
-        htmlContent = htmlContent.replace(/^```html\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/g, '').trim();
+        // La IA a veces antepone texto conversacional o envuelve el HTML en ```html
+        const { extractHtmlContent } = await import("./llmContent");
+        const htmlContent = extractHtmlContent(rawContent);
+
+        if (!htmlContent) {
+          console.error('refineDesign: respuesta de IA sin HTML reconocible:', rawContent.slice(0, 500));
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "La IA devolvió una respuesta inválida. Intenta aplicar los cambios de nuevo.",
+          });
+        }
 
         return { htmlContent };
       }),
@@ -2062,7 +2069,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
           try {
             const { sendBulkEmails, htmlToPlainText } = await import("./email");
             const { ENV } = await import("./_core/env");
-            const appUrl = ENV.appUrl || 'https://cancagua-cms.manus.space';
+            const appUrl = ENV.appUrl || 'https://cancagua.cl';
 
             // Procesar en chunks para evitar acumular toda la memoria de una vez
             const CHUNK_SIZE = 500;

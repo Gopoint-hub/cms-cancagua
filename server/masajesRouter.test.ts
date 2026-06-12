@@ -103,6 +103,5 @@ describe("buildPublicMassageBookingNotifications", () => {
     expect(notifications.therapistEmail?.to).toBe("terapeuta@example.com");
     expect(notifications.clientWhatsApp?.phone).toBe("+56 9 1234 5678");
     expect(notifications.internalEmail.clientPhone).toBe("+56 9 1234 5678");
-    expect(notifications.ownerNotification.title).toContain("Maria Gonzalez");
   });
 });

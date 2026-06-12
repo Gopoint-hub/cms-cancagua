@@ -35,7 +35,7 @@ export const ENV = {
   // Contact email for reservations
   contactEmail: process.env.CONTACT_EMAIL ?? "contacto@cancagua.cl",
   
-  // Manus built-in APIs (LLM, storage, etc.) - legacy
+  // Forge proxy legacy (LLM/storage) — sin uso actual; Gemini y Cloudinary son los primarios
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 

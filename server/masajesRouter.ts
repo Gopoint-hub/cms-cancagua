@@ -26,7 +26,6 @@ import {
   sendMassageTherapistNotificationEmail,
 } from "./_core/email";
 import { ENV } from "./_core/env";
-import { notifyOwner, type NotificationPayload } from "./_core/notification";
 import { sendWhatsApp } from "./_core/whapi";
 import { eq, and, gte, lte, desc, asc, sql, or, isNull, inArray } from "drizzle-orm";
 
@@ -972,7 +971,6 @@ type PublicMassageBookingNotifications = {
   internalEmail: Parameters<typeof sendMassageInternalBookingNotificationEmail>[0];
   therapistEmail?: Parameters<typeof sendMassageTherapistBookingRequestEmail>[0];
   clientWhatsApp?: { phone: string; message: string };
-  ownerNotification: NotificationPayload;
 };
 
 const formatMassageBookingHumanDate = (bookingDate: string): string =>
@@ -1000,18 +998,6 @@ export function buildPublicMassageBookingNotifications(
     endTime: params.endTime,
     duration: params.duration,
   };
-  const ownerContent = [
-    `Cliente: ${params.clientName}`,
-    clientEmail ? `Email: ${clientEmail}` : null,
-    clientPhone ? `Telefono: ${clientPhone}` : null,
-    `Servicio: ${params.techniqueName}`,
-    `Terapeuta asignado: ${therapistName}`,
-    `Fecha: ${params.bookingDate}`,
-    `Horario: ${params.startTime} - ${params.endTime} hrs`,
-    `Duracion: ${params.duration} min`,
-    params.notes ? `Notas: ${params.notes}` : null,
-  ].filter((line): line is string => Boolean(line));
-
   return {
     clientEmail: clientEmail
       ? {
@@ -1047,10 +1033,6 @@ export function buildPublicMassageBookingNotifications(
           message: `Hola ${params.clientName}.\n\nTu solicitud de reserva en Cancagua Spa fue recibida.\n\n${params.techniqueName} · ${params.duration} min\n${humanDate}\n${params.startTime} hrs\n\nTe contactaremos pronto para confirmar y coordinar el pago.`,
         }
       : undefined,
-    ownerNotification: {
-      title: `Nueva reserva de masaje de ${params.clientName}`,
-      content: ownerContent.join("\n"),
-    },
   };
 }
 
@@ -1090,13 +1072,6 @@ async function sendPublicMassageBookingNotifications(
           sendWhatsApp(notifications.clientWhatsApp!.phone, notifications.clientWhatsApp!.message)
         )
       : undefined,
-    runPublicMassageNotification("massage owner notification", async () => {
-      const delivered = await notifyOwner(notifications.ownerNotification);
-      return {
-        success: delivered,
-        error: delivered ? undefined : "Notification service rejected the request",
-      };
-    }),
   ].filter((task): task is Promise<void> => Boolean(task));
 
   await Promise.all(tasks);

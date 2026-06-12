@@ -4,7 +4,6 @@ import { createServer } from "http";
 import net from "net";
 import cors from "cors";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -51,7 +50,7 @@ async function startServer() {
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.some(allowed => origin.startsWith(allowed) || origin.includes("manus.computer"))) {
+      if (allowedOrigins.some(allowed => origin.startsWith(allowed))) {
         return callback(null, true);
       }
       callback(null, false);
@@ -61,8 +60,6 @@ async function startServer() {
     allowedHeaders: ["Content-Type", "Authorization"],
   }));
 
-  // OAuth callback under /api/oauth/callback
-  registerOAuthRoutes(app);
   // Webhook para Skedu (Módulo Concierge)
   app.use("/api/webhooks/skedu", conciergeWebhook);
   // Webhook para Getnet (Módulo Masajes)

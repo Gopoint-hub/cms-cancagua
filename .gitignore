@@ -2,6 +2,9 @@
 **/node_modules
 .pnpm-store/
 
+# El proyecto usa pnpm; evitar lockfile de npm
+package-lock.json
+
 # Build outputs
 dist/
 build/

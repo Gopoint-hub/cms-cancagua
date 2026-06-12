@@ -216,9 +216,10 @@ const resolveApiUrl = () => {
     // Use Gemini OpenAI-compatible endpoint
     return "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
   }
-  return ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+  if (ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0) {
+    return `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+  }
+  throw new Error("No LLM API endpoint configured: set GOOGLE_API_KEY or BUILT_IN_FORGE_API_URL");
 };
 
 const resolveApiKey = () => {

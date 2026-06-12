@@ -14,6 +14,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    setupFiles: ["dotenv/config"],
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
   },
 });

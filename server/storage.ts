@@ -1,4 +1,4 @@
-// Storage helpers - uses Cloudinary (primary) or Manus Forge proxy (legacy fallback)
+// Storage helpers - uses Cloudinary (primary) or legacy Forge proxy fallback (sin uso actual)
 
 import { ENV } from './_core/env';
 
