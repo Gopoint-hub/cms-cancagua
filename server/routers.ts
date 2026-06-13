@@ -1675,7 +1675,7 @@ export const appRouter = router({
           createdBy: ctx.user.id,
         });
 
-        const newId = result?.insertId;
+        const newId = (result as any)?.[0]?.insertId;
         if (!newId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo obtener el ID del newsletter creado" });
 
         // Si se proporcionaron listas, asociarlas
