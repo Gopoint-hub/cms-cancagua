@@ -1,1 +1,1 @@
-/Users/bernarditamirf/Desktop/CMS Cancagua/cms-cancagua/drizzle/schema.ts
+${{ read_file('/Users/bernarditamirf/Desktop/CMS Cancagua/cms-cancagua/drizzle/schema.ts') }}
