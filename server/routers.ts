@@ -1675,18 +1675,17 @@ export const appRouter = router({
           createdBy: ctx.user.id,
         });
 
-        // Obtener el newsletter recién creado para tener el id
-        const newsletters = await db.getAllNewsletters();
-        const newNewsletter = newsletters[0]; // La más reciente
+        const newId = result?.insertId;
+        if (!newId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo obtener el ID del newsletter creado" });
 
         // Si se proporcionaron listas, asociarlas
         if (listIds && listIds.length > 0) {
           for (const listId of listIds) {
-            await db.addListToNewsletter(newNewsletter.id, listId);
+            await db.addListToNewsletter(newId, listId);
           }
         }
 
-        return { success: true, id: newNewsletter.id };
+        return { success: true, id: newId };
       }),
 
     update: protectedProcedure
@@ -2071,30 +2070,35 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
             const { ENV } = await import("./_core/env");
             const appUrl = ENV.appUrl || 'https://cancagua.cl';
 
-            // Procesar en chunks para evitar acumular toda la memoria de una vez
-            const CHUNK_SIZE = 500;
+            // Procesar de a 50 suscriptores (= tamaño de batch de Resend)
+            // para evitar acumular cientos de copias del HTML en memoria simultáneamente
+            const CHUNK_SIZE = 50;
             let totalSent = 0;
             let totalFailed = 0;
+            const totalChunks = Math.ceil(allSubscribers.length / CHUNK_SIZE);
 
-            console.log(`[Newsletter BG] Iniciando envío de ${allSubscribers.length} emails para newsletter ${newsletterId} en chunks de ${CHUNK_SIZE}`);
+            // Pre-calcular si el HTML necesita footer (evita repetir includes() por cada suscriptor)
+            const needsFooter = !htmlContent.includes('/api/unsubscribe') && !htmlContent.includes('darse de baja');
+            const hasPlaceholder = htmlContent.includes('{{unsubscribe_url}}');
+
+            console.log(`[Newsletter BG] Iniciando envío de ${allSubscribers.length} emails para newsletter ${newsletterId} en ${totalChunks} chunks de ${CHUNK_SIZE}`);
 
             for (let i = 0; i < allSubscribers.length; i += CHUNK_SIZE) {
               const chunk = allSubscribers.slice(i, i + CHUNK_SIZE);
               const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
-              const totalChunks = Math.ceil(allSubscribers.length / CHUNK_SIZE);
 
-              // Construir emails solo para este chunk (evita acumular 4000+ HTMLs en memoria)
+              // Construir emails para este chunk (solo 50 copias del HTML a la vez)
               const chunkEmails = chunk.map(sub => {
                 const encodedEmail = Buffer.from(sub.email).toString('base64');
                 const unsubscribeUrl = `${appUrl}/api/unsubscribe?email=${encodedEmail}`;
 
                 let htmlWithUnsub = htmlContent;
 
-                if (htmlWithUnsub.includes('{{unsubscribe_url}}')) {
+                if (hasPlaceholder) {
                   htmlWithUnsub = htmlWithUnsub.replace(/\{\{unsubscribe_url\}\}/g, unsubscribeUrl);
                 }
 
-                if (!htmlWithUnsub.includes('/api/unsubscribe') && !htmlWithUnsub.includes('darse de baja')) {
+                if (needsFooter) {
                   const unsubFooter = `
                   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
                     <tr>
@@ -2127,7 +2131,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
               totalSent += chunkResult.sent;
               totalFailed += chunkResult.failed;
 
-              // Registrar envíos en bulk (una sola query por chunk)
+              // Registrar envíos en bulk
               await db.bulkCreateNewsletterSends(chunk.map(sub => ({
                 newsletterId,
                 subscriberId: sub.id,
@@ -2138,7 +2142,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
 
               // Pausa entre chunks para no saturar la API
               if (i + CHUNK_SIZE < allSubscribers.length) {
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 200));
               }
             }
 
