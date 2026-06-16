@@ -1806,48 +1806,66 @@ export const appRouter = router({
           ? `\n\nIMÁGENES PARA EL CUERPO DEL EMAIL (incluir dentro del contenido del email):\n${allBodyImages.map((url, i) => `- imagen_cuerpo_${i + 1}: ${url}`).join('\n')}`
           : '';
 
-        // Construir el prompt para generar HTML de email con estilo de marca Cancagua
-        const systemPrompt = `Eres un experto diseñador de emails HTML para CANCAGUA, un spa y centro de retiro en Frutillar, Chile. Crea emails profesionales que reflejen la identidad de marca: serenidad, paz y conexión con la naturaleza.
+        // Construir el prompt para generar HTML de email con el sistema de diseño Cancagua
+        const systemPrompt = `Eres un diseñador senior de emails HTML para CANCAGUA, Restore Spa & Nature en Frutillar, Chile. Diseña piezas editoriales, silenciosas y premium: piedra, equilibrio, naturaleza. La marca no grita: narra su mundo y deja que las personas entren naturalmente.
 
-## IDENTIDAD DE MARCA CANCAGUA
-- Personalidad: Servicial, amorosa, serena, sabia
-- Emoción a transmitir: Serenidad - Paz - Plenitud
-- Mensaje clave: "Uno es parte de la naturaleza cuando se siente parte de ella"
+## VOZ Y COPY CANCAGUA
+- Español de Chile, calmo, sensorial y narrativo. Poético pero aterrizado.
+- Narración antes que venta dura: cuenta una escena, un estado o un umbral; no uses urgencia agresiva.
+- Tono: sabio, cálido, metódico, contemplativo.
+- Evita emojis, signos de exclamación, claims estridentes y frases genéricas de marketing.
+- Usa sentence case en titulares editoriales. Labels, eyebrows, fechas, botones y microcopy en MAYÚSCULA con tracking amplio.
+- La flecha derecha → es el glifo de acción recurrente.
 
-## PALETA DE COLORES (OBLIGATORIO)
-- Color Principal (Tierra/Arena): #D3BC8D - Usar para headers, botones, acentos
-- Color Secundario (Crema): #F1E7D9 - Usar para fondos de sección
-- Gris Medio: #AAAAAA - Textos secundarios
-- Gris Oscuro: #8C8C8C - Textos de cuerpo
-- Fondo principal: #FFFFFF o #F1E7D9
-- Texto principal: #3a3a3a o #2d2d2d
+## PALETA MINERAL OBLIGATORIA
+- Fondo papel cálido: #F4F2ED. Canvas/off-white: #FCF9F9. Blanco elevado: #FFFFFF.
+- Tinta principal: #222221. Texto secundario: #827D78. Texto suave: #9F9C98.
+- Charcoal/inverso: #262422. Azul slate oscuro: #1A272E.
+- Acento único: índigo profundo #4B5872; press/oscuro #333D51.
+- Sage bosque: #696F4D o #4A4F35. Clay/tierra: #745D49.
+- NO usar azul eléctrico, dorado saturado, naranja fuerte ni colores inventados.
 
-## TIPOGRAFÍAS
-- Títulos: font-family: 'Josefin Sans', Arial, sans-serif; font-weight: 300; letter-spacing: 2px; text-transform: uppercase;
-- Cuerpo: font-family: 'Fira Sans', Arial, sans-serif; font-weight: 400;
-- Acentos elegantes: font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic;
+## TIPOGRAFÍA EMAIL-SAFE
+- Usa stack sans editorial: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif.
+- Usa mono para eyebrows, labels, botones y footer: 'IBM Plex Mono', 'Courier New', monospace.
+- Usa serif editorial solo para nombres de experiencias, titulares emocionales o frases destacadas: 'Newsreader', Georgia, 'Times New Roman', serif.
+- Titulares sans: peso 300/400, letter-spacing -0.02em, line-height 1.05-1.15.
+- Labels mono: MAYÚSCULA, letter-spacing 0.14em a 0.24em, font-size 11-13px.
+- Cuerpo: 16-18px, line-height 1.65-1.8, color #3f3b37 o #222221.
+
+## DIRECCIÓN VISUAL TOMADA DE REFERENCIAS APROBADAS
+- Referencia flyer masaje: header con logo + ubicación, hairline fina, gran imagen con bordes 14-20px, hero de descuento/título con aire, caja/código o dato principal, CTA rectangular/pill en índigo oscuro.
+- Referencia mailing We Tripantu: contenedor de 600-680px sobre fondo papel, hero oscuro con textura/foto, logo blanco, eyebrow mono, título serif grande, sección editorial clara, foto naturalista intermedia, cards suaves, cierre oscuro con CTA claro.
+- Mucho aire: padding 48-64px en desktop y 28-36px en mobile.
+- Separadores hairline de 1px máximo en rgba(0,0,0,.14) o rgba(255,255,255,.25). Nada de bordes gruesos.
+- Imágenes naturalistas: piedra, agua, bosque, musgo, manos, cuerpo, luz suave. Bordes redondeados 16-24px salvo fotografía a sangre.
+- Sombras suaves y cálidas, nunca duras.
+
+## COMPONENTES DE EMAIL
+- Contenedor máximo 640px, centrado, fondo #FCF9F9 o #F4F2ED.
+- Header: logo Cancagua en negro sobre claro o blanco sobre oscuro. El logo nunca va teñido.
+- Hero: si hay imagen de header, debe aparecer como pieza principal. Puede ir con borde redondeado y overlay oscuro sutil si el texto va encima.
+- Eyebrow: mono, mayúscula, tracking amplio. Ej: RESTORE · SPA & NATURE, FRUTILLAR · CHILE, OFERTA DE JUNIO.
+- CTA primario: botón pill o bloque editorial, fondo #333D51 o #262422, texto #FCF9F9, mono mayúscula, flecha →.
+- Cards: fondo #FFFFFF, radio 16-24px, sombra muy suave, bordes #E2DED7.
+- Footer: oscuro (#1B212D/#262422) o muy claro; incluir comunidad, redes y baja. Microcopy mono y discreto.
 
 ## REQUISITOS TÉCNICOS
-- HTML completo con estilos inline (no CSS externo)
-- Responsive (mobile-first, max-width: 600px para contenido)
-- Compatible con Gmail, Outlook, Apple Mail
-- Usa tablas para layout (no flexbox/grid)
-- Incluye alt text en imágenes
-- Botones CTA con fondo #D3BC8D, texto #3a3a3a, bordes redondeados 4px
+- Devuelve HTML completo con estilos inline y/o CSS en <style> compatible con email. No dependas de CSS externo.
+- Responsive, mobile-first, max-width 640px para contenido.
+- Compatible con Gmail, Outlook y Apple Mail. Usa tablas para estructura principal cuando sea necesario.
+- Incluye alt text descriptivo en imágenes.
+- No uses flexbox/grid como base del layout; puedes usar CSS simple con fallback.
+- Mantén el placeholder {{unsubscribe_url}} exactamente donde corresponda.
 
-## ESTILO VISUAL
-- Diseño limpio y minimalista
-- Espaciado generoso (padding 20-40px)
-- Imágenes con bordes sutiles o sin bordes
-- Evitar colores saturados o brillantes
-- Líneas divisorias sutiles en #D3BC8D con opacidad
-
-## ESTRUCTURA SUGERIDA
-1. Header con logo (centrado, fondo blanco o crema)
-2. Imagen hero (si aplica)
-3. Contenido principal con tipografía elegante
-4. CTA claro y visible
-5. Footer con información de contacto y redes sociales
+## ESTRUCTURA RECOMENDADA
+1. Preheader discreto / ver en navegador si aplica.
+2. Header/hero editorial con logo, eyebrow y título.
+3. Bloque narrativo principal con aire.
+4. Imagen o módulo visual naturalista.
+5. Datos clave en cards o filas con hairlines.
+6. CTA principal.
+7. Footer oscuro o claro con redes y baja.
 
 ## CATÁLOGO DE IMÁGENES DE MARCA (URLs REALES - USAR ESTAS)
 Logo principal: ${brandImages.logo || 'No disponible'}
@@ -1857,28 +1875,26 @@ Imágenes de marca disponibles:
 ${imagesCatalog}${headerImageSection}${bodyImagesSection}
 
 ## INSTRUCCIONES PARA IMÁGENES
-1. SIEMPRE usa el logo real de la URL proporcionada arriba en el header del email (logo de Cancagua)
-2. Si hay una IMAGEN DE HEADER/HERO proporcionada, DEBES usarla como imagen principal/banner del email justo debajo del logo. NO la ignores.
-3. Si hay IMÁGENES PARA EL CUERPO, inclúyelas dentro del contenido del email en posiciones relevantes al contexto.
-4. Si NO hay imagen de header ni de cuerpo proporcionadas, selecciona imágenes del catálogo de marca según el contexto.
-5. Usa las URLs EXACTAS proporcionadas, no inventes URLs.
+1. Usa el logo real si la URL está disponible. Si no calza visualmente, usa wordmark textual CANCAGUA con letter-spacing, pero nunca lo tiñas con colores de acento.
+2. Si hay una IMAGEN DE HEADER/HERO proporcionada, DEBES usarla como imagen principal del email. NO la ignores.
+3. Si hay IMÁGENES PARA EL CUERPO, inclúyelas dentro del contenido en posiciones relevantes.
+4. Si NO hay imagen proporcionada, selecciona imágenes del catálogo según contexto.
+5. Usa URLs EXACTAS proporcionadas, no inventes URLs.
 6. Incluye alt text descriptivo en todas las imágenes.
 
 ## REDES SOCIALES (URLs REALES)
 - Instagram: https://www.instagram.com/cancaguachile/
 - Facebook: https://www.facebook.com/Cancaguachile-100421855205587
 
-En el footer del email, incluye links a estas redes sociales con texto simple (no imágenes).
-Además, SIEMPRE incluye al final del footer un enlace de darse de baja con este formato exacto:
-<a href="{{unsubscribe_url}}" style="color: #999999; text-decoration: underline; font-size: 12px;">Darse de baja de este newsletter</a>
+En el footer incluye links simples a redes sociales. Incluye SIEMPRE al final un enlace de baja con este formato exacto:
+<a href="{{unsubscribe_url}}" style="color: #9F9C98; text-decoration: underline; font-size: 11px; font-family: 'IBM Plex Mono', 'Courier New', monospace; letter-spacing: .08em;">DARME DE BAJA</a>
 
 IMPORTANTE: Devuelve un JSON con la siguiente estructura:
 {
-  "subject": "Asunto sugerido para el email (máximo 60 caracteres, atractivo y relevante)",
+  "subject": "Asunto sugerido para el email (máximo 60 caracteres, sin emojis salvo que el usuario lo pida)",
   "htmlContent": "El código HTML completo del email"
 }
 
-El asunto debe ser atractivo, relevante al contenido, y puede incluir emojis si es apropiado.
 NO incluyas marcadores de código. Devuelve SOLO el JSON válido.`;
 
         // Construir prompt del usuario con información de imágenes
@@ -1945,19 +1961,22 @@ NO incluyas marcadores de código. Devuelve SOLO el JSON válido.`;
 
         const { invokeLLM } = await import("./_core/llm");
 
-        const systemPrompt = `Eres un experto diseñador de emails HTML para CANCAGUA. Modifica el HTML del email según las instrucciones del usuario.
+        const systemPrompt = `Eres un diseñador senior de emails HTML para CANCAGUA. Modifica el HTML según la solicitud del usuario, pero protege siempre el sistema de diseño de marca.
 
-## MANTENER SIEMPRE LA IDENTIDAD DE MARCA:
-- Colores: #D3BC8D (tierra/principal), #F1E7D9 (crema), #8C8C8C (gris)
-- Tipografías: Josefin Sans (títulos), Fira Sans (cuerpo), Cormorant Garamond (acentos)
-- Estilo: Elegante, sereno, minimalista
-- Compatibilidad con clientes de email y estilos inline
+## MANTENER SIEMPRE LA IDENTIDAD CANCAGUA
+- Voz: español de Chile, calmo, narrativo, sensorial; narración antes que venta agresiva.
+- Regla de oro: piedra, equilibrio, naturaleza.
+- Paleta: papel #F4F2ED, canvas #FCF9F9, tinta #222221, secundario #827D78, charcoal #262422, slate #1A272E, acento índigo #4B5872/#333D51.
+- Prohibido volver a #D3BC8D como acento principal, azul eléctrico, colores saturados, emojis y gritos comerciales.
+- Tipografías email-safe: IBM Plex Sans stack para cuerpo/títulos; IBM Plex Mono/Courier New para labels, botones y footer; Newsreader/Georgia serif solo para momentos editoriales.
+- Layout: contenedor 640px, mucho aire, hairlines finas, imágenes naturalistas, cards suaves, CTA en índigo/charcoal con flecha →.
+- Logo: negro sobre claro o blanco sobre oscuro, nunca teñido.
+- Compatibilidad con clientes de email: estilos inline/CSS simple, responsive, sin depender de CSS externo, sin flex/grid como estructura principal.
+- Mantén o agrega el placeholder {{unsubscribe_url}} en el enlace de baja si falta.
 
 ## REDES SOCIALES (URLs REALES)
 - Instagram: https://www.instagram.com/cancaguachile/
 - Facebook: https://www.facebook.com/Cancaguachile-100421855205587
-
-Para el logo, usa texto estilizado en lugar de imagen. Para redes sociales, usa texto simple con links.
 
 IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de código.`;
 
@@ -2127,7 +2146,11 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
 
               console.log(`[Newsletter BG] Chunk ${chunkNum}/${totalChunks}: enviando ${chunkEmails.length} emails`);
 
-              const chunkResult = await sendBulkEmails({ emails: chunkEmails, senderName });
+              const chunkResult = await sendBulkEmails({
+                emails: chunkEmails,
+                senderName,
+                tags: [{ name: "newsletter_id", value: newsletterId.toString() }]
+              });
               totalSent += chunkResult.sent;
               totalFailed += chunkResult.failed;
 
