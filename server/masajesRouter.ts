@@ -27,7 +27,7 @@ import {
 } from "./_core/email";
 import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
-import { eq, and, gte, lte, desc, asc, sql, or, isNull, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, or, isNull, inArray, gt, lt } from "drizzle-orm";
 
 const adminOrEditor = async (role: string) => {
   if (role !== "super_admin" && role !== "admin" && role !== "editor") {
@@ -672,16 +672,20 @@ const clientesRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
+      // Agrupar por email para deduplicar (mismo email = mismo cliente aunque cambie el nombre)
+      // El nombre que se muestra es el más reciente (MAX por orden alfabético descendente)
       const rows = await db.select({
-        clientName: massageBookings.clientName, clientEmail: massageBookings.clientEmail,
-        clientPhone: massageBookings.clientPhone, clientOrigin: massageBookings.clientOrigin,
+        clientName: sql<string>`MAX(${massageBookings.clientName})`,
+        clientEmail: massageBookings.clientEmail,
+        clientPhone: sql<string>`MAX(${massageBookings.clientPhone})`,
+        clientOrigin: sql<string>`MAX(${massageBookings.clientOrigin})`,
         totalBookings: sql<number>`COUNT(*)`,
         lastBookingDate: sql<string>`MAX(${massageBookings.bookingDate})`,
         totalSpent: sql<string>`SUM(${massageBookings.amountPaid})`,
       })
       .from(massageBookings)
       .where(sql`${massageBookings.status} != 'cancelled'`)
-      .groupBy(massageBookings.clientName, massageBookings.clientEmail, massageBookings.clientPhone, massageBookings.clientOrigin)
+      .groupBy(sql`COALESCE(${massageBookings.clientEmail}, ${massageBookings.clientName})`)
       .orderBy(desc(sql`MAX(${massageBookings.bookingDate})`))
       .limit(input?.limit ?? 50).offset(input?.offset ?? 0);
       return rows.map(row => serializeDateFields(row, ["lastBookingDate"]));
@@ -1129,7 +1133,12 @@ const masajesPublicRouter = router({
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
           eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
-          eq(massageTherapistSchedules.available, 1)
+          eq(massageTherapistSchedules.available, 1),
+          or(
+            isNull(massageTherapistSchedules.blockFrom),
+            gt(massageTherapistSchedules.blockFrom, input.date as any),
+            lt(massageTherapistSchedules.blockTo, input.date as any)
+          )
         ));
       if (therapists.length === 0) return [];
 
@@ -1152,6 +1161,17 @@ const masajesPublicRouter = router({
           duration: input.duration,
         });
         if (assignment) slots.push({ time: timeStr });
+      }
+
+      // Para reservas del mismo día: solo mostrar horarios con al menos 2h de anticipación (hora Chile)
+      const todayChile = new Date().toLocaleString("sv-SE", { timeZone: "America/Santiago" }).slice(0, 10);
+      if (input.date === todayChile) {
+        const nowChile = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
+        const minStartMin = nowChile.getHours() * 60 + nowChile.getMinutes() + 120;
+        return slots.filter(s => {
+          const [sh, sm] = s.time.split(":").map(Number);
+          return sh * 60 + sm >= minStartMin;
+        });
       }
       return slots;
     }),
@@ -1274,6 +1294,17 @@ const masajesPublicRouter = router({
       const price = durIdx >= 0 && priceFields[durIdx] ? Number(priceFields[durIdx]) : null;
       if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: "Precio no configurado para esta duración" });
 
+      // Validar anticipación mínima de 2h para reservas del mismo día
+      const todayChile = new Date().toLocaleString("sv-SE", { timeZone: "America/Santiago" }).slice(0, 10);
+      if (input.bookingDate === todayChile) {
+        const nowChile = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
+        const minStartMin = nowChile.getHours() * 60 + nowChile.getMinutes() + 120;
+        const [sh, sm] = input.startTime.split(":").map(Number);
+        if (sh * 60 + sm < minStartMin) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Para reservas del mismo día se requieren al menos 2 horas de anticipación." });
+        }
+      }
+
       const dayOfWeek = new Date(input.bookingDate + "T12:00:00").getDay();
       const therapists = await db.select({
         id: massageTherapists.id,
@@ -1292,6 +1323,11 @@ const masajesPublicRouter = router({
           eq(massageTherapists.active, 1),
           eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
           eq(massageTherapistSchedules.available, 1),
+          or(
+            isNull(massageTherapistSchedules.blockFrom),
+            gt(massageTherapistSchedules.blockFrom, input.bookingDate as any),
+            lt(massageTherapistSchedules.blockTo, input.bookingDate as any)
+          )
         ));
 
       const allBookings = await db.select().from(massageBookings).where(

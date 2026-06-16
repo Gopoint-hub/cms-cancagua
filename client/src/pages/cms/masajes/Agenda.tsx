@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Plus, Edit } from "lucide-react";
-import { format, addDays, subDays, parseISO } from "date-fns";
+import {
+  format, addDays, subDays, parseISO, startOfWeek, endOfWeek,
+  startOfMonth, endOfMonth, addWeeks, subWeeks, addMonths, subMonths,
+  eachDayOfInterval, isSameDay, isSameMonth,
+} from "date-fns";
 import { es } from "date-fns/locale";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -24,6 +28,8 @@ const STATUS_VARIANTS: Record<string, any> = {
   cancelled: "destructive", no_show: "destructive",
 };
 const DURATIONS = [50, 80, 110];
+
+type ViewMode = "day" | "week" | "month";
 
 type BookingForm = {
   clientName: string; clientEmail: string; clientPhone: string; clientOrigin: string;
@@ -46,16 +52,205 @@ function calcEndTime(start: string, duration: number): string {
   return `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`;
 }
 
+// ─── Tarjeta individual de reserva ────────────────────────────────────────────
+function BookingCard({ b, onEdit, onStatus }: {
+  b: any;
+  onEdit: (b: any) => void;
+  onStatus: (id: number, status: string) => void;
+}) {
+  return (
+    <Card className={b.status === "cancelled" ? "opacity-60" : ""}>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-lg">{b.startTime}</span>
+              <span className="text-muted-foreground">–</span>
+              <span className="text-muted-foreground">{b.endTime}</span>
+              <Badge variant={STATUS_VARIANTS[b.status]}>{STATUS_LABELS[b.status]}</Badge>
+              {b.paymentStatus === "paid" && (
+                <Badge variant="outline" className="text-green-600 border-green-600">Pagado</Badge>
+              )}
+            </div>
+            <p className="font-medium mt-1">{b.clientName}</p>
+            <p className="text-sm text-muted-foreground">
+              {b.techniqueName} · {b.duration} min · {b.roomName}
+              {b.therapistName && ` · ${b.therapistName}`}
+            </p>
+            {b.amountPaid && (
+              <p className="text-sm text-green-600 mt-1">$ {Number(b.amountPaid).toLocaleString("es-CL")}</p>
+            )}
+          </div>
+          <div className="flex gap-2 flex-wrap shrink-0">
+            {b.status === "pending" && (
+              <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "confirmed")}>Confirmar</Button>
+            )}
+            {(b.status === "confirmed" || b.status === "pending") && (
+              <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "completed")}>Completar</Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => onEdit(b)}>
+              <Edit className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Vista Día ─────────────────────────────────────────────────────────────────
+function DayView({ bookings, isLoading, onEdit, onStatus }: {
+  bookings: any[] | undefined;
+  isLoading: boolean;
+  onEdit: (b: any) => void;
+  onStatus: (id: number, status: string) => void;
+}) {
+  if (isLoading) return <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full" />)}</div>;
+  if (!bookings || bookings.length === 0) {
+    return <Card><CardContent className="py-12 text-center text-muted-foreground">Sin reservas para este día</CardContent></Card>;
+  }
+  return (
+    <div className="space-y-3">
+      {bookings.map(b => (
+        <BookingCard key={b.id} b={b} onEdit={onEdit} onStatus={onStatus} />
+      ))}
+    </div>
+  );
+}
+
+// ─── Vista Semana ──────────────────────────────────────────────────────────────
+function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus }: {
+  bookings: any[] | undefined;
+  isLoading: boolean;
+  weekStart: Date;
+  onDayClick: (date: string) => void;
+  onEdit: (b: any) => void;
+  onStatus: (id: number, status: string) => void;
+}) {
+  const days = eachDayOfInterval({ start: weekStart, end: endOfWeek(weekStart, { locale: es }) });
+
+  if (isLoading) return <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-32 w-full" />)}</div>;
+
+  return (
+    <div className="space-y-4">
+      {days.map(day => {
+        const dateStr = format(day, "yyyy-MM-dd");
+        const dayBookings = (bookings ?? []).filter(b => b.bookingDate === dateStr);
+        const isToday = isSameDay(day, new Date());
+        return (
+          <div key={dateStr}>
+            <div
+              className={`flex items-center gap-2 mb-2 cursor-pointer group`}
+              onClick={() => onDayClick(dateStr)}
+            >
+              <span className={`text-sm font-semibold capitalize ${isToday ? "text-teal-600" : "text-foreground"}`}>
+                {format(day, "EEEE d 'de' MMMM", { locale: es })}
+              </span>
+              {dayBookings.length > 0 && (
+                <Badge variant="secondary" className="text-xs">{dayBookings.length} reserva{dayBookings.length !== 1 ? "s" : ""}</Badge>
+              )}
+            </div>
+            {dayBookings.length === 0 ? (
+              <p className="text-xs text-muted-foreground pl-2 pb-2">Sin reservas</p>
+            ) : (
+              <div className="space-y-2 pl-1">
+                {dayBookings.map(b => (
+                  <BookingCard key={b.id} b={b} onEdit={onEdit} onStatus={onStatus} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Vista Mes ─────────────────────────────────────────────────────────────────
+function MonthView({ bookings, isLoading, monthDate, onDayClick }: {
+  bookings: any[] | undefined;
+  isLoading: boolean;
+  monthDate: Date;
+  onDayClick: (date: string) => void;
+}) {
+  if (isLoading) return <div className="grid grid-cols-7 gap-1">{Array(35).fill(0).map((_, i) => <Skeleton key={i} className="h-16" />)}</div>;
+
+  const monthStart = startOfMonth(monthDate);
+  const monthEnd = endOfMonth(monthDate);
+  const calStart = startOfWeek(monthStart, { locale: es });
+  const calEnd = endOfWeek(monthEnd, { locale: es });
+  const days = eachDayOfInterval({ start: calStart, end: calEnd });
+
+  const dayNames = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"];
+
+  return (
+    <div>
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {dayNames.map(d => (
+          <div key={d} className="text-center text-xs font-medium text-muted-foreground py-1">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {days.map(day => {
+          const dateStr = format(day, "yyyy-MM-dd");
+          const count = (bookings ?? []).filter(b => b.bookingDate === dateStr).length;
+          const isCurrentMonth = isSameMonth(day, monthDate);
+          const isToday = isSameDay(day, new Date());
+          const revenue = (bookings ?? [])
+            .filter(b => b.bookingDate === dateStr && b.paymentStatus === "paid" && b.status !== "cancelled")
+            .reduce((sum: number, b: any) => sum + Number(b.amountPaid ?? 0), 0);
+
+          return (
+            <button
+              key={dateStr}
+              onClick={() => onDayClick(dateStr)}
+              className={`relative min-h-[64px] rounded-lg border p-1.5 text-left transition-colors hover:bg-accent ${
+                isCurrentMonth ? "bg-background" : "bg-muted/30 text-muted-foreground"
+              } ${isToday ? "border-teal-500 border-2" : "border-border"}`}
+            >
+              <span className={`text-xs font-medium ${isToday ? "text-teal-600" : ""}`}>
+                {format(day, "d")}
+              </span>
+              {count > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  <div className={`text-xs font-semibold ${count > 0 ? "text-teal-700" : ""}`}>
+                    {count} reserva{count !== 1 ? "s" : ""}
+                  </div>
+                  {revenue > 0 && (
+                    <div className="text-[10px] text-green-600">
+                      ${revenue.toLocaleString("es-CL")}
+                    </div>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
 export default function MasajesAgenda() {
+  const [view, setView] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<BookingForm>(emptyForm(selectedDate));
   const utils = trpc.useUtils();
 
-  const { data: bookings, isLoading } = trpc.masajes.agenda.getByDateRange.useQuery(
-    { from: selectedDate, to: selectedDate }
-  );
+  // Calcular rango según vista
+  const parsedDate = parseISO(selectedDate);
+  const weekStart = startOfWeek(parsedDate, { locale: es });
+  const from = view === "day" ? selectedDate
+    : view === "week" ? format(weekStart, "yyyy-MM-dd")
+    : format(startOfMonth(parsedDate), "yyyy-MM-dd");
+  const to = view === "day" ? selectedDate
+    : view === "week" ? format(endOfWeek(parsedDate, { locale: es }), "yyyy-MM-dd")
+    : format(endOfMonth(parsedDate), "yyyy-MM-dd");
+
+  const { data: bookings, isLoading } = trpc.masajes.agenda.getByDateRange.useQuery({ from, to });
   const { data: techniques } = trpc.masajes.tecnicas.getAll.useQuery();
   const { data: therapists } = trpc.masajes.terapeutas.getAll.useQuery();
   const { data: rooms } = trpc.masajes.salas.getAll.useQuery();
@@ -76,6 +271,8 @@ export default function MasajesAgenda() {
     onSuccess: () => { utils.masajes.agenda.getByDateRange.invalidate(); toast.success("Estado actualizado"); },
     onError: e => toast.error(e.message),
   });
+
+  const handleStatus = (id: number, status: string) => statusMut.mutate({ id, status: status as any });
 
   const openCreate = () => {
     setEditingId(null);
@@ -118,7 +315,6 @@ export default function MasajesAgenda() {
     else createMut.mutate(data);
   };
 
-  // Auto-fill amount from technique price when technique or duration changes
   const setTechnique = (techniqueId: string) => {
     const technique = techniques?.find(t => String(t.id) === techniqueId);
     let price = "";
@@ -144,72 +340,110 @@ export default function MasajesAgenda() {
     setForm(f => ({ ...f, duration: d, endTime: calcEndTime(f.startTime, d), amountPaid: price || f.amountPaid }));
   };
 
+  // Navegación según vista
+  const navPrev = () => {
+    if (view === "day") setSelectedDate(format(subDays(parsedDate, 1), "yyyy-MM-dd"));
+    else if (view === "week") setSelectedDate(format(subWeeks(parsedDate, 1), "yyyy-MM-dd"));
+    else setSelectedDate(format(subMonths(parsedDate, 1), "yyyy-MM-dd"));
+  };
+  const navNext = () => {
+    if (view === "day") setSelectedDate(format(addDays(parsedDate, 1), "yyyy-MM-dd"));
+    else if (view === "week") setSelectedDate(format(addWeeks(parsedDate, 1), "yyyy-MM-dd"));
+    else setSelectedDate(format(addMonths(parsedDate, 1), "yyyy-MM-dd"));
+  };
+
+  const navLabel = view === "day"
+    ? format(parsedDate, "EEEE d 'de' MMMM yyyy", { locale: es })
+    : view === "week"
+    ? `${format(weekStart, "d MMM", { locale: es })} – ${format(endOfWeek(parsedDate, { locale: es }), "d MMM yyyy", { locale: es })}`
+    : format(parsedDate, "MMMM yyyy", { locale: es });
+
+  const handleDayClick = (date: string) => {
+    setSelectedDate(date);
+    setView("day");
+  };
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-wide">Agenda</h1>
-            <p className="text-muted-foreground text-sm mt-1">Reservas de masajes por día</p>
+            <p className="text-muted-foreground text-sm mt-1">Reservas de masajes</p>
           </div>
           <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
         </div>
 
-        {/* Navegación de fecha */}
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(subDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-40" />
-          <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(addDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            {format(parseISO(selectedDate), "EEEE d 'de' MMMM", { locale: es })}
-          </span>
-          <Button variant="outline" size="sm" onClick={() => setSelectedDate(format(new Date(), "yyyy-MM-dd"))}>Hoy</Button>
-        </div>
-
-        {/* Lista de reservas */}
-        {isLoading ? (
-          <div className="space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-24 w-full" />)}</div>
-        ) : !bookings || bookings.length === 0 ? (
-          <Card><CardContent className="py-12 text-center text-muted-foreground">Sin reservas para este día</CardContent></Card>
-        ) : (
-          <div className="space-y-3">
-            {bookings.map(b => (
-              <Card key={b.id} className={b.status === "cancelled" ? "opacity-60" : ""}>
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-lg">{b.startTime}</span>
-                        <span className="text-muted-foreground">–</span>
-                        <span className="text-muted-foreground">{b.endTime}</span>
-                        <Badge variant={STATUS_VARIANTS[b.status]}>{STATUS_LABELS[b.status]}</Badge>
-                        {b.paymentStatus === "paid" && <Badge variant="outline" className="text-green-600 border-green-600">Pagado</Badge>}
-                      </div>
-                      <p className="font-medium mt-1">{b.clientName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {b.techniqueName} · {b.duration} min · {b.roomName}
-                        {b.therapistName && ` · ${b.therapistName}`}
-                      </p>
-                      {b.amountPaid && <p className="text-sm text-green-600 mt-1">$ {Number(b.amountPaid).toLocaleString("es-CL")}</p>}
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      {b.status === "pending" && (
-                        <Button size="sm" variant="outline" onClick={() => statusMut.mutate({ id: b.id, status: "confirmed" })}>Confirmar</Button>
-                      )}
-                      {(b.status === "confirmed" || b.status === "pending") && (
-                        <Button size="sm" variant="outline" onClick={() => statusMut.mutate({ id: b.id, status: "completed" })}>Completar</Button>
-                      )}
-                      <Button size="sm" variant="ghost" onClick={() => openEdit(b)}><Edit className="w-4 h-4" /></Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+        {/* Controles de navegación y vista */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Toggle HOY / SEMANA / MES */}
+          <div className="flex rounded-lg border overflow-hidden">
+            {(["day", "week", "month"] as ViewMode[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  view === v ? "bg-stone-800 text-white" : "bg-background hover:bg-accent text-foreground"
+                }`}
+              >
+                {v === "day" ? "Día" : v === "week" ? "Semana" : "Mes"}
+              </button>
             ))}
           </div>
+
+          {/* Botón Hoy */}
+          <Button variant="outline" size="sm" onClick={() => {
+            setSelectedDate(format(new Date(), "yyyy-MM-dd"));
+            setView("day");
+          }}>
+            Hoy
+          </Button>
+
+          {/* Navegación anterior/siguiente */}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" onClick={navPrev}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground capitalize min-w-[200px] text-center">
+              {navLabel}
+            </span>
+            <Button variant="outline" size="icon" onClick={navNext}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+
+          {/* Input de fecha directa (solo vista día) */}
+          {view === "day" && (
+            <Input
+              type="date"
+              value={selectedDate}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="w-40"
+            />
+          )}
+        </div>
+
+        {/* Contenido según vista */}
+        {view === "day" && (
+          <DayView bookings={bookings} isLoading={isLoading} onEdit={openEdit} onStatus={handleStatus} />
+        )}
+        {view === "week" && (
+          <WeekView
+            bookings={bookings}
+            isLoading={isLoading}
+            weekStart={weekStart}
+            onDayClick={handleDayClick}
+            onEdit={openEdit}
+            onStatus={handleStatus}
+          />
+        )}
+        {view === "month" && (
+          <MonthView
+            bookings={bookings}
+            isLoading={isLoading}
+            monthDate={parsedDate}
+            onDayClick={handleDayClick}
+          />
         )}
       </div>
 
@@ -286,7 +520,9 @@ export default function MasajesAgenda() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {slots.map(s => (
-                      <SelectItem key={s.time} value={s.time}>{s.time} ({s.availableRooms.length} sala{s.availableRooms.length !== 1 ? "s" : ""})</SelectItem>
+                      <SelectItem key={s.time} value={s.time}>
+                        {s.time} ({s.availableRooms.length} sala{s.availableRooms.length !== 1 ? "s" : ""})
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

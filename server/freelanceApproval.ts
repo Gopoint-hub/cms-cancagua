@@ -80,53 +80,33 @@ export async function sendFreelanceApprovalRequest(bookingId: number): Promise<v
   // Already has an approval in progress
   if (booking.freelanceApprovalStatus) return;
 
-  const adminToken = randomBytes(32).toString("hex");
-  await db.update(massageBookings)
-    .set({ freelanceApprovalStatus: "pending_admin", adminApprovalToken: adminToken })
-    .where(eq(massageBookings.id, bookingId));
-
-  const [manager] = await db
-    .select({ name: massageTherapists.name, phone: massageTherapists.phone, email: massageTherapists.email })
-    .from(massageTherapists)
-    .where(eq(massageTherapists.isManager, 1))
-    .limit(1);
-
-  if (!manager) {
-    console.warn("[FreelanceApproval] No hay admin (isManager=1) para notificar");
+  // Flujo simplificado: notificar directamente al terapeuta (sin paso de aprobación del admin)
+  if (!booking.therapistPhone) {
+    console.warn(`[FreelanceApproval] Terapeuta sin teléfono para booking ${bookingId}, notificando a Tamara`);
+    await sendWhatsApp("+56999002232",
+      `⚠️ *Reserva sin terapeuta contactable* — Cancagua Spa\n\nSe necesita asignación manual para:\n👤 ${booking.clientName}\n💆 ${booking.techniqueName ?? "Masaje"} · ${booking.duration} min\n📅 ${humanDate(dateStr(booking.bookingDate))}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\nEl terapeuta asignado no tiene teléfono registrado.`
+    ).catch((e) => console.error("[FreelanceApproval] WA Tamara:", e));
     return;
   }
 
+  const therapistToken = randomBytes(32).toString("hex");
+  await db.update(massageBookings)
+    .set({ freelanceApprovalStatus: "admin_approved", therapistConfirmationToken: therapistToken })
+    .where(eq(massageBookings.id, bookingId));
+
   const ds = dateStr(booking.bookingDate);
   const hd = humanDate(ds);
-  const therapistName = booking.therapistName ?? "Terapeuta freelance";
+  const therapistName = booking.therapistName ?? "Terapeuta";
   const techniqueName = booking.techniqueName ?? "Masaje";
 
-  const approveUrl = `${ENV.appUrl}/api/masajes/freelance-approval?token=${adminToken}&action=approve`;
-  const rejectUrl = `${ENV.appUrl}/api/masajes/freelance-approval?token=${adminToken}&action=reject`;
+  const confirmUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}&action=confirm`;
+  const rejectUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}&action=reject`;
 
-  const waMsg = `🔔 *Nueva reserva — Aprobación requerida*\n\nSe asignó un terapeuta FREELANCE que necesita tu aprobación.\n\n👤 Cliente: ${booking.clientName}\n💆 ${techniqueName} · ${booking.duration} min\n📅 ${hd}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n👩‍⚕️ Terapeuta propuesto: ${therapistName}\n\n¿Apruebas esta asignación?\n\n✅ Aprobar:\n${approveUrl}\n\n❌ Rechazar:\n${rejectUrl}`;
+  await sendWhatsApp(
+    booking.therapistPhone,
+    `📅 *Nueva reserva asignada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva asignada.\n\n💆 ${techniqueName} · ${booking.duration} min\n👤 Cliente: ${booking.clientName}\n📅 ${hd}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\n¿Puedes realizar este masaje?\n\n1️⃣ Confirmo masaje:\n${confirmUrl}\n\n2️⃣ No puedo realizarlo:\n${rejectUrl}`
+  ).catch((e) => console.error("[FreelanceApproval] WA terapeuta:", e));
 
-  if (manager.phone) {
-    await sendWhatsApp(manager.phone, waMsg).catch((e) =>
-      console.error("[FreelanceApproval] WA admin:", e)
-    );
-  }
-
-  if (manager.email) {
-    await sendFreelanceApprovalRequestEmail({
-      to: manager.email,
-      managerName: manager.name ?? "Tamara",
-      clientName: booking.clientName,
-      techniqueName,
-      bookingDate: ds,
-      startTime: booking.startTime,
-      endTime: booking.endTime ?? "",
-      duration: booking.duration,
-      therapistName,
-      approveUrl,
-      rejectUrl,
-    }).catch((e) => console.error("[FreelanceApproval] Email admin:", e));
-  }
 }
 
 // GET /api/masajes/freelance-approval?token=&action=approve|reject  (Tamara)
@@ -255,17 +235,18 @@ router.get("/freelance-confirmation", async (req: Request, res: Response) => {
     .where(eq(massageTherapists.isManager, 1))
     .limit(1);
 
+  const TAMARA_PHONE = "+56999002232";
+
   if (action === "reject") {
     await db.update(massageBookings)
       .set({ freelanceApprovalStatus: "therapist_rejected" })
       .where(eq(massageBookings.id, booking.id));
 
-    if (manager?.phone) {
-      await sendWhatsApp(
-        manager.phone,
-        `❌ *${therapistName}* no puede realizar el masaje de ${booking.clientName}.\n📅 ${hd} · ${booking.startTime} hrs\nLa asignación queda manual.`
-      ).catch((e) => console.error("[FreelanceApproval] WA manager rechazo terapeuta:", e));
-    }
+    // Notificar a Tamara directamente con número fijo
+    await sendWhatsApp(
+      TAMARA_PHONE,
+      `❌ *${therapistName}* no puede realizar el masaje.\n\n👤 ${booking.clientName}\n💆 ${techniqueName}\n📅 ${hd} · ${booking.startTime} hrs\n\n⚠️ Se requiere asignación manual de terapeuta. Aparece en el dashboard.`
+    ).catch((e) => console.error("[FreelanceApproval] WA Tamara rechazo:", e));
 
     return res.send(htmlPage(
       "Gracias por avisarnos",
@@ -279,12 +260,11 @@ router.get("/freelance-confirmation", async (req: Request, res: Response) => {
     .set({ freelanceApprovalStatus: "therapist_confirmed", status: "confirmed" })
     .where(eq(massageBookings.id, booking.id));
 
-  if (manager?.phone) {
-    await sendWhatsApp(
-      manager.phone,
-      `✅ *${therapistName}* confirmó el masaje de ${booking.clientName}.\n💆 ${techniqueName}\n📅 ${hd} · ${booking.startTime} hrs\nYa aparece en el dashboard.`
-    ).catch((e) => console.error("[FreelanceApproval] WA manager confirmacion:", e));
-  }
+  // Notificar a Tamara que el terapeuta confirmó
+  await sendWhatsApp(
+    TAMARA_PHONE,
+    `✅ *${therapistName}* confirmó el masaje.\n\n👤 ${booking.clientName}\n💆 ${techniqueName}\n📅 ${hd} · ${booking.startTime} hrs\nYa aparece confirmado en el dashboard.`
+  ).catch((e) => console.error("[FreelanceApproval] WA Tamara confirmacion:", e));
 
   return res.send(htmlPage(
     "¡Masaje confirmado!",

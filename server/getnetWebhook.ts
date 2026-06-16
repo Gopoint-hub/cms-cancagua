@@ -172,7 +172,6 @@ export async function sendBookingConfirmations(bookingId: number) {
       to: bookingData.clientEmail,
       clientName: bookingData.clientName,
       techniqueName,
-      therapistName,
       bookingDate: dateStr,
       startTime: bookingData.startTime,
       duration: bookingData.duration,
@@ -193,7 +192,7 @@ export async function sendBookingConfirmations(bookingId: number) {
   if (bookingData.clientPhone) {
     await sendWhatsApp(
       bookingData.clientPhone,
-      `✅ *¡Tu reserva está confirmada!* — Cancagua Spa\n\nHola ${bookingData.clientName}! Tu pago fue procesado exitosamente.\n\n*${techniqueName}* · ${bookingData.duration} min\n📅 ${humanDate}\n🕐 ${bookingData.startTime} hrs\n\nTe esperamos en Cancagua Spa. ¡Que disfrutes tu masaje!`
+      `✅ *¡Tu reserva está confirmada!* — Cancagua Spa\n\nHola ${bookingData.clientName}! Tu pago fue procesado exitosamente.\n\n*${techniqueName}* · ${bookingData.duration} min\n📅 ${humanDate}\n🕐 ${bookingData.startTime} hrs\n📍https://maps.app.goo.gl/mhKem25vtagvCiSm8\n*Recuerda llegar con 10 minutos de anticipación para hacer Check-in en recepción.*\n\nTe esperamos en Cancagua Spa. ¡Que disfrutes tu masaje!`
     ).catch((e) => console.error("[Confirmaciones] WhatsApp cliente:", e));
   }
 
