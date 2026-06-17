@@ -503,7 +503,7 @@ export default function MasajesAgenda() {
                 <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sin asignar</SelectItem>
-                  {therapists?.filter(t => t.active === 1).map(t => (
+                  {therapists?.filter(t => t.active !== 0).map(t => (
                     <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
                   ))}
                 </SelectContent>
