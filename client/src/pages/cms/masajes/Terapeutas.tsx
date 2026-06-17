@@ -13,9 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Plus, Edit, Phone, Mail, Clock, Star, Save, Trash2, CalendarX } from "lucide-react";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { Plus, Edit, Phone, Mail, Clock, Star, Save, Trash2, CalendarX, CalendarRange } from "lucide-react";
 
 const DRAFT_KEY = "masajes:draft:terapeuta";
 
@@ -141,11 +139,17 @@ export default function MasajesTerapeutas() {
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(defaultSchedule(ALL_DAYS));
   const [formTab, setFormTab] = useState<"datos" | "horarios">("datos");
 
-  // Estado para el diálogo de bloqueo de fecha
+  // Estado para el diálogo de bloqueo de fecha (por día específico)
   const [blockDialog, setBlockDialog] = useState<{ dayOfWeek: number; dayLabel: string } | null>(null);
   const [blockFrom, setBlockFrom] = useState("");
   const [blockTo, setBlockTo] = useState("");
   const [blockReason, setBlockReason] = useState("");
+
+  // Estado para bloqueo de vacaciones / ausencia completa
+  const [vacationFrom, setVacationFrom] = useState("");
+  const [vacationTo, setVacationTo] = useState("");
+  const [vacationReason, setVacationReason] = useState("");
+  const [vacationSaving, setVacationSaving] = useState(false);
 
   const { data: therapists, isLoading } = trpc.masajes.terapeutas.getAll.useQuery();
   const { data: techniques } = trpc.masajes.tecnicas.getAll.useQuery();
@@ -199,6 +203,10 @@ export default function MasajesTerapeutas() {
       toast.success("Bloqueo guardado");
       setBlockDialog(null);
     },
+    onError: e => toast.error(e.message),
+  });
+  // Mutación silenciosa para el bloqueo de vacaciones (sin toast individual)
+  const vacationBlockMut = trpc.masajes.terapeutas.blockAvailability.useMutation({
     onError: e => toast.error(e.message),
   });
   const deleteMut = trpc.masajes.terapeutas.delete.useMutation({
@@ -303,6 +311,36 @@ export default function MasajesTerapeutas() {
       blockTo,
       blockReason: blockReason || undefined,
     });
+  };
+
+  const handleSaveVacation = async () => {
+    if (!editing) return;
+    if (!vacationFrom || !vacationTo) { toast.error("Indica las fechas del período de ausencia"); return; }
+    if (vacationFrom > vacationTo) { toast.error("La fecha de inicio debe ser anterior al fin"); return; }
+    // Solo bloquea los días que ya tienen fila en la DB (id definido)
+    const daysWithSchedule = scheduleRows.filter(r => r.id !== undefined);
+    if (daysWithSchedule.length === 0) {
+      toast.error("Guarda el horario primero antes de aplicar un bloqueo general");
+      return;
+    }
+    setVacationSaving(true);
+    try {
+      for (const row of daysWithSchedule) {
+        await vacationBlockMut.mutateAsync({
+          therapistId: editing,
+          dayOfWeek: row.dayOfWeek,
+          blockFrom: vacationFrom,
+          blockTo: vacationTo,
+          blockReason: vacationReason || "Vacaciones",
+        });
+      }
+      utils.masajes.terapeutas.getSchedules.invalidate();
+      toast.success(`Período de ausencia aplicado a ${daysWithSchedule.length} días`);
+    } catch {
+      toast.error("Error al guardar el bloqueo");
+    } finally {
+      setVacationSaving(false);
+    }
   };
 
   const updateScheduleRow = (dayOfWeek: number, field: keyof ScheduleRow, value: any) => {
@@ -467,11 +505,57 @@ export default function MasajesTerapeutas() {
               {/* TAB HORARIOS Y DISPONIBILIDAD */}
               {editing && (
                 <TabsContent value="horarios">
-                  <div className="py-3 space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      Configura los días y horarios de trabajo habitual.
-                      {form.type === "freelance" && " (Martes a Domingo)"}
-                    </p>
+                  <div className="py-3 space-y-5">
+
+                    {/* ── Bloqueo general: vacaciones / ausencia completa ── */}
+                    <div className="border border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-900 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <CalendarRange className="w-4 h-4 text-orange-600" />
+                        <span className="font-medium text-sm">Período de ausencia completa</span>
+                        <span className="text-xs text-muted-foreground">(vacaciones, licencia, etc.)</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Bloquea <strong>todos los días trabajados</strong> dentro del rango de fechas indicado. Ideal para vacaciones o períodos largos de ausencia.
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs">Desde</Label>
+                          <Input type="date" value={vacationFrom} onChange={e => setVacationFrom(e.target.value)} className="mt-1 h-8 text-sm" />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Hasta</Label>
+                          <Input type="date" value={vacationTo} onChange={e => setVacationTo(e.target.value)} className="mt-1 h-8 text-sm" />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Motivo (opcional)</Label>
+                        <Input
+                          value={vacationReason}
+                          onChange={e => setVacationReason(e.target.value)}
+                          placeholder="Vacaciones, licencia médica..."
+                          className="mt-1 h-8 text-sm"
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleSaveVacation}
+                        disabled={vacationSaving || vacationBlockMut.isPending}
+                        className="gap-2"
+                      >
+                        <CalendarRange className="w-3 h-3" />
+                        {vacationSaving ? "Guardando..." : "Aplicar bloqueo a todos los días"}
+                      </Button>
+                    </div>
+
+                    {/* ── Horario por día ── */}
+                    <div>
+                      <p className="text-sm font-medium mb-2">Horario semanal</p>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        Configura días y horarios habituales. Usa "Bloquear" para excepciones puntuales por día.
+                        {form.type === "freelance" && " (Martes a Domingo)"}
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       {days.map(day => {
                         const row = scheduleRows.find(r => r.dayOfWeek === day.value);
