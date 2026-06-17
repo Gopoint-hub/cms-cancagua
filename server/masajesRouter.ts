@@ -1445,7 +1445,7 @@ const masajesPublicRouter = router({
             .limit(1);
           if (existing && existing.paymentStatus !== "paid") {
             await db.update(massageBookings)
-              .set({ paymentStatus: "paid", status: "confirmed" })
+              .set({ paymentStatus: "paid", status: "pending" })
               .where(eq(massageBookings.id, existing.id));
             sendBookingConfirmations(existing.id).catch((e) =>
               console.error("[checkPaymentStatus] Error en notificaciones:", e)
