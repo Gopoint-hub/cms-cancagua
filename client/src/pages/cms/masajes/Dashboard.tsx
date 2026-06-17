@@ -107,68 +107,68 @@ export default function MasajesDashboard() {
           </Card>
         </div>
 
-        {/* Asignación manual pendiente */}
-        {(loadingPending || (pendingAssignment && pendingAssignment.length > 0)) && (
-          <Card className="border-amber-300 bg-amber-50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2 text-amber-800">
-                <UserX className="w-5 h-5" />
-                Asignación manual pendiente
-                {!loadingPending && pendingAssignment && (
-                  <Badge variant="outline" className="ml-1 border-amber-400 text-amber-800 bg-amber-100">
-                    {pendingAssignment.length}
-                  </Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingPending ? (
-                <div className="space-y-2">
-                  {[1, 2].map(i => <Skeleton key={i} className="h-14 w-full" />)}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {pendingAssignment!.map(b => {
-                    const reason =
-                      b.freelanceApprovalStatus === "therapist_rejected" ? "Terapeuta rechazó — reasignar" :
-                      b.freelanceApprovalStatus === "admin_approved" ? "⏳ Esperando respuesta del terapeuta" :
-                      b.freelanceApprovalStatus === "admin_rejected" ? "Sin terapeuta disponible" :
-                      "Sin terapeuta asignado";
-                    return (
-                      <div key={b.id} className="flex items-center justify-between border border-amber-200 rounded-lg p-3 bg-white">
-                        <div className="min-w-0">
-                          <p className="font-medium text-sm truncate">{b.clientName}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {b.techniqueName} · {b.duration} min · {b.bookingDate} {b.startTime}
-                          </p>
-                          <p className="text-xs text-amber-700 mt-0.5">{reason}</p>
-                        </div>
-                        <div className="flex gap-1 ml-3 shrink-0">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-xs border-amber-400 hover:bg-amber-100"
-                            onClick={() => notifyMut.mutate({ bookingId: b.id })}
-                            disabled={notifyMut.isPending}
-                            title="Enviar WhatsApp de confirmación al terapeuta asignado"
-                          >
-                            <Send className="w-3 h-3 mr-1" />
-                            Notificar
-                          </Button>
-                          <Link href="/cms/masajes/agenda">
-                            <Button variant="outline" size="sm" className="text-xs border-amber-400 hover:bg-amber-100">
-                              Asignar
-                            </Button>
-                          </Link>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+        {/* Asignación manual pendiente — siempre visible */}
+        <Card className="border-amber-300 bg-amber-50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-amber-800">
+              <UserX className="w-5 h-5" />
+              Asignación manual pendiente
+              {!loadingPending && pendingAssignment && pendingAssignment.length > 0 && (
+                <Badge variant="outline" className="ml-1 border-amber-400 text-amber-800 bg-amber-100">
+                  {pendingAssignment.length}
+                </Badge>
               )}
-            </CardContent>
-          </Card>
-        )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loadingPending ? (
+              <div className="space-y-2">
+                {[1, 2].map(i => <Skeleton key={i} className="h-14 w-full" />)}
+              </div>
+            ) : !pendingAssignment || pendingAssignment.length === 0 ? (
+              <p className="text-sm text-amber-700/60 text-center py-3">Sin reservas pendientes de asignación</p>
+            ) : (
+              <div className="space-y-2">
+                {pendingAssignment.map(b => {
+                  const reason =
+                    b.freelanceApprovalStatus === "therapist_rejected" ? "Terapeuta rechazó — reasignar" :
+                    b.freelanceApprovalStatus === "admin_approved" ? "⏳ Esperando respuesta del terapeuta" :
+                    b.freelanceApprovalStatus === "admin_rejected" ? "Sin terapeuta disponible" :
+                    "Sin terapeuta asignado";
+                  return (
+                    <div key={b.id} className="flex items-center justify-between border border-amber-200 rounded-lg p-3 bg-white">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">{b.clientName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {b.techniqueName} · {b.duration} min · {b.bookingDate} {b.startTime}
+                        </p>
+                        <p className="text-xs text-amber-700 mt-0.5">{reason}</p>
+                      </div>
+                      <div className="flex gap-1 ml-3 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs border-amber-400 hover:bg-amber-100"
+                          onClick={() => notifyMut.mutate({ bookingId: b.id })}
+                          disabled={notifyMut.isPending}
+                          title="Enviar WhatsApp de confirmación al terapeuta asignado"
+                        >
+                          <Send className="w-3 h-3 mr-1" />
+                          Notificar
+                        </Button>
+                        <Link href="/cms/masajes/agenda">
+                          <Button variant="outline" size="sm" className="text-xs border-amber-400 hover:bg-amber-100">
+                            Asignar
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Agenda del día */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
