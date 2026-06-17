@@ -7,12 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, ChevronLeft, ChevronRight, UserX } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, UserX, Send, ChevronLeft, ChevronRight } from "lucide-react";
 import { Link } from "wouter";
+import { toast } from "sonner";
 
 const STOCK_PAGE_SIZE = 5;
 
 export default function MasajesDashboard() {
+  const utils = trpc.useUtils();
   const today = format(new Date(), "yyyy-MM-dd");
   const [stockPage, setStockPage] = useState(0);
   const { data: bookings, isLoading: loadingBookings } = trpc.masajes.agenda.getByDateRange.useQuery(
@@ -22,6 +24,13 @@ export default function MasajesDashboard() {
   const { data: therapists, isLoading: loadingTherapists } = trpc.masajes.terapeutas.getAll.useQuery();
 
   const { data: pendingAssignment, isLoading: loadingPending } = trpc.masajes.agenda.getPendingManualAssignment.useQuery();
+  const notifyMut = trpc.masajes.agenda.notifyFreelanceTherapist.useMutation({
+    onSuccess: () => {
+      utils.masajes.agenda.getPendingManualAssignment.invalidate();
+      toast.success("WhatsApp enviado al terapeuta");
+    },
+    onError: e => toast.error(e.message),
+  });
 
   const confirmed = bookings?.filter(b => b.status === "confirmed" || b.status === "pending") ?? [];
   const activeTherapists = therapists?.filter(t => t.active === 1) ?? [];
@@ -133,11 +142,24 @@ export default function MasajesDashboard() {
                           </p>
                           <p className="text-xs text-amber-700 mt-0.5">{reason}</p>
                         </div>
-                        <Link href="/cms/masajes/agenda">
-                          <Button variant="outline" size="sm" className="ml-3 shrink-0 text-xs border-amber-400 hover:bg-amber-100">
-                            Asignar
+                        <div className="flex gap-1 ml-3 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs border-amber-400 hover:bg-amber-100"
+                            onClick={() => notifyMut.mutate({ bookingId: b.id })}
+                            disabled={notifyMut.isPending}
+                            title="Enviar WhatsApp de confirmación al terapeuta asignado"
+                          >
+                            <Send className="w-3 h-3 mr-1" />
+                            Notificar
                           </Button>
-                        </Link>
+                          <Link href="/cms/masajes/agenda">
+                            <Button variant="outline" size="sm" className="text-xs border-amber-400 hover:bg-amber-100">
+                              Asignar
+                            </Button>
+                          </Link>
+                        </div>
                       </div>
                     );
                   })}

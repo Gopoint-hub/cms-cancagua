@@ -3,7 +3,25 @@
  * All emails are sent from @cancagua.cl domain
  */
 import { Resend } from "resend";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { ENV } from "./env";
+
+function getReglamentoBase64(): string {
+  try {
+    const filePath = join(__dirname, "../../server/assets/reglamento-masajes.pdf");
+    return readFileSync(filePath).toString("base64");
+  } catch {
+    // Fallback path for compiled output
+    try {
+      const filePath = join(__dirname, "../assets/reglamento-masajes.pdf");
+      return readFileSync(filePath).toString("base64");
+    } catch {
+      console.warn("[Email] No se pudo cargar reglamento-masajes.pdf");
+      return "";
+    }
+  }
+}
 
 let resend: Resend | null = null;
 
@@ -699,10 +717,16 @@ export async function sendMassageBookingConfirmationEmail(params: {
       ? `<p style="margin: 0 0 8px; color: #52525b;">Monto pagado: <strong>${formattedAmount}</strong></p>`
       : "";
 
+    const reglamentoBase64 = getReglamentoBase64();
+    const attachments = reglamentoBase64
+      ? [{ filename: "Reglamento-Cancagua-Spa.pdf", content: reglamentoBase64 }]
+      : [];
+
     const { data, error } = await client.emails.send({
       from: FROM_EMAIL,
       to: [params.to],
       subject: "Reserva de masaje confirmada - Cancagua",
+      attachments,
       html: `
 <!DOCTYPE html>
 <html>
@@ -735,6 +759,12 @@ export async function sendMassageBookingConfirmationEmail(params: {
                 <p style="margin: 0 0 8px; color: #52525b;">Hora: <strong>${escapeHtml(params.startTime)} hrs</strong></p>
                 <p style="margin: 0 0 8px; color: #52525b;">Duración: <strong>${params.duration} min</strong></p>
                 ${amountLine}
+              </div>
+              <div style="margin: 24px 0; padding: 20px; background-color: #fefce8; border-radius: 8px; border: 1px solid #fde68a;">
+                <p style="margin: 0 0 8px; color: #92400e; font-size: 15px; font-weight: 600;">📄 Documento adjunto importante</p>
+                <p style="margin: 0; color: #78350f; font-size: 14px; line-height: 1.6;">
+                  Te enviamos adjunto un documento que necesitamos que revises antes de tu reserva. En él encontrarás todas las recomendaciones y restricciones de nuestros servicios, incluyendo indicaciones sobre la ropa, cómo prepararte para la sesión y nuestro reglamento interno.
+                </p>
               </div>
               <p style="margin: 24px 0 0; color: #71717a; font-size: 14px; line-height: 1.6;">
                 Si necesitas modificar tu reserva, contáctanos respondiendo este correo o escribiendo a ${SUPPORT_EMAIL}.

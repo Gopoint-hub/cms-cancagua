@@ -418,6 +418,21 @@ const agendaRouter = router({
     return rows.map(row => serializeDateFields(row, ["bookingDate"]));
   }),
 
+  notifyFreelanceTherapist: protectedProcedure
+    .input(z.object({ bookingId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      // Resetea el estado de aprobación para que sendFreelanceApprovalRequest pueda re-ejecutarse
+      await db.update(massageBookings)
+        .set({ freelanceApprovalStatus: null, therapistConfirmationToken: null })
+        .where(eq(massageBookings.id, input.bookingId));
+      const { sendFreelanceApprovalRequest } = await import("./freelanceApproval");
+      await sendFreelanceApprovalRequest(input.bookingId);
+      return { success: true };
+    }),
+
   getAvailableSlots: protectedProcedure
     .input(z.object({ date: z.string(), duration: z.number(), techniqueId: z.number().optional() }))
     .query(async ({ ctx, input }) => {
