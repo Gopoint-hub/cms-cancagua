@@ -424,9 +424,9 @@ const agendaRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      // Resetea el estado de aprobación para que sendFreelanceApprovalRequest pueda re-ejecutarse
+      // Resetea estado de aprobación Y vuelve a pending para que el flujo sea correcto
       await db.update(massageBookings)
-        .set({ freelanceApprovalStatus: null, therapistConfirmationToken: null })
+        .set({ freelanceApprovalStatus: null, therapistConfirmationToken: null, status: "pending" })
         .where(eq(massageBookings.id, input.bookingId));
       const { sendFreelanceApprovalRequest } = await import("./freelanceApproval");
       await sendFreelanceApprovalRequest(input.bookingId);

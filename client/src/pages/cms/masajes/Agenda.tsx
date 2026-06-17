@@ -271,6 +271,15 @@ export default function MasajesAgenda() {
     onSuccess: () => { utils.masajes.agenda.getByDateRange.invalidate(); toast.success("Estado actualizado"); },
     onError: e => toast.error(e.message),
   });
+  const notifyMut = trpc.masajes.agenda.notifyFreelanceTherapist.useMutation({
+    onSuccess: () => {
+      utils.masajes.agenda.getByDateRange.invalidate();
+      utils.masajes.agenda.getPendingManualAssignment.invalidate();
+      toast.success("WhatsApp enviado al terapeuta — reserva en espera de confirmación");
+      setOpen(false);
+    },
+    onError: e => toast.error(e.message),
+  });
 
   const handleStatus = (id: number, status: string) => statusMut.mutate({ id, status: status as any });
 
@@ -490,10 +499,10 @@ export default function MasajesAgenda() {
             </div>
             <div>
               <Label>Terapeuta</Label>
-              <Select value={form.therapistId} onValueChange={v => setForm(f => ({ ...f, therapistId: v }))}>
+              <Select value={form.therapistId || "none"} onValueChange={v => setForm(f => ({ ...f, therapistId: v === "none" ? "" : v }))}>
                 <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sin asignar</SelectItem>
+                  <SelectItem value="none">Sin asignar</SelectItem>
                   {therapists?.filter(t => t.active === 1).map(t => (
                     <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
                   ))}
@@ -553,7 +562,18 @@ export default function MasajesAgenda() {
               <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            {editingId && (
+              <Button
+                variant="outline"
+                className="border-amber-400 text-amber-700 hover:bg-amber-50 gap-2"
+                onClick={() => notifyMut.mutate({ bookingId: editingId })}
+                disabled={notifyMut.isPending}
+                title="Enviar WhatsApp de confirmación al terapeuta asignado y poner reserva en espera"
+              >
+                📲 Notificar terapeuta
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
             <Button onClick={handleSave} disabled={createMut.isPending || updateMut.isPending}>
               {editingId ? "Guardar cambios" : "Crear reserva"}
