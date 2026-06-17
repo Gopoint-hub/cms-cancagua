@@ -130,8 +130,9 @@ export default function MasajesDashboard() {
                 <div className="space-y-2">
                   {pendingAssignment!.map(b => {
                     const reason =
-                      b.freelanceApprovalStatus === "admin_rejected" ? "Admin rechazó freelance" :
-                      b.freelanceApprovalStatus === "therapist_rejected" ? "Terapeuta rechazó reserva" :
+                      b.freelanceApprovalStatus === "therapist_rejected" ? "Terapeuta rechazó — reasignar" :
+                      b.freelanceApprovalStatus === "admin_approved" ? "⏳ Esperando respuesta del terapeuta" :
+                      b.freelanceApprovalStatus === "admin_rejected" ? "Sin terapeuta disponible" :
                       "Sin terapeuta asignado";
                     return (
                       <div key={b.id} className="flex items-center justify-between border border-amber-200 rounded-lg p-3 bg-white">

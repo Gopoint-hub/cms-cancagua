@@ -381,7 +381,11 @@ const agendaRouter = router({
       .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
       .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
       .leftJoin(massageRooms, eq(massageBookings.roomId, massageRooms.id))
-      .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any)))
+      .where(and(
+        gte(massageBookings.bookingDate, input.from as any),
+        lte(massageBookings.bookingDate, input.to as any),
+        inArray(massageBookings.status, ["confirmed", "completed", "no_show"])
+      ))
       .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
       return rows.map(row => serializeDateFields(row, ["bookingDate"]));
     }),
@@ -407,11 +411,7 @@ const agendaRouter = router({
     .where(
       and(
         eq(massageBookings.paymentStatus, "paid"),
-        sql`${massageBookings.status} NOT IN ('cancelled', 'completed')`,
-        or(
-          isNull(massageBookings.therapistId),
-          inArray(massageBookings.freelanceApprovalStatus, ["admin_rejected", "therapist_rejected"])
-        )
+        eq(massageBookings.status, "pending")
       )
     )
     .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));

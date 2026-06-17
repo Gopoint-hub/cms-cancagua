@@ -62,7 +62,7 @@ router.post("/", async (req: Request, res: Response) => {
     if (booking.paymentStatus !== "paid") {
       await db
         .update(massageBookings)
-        .set({ paymentStatus: "paid", status: "confirmed" })
+        .set({ paymentStatus: "paid", status: "pending" })
         .where(eq(massageBookings.id, booking.id));
 
       sendBookingConfirmations(booking.id).catch((e) =>
@@ -198,12 +198,18 @@ export async function sendBookingConfirmations(bookingId: number) {
 
   // ── Notificación al terapeuta según tipo ─────────────────────────────────────
   if (therapistType === "freelance") {
-    console.log(`[sendBookingConfirmations] booking=${bookingId} → FREELANCE: enviando solicitud de aprobación al admin`);
+    // Freelance: queda "pending" hasta que el terapeuta confirme via WA
+    console.log(`[sendBookingConfirmations] booking=${bookingId} → FREELANCE: enviando confirmación al terapeuta (booking queda pending)`);
     sendFreelanceApprovalRequest(bookingId).catch((e) =>
       console.error("[Confirmaciones] Error en aprobación freelance:", e)
     );
   } else if (therapistType === "inhouse") {
-    console.log(`[sendBookingConfirmations] booking=${bookingId} → INHOUSE: notificando terapeuta directamente`);
+    // Inhouse: no necesita confirmación, se confirma de inmediato
+    console.log(`[sendBookingConfirmations] booking=${bookingId} → INHOUSE: confirmando de inmediato`);
+    await db.update(massageBookings)
+      .set({ status: "confirmed" })
+      .where(eq(massageBookings.id, bookingId));
+
     if (therapistEmail) {
       await sendMassageTherapistNotificationEmail({
         to: therapistEmail,
@@ -225,7 +231,8 @@ export async function sendBookingConfirmations(bookingId: number) {
       ).catch((e) => console.error("[Confirmaciones] WhatsApp terapeuta:", e));
     }
   } else {
-    console.warn(`[sendBookingConfirmations] booking=${bookingId} therapistType=${therapistType} → sin notificación al terapeuta`);
+    // Sin terapeuta asignado: queda pending, aparece en dashboard como asignación pendiente
+    console.warn(`[sendBookingConfirmations] booking=${bookingId} sin terapeuta → queda pending`);
   }
 }
 
