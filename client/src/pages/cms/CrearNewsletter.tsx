@@ -114,6 +114,8 @@ export default function CMSCrearNewsletter() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfFileName, setPdfFileName] = useState<string | null>(null);
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+  // ZIP upload (HTML + assets from Claude Design)
+  const [isUploadingZip, setIsUploadingZip] = useState(false);
 
   // URL extraction
   const [sourceUrl, setSourceUrl] = useState("");
@@ -157,6 +159,7 @@ export default function CMSCrearNewsletter() {
   const bodyFileInputRef = useRef<HTMLInputElement>(null);
   const htmlFileInputRef = useRef<HTMLInputElement>(null);
   const pdfFileInputRef = useRef<HTMLInputElement>(null);
+  const zipFileInputRef = useRef<HTMLInputElement>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   // Edit mode state
@@ -366,6 +369,19 @@ export default function CMSCrearNewsletter() {
     },
   });
 
+  // Upload ZIP (HTML + assets) mutation
+  const uploadHtmlZipMutation = trpc.newsletters.uploadHtmlZip.useMutation({
+    onSuccess: (data) => {
+      setHtmlContent(data.htmlContent);
+      setIsUploadingZip(false);
+      toast.success("ZIP procesado: imágenes subidas a Cloudinary");
+    },
+    onError: (error) => {
+      toast.error(error.message || "Error al procesar el ZIP");
+      setIsUploadingZip(false);
+    },
+  });
+
   // Helper functions
   const generateSubjectFromType = (): string => {
     switch (selectedType) {
@@ -465,8 +481,27 @@ export default function CMSCrearNewsletter() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const isZip = file.name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+
+    if (isZip) {
+      setHtmlFileName(file.name);
+      setIsUploadingZip(true);
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        uploadHtmlZipMutation.mutate({ zipData: dataUrl });
+      };
+      reader.onerror = () => {
+        toast.error('Error al leer el ZIP');
+        setIsUploadingZip(false);
+      };
+      reader.readAsDataURL(file);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
     if (!file.name.endsWith('.html') && file.type !== 'text/html') {
-      toast.error('Por favor sube un archivo HTML válido');
+      toast.error('Por favor sube un archivo HTML o ZIP válido');
       return;
     }
 
@@ -481,8 +516,7 @@ export default function CMSCrearNewsletter() {
       toast.error('Error al leer el archivo HTML');
     };
     reader.readAsText(file);
-    
-    // Clear input so same file can be uploaded again if needed
+
     if (e.target) e.target.value = '';
   };
 
@@ -644,7 +678,7 @@ export default function CMSCrearNewsletter() {
   const canProceedToStep = (step: number): boolean => {
     switch (step) {
       case 2: return selectedType !== null;
-      case 3: return selectedType === 'html' ? htmlContent.trim().length > 0 : selectedType === 'pdf' ? pdfFile !== null : requestText.trim().length > 0;
+      case 3: return selectedType === 'html' ? (htmlContent.trim().length > 0 && !isUploadingZip) : selectedType === 'pdf' ? pdfFile !== null : requestText.trim().length > 0;
       case 4: return htmlContent.length > 0;
       case 5: return true;
       default: return true;
@@ -832,31 +866,42 @@ export default function CMSCrearNewsletter() {
                   <CardContent className="pt-6">
                     <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-[#44580E]/30 rounded-xl bg-[#44580E]/5 mb-2 transition-colors hover:bg-[#44580E]/10">
                       <FileText className="w-12 h-12 text-[#44580E] mb-4" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">Sube tu archivo HTML</h3>
-                      <p className="text-sm text-gray-500 text-center mb-6 max-w-md">
-                        Si descargaste el email de Claude o ChatGPT como un archivo, puedes subirlo directamente aquí.
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">Sube tu archivo HTML o ZIP</h3>
+                      <p className="text-sm text-gray-500 text-center mb-1 max-w-md">
+                        Sube un <strong>.html</strong> o un <strong>.zip</strong> con HTML + imágenes (exportación de Claude Design).
+                      </p>
+                      <p className="text-xs text-gray-400 text-center mb-6 max-w-md">
+                        En Claude Design: Compartir → Descargar → <em>Standalone HTML</em> para .html · <em>Static HTML + assets</em> para .zip
                       </p>
 
                       <input
                         type="file"
                         ref={htmlFileInputRef}
                         onChange={handleHtmlFileUpload}
-                        accept=".html,text/html"
+                        accept=".html,.zip,text/html,application/zip,application/x-zip-compressed"
                         className="hidden"
                       />
 
-                      <Button
-                        onClick={() => htmlFileInputRef.current?.click()}
-                        className="bg-[#44580E] hover:bg-[#3a4c0c]"
-                      >
-                        <Upload className="w-4 h-4 mr-2" />
-                        Seleccionar Archivo HTML
-                      </Button>
+                      {isUploadingZip ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <Loader2 className="w-8 h-8 animate-spin text-[#44580E]" />
+                          <p className="text-sm font-medium text-[#44580E]">Subiendo imágenes a Cloudinary...</p>
+                          <p className="text-xs text-gray-400">Esto puede tomar unos segundos</p>
+                        </div>
+                      ) : (
+                        <Button
+                          onClick={() => htmlFileInputRef.current?.click()}
+                          className="bg-[#44580E] hover:bg-[#3a4c0c]"
+                        >
+                          <Upload className="w-4 h-4 mr-2" />
+                          Seleccionar HTML o ZIP
+                        </Button>
+                      )}
 
-                      {htmlFileName && (
+                      {htmlFileName && !isUploadingZip && (
                         <div className="mt-4 flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1.5 rounded-full">
                           <CheckCircle2 className="w-4 h-4" />
-                          Archivo cargado: {htmlFileName}
+                          {htmlFileName.endsWith('.zip') ? `ZIP procesado: ${htmlFileName}` : `Archivo cargado: ${htmlFileName}`}
                         </div>
                       )}
                     </div>
@@ -1539,7 +1584,7 @@ export default function CMSCrearNewsletter() {
           {currentStep < totalSteps ? (
             <Button
               onClick={goToNextStep}
-              disabled={!canProceedToStep(currentStep + 1) || isGenerating || isRecording || isTranscribing || isUploadingPdf}
+              disabled={!canProceedToStep(currentStep + 1) || isGenerating || isRecording || isTranscribing || isUploadingPdf || isUploadingZip}
               className="bg-[#44580E] hover:bg-[#3a4c0c]"
             >
               {isGenerating ? (

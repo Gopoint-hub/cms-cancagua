@@ -2338,6 +2338,18 @@ ${pagesHtml}
         return { htmlContent, pageCount, pdfUrl: result.secure_url };
       }),
 
+    // Procesar ZIP con HTML estático + assets (Claude Design "Static HTML + assets")
+    uploadHtmlZip: protectedProcedure
+      .input(z.object({ zipData: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        const { processHtmlZip } = await import('./newsletterZipProcessor');
+        const htmlContent = await processHtmlZip(input.zipData);
+        return { htmlContent };
+      }),
+
     // Extraer contenido de una URL de Cancagua
     extractFromUrl: protectedProcedure
       .input(z.object({
