@@ -54,17 +54,24 @@ const EMAIL_TYPES = [
     description: "Para nuevos suscriptores",
     placeholder: "Ej: Quiero dar la bienvenida a nuevos suscriptores con un código de descuento del 15%..."
   },
-  { 
-    id: "html", 
-    icon: "💻", 
-    title: "HTML Propio", 
+  {
+    id: "html",
+    icon: "💻",
+    title: "HTML Propio",
     description: "Pega tu código HTML",
     placeholder: "Pega aquí tu código HTML completo..."
   },
-  { 
-    id: "custom", 
-    icon: "✨", 
-    title: "Personalizado", 
+  {
+    id: "pdf",
+    icon: "📄",
+    title: "Diseño PDF",
+    description: "Sube tu PDF como mailing",
+    placeholder: ""
+  },
+  {
+    id: "custom",
+    icon: "✨",
+    title: "Personalizado",
     description: "Describe tu idea",
     placeholder: "Describe libremente qué tipo de email necesitas crear..."
   },
@@ -103,7 +110,11 @@ export default function CMSCrearNewsletter() {
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
-  
+  // PDF upload
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfFileName, setPdfFileName] = useState<string | null>(null);
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+
   // URL extraction
   const [sourceUrl, setSourceUrl] = useState("");
   const [isExtractingUrl, setIsExtractingUrl] = useState(false);
@@ -145,6 +156,7 @@ export default function CMSCrearNewsletter() {
   const headerFileInputRef = useRef<HTMLInputElement>(null);
   const bodyFileInputRef = useRef<HTMLInputElement>(null);
   const htmlFileInputRef = useRef<HTMLInputElement>(null);
+  const pdfFileInputRef = useRef<HTMLInputElement>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   // Edit mode state
@@ -338,6 +350,22 @@ export default function CMSCrearNewsletter() {
     },
   });
 
+  // Upload PDF as email mutation
+  const uploadPdfAsEmailMutation = trpc.newsletters.uploadPdfAsEmail.useMutation({
+    onSuccess: (data) => {
+      setHtmlContent(data.htmlContent);
+      const subj = "Newsletter Cancagua";
+      setGeneratedSubject(subj);
+      setSubject(subj);
+      setIsUploadingPdf(false);
+      toast.success(`PDF convertido: ${data.pageCount} página${data.pageCount !== 1 ? "s" : ""}`);
+    },
+    onError: (error) => {
+      toast.error(error.message || "Error al convertir el PDF");
+      setIsUploadingPdf(false);
+    },
+  });
+
   // Helper functions
   const generateSubjectFromType = (): string => {
     switch (selectedType) {
@@ -455,6 +483,18 @@ export default function CMSCrearNewsletter() {
     reader.readAsText(file);
     
     // Clear input so same file can be uploaded again if needed
+    if (e.target) e.target.value = '';
+  };
+
+  const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Por favor sube un archivo PDF válido');
+      return;
+    }
+    setPdfFile(file);
+    setPdfFileName(file.name);
     if (e.target) e.target.value = '';
   };
 
@@ -604,7 +644,7 @@ export default function CMSCrearNewsletter() {
   const canProceedToStep = (step: number): boolean => {
     switch (step) {
       case 2: return selectedType !== null;
-      case 3: return selectedType === 'html' ? htmlContent.trim().length > 0 : requestText.trim().length > 0;
+      case 3: return selectedType === 'html' ? htmlContent.trim().length > 0 : selectedType === 'pdf' ? pdfFile !== null : requestText.trim().length > 0;
       case 4: return htmlContent.length > 0;
       case 5: return true;
       default: return true;
@@ -615,6 +655,19 @@ export default function CMSCrearNewsletter() {
     if (currentStep === 2 && canProceedToStep(3)) {
       if (selectedType === 'html') {
         setCurrentStep(3);
+      } else if (selectedType === 'pdf') {
+        if (!pdfFile) return;
+        setIsUploadingPdf(true);
+        setCurrentStep(3);
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const dataUrl = ev.target?.result as string;
+          uploadPdfAsEmailMutation.mutate({
+            pdfData: dataUrl,
+            fileName: pdfFileName || undefined,
+          });
+        };
+        reader.readAsDataURL(pdfFile);
       } else {
         // Al pasar del paso 2 al 3, generar el diseño
         handleGenerateDesign();
@@ -738,7 +791,7 @@ export default function CMSCrearNewsletter() {
                 <p className="text-gray-500">Selecciona el tipo de mailing que necesitas</p>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {EMAIL_TYPES.map((type) => (
                   <button
                     key={type.id}
@@ -767,10 +820,10 @@ export default function CMSCrearNewsletter() {
                   {EMAIL_TYPES.find(t => t.id === selectedType)?.title}
                 </div>
                 <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  {selectedType === 'html' ? 'Pega tu código HTML' : 'Describe tu solicitud'}
+                  {selectedType === 'html' ? 'Sube tu archivo HTML' : selectedType === 'pdf' ? 'Sube tu diseño PDF' : 'Describe tu solicitud'}
                 </h2>
                 <p className="text-gray-500">
-                  {selectedType === 'html' ? 'Pega el código HTML completo de tu email' : 'Escribe o dicta qué necesitas para tu email'}
+                  {selectedType === 'html' ? 'Pega el código HTML completo de tu email' : selectedType === 'pdf' ? 'El PDF se convertirá en imágenes y se enviará como email' : 'Escribe o dicta qué necesitas para tu email'}
                 </p>
               </div>
 
@@ -783,23 +836,23 @@ export default function CMSCrearNewsletter() {
                       <p className="text-sm text-gray-500 text-center mb-6 max-w-md">
                         Si descargaste el email de Claude o ChatGPT como un archivo, puedes subirlo directamente aquí.
                       </p>
-                      
-                      <input 
-                        type="file" 
+
+                      <input
+                        type="file"
                         ref={htmlFileInputRef}
                         onChange={handleHtmlFileUpload}
                         accept=".html,text/html"
                         className="hidden"
                       />
-                      
-                      <Button 
+
+                      <Button
                         onClick={() => htmlFileInputRef.current?.click()}
                         className="bg-[#44580E] hover:bg-[#3a4c0c]"
                       >
                         <Upload className="w-4 h-4 mr-2" />
                         Seleccionar Archivo HTML
                       </Button>
-                      
+
                       {htmlFileName && (
                         <div className="mt-4 flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1.5 rounded-full">
                           <CheckCircle2 className="w-4 h-4" />
@@ -807,6 +860,44 @@ export default function CMSCrearNewsletter() {
                         </div>
                       )}
                     </div>
+                  </CardContent>
+                </Card>
+              ) : selectedType === 'pdf' ? (
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-[#44580E]/30 rounded-xl bg-[#44580E]/5 mb-2 transition-colors hover:bg-[#44580E]/10">
+                      <span className="text-5xl mb-4">📄</span>
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">Sube tu diseño en PDF</h3>
+                      <p className="text-sm text-gray-500 text-center mb-6 max-w-md">
+                        Cada página del PDF se convertirá en una imagen y se enviará como el cuerpo del email. No se adjunta — se envía como diseño visual.
+                      </p>
+
+                      <input
+                        type="file"
+                        ref={pdfFileInputRef}
+                        onChange={handlePdfUpload}
+                        accept=".pdf,application/pdf"
+                        className="hidden"
+                      />
+
+                      <Button
+                        onClick={() => pdfFileInputRef.current?.click()}
+                        className="bg-[#44580E] hover:bg-[#3a4c0c]"
+                      >
+                        <Upload className="w-4 h-4 mr-2" />
+                        Seleccionar PDF
+                      </Button>
+
+                      {pdfFileName && (
+                        <div className="mt-4 flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1.5 rounded-full">
+                          <CheckCircle2 className="w-4 h-4" />
+                          {pdfFileName}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 text-center mt-3">
+                      💡 El PDF se procesará al hacer clic en "Siguiente". Cloudinary convierte cada página en imagen automáticamente.
+                    </p>
                   </CardContent>
                 </Card>
               ) : (
@@ -1003,7 +1094,7 @@ export default function CMSCrearNewsletter() {
                         <CardDescription>Vista previa de tu email</CardDescription>
                       </div>
                     </div>
-                    {selectedType !== 'html' && (
+                    {selectedType !== 'html' && selectedType !== 'pdf' && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -1020,10 +1111,12 @@ export default function CMSCrearNewsletter() {
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                  {isGenerating ? (
+                  {isGenerating || isUploadingPdf ? (
                     <div className="flex flex-col items-center justify-center h-[400px] text-gray-400">
                       <Loader2 className="w-10 h-10 animate-spin mb-4 text-[#44580E]" />
-                      <p className="text-lg font-medium text-gray-600">Generando tu diseño...</p>
+                      <p className="text-lg font-medium text-gray-600">
+                        {isUploadingPdf ? "Convirtiendo PDF a email..." : "Generando tu diseño..."}
+                      </p>
                       <p className="text-sm text-gray-500 mt-2">Esto puede tomar unos segundos</p>
                     </div>
                   ) : htmlContent ? (
@@ -1042,7 +1135,7 @@ export default function CMSCrearNewsletter() {
               </Card>
 
               {/* Campo para pedir cambios por IA */}
-              {htmlContent && !isGenerating && (
+              {htmlContent && !isGenerating && !isUploadingPdf && selectedType !== 'pdf' && (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -1446,13 +1539,18 @@ export default function CMSCrearNewsletter() {
           {currentStep < totalSteps ? (
             <Button
               onClick={goToNextStep}
-              disabled={!canProceedToStep(currentStep + 1) || isGenerating || isRecording || isTranscribing}
+              disabled={!canProceedToStep(currentStep + 1) || isGenerating || isRecording || isTranscribing || isUploadingPdf}
               className="bg-[#44580E] hover:bg-[#3a4c0c]"
             >
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Generando...
+                </>
+              ) : isUploadingPdf ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Convirtiendo PDF...
                 </>
               ) : (
                 <>

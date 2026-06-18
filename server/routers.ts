@@ -2246,6 +2246,90 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
         return { url, key: fileKey };
       }),
 
+    // Convertir PDF a HTML de email con imágenes por página (Cloudinary)
+    uploadPdfAsEmail: protectedProcedure
+      .input(z.object({
+        pdfData: z.string(), // Base64 encoded PDF data URI
+        fileName: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        const matches = input.pdfData.match(/^data:application\/pdf;base64,(.+)$/);
+        if (!matches) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Formato de PDF inválido" });
+        }
+
+        const base64Data = matches[1];
+        const { v2: cloudinary } = await import('cloudinary');
+
+        const cloudinaryUrl = process.env.CLOUDINARY_URL;
+        if (cloudinaryUrl) {
+          cloudinary.config({ cloudinary_url: cloudinaryUrl });
+        } else {
+          const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+          const apiKey = process.env.CLOUDINARY_API_KEY;
+          const apiSecret = process.env.CLOUDINARY_API_SECRET;
+          if (!cloudName || !apiKey || !apiSecret) {
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Cloudinary no configurado" });
+          }
+          cloudinary.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure: true });
+        }
+
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const baseName = (input.fileName || `newsletter-pdf-${timestamp}-${randomSuffix}`)
+          .replace(/\.pdf$/i, '');
+        const publicId = `newsletter-pdfs/${baseName}-${timestamp}`;
+
+        const result = await cloudinary.uploader.upload(
+          `data:application/pdf;base64,${base64Data}`,
+          { public_id: publicId, resource_type: "image", overwrite: true }
+        );
+
+        const pageCount = result.pages || 1;
+        const urlParts = result.secure_url.split('/upload/');
+        const pageUrls: string[] = [];
+        for (let i = 1; i <= pageCount; i++) {
+          pageUrls.push(`${urlParts[0]}/upload/pg_${i},f_jpg,q_auto,w_800/${urlParts[1]}`);
+        }
+
+        const pagesHtml = pageUrls
+          .map((url, i) =>
+            `              <img src="${url}" alt="Página ${i + 1}" width="600" style="display:block;width:100%;max-width:600px;border:0;outline:none;text-decoration:none;" />`
+          )
+          .join('\n');
+
+        const htmlContent = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Newsletter Cancagua</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f4;">
+    <tr>
+      <td align="center" style="padding:20px 0;">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;">
+          <tr>
+            <td style="padding:0;">
+${pagesHtml}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+        return { htmlContent, pageCount, pdfUrl: result.secure_url };
+      }),
+
     // Extraer contenido de una URL de Cancagua
     extractFromUrl: protectedProcedure
       .input(z.object({
