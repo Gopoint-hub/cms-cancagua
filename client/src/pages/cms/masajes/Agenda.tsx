@@ -503,7 +503,16 @@ export default function MasajesAgenda() {
                 <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sin asignar</SelectItem>
-                  {therapists?.filter(t => t.active !== 0).map(t => (
+                  {(therapists ?? []).filter(t => t.type === "inhouse").length > 0 && (
+                    <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Inhouse</div>
+                  )}
+                  {(therapists ?? []).filter(t => t.type === "inhouse").map(t => (
+                    <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                  ))}
+                  {(therapists ?? []).filter(t => t.type === "freelance").length > 0 && (
+                    <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Freelance</div>
+                  )}
+                  {(therapists ?? []).filter(t => t.type === "freelance").map(t => (
                     <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
                   ))}
                 </SelectContent>
