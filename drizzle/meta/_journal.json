@@ -85,6 +85,13 @@
       "when": 1781191487854,
       "tag": "0012_loud_maverick",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1750204800000,
+      "tag": "0013_newsletter_mediumtext",
+      "breakpoints": true
     }
   ]
 }

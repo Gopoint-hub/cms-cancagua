@@ -7,6 +7,7 @@ import { z } from "zod";
 import * as db from "./db";
 import { generateQuoteNumber, calculateValidUntil } from "./quoteHelpers";
 import { invokeLLM } from "./_core/llm";
+import { isBundledDesignHtml, convertBundledHtmlToEmail } from "./newsletterHtmlProcessor";
 import { conciergeRouter } from "./conciergeRouter";
 import { analyticsRouter } from "./analyticsRouter";
 import { masajesRouter } from "./masajesRouter";
@@ -1668,6 +1669,10 @@ export const appRouter = router({
 
         const { listIds, scheduledAt, ...newsletterData } = input;
 
+        if (isBundledDesignHtml(newsletterData.htmlContent)) {
+          newsletterData.htmlContent = await convertBundledHtmlToEmail(newsletterData.htmlContent);
+        }
+
         const result = await db.createNewsletter({
           ...newsletterData,
           status: scheduledAt ? "scheduled" : "draft",
@@ -1702,6 +1707,9 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...updateData } = input;
+        if (updateData.htmlContent && isBundledDesignHtml(updateData.htmlContent)) {
+          updateData.htmlContent = await convertBundledHtmlToEmail(updateData.htmlContent);
+        }
         return await db.updateNewsletter(id, updateData);
       }),
 
