@@ -156,7 +156,7 @@ export default function MasajesDashboard() {
                           <Send className="w-3 h-3 mr-1" />
                           Notificar
                         </Button>
-                        <Link href="/cms/masajes/agenda">
+                        <Link href={`/cms/masajes/agenda?date=${b.bookingDate}`}>
                           <Button variant="outline" size="sm" className="text-xs border-amber-400 hover:bg-amber-100">
                             Asignar
                           </Button>

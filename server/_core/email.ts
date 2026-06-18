@@ -7,13 +7,13 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { ENV } from "./env";
 
-function getReglamentoBase64(): string {
+function getTerminosBase64(): string {
   // process.cwd() apunta al root del proyecto tanto en dev como en producción (Render)
-  const filePath = join(process.cwd(), "server/assets/reglamento-masajes.pdf");
+  const filePath = join(process.cwd(), "server/assets/terminos-condiciones-masajes.pdf");
   try {
     return readFileSync(filePath).toString("base64");
   } catch {
-    console.warn("[Email] No se pudo cargar reglamento-masajes.pdf desde:", filePath);
+    console.warn("[Email] No se pudo cargar terminos-condiciones-masajes.pdf desde:", filePath);
     return "";
   }
 }
@@ -712,9 +712,9 @@ export async function sendMassageBookingConfirmationEmail(params: {
       ? `<p style="margin: 0 0 8px; color: #52525b;">Monto pagado: <strong>${formattedAmount}</strong></p>`
       : "";
 
-    const reglamentoBase64 = getReglamentoBase64();
-    const attachments = reglamentoBase64
-      ? [{ filename: "Reglamento-Cancagua-Spa.pdf", content: reglamentoBase64 }]
+    const terminosBase64 = getTerminosBase64();
+    const attachments = terminosBase64
+      ? [{ filename: "Terminos-y-Condiciones-Cancagua.pdf", content: terminosBase64 }]
       : [];
 
     const { data, error } = await client.emails.send({
@@ -756,9 +756,28 @@ export async function sendMassageBookingConfirmationEmail(params: {
                 ${amountLine}
               </div>
               <div style="margin: 24px 0; padding: 20px; background-color: #fefce8; border-radius: 8px; border: 1px solid #fde68a;">
-                <p style="margin: 0 0 8px; color: #92400e; font-size: 15px; font-weight: 600;">📄 Documento adjunto importante</p>
-                <p style="margin: 0; color: #78350f; font-size: 14px; line-height: 1.6;">
-                  Te enviamos adjunto un documento que necesitamos que revises antes de tu reserva. En él encontrarás todas las recomendaciones y restricciones de nuestros servicios, incluyendo indicaciones sobre la ropa, cómo prepararte para la sesión y nuestro reglamento interno.
+                <p style="margin: 0 0 12px; color: #92400e; font-size: 15px; font-weight: 600;">📋 Antes de tu visita</p>
+                <p style="margin: 0 0 12px; color: #78350f; font-size: 14px; line-height: 1.6;">
+                  Para que todo fluya sin contratiempos, estas son las condiciones de tu reserva:
+                </p>
+                <ul style="margin: 0 0 12px; padding-left: 20px; color: #78350f; font-size: 14px; line-height: 1.8;">
+                  <li>Al momento del check-in te solicitaremos tu <strong>cédula de identidad</strong>.</li>
+                  <li>Te pedimos llegar <strong>10 minutos antes</strong> de tu hora reservada.</li>
+                  <li>Si necesitas acceso para movilidad reducida, contáctanos por teléfono con al menos <strong>24 horas de anticipación</strong>, así preparamos un salón accesible para ti (sujeto a disponibilidad).</li>
+                  <li>Contamos con un equipo de masajistas mixto, por lo que tu sesión puede ser realizada tanto por un terapeuta hombre como mujer. Si tienes alguna preferencia o inconveniente con esto, escríbenos al WhatsApp <strong>+56 9 4007 3999</strong> y lo conversamos antes de tu visita.</li>
+                </ul>
+                <p style="margin: 0 0 8px; color: #92400e; font-size: 14px; font-weight: 600;">Cancelaciones y reagendamientos</p>
+                <p style="margin: 0 0 8px; color: #78350f; font-size: 14px; line-height: 1.6;">
+                  Entendemos que los planes cambian. Estas son las condiciones según tu tiempo de aviso:
+                </p>
+                <ul style="margin: 0 0 12px; padding-left: 20px; color: #78350f; font-size: 14px; line-height: 1.8;">
+                  <li><strong>Con 48 horas o más:</strong> puedes cancelar y acceder a reembolso (se descuenta un 0,25% por cobro de transacción Transbank).</li>
+                  <li><strong>Con 24 horas de anticipación:</strong> puedes reagendar, sin derecho a reembolso. Máximo 2 veces por reserva.</li>
+                  <li><strong>Con menos de 24 horas de aviso:</strong> no es posible acceder a reembolso ni reagendamiento.</li>
+                  <li>Si cuentas con una GiftCard o cupón, tienes <strong>3 meses desde la fecha de compra</strong> para hacerlo efectivo.</li>
+                </ul>
+                <p style="margin: 0; color: #78350f; font-size: 13px; line-height: 1.6;">
+                  📄 Te adjuntamos el documento completo de Términos y Condiciones para tu referencia.
                 </p>
               </div>
               <p style="margin: 24px 0 0; color: #71717a; font-size: 14px; line-height: 1.6;">

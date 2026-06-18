@@ -256,9 +256,16 @@ export default function ReservarMasaje() {
                   className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${termsAccepted ? "bg-teal-600 border-teal-600" : "border-red-400 bg-red-50"}`}>
                   {termsAccepted && <Check className="w-3 h-3 text-white" />}
                 </div>
-                <span className="text-sm text-stone-700" onClick={() => setTermsAccepted(!termsAccepted)}>
-                  He leído y acepto los <span className="text-teal-600 underline">Términos y Condiciones</span>
-                  <span className="text-red-500 ml-0.5">*</span>
+                <span className="text-sm text-stone-700">
+                  <span onClick={() => setTermsAccepted(!termsAccepted)}>He leído y acepto los </span>
+                  <a
+                    href="/terminos-condiciones-masajes.pdf"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-teal-600 underline"
+                    onClick={e => e.stopPropagation()}
+                  >Términos y Condiciones</a>
+                  <span className="text-red-500 ml-0.5" onClick={() => setTermsAccepted(!termsAccepted)}>*</span>
                 </span>
               </label>
 

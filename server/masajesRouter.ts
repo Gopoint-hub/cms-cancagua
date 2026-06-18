@@ -384,7 +384,10 @@ const agendaRouter = router({
       .where(and(
         gte(massageBookings.bookingDate, input.from as any),
         lte(massageBookings.bookingDate, input.to as any),
-        inArray(massageBookings.status, ["confirmed", "completed", "no_show"])
+        or(
+          inArray(massageBookings.status, ["confirmed", "completed", "no_show"]),
+          and(eq(massageBookings.status, "pending"), eq(massageBookings.paymentStatus, "paid"))
+        )
       ))
       .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
       return rows.map(row => serializeDateFields(row, ["bookingDate"]));

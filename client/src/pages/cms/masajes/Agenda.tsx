@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -233,8 +234,15 @@ function MonthView({ bookings, isLoading, monthDate, onDayClick }: {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function MasajesAgenda() {
+  const search = useSearch();
+  const initialDate = (() => {
+    const p = new URLSearchParams(search);
+    const d = p.get("date");
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : format(new Date(), "yyyy-MM-dd");
+  })();
+
   const [view, setView] = useState<ViewMode>("day");
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [selectedDate, setSelectedDate] = useState(initialDate);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<BookingForm>(emptyForm(selectedDate));
