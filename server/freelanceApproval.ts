@@ -99,12 +99,13 @@ export async function sendFreelanceApprovalRequest(bookingId: number): Promise<v
   const therapistName = booking.therapistName ?? "Terapeuta";
   const techniqueName = booking.techniqueName ?? "Masaje";
 
-  const confirmUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}&action=confirm`;
-  const rejectUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}&action=reject`;
+  // Un solo link — el GET muestra la página con botones, el POST procesa
+  // (evita que WhatsApp auto-confirme al hacer preview del enlace)
+  const actionUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}`;
 
   await sendWhatsApp(
     booking.therapistPhone,
-    `📅 *Nueva reserva asignada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva asignada.\n\n💆 ${techniqueName} · ${booking.duration} min\n👤 Cliente: ${booking.clientName}\n📅 ${hd}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\n¿Puedes realizar este masaje?\n\n1️⃣ Confirmo masaje:\n${confirmUrl}\n\n2️⃣ No puedo realizarlo:\n${rejectUrl}`
+    `📅 *Nueva reserva asignada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva asignada.\n\n💆 ${techniqueName} · ${booking.duration} min\n👤 Cliente: ${booking.clientName}\n📅 ${hd}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\n¿Puedes realizar este masaje?\nResponde aquí 👉 ${actionUrl}`
   ).catch((e) => console.error("[FreelanceApproval] WA terapeuta:", e));
 
 }
@@ -170,13 +171,12 @@ router.get("/freelance-approval", async (req: Request, res: Response) => {
     .where(eq(massageBookings.id, booking.id));
 
   if (booking.therapistPhone) {
-    const confirmUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}&action=confirm`;
-    const rejectUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}&action=reject`;
+    const actionUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}`;
     const techniqueName = booking.techniqueName ?? "Masaje";
 
     await sendWhatsApp(
       booking.therapistPhone,
-      `📅 *Nueva reserva asignada* — Cancagua Spa\n\nHola ${booking.therapistName}! Tienes una reserva asignada.\n\n💆 ${techniqueName} · ${booking.duration} min\n👤 Cliente: ${booking.clientName}\n📅 ${hd}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\n¿Puedes realizar este masaje?\n\n1️⃣ Confirmo masaje:\n${confirmUrl}\n\n2️⃣ No puedo realizarlo:\n${rejectUrl}`
+      `📅 *Nueva reserva asignada* — Cancagua Spa\n\nHola ${booking.therapistName}! Tienes una reserva asignada.\n\n💆 ${techniqueName} · ${booking.duration} min\n👤 Cliente: ${booking.clientName}\n📅 ${hd}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\n¿Puedes realizar este masaje?\nResponde aquí 👉 ${actionUrl}`
     ).catch((e) => console.error("[FreelanceApproval] WA terapeuta:", e));
   }
 
@@ -187,12 +187,12 @@ router.get("/freelance-approval", async (req: Request, res: Response) => {
   ));
 });
 
-// GET /api/masajes/freelance-confirmation?token=&action=confirm|reject  (Terapeuta)
+// GET /api/masajes/freelance-confirmation?token=  (Terapeuta)
+// Solo muestra la página con botones. NO procesa nada (evita que WhatsApp auto-confirme al previsualizar el link).
 router.get("/freelance-confirmation", async (req: Request, res: Response) => {
   const token = String(req.query.token ?? "");
-  const action = String(req.query.action ?? "");
 
-  if (!token || (action !== "confirm" && action !== "reject")) {
+  if (!token) {
     return res.status(400).send(htmlPage("Enlace inválido", "Este enlace no es válido.", "⚠️", "#ef4444"));
   }
 
@@ -227,14 +227,101 @@ router.get("/freelance-confirmation", async (req: Request, res: Response) => {
   const hd = humanDate(ds);
   const therapistName = booking.therapistName ?? "Terapeuta";
   const techniqueName = booking.techniqueName ?? "Masaje";
+  const postUrl = `/api/masajes/freelance-confirmation`;
 
-  // Get manager to notify
-  const [manager] = await db
-    .select({ phone: massageTherapists.phone })
-    .from(massageTherapists)
-    .where(eq(massageTherapists.isManager, 1))
+  return res.send(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirmar masaje — Cancagua Spa</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+      background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:20px}
+    .card{background:#fff;border-radius:16px;padding:40px 32px;max-width:440px;width:100%;
+      text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+    .emoji{font-size:56px;margin-bottom:20px}
+    h1{font-size:22px;color:#18181b;margin-bottom:12px}
+    .info{background:#f4f4f5;border-radius:12px;padding:16px;margin:16px 0;text-align:left;font-size:14px;color:#3f3f46;line-height:1.8}
+    .info strong{color:#18181b}
+    .btns{display:flex;flex-direction:column;gap:12px;margin-top:24px}
+    .btn{display:block;width:100%;padding:14px;border-radius:10px;border:none;font-size:16px;font-weight:600;cursor:pointer;transition:opacity .15s}
+    .btn:active{opacity:.8}
+    .btn-confirm{background:#10b981;color:#fff}
+    .btn-reject{background:#f4f4f5;color:#71717a;border:1px solid #e4e4e7}
+    small{display:block;margin-top:24px;font-size:12px;color:#a1a1aa}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="emoji">💆</div>
+    <h1>Hola ${therapistName}</h1>
+    <div class="info">
+      <strong>${techniqueName}</strong><br>
+      👤 ${booking.clientName}<br>
+      📅 ${hd}<br>
+      🕐 ${booking.startTime} – ${booking.endTime} hrs
+    </div>
+    <p style="font-size:15px;color:#52525b">¿Puedes realizar este masaje?</p>
+    <div class="btns">
+      <form method="POST" action="${postUrl}">
+        <input type="hidden" name="token" value="${token}">
+        <input type="hidden" name="action" value="confirm">
+        <button class="btn btn-confirm" type="submit">✅ Sí, confirmo el masaje</button>
+      </form>
+      <form method="POST" action="${postUrl}">
+        <input type="hidden" name="token" value="${token}">
+        <input type="hidden" name="action" value="reject">
+        <button class="btn btn-reject" type="submit">❌ No puedo realizarlo</button>
+      </form>
+    </div>
+    <small>Cancagua Spa · Sistema de masajes</small>
+  </div>
+</body>
+</html>`);
+});
+
+// POST /api/masajes/freelance-confirmation  (Terapeuta confirma o rechaza)
+router.post("/freelance-confirmation", async (req: Request, res: Response) => {
+  const token = String(req.body.token ?? "");
+  const action = String(req.body.action ?? "");
+
+  if (!token || (action !== "confirm" && action !== "reject")) {
+    return res.status(400).send(htmlPage("Error", "Datos inválidos.", "⚠️", "#ef4444"));
+  }
+
+  const db = await getDb();
+  if (!db) return res.status(500).send(htmlPage("Error", "No se pudo conectar a la base de datos.", "⚠️", "#ef4444"));
+
+  const [booking] = await db
+    .select({
+      id: massageBookings.id,
+      clientName: massageBookings.clientName,
+      bookingDate: massageBookings.bookingDate,
+      startTime: massageBookings.startTime,
+      endTime: massageBookings.endTime,
+      freelanceApprovalStatus: massageBookings.freelanceApprovalStatus,
+      therapistName: massageTherapists.name,
+      techniqueName: massageTechniques.name,
+    })
+    .from(massageBookings)
+    .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
+    .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
+    .where(eq(massageBookings.therapistConfirmationToken, token))
     .limit(1);
 
+  if (!booking) {
+    return res.send(htmlPage("Enlace inválido", "Este enlace no es válido o ya fue utilizado.", "⚠️", "#f59e0b"));
+  }
+  if (booking.freelanceApprovalStatus !== "admin_approved") {
+    return res.send(htmlPage("Ya procesado", "Esta solicitud ya fue procesada anteriormente.", "ℹ️", "#6366f1"));
+  }
+
+  const ds = dateStr(booking.bookingDate);
+  const hd = humanDate(ds);
+  const therapistName = booking.therapistName ?? "Terapeuta";
+  const techniqueName = booking.techniqueName ?? "Masaje";
   const TAMARA_PHONE = "+56999002232";
 
   if (action === "reject") {
@@ -242,7 +329,6 @@ router.get("/freelance-confirmation", async (req: Request, res: Response) => {
       .set({ freelanceApprovalStatus: "therapist_rejected" })
       .where(eq(massageBookings.id, booking.id));
 
-    // Notificar a Tamara directamente con número fijo
     await sendWhatsApp(
       TAMARA_PHONE,
       `❌ *${therapistName}* no puede realizar el masaje.\n\n👤 ${booking.clientName}\n💆 ${techniqueName}\n📅 ${hd} · ${booking.startTime} hrs\n\n⚠️ Se requiere asignación manual de terapeuta. Aparece en el dashboard.`
@@ -260,7 +346,6 @@ router.get("/freelance-confirmation", async (req: Request, res: Response) => {
     .set({ freelanceApprovalStatus: "therapist_confirmed", status: "confirmed" })
     .where(eq(massageBookings.id, booking.id));
 
-  // Notificar a Tamara que el terapeuta confirmó
   await sendWhatsApp(
     TAMARA_PHONE,
     `✅ *${therapistName}* confirmó el masaje.\n\n👤 ${booking.clientName}\n💆 ${techniqueName}\n📅 ${hd} · ${booking.startTime} hrs\nYa aparece confirmado en el dashboard.`

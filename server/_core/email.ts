@@ -8,18 +8,13 @@ import { join } from "path";
 import { ENV } from "./env";
 
 function getReglamentoBase64(): string {
+  // process.cwd() apunta al root del proyecto tanto en dev como en producción (Render)
+  const filePath = join(process.cwd(), "server/assets/reglamento-masajes.pdf");
   try {
-    const filePath = join(__dirname, "../../server/assets/reglamento-masajes.pdf");
     return readFileSync(filePath).toString("base64");
   } catch {
-    // Fallback path for compiled output
-    try {
-      const filePath = join(__dirname, "../assets/reglamento-masajes.pdf");
-      return readFileSync(filePath).toString("base64");
-    } catch {
-      console.warn("[Email] No se pudo cargar reglamento-masajes.pdf");
-      return "";
-    }
+    console.warn("[Email] No se pudo cargar reglamento-masajes.pdf desde:", filePath);
+    return "";
   }
 }
 
