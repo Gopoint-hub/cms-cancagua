@@ -11,6 +11,7 @@ import conciergeWebhook from "../conciergeWebhook";
 import getnetWebhook from "../getnetWebhook";
 import unsubscribeRouter from "../unsubscribeRoute";
 import freelanceApprovalRouter from "../freelanceApproval";
+import cerebroRouter from "../cerebroRoute";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -68,6 +69,8 @@ async function startServer() {
   app.use("/api/masajes", freelanceApprovalRouter);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
+  // Cerebro: grafo de conocimiento del proyecto (solo admins)
+  app.use("/api/cerebro", cerebroRouter);
   // tRPC API
   app.use(
     "/api/trpc",

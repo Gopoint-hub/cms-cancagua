@@ -111,3 +111,8 @@ temp/
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
+
+# Workspace local de graphify (cache, json crudo). La copia servida en el
+# módulo Cerebro vive en server/cerebro/graph.html y SÍ se versiona.
+graphify-out/
+.graphify-logs/

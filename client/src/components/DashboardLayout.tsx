@@ -26,7 +26,7 @@ import {
   FileText, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -148,6 +148,7 @@ export const categories: Category[] = [
     roles: ["super_admin", "admin"],
     items: [
       { icon: Users, label: "Usuarios", path: "/cms/usuarios" },
+      { icon: Brain, label: "Cerebro", path: "/cms/cerebro" },
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
       { icon: RefreshCw, label: "Integraciones", path: "/cms/integraciones" },
       { icon: Settings, label: "Configuración", path: "/cms/configuracion" },

@@ -34,6 +34,7 @@ import CMSConciergeServicios from "./pages/cms/concierge/ServiciosDisponibles";
 import CMSConciergeVendedores from "./pages/cms/concierge/Vendedores";
 import CMSMisComisiones from "./pages/cms/concierge/MisComisiones";
 import CMSIntegraciones from "./pages/cms/Integraciones";
+import CMSCerebro from "./pages/cms/Cerebro";
 import CMSGiftCardsSales from "./pages/cms/GiftCardsSales";
 import CMSAyudaNewsletters from "./pages/cms/AyudaNewsletters";
 import CMSLogin from "./pages/cms/Login";
@@ -88,6 +89,7 @@ function Router() {
       <Route path="/cms/crm-pipeline" component={CMSCRMPipeline} />
       <Route path="/cms/marketing-roi" component={CMSMarketingROI} />
       <Route path="/cms/integraciones" component={CMSIntegraciones} />
+      <Route path="/cms/cerebro" component={CMSCerebro} />
       <Route path="/cms/gift-cards-sales" component={CMSGiftCardsSales} />
       <Route path="/cms/traducciones" component={CMSTraducciones} />
       <Route path="/cms/reportes-mantencion" component={CMSReportesMantencion} />
