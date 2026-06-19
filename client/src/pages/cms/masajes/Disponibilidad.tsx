@@ -750,7 +750,7 @@ function ResumenView({ month }: { month: string }) {
     return map;
   }, [rows]);
 
-  const activeTherapists = (therapists ?? []).filter(t => t.active !== 0);
+  const activeTherapists = therapists ?? [];
   const total = daysInMonth(month);
   const [y, m] = month.split("-").map(Number);
 
@@ -844,8 +844,8 @@ export default function Disponibilidad() {
 
   const { data: therapists, isLoading } = trpc.masajes.terapeutas.getAll.useQuery();
 
-  const inhouse = (therapists ?? []).filter(t => t.type === "inhouse" && t.active !== 0);
-  const freelance = (therapists ?? []).filter(t => t.type === "freelance" && t.active !== 0);
+  const inhouse = (therapists ?? []).filter(t => t.type === "inhouse");
+  const freelance = (therapists ?? []).filter(t => t.type === "freelance");
 
   // Barbara y Daniela: inhouse no-manager (las dos que rotan)
   const rotating = inhouse.filter(t => !t.isManager);
