@@ -16,6 +16,8 @@ import {
   massageTherapistEvaluations,
   massageTherapistDocuments,
   massageSettings,
+  massageTherapistAvailability,
+  massageHrLeaves,
   newsletterSubscribers,
 } from "../drizzle/schema";
 import {
@@ -1135,30 +1137,58 @@ const masajesPublicRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
-      const dayOfWeek = new Date(input.date + "T12:00:00").getDay();
-      const therapists = await db.select({
+
+      // Intentar con disponibilidad mensual primero
+      let therapists = await db.select({
         id: massageTherapists.id,
         name: massageTherapists.name,
         type: massageTherapists.type,
         callPriority: massageTherapists.callPriority,
-        scheduleStart: massageTherapistSchedules.startTime,
-        scheduleEnd: massageTherapistSchedules.endTime,
+        scheduleStart: massageTherapistAvailability.startTime,
+        scheduleEnd: massageTherapistAvailability.endTime,
       })
         .from(massageTherapistTechniques)
         .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-        .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
         .where(and(
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
-          eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
-          eq(massageTherapistSchedules.available, 1),
-          or(
-            isNull(massageTherapistSchedules.blockFrom),
-            gt(massageTherapistSchedules.blockFrom, input.date as any),
-            lt(massageTherapistSchedules.blockTo, input.date as any)
-          )
-        ));
-      if (therapists.length === 0) return [];
+          eq(massageTherapistAvailability.date, input.date as any),
+          eq(massageTherapistAvailability.isAvailable, 1),
+        )) as Array<{ id: number; name: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string | null; scheduleEnd: string | null }>;
+
+      // Filtrar therapists con horario válido
+      let validTherapists = therapists.filter(t => t.scheduleStart && t.scheduleEnd) as Array<{ id: number; name: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string; scheduleEnd: string }>;
+
+      // Fallback: si no hay disponibilidad mensual, usar horario semanal legacy
+      if (validTherapists.length === 0) {
+        const dayOfWeek = new Date(input.date + "T12:00:00").getDay();
+        const legacyTherapists = await db.select({
+          id: massageTherapists.id,
+          name: massageTherapists.name,
+          type: massageTherapists.type,
+          callPriority: massageTherapists.callPriority,
+          scheduleStart: massageTherapistSchedules.startTime,
+          scheduleEnd: massageTherapistSchedules.endTime,
+        })
+          .from(massageTherapistTechniques)
+          .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+          .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+          .where(and(
+            eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+            eq(massageTherapists.active, 1),
+            eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
+            eq(massageTherapistSchedules.available, 1),
+            or(
+              isNull(massageTherapistSchedules.blockFrom),
+              gt(massageTherapistSchedules.blockFrom, input.date as any),
+              lt(massageTherapistSchedules.blockTo, input.date as any),
+            ),
+          ));
+        validTherapists = legacyTherapists as typeof validTherapists;
+      }
+
+      if (validTherapists.length === 0) return [];
 
       const allBookings = await db.select().from(massageBookings).where(
         and(eq(massageBookings.bookingDate, input.date as any), sql`${massageBookings.status} NOT IN ('cancelled')`)
@@ -1166,13 +1196,13 @@ const masajesPublicRouter = router({
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
       if (rooms.length === 0) return [];
 
-      const schedStart = Math.min(...therapists.map((t) => parseTimeMin(t.scheduleStart)));
-      const schedEnd = Math.max(...therapists.map((t) => parseTimeMin(t.scheduleEnd)));
+      const schedStart = Math.min(...validTherapists.map((t) => parseTimeMin(t.scheduleStart)));
+      const schedEnd = Math.max(...validTherapists.map((t) => parseTimeMin(t.scheduleEnd)));
       const slots: { time: string }[] = [];
       for (let t = schedStart; t + input.duration <= schedEnd; t += 30) {
         const timeStr = formatTimeMin(t);
         const assignment = selectAutomaticMassageAssignment({
-          therapists,
+          therapists: validTherapists,
           bookings: allBookings,
           rooms,
           startTime: timeStr,
@@ -1206,31 +1236,59 @@ const masajesPublicRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { subscribeNewsletter, ...bookingData } = input;
-      const dayOfWeek = new Date(input.bookingDate + "T12:00:00").getDay();
-      const therapists = await db.select({
+
+      // Intentar con disponibilidad mensual primero
+      let therapists = await db.select({
         id: massageTherapists.id,
         name: massageTherapists.name,
         email: massageTherapists.email,
         type: massageTherapists.type,
         callPriority: massageTherapists.callPriority,
-        scheduleStart: massageTherapistSchedules.startTime,
-        scheduleEnd: massageTherapistSchedules.endTime,
+        scheduleStart: massageTherapistAvailability.startTime,
+        scheduleEnd: massageTherapistAvailability.endTime,
       })
         .from(massageTherapistTechniques)
         .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-        .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
         .where(and(
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
-          eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
-          eq(massageTherapistSchedules.available, 1)
-        ));
+          eq(massageTherapistAvailability.date, input.bookingDate as any),
+          eq(massageTherapistAvailability.isAvailable, 1),
+        )) as Array<{ id: number; name: string | null; email: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string | null; scheduleEnd: string | null }>;
+
+      // Filtrar therapists con horario válido
+      let validTherapists = therapists.filter(t => t.scheduleStart && t.scheduleEnd) as Array<{ id: number; name: string | null; email: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string; scheduleEnd: string }>;
+
+      // Fallback al sistema de horario semanal legacy
+      if (validTherapists.length === 0) {
+        const dayOfWeek = new Date(input.bookingDate + "T12:00:00").getDay();
+        const legacyTherapists = await db.select({
+          id: massageTherapists.id,
+          name: massageTherapists.name,
+          email: massageTherapists.email,
+          type: massageTherapists.type,
+          callPriority: massageTherapists.callPriority,
+          scheduleStart: massageTherapistSchedules.startTime,
+          scheduleEnd: massageTherapistSchedules.endTime,
+        })
+          .from(massageTherapistTechniques)
+          .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+          .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+          .where(and(
+            eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+            eq(massageTherapists.active, 1),
+            eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
+            eq(massageTherapistSchedules.available, 1),
+          ));
+        validTherapists = legacyTherapists as typeof validTherapists;
+      }
       const allBookings = await db.select().from(massageBookings).where(
         and(eq(massageBookings.bookingDate, input.bookingDate as any), sql`${massageBookings.status} NOT IN ('cancelled')`)
       );
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
       const assignment = selectAutomaticMassageAssignment({
-        therapists,
+        therapists: validTherapists,
         bookings: allBookings,
         rooms,
         startTime: input.startTime,
@@ -1461,6 +1519,363 @@ const masajesPublicRouter = router({
     }),
 });
 
+// ─── DISPONIBILIDAD MENSUAL ────────────────────────────────────
+const disponibilidadRouter = router({
+  // Obtiene disponibilidad de un terapeuta para un mes (YYYY-MM)
+  getMonth: protectedProcedure
+    .input(z.object({ therapistId: z.number(), month: z.string() })) // month: "2026-07"
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return [];
+      const [year, mon] = input.month.split("-").map(Number);
+      const firstDay = `${input.month}-01`;
+      const lastDay = new Date(year, mon, 0).toISOString().slice(0, 10);
+      const rows = await db.select().from(massageTherapistAvailability)
+        .where(and(
+          eq(massageTherapistAvailability.therapistId, input.therapistId),
+          gte(massageTherapistAvailability.date, firstDay as any),
+          lte(massageTherapistAvailability.date, lastDay as any),
+        ))
+        .orderBy(asc(massageTherapistAvailability.date));
+      return rows.map(r => serializeDateFields(r, ["date"]));
+    }),
+
+  // Obtiene disponibilidad de TODOS los terapeutas para un mes (vista resumen)
+  getAllForMonth: protectedProcedure
+    .input(z.object({ month: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return [];
+      const [year, mon] = input.month.split("-").map(Number);
+      const firstDay = `${input.month}-01`;
+      const lastDay = new Date(year, mon, 0).toISOString().slice(0, 10);
+      const rows = await db.select({
+        id: massageTherapistAvailability.id,
+        therapistId: massageTherapistAvailability.therapistId,
+        therapistName: massageTherapists.name,
+        therapistType: massageTherapists.type,
+        date: massageTherapistAvailability.date,
+        isAvailable: massageTherapistAvailability.isAvailable,
+        startTime: massageTherapistAvailability.startTime,
+        endTime: massageTherapistAvailability.endTime,
+        shift: massageTherapistAvailability.shift,
+        blockType: massageTherapistAvailability.blockType,
+        blockNotes: massageTherapistAvailability.blockNotes,
+      })
+        .from(massageTherapistAvailability)
+        .innerJoin(massageTherapists, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
+        .where(and(
+          gte(massageTherapistAvailability.date, firstDay as any),
+          lte(massageTherapistAvailability.date, lastDay as any),
+          eq(massageTherapists.active, 1),
+        ))
+        .orderBy(asc(massageTherapistAvailability.date), asc(massageTherapists.callPriority));
+      return rows.map(r => serializeDateFields(r, ["date"]));
+    }),
+
+  // Crea o actualiza disponibilidad de un día específico
+  upsertDay: protectedProcedure
+    .input(z.object({
+      therapistId: z.number(),
+      date: z.string(), // YYYY-MM-DD
+      isAvailable: z.number().default(1),
+      startTime: z.string().optional(),
+      endTime: z.string().optional(),
+      shift: z.enum(["am", "pm"]).optional(),
+      blockType: z.enum(["vacation", "sick_leave", "personal", "other"]).optional(),
+      blockNotes: z.string().optional(),
+      autoGenerated: z.number().default(0),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { therapistId, date, ...rest } = input;
+      await db.insert(massageTherapistAvailability)
+        .values({ therapistId, date: date as any, ...rest })
+        .onDuplicateKeyUpdate({ set: { ...rest, updatedAt: new Date() } });
+      return { success: true };
+    }),
+
+  // Elimina la disponibilidad de un día (vuelve a sin registro)
+  deleteDay: protectedProcedure
+    .input(z.object({ therapistId: z.number(), date: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.delete(massageTherapistAvailability)
+        .where(and(
+          eq(massageTherapistAvailability.therapistId, input.therapistId),
+          eq(massageTherapistAvailability.date, input.date as any),
+        ));
+      return { success: true };
+    }),
+
+  // Genera un mes completo para inhouse con rotación de turnos (Barbara/Daniela)
+  generateMonthRotation: protectedProcedure
+    .input(z.object({
+      month: z.string(), // "2026-07"
+      // Qué turno trabaja Barbara la primera semana de ese mes
+      barbaraFirstWeekShift: z.enum(["am", "pm"]),
+      // IDs de Barbara y Daniela
+      barbaraId: z.number(),
+      danielaId: z.number(),
+      // Horarios de los turnos
+      amStart: z.string().default("10:00"),
+      amEnd: z.string().default("18:00"),
+      pmStart: z.string().default("14:00"),
+      pmEnd: z.string().default("22:00"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [year, mon] = input.month.split("-").map(Number);
+      const daysInMonth = new Date(year, mon, 0).getDate();
+
+      // Calcula el lunes de la primera semana del mes
+      const firstDayDate = new Date(year, mon - 1, 1);
+      // Número de semana del año para el 1 del mes (para determinar si es semana par/impar)
+      const getISOWeekNumber = (d: Date) => {
+        const date = new Date(d);
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+        const week1 = new Date(date.getFullYear(), 0, 4);
+        return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+      };
+      const firstWeekNum = getISOWeekNumber(firstDayDate);
+
+      const entries: Array<{
+        therapistId: number;
+        date: string;
+        isAvailable: number;
+        startTime: string;
+        endTime: string;
+        shift: "am" | "pm";
+        autoGenerated: number;
+      }> = [];
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(year, mon - 1, day);
+        const weekNum = getISOWeekNumber(d);
+        const dayOfWeek = d.getDay(); // 0=Dom, 1=Lun...6=Sab
+
+        // Solo días laborales (lunes a sábado, sin domingo)
+        if (dayOfWeek === 0) continue;
+
+        // Si la semana actual es par/impar respecto a la primera, determinar turno de Barbara
+        const weeksOffset = weekNum - firstWeekNum;
+        const barbaraShift = weeksOffset % 2 === 0
+          ? input.barbaraFirstWeekShift
+          : input.barbaraFirstWeekShift === "am" ? "pm" : "am";
+        const danielaShift = barbaraShift === "am" ? "pm" : "am";
+
+        const dateStr = `${year}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        entries.push({
+          therapistId: input.barbaraId,
+          date: dateStr,
+          isAvailable: 1,
+          startTime: barbaraShift === "am" ? input.amStart : input.pmStart,
+          endTime: barbaraShift === "am" ? input.amEnd : input.pmEnd,
+          shift: barbaraShift,
+          autoGenerated: 1,
+        });
+        entries.push({
+          therapistId: input.danielaId,
+          date: dateStr,
+          isAvailable: 1,
+          startTime: danielaShift === "am" ? input.amStart : input.pmStart,
+          endTime: danielaShift === "am" ? input.amEnd : input.pmEnd,
+          shift: danielaShift,
+          autoGenerated: 1,
+        });
+      }
+
+      // Inserta o actualiza (no sobreescribe registros manuales si autoGenerated=0)
+      for (const entry of entries) {
+        const existing = await db.select({ autoGenerated: massageTherapistAvailability.autoGenerated })
+          .from(massageTherapistAvailability)
+          .where(and(
+            eq(massageTherapistAvailability.therapistId, entry.therapistId),
+            eq(massageTherapistAvailability.date, entry.date as any),
+          ))
+          .limit(1);
+        // Solo sobreescribir si no existe o si el registro previo también era auto-generado
+        if (existing.length === 0 || existing[0].autoGenerated === 1) {
+          const { date: _d, therapistId: _t, ...updateFields } = entry;
+          await db.insert(massageTherapistAvailability)
+            .values({ ...entry, date: entry.date as any })
+            .onDuplicateKeyUpdate({ set: updateFields });
+        }
+      }
+      return { success: true, generated: entries.length };
+    }),
+
+  // Copia el horario del mes anterior para un terapeuta (para Tamara)
+  copyPreviousMonth: protectedProcedure
+    .input(z.object({ therapistId: z.number(), month: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [year, mon] = input.month.split("-").map(Number);
+      const prevMonth = mon === 1
+        ? `${year - 1}-12`
+        : `${year}-${String(mon - 1).padStart(2, "0")}`;
+      const [prevYear, prevMon] = prevMonth.split("-").map(Number);
+      const prevFirst = `${prevMonth}-01`;
+      const prevLast = new Date(prevYear, prevMon, 0).toISOString().slice(0, 10);
+
+      const prevRows = await db.select().from(massageTherapistAvailability)
+        .where(and(
+          eq(massageTherapistAvailability.therapistId, input.therapistId),
+          gte(massageTherapistAvailability.date, prevFirst as any),
+          lte(massageTherapistAvailability.date, prevLast as any),
+        ));
+
+      if (prevRows.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "El mes anterior no tiene horarios registrados" });
+      }
+
+      const daysInCurrentMonth = new Date(year, mon, 0).getDate();
+      let copied = 0;
+      for (const row of prevRows) {
+        const prevDate = serializeDateOnly(row.date) ?? "";
+        const prevDayNum = parseInt(prevDate.slice(8, 10));
+        if (prevDayNum > daysInCurrentMonth) continue; // febrero tiene menos días
+
+        const newDate = `${input.month}-${String(prevDayNum).padStart(2, "0")}`;
+        const existing = await db.select({ id: massageTherapistAvailability.id })
+          .from(massageTherapistAvailability)
+          .where(and(
+            eq(massageTherapistAvailability.therapistId, input.therapistId),
+            eq(massageTherapistAvailability.date, newDate as any),
+          ))
+          .limit(1);
+        if (existing.length > 0) continue; // no sobreescribir días ya editados
+
+        await db.insert(massageTherapistAvailability).values({
+          therapistId: input.therapistId,
+          date: newDate as any,
+          isAvailable: row.isAvailable,
+          startTime: row.startTime,
+          endTime: row.endTime,
+          shift: row.shift,
+          blockType: null,
+          blockNotes: null,
+          autoGenerated: 1,
+        });
+        copied++;
+      }
+      return { success: true, copied };
+    }),
+
+  // Actualiza el flag auto_fill_month de un terapeuta
+  setAutoFill: protectedProcedure
+    .input(z.object({ therapistId: z.number(), autoFillMonth: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.update(massageTherapists)
+        .set({ autoFillMonth: input.autoFillMonth })
+        .where(eq(massageTherapists.id, input.therapistId));
+      return { success: true };
+    }),
+
+  // Agrega vacación/licencia: crea registro RRHH y bloquea días en disponibilidad
+  addLeave: protectedProcedure
+    .input(z.object({
+      therapistId: z.number(),
+      startDate: z.string(),
+      endDate: z.string(),
+      type: z.enum(["vacation", "sick_leave", "maternity", "personal", "other"]),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // Crear registro en RRHH
+      const result = await db.insert(massageHrLeaves).values({
+        therapistId: input.therapistId,
+        startDate: input.startDate as any,
+        endDate: input.endDate as any,
+        type: input.type,
+        status: "approved",
+        notes: input.notes || null,
+        approvedBy: ctx.user.id,
+      });
+
+      // Bloquear cada día del rango en disponibilidad
+      const start = new Date(input.startDate + "T12:00:00");
+      const end = new Date(input.endDate + "T12:00:00");
+      let blocked = 0;
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().slice(0, 10);
+        await db.insert(massageTherapistAvailability)
+          .values({
+            therapistId: input.therapistId,
+            date: dateStr as any,
+            isAvailable: 0,
+            startTime: null,
+            endTime: null,
+            shift: null,
+            blockType: input.type as any,
+            blockNotes: input.notes || null,
+            autoGenerated: 0,
+          })
+          .onDuplicateKeyUpdate({
+            set: { isAvailable: 0, startTime: null, endTime: null, shift: null, blockType: input.type as any, blockNotes: input.notes || null, autoGenerated: 0 },
+          });
+        blocked++;
+      }
+      return { success: true, blocked, leaveId: (result as any).insertId };
+    }),
+
+  // Obtiene licencias de un terapeuta
+  getLeaves: protectedProcedure
+    .input(z.object({ therapistId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return [];
+      const rows = await db.select().from(massageHrLeaves)
+        .where(eq(massageHrLeaves.therapistId, input.therapistId))
+        .orderBy(desc(massageHrLeaves.startDate));
+      return rows.map(r => serializeDateFields(r, ["startDate", "endDate"]));
+    }),
+
+  // Elimina una licencia y desbloquea los días correspondientes
+  deleteLeave: protectedProcedure
+    .input(z.object({ leaveId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [leave] = await db.select().from(massageHrLeaves)
+        .where(eq(massageHrLeaves.id, input.leaveId)).limit(1);
+      if (!leave) throw new TRPCError({ code: "NOT_FOUND" });
+      const start = new Date(serializeDateOnly(leave.startDate) + "T12:00:00");
+      const end = new Date(serializeDateOnly(leave.endDate) + "T12:00:00");
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().slice(0, 10);
+        await db.delete(massageTherapistAvailability)
+          .where(and(
+            eq(massageTherapistAvailability.therapistId, leave.therapistId),
+            eq(massageTherapistAvailability.date, dateStr as any),
+            eq(massageTherapistAvailability.autoGenerated, 0),
+          ));
+      }
+      await db.delete(massageHrLeaves).where(eq(massageHrLeaves.id, input.leaveId));
+      return { success: true };
+    }),
+});
+
 // ─── ROUTER PRINCIPAL ─────────────────────────────────────────
 export const masajesRouter = router({
   tecnicas: tecnicasRouter,
@@ -1473,4 +1888,5 @@ export const masajesRouter = router({
   rrhh: rrhhRouter,
   public: masajesPublicRouter,
   config: configRouter,
+  disponibilidad: disponibilidadRouter,
 });

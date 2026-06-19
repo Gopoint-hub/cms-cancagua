@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Plus, Edit, Phone, Mail, Clock, Star, Save, Trash2, CalendarX, CalendarRange } from "lucide-react";
+import Disponibilidad from "./Disponibilidad";
 
 const DRAFT_KEY = "masajes:draft:terapeuta";
 
@@ -366,6 +367,7 @@ export default function MasajesTerapeutas() {
           <TabsList>
             <TabsTrigger value="inhouse">Inhouse ({inhouse.length})</TabsTrigger>
             <TabsTrigger value="freelance">Freelance ({freelance.length})</TabsTrigger>
+            <TabsTrigger value="disponibilidad">Disponibilidad</TabsTrigger>
           </TabsList>
           <TabsContent value="inhouse" className="mt-4 space-y-3">
             {isLoading ? [1, 2].map(i => <Skeleton key={i} className="h-28 w-full" />) :
@@ -384,6 +386,9 @@ export default function MasajesTerapeutas() {
                     .map(t => (
                       <TherapistCard key={t.id} t={t} onEdit={openEdit} onDelete={handleDelete} />
                     ))}
+          </TabsContent>
+          <TabsContent value="disponibilidad" className="mt-4">
+            <Disponibilidad />
           </TabsContent>
         </Tabs>
 
