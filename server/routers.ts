@@ -2338,15 +2338,20 @@ ${pagesHtml}
         return { htmlContent, pageCount, pdfUrl: result.secure_url };
       }),
 
-    // Procesar ZIP con HTML estático + assets (Claude Design "Static HTML + assets")
+    // Procesar ZIP con assets (Claude Design). Si se pasa htmlContent, usarlo en vez del HTML del ZIP.
     uploadHtmlZip: protectedProcedure
-      .input(z.object({ zipData: z.string() }))
+      .input(z.object({
+        zipData: z.string(),
+        htmlContent: z.string().optional(), // HTML from separate .html file
+      }))
       .mutation(async ({ ctx, input }) => {
         if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
-        const { processHtmlZip } = await import('./newsletterZipProcessor');
-        const htmlContent = await processHtmlZip(input.zipData);
+        const { processHtmlZip, processHtmlWithZipAssets } = await import('./newsletterZipProcessor');
+        const htmlContent = input.htmlContent
+          ? await processHtmlWithZipAssets(input.htmlContent, input.zipData)
+          : await processHtmlZip(input.zipData);
         return { htmlContent };
       }),
 

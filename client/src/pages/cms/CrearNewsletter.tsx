@@ -114,8 +114,11 @@ export default function CMSCrearNewsletter() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfFileName, setPdfFileName] = useState<string | null>(null);
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
-  // ZIP upload (HTML + assets from Claude Design)
+  // ZIP + HTML combined upload (Claude Design Static HTML + assets)
   const [isUploadingZip, setIsUploadingZip] = useState(false);
+  const [pendingHtmlText, setPendingHtmlText] = useState<string | null>(null);
+  const [zipFileName, setZipFileName] = useState<string | null>(null);
+  const pendingZipDataUrlRef = useRef<string | null>(null);
 
   // URL extraction
   const [sourceUrl, setSourceUrl] = useState("");
@@ -374,7 +377,8 @@ export default function CMSCrearNewsletter() {
     onSuccess: (data) => {
       setHtmlContent(data.htmlContent);
       setIsUploadingZip(false);
-      toast.success("ZIP procesado: imágenes subidas a Cloudinary");
+      pendingZipDataUrlRef.current = null;
+      toast.success("Imágenes procesadas y listas para enviar");
     },
     onError: (error) => {
       toast.error(error.message || "Error al procesar el ZIP");
@@ -480,43 +484,55 @@ export default function CMSCrearNewsletter() {
   const handleHtmlFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const isZip = file.name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
-
-    if (isZip) {
-      setHtmlFileName(file.name);
-      setIsUploadingZip(true);
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const dataUrl = ev.target?.result as string;
-        uploadHtmlZipMutation.mutate({ zipData: dataUrl });
-      };
-      reader.onerror = () => {
-        toast.error('Error al leer el ZIP');
-        setIsUploadingZip(false);
-      };
-      reader.readAsDataURL(file);
-      if (e.target) e.target.value = '';
-      return;
-    }
-
     if (!file.name.endsWith('.html') && file.type !== 'text/html') {
-      toast.error('Por favor sube un archivo HTML o ZIP válido');
+      toast.error('Por favor sube un archivo .html');
       return;
     }
-
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const content = ev.target?.result as string;
-      setHtmlContent(content);
+      const text = ev.target?.result as string;
       setHtmlFileName(file.name);
-      toast.success('Archivo HTML cargado correctamente');
+      setPendingHtmlText(text);
+      // If ZIP is already loaded → trigger combined processing
+      if (pendingZipDataUrlRef.current) {
+        setIsUploadingZip(true);
+        uploadHtmlZipMutation.mutate({ zipData: pendingZipDataUrlRef.current, htmlContent: text });
+      } else {
+        // No ZIP yet: set HTML directly so the user sees a partial preview
+        setHtmlContent(text);
+        toast.success('HTML cargado. Ahora sube el ZIP con las imágenes.');
+      }
+    };
+    reader.onerror = () => toast.error('Error al leer el archivo HTML');
+    reader.readAsText(file);
+    if (e.target) e.target.value = '';
+  };
+
+  const handleZipFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isZip = file.name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+    if (!isZip) {
+      toast.error('Por favor sube un archivo .zip');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      pendingZipDataUrlRef.current = dataUrl;
+      setZipFileName(file.name);
+      setIsUploadingZip(true);
+      // Always trigger processing (combined if HTML is ready, ZIP-only otherwise)
+      uploadHtmlZipMutation.mutate({
+        zipData: dataUrl,
+        ...(pendingHtmlText ? { htmlContent: pendingHtmlText } : {}),
+      });
     };
     reader.onerror = () => {
-      toast.error('Error al leer el archivo HTML');
+      toast.error('Error al leer el ZIP');
+      setIsUploadingZip(false);
     };
-    reader.readAsText(file);
-
+    reader.readAsDataURL(file);
     if (e.target) e.target.value = '';
   };
 
@@ -863,48 +879,93 @@ export default function CMSCrearNewsletter() {
 
               {selectedType === 'html' ? (
                 <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-[#44580E]/30 rounded-xl bg-[#44580E]/5 mb-2 transition-colors hover:bg-[#44580E]/10">
-                      <FileText className="w-12 h-12 text-[#44580E] mb-4" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">Sube tu archivo HTML o ZIP</h3>
-                      <p className="text-sm text-gray-500 text-center mb-1 max-w-md">
-                        Sube un <strong>.html</strong> o un <strong>.zip</strong> con HTML + imágenes (exportación de Claude Design).
-                      </p>
-                      <p className="text-xs text-gray-400 text-center mb-6 max-w-md">
-                        En Claude Design: Compartir → Descargar → <em>Standalone HTML</em> para .html · <em>Static HTML + assets</em> para .zip
-                      </p>
+                  <CardContent className="pt-6 space-y-4">
+                    <p className="text-xs text-gray-500 text-center">
+                      En Claude Design: <strong>Compartir → Descargar</strong> → elige <em>Standalone HTML</em> (.html) <strong>y también</strong> <em>Static HTML + assets</em> (.zip) con las imágenes.
+                    </p>
 
-                      <input
-                        type="file"
-                        ref={htmlFileInputRef}
-                        onChange={handleHtmlFileUpload}
-                        accept=".html,.zip,text/html,application/zip,application/x-zip-compressed"
-                        className="hidden"
-                      />
+                    {/* Two upload zones side by side */}
+                    <div className="grid grid-cols-2 gap-3">
 
-                      {isUploadingZip ? (
-                        <div className="flex flex-col items-center gap-3">
-                          <Loader2 className="w-8 h-8 animate-spin text-[#44580E]" />
-                          <p className="text-sm font-medium text-[#44580E]">Subiendo imágenes a Cloudinary...</p>
+                      {/* HTML file */}
+                      <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed rounded-xl transition-colors
+                        border-[#44580E]/30 bg-[#44580E]/5 hover:bg-[#44580E]/10">
+                        <FileText className="w-8 h-8 text-[#44580E] mb-2" />
+                        <p className="text-sm font-medium text-gray-800 mb-1">Archivo HTML</p>
+                        <p className="text-xs text-gray-400 text-center mb-3">Standalone HTML export</p>
+                        <input
+                          type="file"
+                          ref={htmlFileInputRef}
+                          onChange={handleHtmlFileUpload}
+                          accept=".html,text/html"
+                          className="hidden"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => htmlFileInputRef.current?.click()}
+                          disabled={isUploadingZip}
+                          className="text-xs border-[#44580E]/40 text-[#44580E]"
+                        >
+                          <Upload className="w-3 h-3 mr-1" />
+                          Subir .html
+                        </Button>
+                        {htmlFileName && (
+                          <div className="mt-2 flex items-center gap-1 text-xs text-green-600">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span className="truncate max-w-[110px]" title={htmlFileName}>{htmlFileName}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ZIP file */}
+                      <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed rounded-xl transition-colors
+                        border-blue-300/60 bg-blue-50/40 hover:bg-blue-50/70">
+                        <span className="text-3xl mb-2">🗜️</span>
+                        <p className="text-sm font-medium text-gray-800 mb-1">Imágenes (ZIP)</p>
+                        <p className="text-xs text-gray-400 text-center mb-3">Static HTML + assets</p>
+                        <input
+                          type="file"
+                          ref={zipFileInputRef}
+                          onChange={handleZipFileUpload}
+                          accept=".zip,application/zip,application/x-zip-compressed"
+                          className="hidden"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => zipFileInputRef.current?.click()}
+                          disabled={isUploadingZip}
+                          className="text-xs border-blue-300 text-blue-600"
+                        >
+                          <Upload className="w-3 h-3 mr-1" />
+                          Subir .zip
+                        </Button>
+                        {zipFileName && (
+                          <div className="mt-2 flex items-center gap-1 text-xs text-green-600">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span className="truncate max-w-[110px]" title={zipFileName}>{zipFileName}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Processing status */}
+                    {isUploadingZip && (
+                      <div className="flex items-center justify-center gap-3 py-3 bg-[#44580E]/5 rounded-lg">
+                        <Loader2 className="w-5 h-5 animate-spin text-[#44580E]" />
+                        <div>
+                          <p className="text-sm font-medium text-[#44580E]">Subiendo imágenes a Cloudinary…</p>
                           <p className="text-xs text-gray-400">Esto puede tomar unos segundos</p>
                         </div>
-                      ) : (
-                        <Button
-                          onClick={() => htmlFileInputRef.current?.click()}
-                          className="bg-[#44580E] hover:bg-[#3a4c0c]"
-                        >
-                          <Upload className="w-4 h-4 mr-2" />
-                          Seleccionar HTML o ZIP
-                        </Button>
-                      )}
-
-                      {htmlFileName && !isUploadingZip && (
-                        <div className="mt-4 flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1.5 rounded-full">
-                          <CheckCircle2 className="w-4 h-4" />
-                          {htmlFileName.endsWith('.zip') ? `ZIP procesado: ${htmlFileName}` : `Archivo cargado: ${htmlFileName}`}
-                        </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                    {!isUploadingZip && htmlFileName && zipFileName && htmlContent && (
+                      <div className="flex items-center justify-center gap-2 py-2 bg-green-50 rounded-lg text-sm text-green-700">
+                        <CheckCircle2 className="w-4 h-4" />
+                        HTML + imágenes listos para enviar
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               ) : selectedType === 'pdf' ? (

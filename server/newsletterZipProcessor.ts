@@ -17,37 +17,31 @@ function fixDoubleEncodedUtf8(text: string): string {
   }
 }
 
-export async function processHtmlZip(zipDataUri: string): Promise<string> {
+async function extractAssetsFromZip(
+  zipDataUri: string
+): Promise<{ urlMap: Record<string, string>; htmlDir: string; zipHtml: string | null }> {
   const base64 = zipDataUri.replace(/^data:[^;]+;base64,/, '');
   const zipBuffer = Buffer.from(base64, 'base64');
   const zip = new AdmZip(zipBuffer);
   const entries = zip.getEntries();
 
-  // Find the main HTML file (shortest path, not hidden, not node_modules)
+  // Try to find an HTML file inside the ZIP (may not exist when ZIP is assets-only)
   const htmlEntries = entries.filter(e =>
     !e.isDirectory &&
     e.entryName.endsWith('.html') &&
     !e.entryName.includes('node_modules/') &&
     !e.entryName.startsWith('.')
   );
-
-  if (htmlEntries.length === 0) {
-    throw new Error('No se encontró archivo HTML en el ZIP');
-  }
-
   const htmlEntry = htmlEntries.sort(
     (a, b) => a.entryName.split('/').length - b.entryName.split('/').length
-  )[0];
+  )[0] ?? null;
 
-  let html = htmlEntry.getData().toString('utf-8');
-  html = fixDoubleEncodedUtf8(html);
-
-  // The HTML file's directory prefix inside the ZIP (for resolving relative src paths)
-  const htmlDir = htmlEntry.entryName.includes('/')
+  const htmlDir = htmlEntry?.entryName.includes('/')
     ? htmlEntry.entryName.split('/').slice(0, -1).join('/')
     : '';
 
-  // Find all image files
+  const zipHtml = htmlEntry ? fixDoubleEncodedUtf8(htmlEntry.getData().toString('utf-8')) : null;
+
   const imageEntries = entries.filter(
     e => !e.isDirectory && /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(e.entryName)
   );
@@ -66,28 +60,43 @@ export async function processHtmlZip(zipDataUri: string): Promise<string> {
 
     const basename = path.basename(entry.entryName, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
     const cloudKey = `newsletter-assets/${timestamp}-${basename}${ext}`;
-
     const { url } = await cloudinaryPut(cloudKey, data, contentType);
 
-    // Index by full ZIP path
     urlMap[entry.entryName] = url;
-    // Also by relative path from the HTML file's directory
+    // Also index relative path variants for flexible matching
+    const parts = entry.entryName.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      urlMap[parts.slice(i).join('/')] = url;
+    }
     if (htmlDir && entry.entryName.startsWith(htmlDir + '/')) {
       urlMap[entry.entryName.slice(htmlDir.length + 1)] = url;
     }
   }));
 
-  // Rewrite src= attributes (skip external and data: URLs)
-  html = html.replace(/\bsrc="([^"]+)"/g, (match, src: string) => {
+  return { urlMap, htmlDir, zipHtml };
+}
+
+function rewriteSrcAttributes(html: string, urlMap: Record<string, string>): string {
+  return html.replace(/\bsrc="([^"]+)"/g, (match, src: string) => {
     if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) {
       return match;
     }
     const cleanSrc = src.replace(/^\.\//, '');
-    const mapped =
-      urlMap[cleanSrc] ||
-      urlMap[htmlDir ? `${htmlDir}/${cleanSrc}` : cleanSrc];
+    const mapped = urlMap[cleanSrc] ?? urlMap[cleanSrc.replace(/^assets\//, '')];
     return mapped ? `src="${mapped}"` : match;
   });
+}
 
-  return html;
+// ZIP only: extract HTML + assets from the ZIP
+export async function processHtmlZip(zipDataUri: string): Promise<string> {
+  const { urlMap, zipHtml } = await extractAssetsFromZip(zipDataUri);
+  if (!zipHtml) throw new Error('No se encontró archivo HTML en el ZIP');
+  return rewriteSrcAttributes(zipHtml, urlMap);
+}
+
+// HTML file + ZIP assets combined: use the provided HTML, images from the ZIP
+export async function processHtmlWithZipAssets(htmlContent: string, zipDataUri: string): Promise<string> {
+  const { urlMap } = await extractAssetsFromZip(zipDataUri);
+  const html = fixDoubleEncodedUtf8(htmlContent);
+  return rewriteSrcAttributes(html, urlMap);
 }
