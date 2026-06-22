@@ -16,13 +16,9 @@ import { marketingRouter } from "./marketingRouter";
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
-  // Módulo Concierge - Sistema de ventas para afiliados
+  // Módulo Concierge - Sistema
   concierge: conciergeRouter,
-  // Módulo Analytics - Dashboard con datos de Google Ads, Meta Ads, Search Console, Skedu
   analytics: analyticsRouter,
-  // Módulo Masajes - Reservas, terapeutas, inventario y analítica de masajes
   masajes: masajesRouter,
-  // Módulo Clientes - CRM y gestión de clientes
   clientes: clientesRouter,
-  // Módulo Marketing - Email personal, calendario, blog
   marketing: marketingRouter,
