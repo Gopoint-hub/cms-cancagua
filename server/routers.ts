@@ -2753,6 +2753,38 @@ ${pagesHtml}
         return { success: true, imported, skipped };
       }),
 
+    bulkImportJSON: protectedProcedure
+      .input(z.object({
+        contacts: z.array(z.object({
+          email: z.string().email(),
+          first_name: z.string().optional(),
+          last_name: z.string().optional(),
+          segment: z.string().optional(),
+        })),
+        listId: z.number().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        const mapped = input.contacts.map(c => ({
+          email: c.email,
+          name: [c.first_name, c.last_name].filter(Boolean).join(" ") || undefined,
+          segment: c.segment,
+        }));
+        const result = await db.fastBulkImportSubscribers(mapped);
+
+        if (input.listId) {
+          const emails = input.contacts.map(c => c.email);
+          const ids = await db.getSubscriberIdsByEmails(emails);
+          if (ids.length > 0) {
+            await db.bulkAddSubscribersToList(ids, input.listId);
+          }
+        }
+
+        return { success: true, created: result.created, skipped: result.skipped };
+      }),
+
     analyzeAndSegment: protectedProcedure
       .input(z.object({
         csvData: z.string(),
