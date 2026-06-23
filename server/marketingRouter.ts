@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
+import { createList } from "./db";
 
 const EVENTOS_EMAIL = "Cancagua Eventos <eventos@cancagua.cl>";
 
@@ -225,4 +226,27 @@ status: "published"
         url: `https://cancagua.cl/blog/${input.slug}`,
       };
     }),
+
+  // ─── Seed default subscriber lists (run once) ─────────────────────────────
+  seedDefaultLists: protectedProcedure.mutation(async ({ ctx }) => {
+    if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN" });
+    }
+    const LISTS = [
+      { name: "B2C-VIP", description: "Clientes VIP - Alta frecuencia y ticket promedio" },
+      { name: "B2C-Loyal", description: "Clientes leales - Múltiples visitas recientes" },
+      { name: "B2C-Regular", description: "Clientes regulares - Visitas periódicas" },
+      { name: "B2C-Occasional", description: "Clientes ocasionales - Visitas esporádicas" },
+      { name: "B2C-Cold", description: "Clientes fríos - Sin visitas recientes" },
+      { name: "B2C-Mujeres-Activas", description: "Segmento mujeres activas" },
+      { name: "B2B-Prioridad-1", description: "Empresas B2B de alta prioridad" },
+      { name: "B2B-Universidades", description: "Universidades y centros educativos" },
+    ];
+    const created: string[] = [];
+    for (const list of LISTS) {
+      await createList(list);
+      created.push(list.name);
+    }
+    return { success: true, created };
+  }),
 });
