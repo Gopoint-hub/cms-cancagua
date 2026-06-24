@@ -98,4 +98,9 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+startServer()
+  .then(async () => {
+    const { runSeedIfNeeded } = await import("../seed");
+    runSeedIfNeeded().catch(e => console.error("[seed] Startup seed failed:", e));
+  })
+  .catch(console.error);
