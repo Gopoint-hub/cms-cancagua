@@ -14,7 +14,8 @@ import { toast } from "sonner";
 import { 
   Loader2, Send, Upload, Sparkles, ArrowLeft, ArrowRight, Eye, Calendar, 
   Clock, X, Bot, User, RefreshCw, Check, FileText, Users, Mail, Pencil,
-  Wand2, ChevronRight, CheckCircle2, Mic, MicOff, Square, Link2, ExternalLink
+  Wand2, ChevronRight, CheckCircle2, Mic, MicOff, Square, Link2, ExternalLink,
+  Monitor, Smartphone, BookOpen
 } from "lucide-react";
 import { Link, useLocation, useRoute } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -152,6 +153,7 @@ export default function CMSCrearNewsletter() {
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   
   // Preview state
   const [showPreview, setShowPreview] = useState(false);
@@ -276,11 +278,42 @@ export default function CMSCrearNewsletter() {
         toast.success(`Newsletter enviado a ${data.total} destinatarios`);
       }
       setIsSending(false);
-      navigate("/cms/newsletter");
+      // Auto-generate blog article from this campaign
+      const subject = emailSubject || requestText || "Campaña de email marketing";
+      const body = htmlContent || requestText || "";
+      if (subject || body) {
+        generateBlogMutation.mutate({
+          campaignSubject: subject,
+          campaignBody: body.substring(0, 2000),
+          targetAudience: "Clientes y visitantes de Cancagua Spa",
+          additionalContext: "Artículo generado automáticamente desde campaña de newsletter",
+        });
+      } else {
+        navigate("/cms/newsletter");
+      }
     },
     onError: (error) => {
       toast.error(error.message || "Error al enviar newsletter");
       setIsSending(false);
+    },
+  });
+
+  // Blog article auto-generation after send
+  const generateBlogMutation = trpc.marketing.generateBlogArticle.useMutation({
+    onSuccess: (article) => {
+      const BLOG_STORAGE_KEY = "cancagua_blog_articles";
+      const existing = JSON.parse(localStorage.getItem(BLOG_STORAGE_KEY) || "[]");
+      const newArticle = { ...article, id: Date.now().toString(), status: "draft" };
+      localStorage.setItem(BLOG_STORAGE_KEY, JSON.stringify([newArticle, ...existing]));
+      toast.success("Artículo de blog generado — revísalo en Blog & Contenido", {
+        action: { label: "Ver", onClick: () => navigate("/cms/blog-contenido") },
+        duration: 8000,
+      });
+      navigate("/cms/newsletter");
+    },
+    onError: () => {
+      // Blog generation failed silently — don't block newsletter flow
+      navigate("/cms/newsletter");
     },
   });
 
@@ -1200,6 +1233,26 @@ export default function CMSCrearNewsletter() {
                         <CardDescription>Vista previa de tu email</CardDescription>
                       </div>
                     </div>
+                    <div className="flex items-center gap-1 border rounded-lg p-0.5 bg-gray-100">
+                      <Button
+                        variant={previewMode === "desktop" ? "default" : "ghost"}
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => setPreviewMode("desktop")}
+                        title="Vista computador"
+                      >
+                        <Monitor className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant={previewMode === "mobile" ? "default" : "ghost"}
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => setPreviewMode("mobile")}
+                        title="Vista teléfono"
+                      >
+                        <Smartphone className="w-4 h-4" />
+                      </Button>
+                    </div>
                     {selectedType !== 'html' && selectedType !== 'pdf' && (
                       <Button
                         variant="outline"
@@ -1226,11 +1279,25 @@ export default function CMSCrearNewsletter() {
                       <p className="text-sm text-gray-500 mt-2">Esto puede tomar unos segundos</p>
                     </div>
                   ) : htmlContent ? (
-                    <iframe
-                      srcDoc={htmlContent}
-                      className="w-full h-[400px] border-0"
-                      title="Vista previa del newsletter"
-                    />
+                    <div className="flex justify-center bg-gray-100 py-4 overflow-auto" style={{minHeight: 420}}>
+                      <div
+                        style={{
+                          width: previewMode === "desktop" ? 600 : 375,
+                          transition: "width 0.3s ease",
+                          boxShadow: "0 2px 16px rgba(0,0,0,0.12)",
+                          background: "white",
+                        }}
+                      >
+                        <div className="flex items-center justify-center gap-2 py-1 bg-gray-200 text-xs text-gray-500 rounded-t">
+                          {previewMode === "desktop" ? <><Monitor className="w-3 h-3" /> Computador (600px)</> : <><Smartphone className="w-3 h-3" /> Teléfono (375px)</>}
+                        </div>
+                        <iframe
+                          srcDoc={htmlContent}
+                          style={{ width: previewMode === "desktop" ? 600 : 375, height: 500, border: "none", display: "block" }}
+                          title="Vista previa del newsletter"
+                        />
+                      </div>
+                    </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-[400px] text-gray-400">
                       <FileText className="w-12 h-12 mb-4" />

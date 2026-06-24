@@ -848,6 +848,56 @@ export async function bulkCreateNewsletterSubscribers(subscribers: any[]) {
   return { created, skipped };
 }
 
+// Fast bulk import using ON CONFLICT DO NOTHING — handles 50k+ contacts efficiently
+export async function fastBulkImportSubscribers(contacts: Array<{ email: string; name?: string; segment?: string }>) {
+  const dbConn = await getDb();
+  if (!dbConn) return { created: 0, skipped: 0 };
+  const { newsletterSubscribers } = await import("../drizzle/schema");
+
+  const CHUNK = 500;
+  let created = 0;
+  let skipped = 0;
+
+  for (let i = 0; i < contacts.length; i += CHUNK) {
+    const chunk = contacts.slice(i, i + CHUNK);
+    const values = chunk.map(c => ({
+      email: c.email.toLowerCase().trim(),
+      name: c.name || null,
+      status: "active" as const,
+      source: "import" as const,
+      metadata: c.segment ? JSON.stringify({ segment: c.segment }) : null,
+    }));
+
+    const result = await dbConn
+      .insert(newsletterSubscribers)
+      .values(values)
+      .onConflictDoNothing()
+      .returning({ id: newsletterSubscribers.id });
+
+    created += result.length;
+    skipped += chunk.length - result.length;
+  }
+
+  return { created, skipped };
+}
+
+export async function getSubscriberIdsByEmails(emails: string[]) {
+  const dbConn = await getDb();
+  if (!dbConn || emails.length === 0) return [];
+  const { newsletterSubscribers } = await import("../drizzle/schema");
+  const CHUNK = 500;
+  const ids: number[] = [];
+  for (let i = 0; i < emails.length; i += CHUNK) {
+    const chunk = emails.slice(i, i + CHUNK).map(e => e.toLowerCase().trim());
+    const rows = await dbConn
+      .select({ id: newsletterSubscribers.id })
+      .from(newsletterSubscribers)
+      .where(inArray(newsletterSubscribers.email, chunk));
+    ids.push(...rows.map(r => r.id));
+  }
+  return ids;
+}
+
 // Subscriber Lists
 export async function getAllSubscriberLists() {
   const db = await getDb();

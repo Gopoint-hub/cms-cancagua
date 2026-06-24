@@ -99,6 +99,18 @@ export default function CMSSuscriptores() {
     },
   });
 
+  const bulkImportMutation = trpc.subscribers.bulkImportJSON.useMutation({
+    onSuccess: (data) => {
+      toast.success(`✅ Importación completada: ${data.created} nuevos, ${data.skipped} omitidos`);
+      setShowImportModal(false);
+      setCsvData("");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message || "Error al importar");
+    },
+  });
+
   const analyzeAndSegmentMutation = trpc.subscribers.analyzeAndSegment.useMutation({
     onSuccess: (data) => {
       setAnalysisResult(data);
@@ -240,6 +252,37 @@ export default function CMSSuscriptores() {
       return;
     }
     importCSVMutation.mutate({ csvData });
+  };
+
+  const handleBulkImport = () => {
+    if (!csvData.trim()) {
+      toast.error("Por favor carga un archivo CSV");
+      return;
+    }
+    // Parse CSV into JSON contacts
+    const lines = csvData.split("\n").filter(l => l.trim());
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/"/g, ""));
+    const emailIdx = headers.findIndex(h => h.includes("email") || h.includes("correo"));
+    const firstIdx = headers.findIndex(h => h === "first_name" || h === "nombre" || h === "name");
+    const lastIdx = headers.findIndex(h => h === "last_name" || h === "apellido");
+    const segIdx = headers.findIndex(h => h === "segment" || h === "segmento" || h === "lista");
+
+    if (emailIdx === -1) { toast.error("No se encontró columna de email en el CSV"); return; }
+
+    const contacts = lines.slice(1).map(line => {
+      const vals = line.split(",").map(v => v.trim().replace(/"/g, ""));
+      return {
+        email: vals[emailIdx] || "",
+        first_name: firstIdx !== -1 ? vals[firstIdx] : undefined,
+        last_name: lastIdx !== -1 ? vals[lastIdx] : undefined,
+        segment: segIdx !== -1 ? vals[segIdx] : undefined,
+      };
+    }).filter(c => c.email.includes("@"));
+
+    if (contacts.length === 0) { toast.error("No se encontraron contactos válidos"); return; }
+
+    toast.info(`Importando ${contacts.length} contactos...`);
+    bulkImportMutation.mutate({ contacts });
   };
 
   const handleAnalyze = () => {
@@ -626,7 +669,7 @@ export default function CMSSuscriptores() {
           <DialogHeader>
             <DialogTitle>Importar Suscriptores desde CSV</DialogTitle>
             <DialogDescription>
-              Carga un archivo CSV con columnas: email, nombre (opcional), y otros campos
+              Columnas: email (requerido), first_name, last_name, segment (para asignar a lista). Usa "Importar Rápido" para archivos grandes (+5.000 contactos)
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -684,6 +727,19 @@ export default function CMSSuscriptores() {
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setShowImportModal(false)}>
                 Cancelar
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleBulkImport}
+                disabled={bulkImportMutation.isPending || !csvData}
+                className="border-[#44580E] text-[#44580E] hover:bg-[#44580E]/10"
+              >
+                {bulkImportMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4 mr-2" />
+                )}
+                Importar Rápido
               </Button>
               <Button
                 onClick={handleImport}

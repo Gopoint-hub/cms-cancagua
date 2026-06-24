@@ -41,6 +41,10 @@ import CMSLogin from "./pages/cms/Login";
 import CMSActivarCuenta from "./pages/cms/ActivarCuenta";
 import CMSRecuperarContrasena from "./pages/cms/RecuperarContrasena";
 import CMSRestablecerContrasena from "./pages/cms/RestablecerContrasena";
+// Marketing modules
+import CMSEnvioPersonal from "./pages/cms/EnvioPersonal";
+import CMSCalendarioMarketing from "./pages/cms/CalendarioMarketing";
+import CMSBlogContenido from "./pages/cms/BlogContenido";
 // Módulo Masajes
 import MasajesDashboard from "./pages/cms/masajes/Dashboard";
 import MasajesAgenda from "./pages/cms/masajes/Agenda";
@@ -93,6 +97,10 @@ function Router() {
       <Route path="/cms/gift-cards-sales" component={CMSGiftCardsSales} />
       <Route path="/cms/traducciones" component={CMSTraducciones} />
       <Route path="/cms/reportes-mantencion" component={CMSReportesMantencion} />
+      {/* Marketing modules */}
+      <Route path="/cms/envio-personal" component={CMSEnvioPersonal} />
+      <Route path="/cms/calendario-marketing" component={CMSCalendarioMarketing} />
+      <Route path="/cms/blog-contenido" component={CMSBlogContenido} />
       {/* Módulo Concierge */}
       <Route path="/cms/concierge" component={CMSConciergeVenta} />
       <Route path="/cms/concierge/venta" component={CMSConciergeVenta} />

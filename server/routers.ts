@@ -12,6 +12,7 @@ import { conciergeRouter } from "./conciergeRouter";
 import { analyticsRouter } from "./analyticsRouter";
 import { masajesRouter } from "./masajesRouter";
 import { clientesRouter } from "./clientesRouter";
+import { marketingRouter } from "./marketingRouter";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -23,6 +24,7 @@ export const appRouter = router({
   // Módulo Masajes - Reservas, terapeutas, inventario y analítica del área de masajes
   masajes: masajesRouter,
   clientes: clientesRouter,
+  marketing: marketingRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
 
@@ -2749,6 +2751,38 @@ ${pagesHtml}
         }
 
         return { success: true, imported, skipped };
+      }),
+
+    bulkImportJSON: protectedProcedure
+      .input(z.object({
+        contacts: z.array(z.object({
+          email: z.string().email(),
+          first_name: z.string().optional(),
+          last_name: z.string().optional(),
+          segment: z.string().optional(),
+        })),
+        listId: z.number().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        const mapped = input.contacts.map(c => ({
+          email: c.email,
+          name: [c.first_name, c.last_name].filter(Boolean).join(" ") || undefined,
+          segment: c.segment,
+        }));
+        const result = await db.fastBulkImportSubscribers(mapped);
+
+        if (input.listId) {
+          const emails = input.contacts.map(c => c.email);
+          const ids = await db.getSubscriberIdsByEmails(emails);
+          if (ids.length > 0) {
+            await db.bulkAddSubscribersToList(ids, input.listId);
+          }
+        }
+
+        return { success: true, created: result.created, skipped: result.skipped };
       }),
 
     analyzeAndSegment: protectedProcedure

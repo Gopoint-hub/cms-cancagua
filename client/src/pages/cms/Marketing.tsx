@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { trpc } from "@/lib/trpc";
 import {
   Newspaper, MailPlus, UsersRound, ListChecks, ArrowRight,
-  TrendingUp, Send, Users
+  TrendingUp, Send, Users, Mail, Calendar, BookOpen,
 } from "lucide-react";
 import { useLocation } from "wouter";
 
@@ -18,6 +18,25 @@ export default function CMSMarketing() {
   const draftNewsletters = newslettersData?.filter((n: any) => n.status === "draft").length || 0;
   const activeSubscribers = subscribersData?.filter((s: any) => s.status === "active").length || 0;
   const totalLists = listsData?.length || 0;
+
+  const today = new Date().toISOString().split("T")[0];
+  let todayAlerts = 0;
+  try {
+    const saved = localStorage.getItem("cancagua_marketing_calendar");
+    if (saved) {
+      const events = JSON.parse(saved);
+      todayAlerts = events.filter((e: any) => e.date === today && e.status === "pending").length;
+    }
+  } catch {}
+
+  let pendingBlog = 0;
+  try {
+    const saved = localStorage.getItem("cancagua_blog_articles");
+    if (saved) {
+      const arts = JSON.parse(saved);
+      pendingBlog = arts.filter((a: any) => a.status === "draft").length;
+    }
+  } catch {}
 
   const modules = [
     {
@@ -59,12 +78,34 @@ export default function CMSMarketing() {
       color: "bg-emerald-500",
       badge: "Nuevo",
     },
+    {
+      title: "Envío Personal",
+      description: "Email uno a uno desde eventos@cancagua.cl",
+      icon: Mail,
+      path: "/cms/envio-personal",
+      color: "bg-teal-500",
+    },
+    {
+      title: "Calendario",
+      description: "Plan editorial de campañas",
+      icon: Calendar,
+      path: "/cms/calendario-marketing",
+      color: "bg-indigo-500",
+      badge: todayAlerts > 0 ? `${todayAlerts} para hoy` : undefined,
+    },
+    {
+      title: "Blog & Contenido",
+      description: "Generador SEO/AEO con IA",
+      icon: BookOpen,
+      path: "/cms/blog-contenido",
+      color: "bg-rose-500",
+      badge: pendingBlog > 0 ? `${pendingBlog} para aprobar` : undefined,
+    },
   ];
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Marketing</h1>
           <p className="text-muted-foreground">
@@ -72,7 +113,6 @@ export default function CMSMarketing() {
           </p>
         </div>
 
-        {/* Stats rápidas */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -119,7 +159,6 @@ export default function CMSMarketing() {
           </Card>
         </div>
 
-        {/* Módulos */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {modules.map((module) => (
             <Card
