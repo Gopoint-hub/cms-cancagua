@@ -10,9 +10,11 @@ export function isBundledDesignHtml(html: string): boolean {
 
 export async function convertBundledHtmlToEmail(html: string): Promise<string> {
   const puppeteer = await import('puppeteer');
+  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
   const browser = await puppeteer.default.launch({
     headless: true,
+    executablePath,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
