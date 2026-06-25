@@ -1,4 +1,11 @@
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import { cloudinaryPut } from './cloudinaryStorage';
+
+const execFileAsync = promisify(execFile);
+let chromeInstallPromise: Promise<void> | null = null;
 
 export function isBundledDesignHtml(html: string): boolean {
   return (
@@ -8,11 +15,43 @@ export function isBundledDesignHtml(html: string): boolean {
   );
 }
 
-export async function convertBundledHtmlToEmail(html: string): Promise<string> {
-  const puppeteer = await import('puppeteer');
+function getPuppeteerCliPath() {
+  const binaryName = process.platform === 'win32' ? 'puppeteer.cmd' : 'puppeteer';
+  return path.join(process.cwd(), 'node_modules', '.bin', binaryName);
+}
+
+function isMissingChromeError(error: unknown) {
+  return error instanceof Error && /Could not find Chrome/i.test(error.message);
+}
+
+async function ensurePuppeteerChromeInstalled() {
+  if (!chromeInstallPromise) {
+    chromeInstallPromise = (async () => {
+      const puppeteerCliPath = getPuppeteerCliPath();
+      if (!existsSync(puppeteerCliPath)) {
+        throw new Error(`No se encontró el CLI de Puppeteer en ${puppeteerCliPath}`);
+      }
+
+      console.log('[newsletter] Installing Puppeteer Chrome for newsletter rendering...');
+      await execFileAsync(puppeteerCliPath, ['browsers', 'install', 'chrome'], {
+        env: process.env,
+        timeout: 240000,
+        maxBuffer: 1024 * 1024 * 5,
+      });
+      console.log('[newsletter] Puppeteer Chrome installation finished.');
+    })().catch((error) => {
+      chromeInstallPromise = null;
+      throw error;
+    });
+  }
+
+  await chromeInstallPromise;
+}
+
+async function launchNewsletterBrowser(puppeteer: typeof import('puppeteer')) {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
-  const browser = await puppeteer.default.launch({
+  const launchOptions = {
     headless: true,
     executablePath,
     args: [
@@ -23,7 +62,20 @@ export async function convertBundledHtmlToEmail(html: string): Promise<string> {
       '--single-process',
       '--no-zygote',
     ],
-  });
+  };
+
+  try {
+    return await puppeteer.default.launch(launchOptions);
+  } catch (error) {
+    if (!isMissingChromeError(error)) throw error;
+    await ensurePuppeteerChromeInstalled();
+    return await puppeteer.default.launch(launchOptions);
+  }
+}
+
+export async function convertBundledHtmlToEmail(html: string): Promise<string> {
+  const puppeteer = await import('puppeteer');
+  const browser = await launchNewsletterBrowser(puppeteer);
 
   try {
     const page = await browser.newPage();
