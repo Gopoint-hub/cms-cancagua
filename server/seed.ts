@@ -1,6 +1,6 @@
 import { getDb, fastBulkImportSubscribers, getSubscriberIdsByEmails, bulkAddSubscribersToList, createList } from "./db";
 import { sql } from "drizzle-orm";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 const DEFAULT_LISTS = [
@@ -14,6 +14,19 @@ const DEFAULT_LISTS = [
   { name: "B2B-Prioridad-1", description: "Empresas B2B de alta prioridad" },
   { name: "B2B-Universidades", description: "Universidades y centros educativos" },
 ];
+
+function getSeedContactsPath() {
+  const candidates = [
+    join(process.cwd(), "server", "data", "seed_contacts.json"),
+    join(process.cwd(), "dist", "data", "seed_contacts.json"),
+    join(__dirname, "data", "seed_contacts.json"),
+  ];
+  const found = candidates.find((path) => existsSync(path));
+  if (!found) {
+    throw new Error(`seed_contacts.json not found. Tried: ${candidates.join(", ")}`);
+  }
+  return found;
+}
 
 async function ensureMarketingTables(db: any) {
   await db.execute(sql`
@@ -92,8 +105,9 @@ export async function runSeedIfNeeded() {
       console.log(`[seed] ${missingLists.length} subscriber lists created.`);
     }
 
-    // Load seed file
-    const seedPath = join(__dirname, "data", "seed_contacts.json");
+    // Load seed file. In production the server runs from dist/, while the seed
+    // file remains in server/data inside the repository checkout.
+    const seedPath = getSeedContactsPath();
     const contacts: Array<{ email: string; name?: string; segment?: string }> = JSON.parse(
       readFileSync(seedPath, "utf-8")
     );
@@ -107,10 +121,10 @@ export async function runSeedIfNeeded() {
 
     const existingCount = Number(countRow?.count ?? 0);
     if (existingCount >= uniqueSeedEmails.size) {
-      console.log(`[seed] ${existingCount} subscribers already exist — skipping contact import.`);
-      return;
+      console.log(`[seed] ${existingCount} subscribers already exist — syncing list assignments.`);
+    } else {
+      console.log(`[seed] Importing ${contacts.length} segment rows for ${uniqueSeedEmails.size} unique contacts...`);
     }
-    console.log(`[seed] Importing ${contacts.length} segment rows for ${uniqueSeedEmails.size} unique contacts...`);
 
     // Get list map by name
     const lists = await db.select().from(subscriberLists);

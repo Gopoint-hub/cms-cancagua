@@ -920,8 +920,20 @@ export async function getSubscriberIdsByEmails(emails: string[]) {
 export async function getAllSubscriberLists() {
   const db = await getDb();
   if (!db) return [];
-  const { subscriberLists } = await import("../drizzle/schema");
-  return await db.select().from(subscriberLists).orderBy(desc(subscriberLists.createdAt));
+  const { subscriberLists, listSubscribers } = await import("../drizzle/schema");
+  const lists = await db.select().from(subscriberLists).orderBy(desc(subscriberLists.createdAt));
+  const counts = await db
+    .select({
+      listId: listSubscribers.listId,
+      count: sql<number>`COUNT(DISTINCT ${listSubscribers.subscriberId})`,
+    })
+    .from(listSubscribers)
+    .groupBy(listSubscribers.listId);
+  const countMap = new Map(counts.map((row) => [row.listId, Number(row.count)]));
+  return lists.map((list) => ({
+    ...list,
+    subscriberCount: countMap.get(list.id) ?? list.subscriberCount ?? 0,
+  }));
 }
 
 export async function getListById(id: number) {
@@ -1042,6 +1054,7 @@ export async function addSubscriberToList(subscriberId: number, listId: number) 
   if (!db) return;
   const { listSubscribers } = await import("../drizzle/schema");
   await db.insert(listSubscribers).values({ subscriberId, listId }).onDuplicateKeyUpdate({ set: { addedAt: new Date() } });
+  await refreshSubscriberListCount(listId);
 }
 
 export async function removeSubscriberFromList(subscriberId: number, listId: number) {
@@ -1049,6 +1062,7 @@ export async function removeSubscriberFromList(subscriberId: number, listId: num
   if (!db) return;
   const { listSubscribers } = await import("../drizzle/schema");
   await db.delete(listSubscribers).where(and(eq(listSubscribers.subscriberId, subscriberId), eq(listSubscribers.listId, listId)));
+  await refreshSubscriberListCount(listId);
 }
 
 export async function bulkAddSubscribersToList(subscriberIds: number[], listId: number) {
@@ -1072,6 +1086,7 @@ export async function bulkAddSubscribersToList(subscriberIds: number[], listId: 
   if (values.length > 0) {
     await db.insert(listSubscribers).values(values);
   }
+  await refreshSubscriberListCount(listId);
 }
 
 export async function bulkRemoveSubscribersFromList(subscriberIds: number[], listId: number) {
@@ -1082,6 +1097,20 @@ export async function bulkRemoveSubscribersFromList(subscriberIds: number[], lis
     sql`${listSubscribers.subscriberId} IN (${sql.join(subscriberIds, sql`, `)})`,
     eq(listSubscribers.listId, listId)
   ));
+  await refreshSubscriberListCount(listId);
+}
+
+export async function refreshSubscriberListCount(listId: number) {
+  const db = await getDb();
+  if (!db) return 0;
+  const { subscriberLists, listSubscribers } = await import("../drizzle/schema");
+  const [row] = await db
+    .select({ count: sql<number>`COUNT(DISTINCT ${listSubscribers.subscriberId})` })
+    .from(listSubscribers)
+    .where(eq(listSubscribers.listId, listId));
+  const count = Number(row?.count ?? 0);
+  await db.update(subscriberLists).set({ subscriberCount: count }).where(eq(subscriberLists.id, listId));
+  return count;
 }
 
 // Corporate Products
