@@ -9,6 +9,7 @@ const DEFAULT_LISTS = [
   { name: "B2C-Regular", description: "Clientes regulares - Visitas periódicas" },
   { name: "B2C-Occasional", description: "Clientes ocasionales - Visitas esporádicas" },
   { name: "B2C-Cold", description: "Clientes fríos - Sin visitas recientes" },
+  { name: "B2C-Sin-Pedidos", description: "Contactos con ordersCount 0 - validar antes de campañas masivas" },
   { name: "B2C-Mujeres-Activas", description: "Segmento mujeres activas" },
   { name: "B2B-Prioridad-1", description: "Empresas B2B de alta prioridad" },
   { name: "B2B-Universidades", description: "Universidades y centros educativos" },
