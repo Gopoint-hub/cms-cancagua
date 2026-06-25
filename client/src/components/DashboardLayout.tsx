@@ -109,6 +109,7 @@ export const categories: Category[] = [
     color: "bg-purple-500",
     roles: ["super_admin", "admin"],
     items: [
+      { icon: LayoutDashboard, label: "Dashboard", path: "/cms/marketing" },
       { icon: Newspaper, label: "Newsletters", path: "/cms/newsletter" },
       { icon: MailPlus, label: "Crear Newsletter", path: "/cms/crear-newsletter" },
       { icon: UsersRound, label: "Suscriptores", path: "/cms/suscriptores" },

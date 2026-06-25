@@ -6,9 +6,10 @@ import { trpc } from "@/lib/trpc";
 import {
   Newspaper, MailPlus, UsersRound, ListChecks, ArrowRight,
   TrendingUp, Send, Users, Mail, Calendar, BookOpen,
-  Bell, AlertCircle, CheckCircle2, FileText,
+  Bell, AlertCircle, CheckCircle2, FileText, RefreshCw,
 } from "lucide-react";
 import { useLocation } from "wouter";
+import { toast } from "sonner";
 
 type CalendarEvent = {
   id: number;
@@ -68,10 +69,18 @@ export default function CMSMarketing() {
   const [, setLocation] = useLocation();
 
   const { data: newslettersData } = trpc.newsletters.getAll.useQuery();
-  const { data: subscribersData } = trpc.subscribers.getAll.useQuery();
-  const { data: listsData } = trpc.lists.getAll.useQuery();
+  const { data: subscribersData, refetch: refetchSubscribers } = trpc.subscribers.getAll.useQuery();
+  const { data: listsData, refetch: refetchLists } = trpc.lists.getAll.useQuery();
   const { data: calendarEvents = [] } = trpc.marketing.listCalendarEvents.useQuery();
   const { data: blogArticles = [] } = trpc.marketing.listBlogArticles.useQuery();
+  const syncJustoMutation = trpc.marketing.syncJustoDatabase.useMutation({
+    onSuccess: (result) => {
+      toast.success(`BBDD Justo sincronizada: ${result.created} nuevos, ${result.assigned} asignaciones`);
+      refetchSubscribers();
+      refetchLists();
+    },
+    onError: (error) => toast.error(error.message || "No se pudo sincronizar Justo"),
+  });
 
   const sentNewsletters = newslettersData?.filter((n: any) => n.status === "sent").length || 0;
   const draftNewsletters = newslettersData?.filter((n: any) => n.status === "draft").length || 0;
@@ -155,11 +164,22 @@ export default function CMSMarketing() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Marketing</h1>
-          <p className="text-muted-foreground">
-            Acciones del día, calendario editorial y accesos del módulo
-          </p>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Marketing</h1>
+            <p className="text-muted-foreground">
+              Acciones del día, calendario editorial y accesos del módulo
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => syncJustoMutation.mutate()}
+            disabled={syncJustoMutation.isPending}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncJustoMutation.isPending ? "animate-spin" : ""}`} />
+            {syncJustoMutation.isPending ? "Sincronizando Justo..." : "Sincronizar BBDD Justo"}
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

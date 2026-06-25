@@ -87,7 +87,17 @@ async function ensureMarketingTables(db: any) {
 
 export async function runSeedIfNeeded() {
   const db = await getDb();
-  if (!db) return;
+  if (!db) {
+    return {
+      success: false,
+      message: "Database not available",
+      uniqueSeedEmails: 0,
+      segmentRows: 0,
+      created: 0,
+      skipped: 0,
+      assigned: 0,
+    };
+  }
 
   try {
     await ensureMarketingTables(db);
@@ -140,6 +150,7 @@ export async function runSeedIfNeeded() {
 
     let totalCreated = 0;
     let totalSkipped = 0;
+    let totalAssigned = 0;
 
     for (const [segment, segContacts] of Array.from(bySegment.entries())) {
       const result = await fastBulkImportSubscribers(segContacts);
@@ -150,13 +161,34 @@ export async function runSeedIfNeeded() {
       if (listId) {
         const emails = segContacts.map((c: { email: string }) => c.email);
         const ids = await getSubscriberIdsByEmails(emails);
-        if (ids.length > 0) await bulkAddSubscribersToList(ids, listId);
-        console.log(`[seed]   ${segment}: ${result.created} new, assigned to list ${listId}`);
+        if (ids.length > 0) {
+          await bulkAddSubscribersToList(ids, listId);
+          totalAssigned += ids.length;
+        }
+        console.log(`[seed]   ${segment}: ${result.created} new, ${ids.length} assigned to list ${listId}`);
       }
     }
 
-    console.log(`[seed] Import complete — created: ${totalCreated}, skipped: ${totalSkipped}`);
+    const summary = {
+      success: true,
+      uniqueSeedEmails: uniqueSeedEmails.size,
+      segmentRows: contacts.length,
+      created: totalCreated,
+      skipped: totalSkipped,
+      assigned: totalAssigned,
+    };
+    console.log(`[seed] Import complete — created: ${totalCreated}, skipped: ${totalSkipped}, assigned: ${totalAssigned}`);
+    return summary;
   } catch (err) {
     console.error("[seed] Error during seed:", err);
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Unknown seed error",
+      uniqueSeedEmails: 0,
+      segmentRows: 0,
+      created: 0,
+      skipped: 0,
+      assigned: 0,
+    };
   }
 }

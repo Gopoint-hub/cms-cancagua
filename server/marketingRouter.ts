@@ -142,6 +142,21 @@ export const marketingRouter = router({
     return await db.getPersonalEmailLogs(50);
   }),
 
+  syncJustoDatabase: protectedProcedure.mutation(async ({ ctx }) => {
+    if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN" });
+    }
+    const { runSeedIfNeeded } = await import("./seed");
+    const result = await runSeedIfNeeded();
+    if (!result?.success) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "message" in result ? result.message : "No se pudo sincronizar la BBDD Justo",
+      });
+    }
+    return result;
+  }),
+
   listCalendarEvents: protectedProcedure.query(async ({ ctx }) => {
     requireMarketingRole(ctx.user.role);
     const events = await db.getMarketingCalendarEvents();
