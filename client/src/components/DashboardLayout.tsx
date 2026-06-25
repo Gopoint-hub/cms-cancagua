@@ -26,7 +26,7 @@ import {
   FileText, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -113,6 +113,9 @@ export const categories: Category[] = [
       { icon: MailPlus, label: "Crear Newsletter", path: "/cms/crear-newsletter" },
       { icon: UsersRound, label: "Suscriptores", path: "/cms/suscriptores" },
       { icon: ListChecks, label: "Listas", path: "/cms/listas" },
+      { icon: Mail, label: "Envío Personal", path: "/cms/envio-personal" },
+      { icon: Calendar, label: "Calendario", path: "/cms/calendario-marketing" },
+      { icon: BookOpen, label: "Blog & Contenido", path: "/cms/blog-contenido" },
       { icon: TrendingUp, label: "ROI de Marketing", path: "/cms/marketing-roi" },
       { icon: Tag, label: "Códigos Dcto.", path: "/cms/codigos-descuento" },
     ],
