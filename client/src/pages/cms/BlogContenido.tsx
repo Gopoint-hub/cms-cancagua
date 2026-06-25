@@ -129,7 +129,9 @@ export default function BlogContenido() {
           publishedUrl: data.url,
         });
       }
-      toast.success(`¡Publicado! Disponible en ${data.url}`);
+      toast.success("Artículo publicado. El deploy puede tardar unos minutos.", {
+        description: data.url,
+      });
       setPublishingId(null);
     },
     onError: (e) => {
@@ -171,6 +173,7 @@ export default function BlogContenido() {
   const publishArticle = (a: BlogArticle) => {
     setPublishingId(String(a.id));
     publishMutation.mutate({
+      id: a.id,
       title: a.title,
       slug: a.slug,
       content: a.content,
@@ -178,6 +181,7 @@ export default function BlogContenido() {
       metaKeywords: a.metaKeywords,
       category: a.category || undefined,
       author: "Cancagua",
+      status: "published",
     });
   };
 

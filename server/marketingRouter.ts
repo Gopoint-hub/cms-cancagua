@@ -356,13 +356,15 @@ Responde SOLAMENTE con un JSON con esta estructura exacta:
   publishBlogArticle: protectedProcedure
     .input(
       z.object({
+        id: z.number(),
         title: z.string(),
-        slug: z.string(),
+        slug: z.string().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug inválido"),
         content: z.string(),
         metaDescription: z.string().optional(),
         metaKeywords: z.array(z.string()).optional(),
         category: z.string().optional(),
         author: z.string().optional(),
+        status: z.literal("published"),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -391,6 +393,7 @@ Responde SOLAMENTE con un JSON con esta estructura exacta:
       const frontmatter = `---
 title: "${input.title.replace(/"/g, '\\"')}"
 slug: "${input.slug}"
+cmsArticleId: "${input.id}"
 date: "${date}"
 author: "${input.author || "Cancagua"}"
 category: "${input.category || "Bienestar"}"
@@ -413,12 +416,21 @@ status: "published"
         );
         if (checkResp.ok) {
           const existing = await checkResp.json();
+          const existingContent = Buffer.from(existing.content || "", "base64").toString("utf-8");
+          if (!existingContent.includes(`cmsArticleId: "${input.id}"`)) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: `Ya existe ${fileName} para otro artículo. Cambia el slug o publica como actualización intencional.`,
+            });
+          }
           sha = existing.sha;
         }
-      } catch {}
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+      }
 
       const body: any = {
-        message: `blog: publish "${input.title}"`,
+        message: `Publish blog article: ${input.slug}`,
         content: encoded,
         branch,
       };
