@@ -21,26 +21,16 @@ export async function runSeedIfNeeded() {
   try {
     const { subscriberLists, newsletterSubscribers } = await import("../drizzle/schema");
 
-    // ── 1. Create default lists if none exist ──────────────────────────────
+    // ── 1. Create missing default lists ────────────────────────────────────
     const existingLists = await db.select().from(subscriberLists);
-    if (existingLists.length === 0) {
-      console.log("[seed] Creating default subscriber lists...");
-      for (const list of DEFAULT_LISTS) {
+    const existingListNames = new Set(existingLists.map((list: any) => list.name));
+    const missingLists = DEFAULT_LISTS.filter((list) => !existingListNames.has(list.name));
+    if (missingLists.length > 0) {
+      console.log(`[seed] Creating ${missingLists.length} missing default subscriber lists...`);
+      for (const list of missingLists) {
         await createList(list);
       }
-      console.log("[seed] 8 subscriber lists created.");
-    }
-
-    // ── 2. Import contacts if subscribers table is empty ───────────────────
-    const [countRow] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(newsletterSubscribers)
-      .catch(() => [{ count: 0 }]);
-
-    const existingCount = Number(countRow?.count ?? 0);
-    if (existingCount > 0) {
-      console.log(`[seed] ${existingCount} subscribers already exist — skipping contact import.`);
-      return;
+      console.log(`[seed] ${missingLists.length} subscriber lists created.`);
     }
 
     // Load seed file
@@ -48,7 +38,20 @@ export async function runSeedIfNeeded() {
     const contacts: Array<{ email: string; name?: string; segment?: string }> = JSON.parse(
       readFileSync(seedPath, "utf-8")
     );
-    console.log(`[seed] Importing ${contacts.length} contacts...`);
+    const uniqueSeedEmails = new Set(contacts.map((contact) => contact.email.toLowerCase().trim()));
+
+    // ── 2. Import contacts while seed contacts are missing ─────────────────
+    const [countRow] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(newsletterSubscribers)
+      .catch(() => [{ count: 0 }]);
+
+    const existingCount = Number(countRow?.count ?? 0);
+    if (existingCount >= uniqueSeedEmails.size) {
+      console.log(`[seed] ${existingCount} subscribers already exist — skipping contact import.`);
+      return;
+    }
+    console.log(`[seed] Importing ${contacts.length} segment rows for ${uniqueSeedEmails.size} unique contacts...`);
 
     // Get list map by name
     const lists = await db.select().from(subscriberLists);
