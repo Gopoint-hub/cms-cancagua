@@ -65,14 +65,14 @@ export async function runSeedIfNeeded() {
     let totalCreated = 0;
     let totalSkipped = 0;
 
-    for (const [segment, segContacts] of bySegment) {
+    for (const [segment, segContacts] of Array.from(bySegment.entries())) {
       const result = await fastBulkImportSubscribers(segContacts);
       totalCreated += result.created;
       totalSkipped += result.skipped;
 
       const listId = listMap[segment];
       if (listId) {
-        const emails = segContacts.map((c) => c.email);
+        const emails = segContacts.map((c: { email: string }) => c.email);
         const ids = await getSubscriberIdsByEmails(emails);
         if (ids.length > 0) await bulkAddSubscribersToList(ids, listId);
         console.log(`[seed]   ${segment}: ${result.created} new, assigned to list ${listId}`);

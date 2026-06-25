@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,13 @@ import { Link, useLocation } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 
 export default function CMSSuscriptores() {
+  const PAGE_SIZE = 25;
   const { user, loading: authLoading } = useAuth();
   const [, navigate] = useLocation();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -169,7 +171,27 @@ export default function CMSSuscriptores() {
       sub.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       sub.name?.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesStatus && matchesSearch;
-  });
+  }) || [];
+
+  const totalPages = Math.max(1, Math.ceil(filteredSubscribers.length / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStart = (safeCurrentPage - 1) * PAGE_SIZE;
+  const pageEnd = pageStart + PAGE_SIZE;
+  const paginatedSubscribers = filteredSubscribers.slice(pageStart, pageEnd);
+  const visibleSubscriberIds = paginatedSubscribers.map((subscriber: any) => subscriber.id);
+  const allVisibleSelected =
+    visibleSubscriberIds.length > 0 &&
+    visibleSubscriberIds.every((id: number) => selectedIds.includes(id));
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -205,10 +227,10 @@ export default function CMSSuscriptores() {
   };
 
   const handleSelectAll = () => {
-    if (selectedIds.length === filteredSubscribers?.length) {
-      setSelectedIds([]);
+    if (allVisibleSelected) {
+      setSelectedIds(selectedIds.filter((id) => !visibleSubscriberIds.includes(id)));
     } else {
-      setSelectedIds(filteredSubscribers?.map((s: any) => s.id) || []);
+      setSelectedIds(Array.from(new Set([...selectedIds, ...visibleSubscriberIds])));
     }
   };
 
@@ -303,7 +325,7 @@ export default function CMSSuscriptores() {
   };
 
   const exportToCSV = () => {
-    if (!filteredSubscribers || filteredSubscribers.length === 0) {
+    if (filteredSubscribers.length === 0) {
       toast.error("No hay suscriptores para exportar");
       return;
     }
@@ -489,7 +511,7 @@ export default function CMSSuscriptores() {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-[#44580E]" />
               </div>
-            ) : !filteredSubscribers || filteredSubscribers.length === 0 ? (
+            ) : filteredSubscribers.length === 0 ? (
               <div className="text-center py-12">
                 <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No hay suscriptores</h3>
@@ -512,7 +534,7 @@ export default function CMSSuscriptores() {
                     <tr>
                       <th className="px-4 py-3 text-left">
                         <Checkbox
-                          checked={selectedIds.length === filteredSubscribers.length && filteredSubscribers.length > 0}
+                          checked={allVisibleSelected}
                           onCheckedChange={handleSelectAll}
                         />
                       </th>
@@ -525,7 +547,7 @@ export default function CMSSuscriptores() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filteredSubscribers.map((subscriber: any) => (
+                    {paginatedSubscribers.map((subscriber: any) => (
                       <tr key={subscriber.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <Checkbox
@@ -575,6 +597,32 @@ export default function CMSSuscriptores() {
                     ))}
                   </tbody>
                 </table>
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t px-4 py-3 text-sm text-gray-500">
+                  <span>
+                    Mostrando {pageStart + 1}-{Math.min(pageEnd, filteredSubscribers.length)} de {filteredSubscribers.length} suscriptores
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      disabled={safeCurrentPage === 1}
+                    >
+                      Anterior
+                    </Button>
+                    <span className="min-w-20 text-center">
+                      Página {safeCurrentPage} de {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                      disabled={safeCurrentPage === totalPages}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>

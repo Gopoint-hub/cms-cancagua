@@ -279,11 +279,11 @@ export default function CMSCrearNewsletter() {
       }
       setIsSending(false);
       // Auto-generate blog article from this campaign
-      const subject = emailSubject || requestText || "Campaña de email marketing";
+      const campaignSubject = subject || requestText || "Campaña de email marketing";
       const body = htmlContent || requestText || "";
-      if (subject || body) {
+      if (campaignSubject || body) {
         generateBlogMutation.mutate({
-          campaignSubject: subject,
+          campaignSubject,
           campaignBody: body.substring(0, 2000),
           targetAudience: "Clientes y visitantes de Cancagua Spa",
           additionalContext: "Artículo generado automáticamente desde campaña de newsletter",

@@ -859,7 +859,21 @@ export async function fastBulkImportSubscribers(contacts: Array<{ email: string;
   let skipped = 0;
 
   for (let i = 0; i < contacts.length; i += CHUNK) {
-    const chunk = contacts.slice(i, i + CHUNK);
+    const seen = new Set<string>();
+    const chunk = contacts.slice(i, i + CHUNK).filter((contact) => {
+      const email = contact.email.toLowerCase().trim();
+      if (!email || seen.has(email)) return false;
+      seen.add(email);
+      return true;
+    });
+    const emails = chunk.map((c) => c.email.toLowerCase().trim());
+    const existing = emails.length
+      ? await dbConn
+          .select({ email: newsletterSubscribers.email })
+          .from(newsletterSubscribers)
+          .where(inArray(newsletterSubscribers.email, emails))
+      : [];
+    const existingEmails = new Set(existing.map((row) => row.email.toLowerCase().trim()));
     const values = chunk.map(c => ({
       email: c.email.toLowerCase().trim(),
       name: c.name || null,
@@ -868,14 +882,18 @@ export async function fastBulkImportSubscribers(contacts: Array<{ email: string;
       metadata: c.segment ? JSON.stringify({ segment: c.segment }) : null,
     }));
 
-    const result = await dbConn
-      .insert(newsletterSubscribers)
-      .values(values)
-      .onConflictDoNothing()
-      .returning({ id: newsletterSubscribers.id });
+    if (values.length > 0) {
+      await dbConn
+        .insert(newsletterSubscribers)
+        .values(values)
+        .onDuplicateKeyUpdate({
+          set: { updatedAt: sql`${newsletterSubscribers.updatedAt}` },
+        });
+    }
 
-    created += result.length;
-    skipped += chunk.length - result.length;
+    const newInChunk = values.filter((value) => !existingEmails.has(value.email)).length;
+    created += newInChunk;
+    skipped += values.length - newInChunk;
   }
 
   return { created, skipped };
@@ -1037,8 +1055,23 @@ export async function bulkAddSubscribersToList(subscriberIds: number[], listId: 
   const db = await getDb();
   if (!db || subscriberIds.length === 0) return;
   const { listSubscribers } = await import("../drizzle/schema");
-  const values = subscriberIds.map(id => ({ subscriberId: id, listId }));
-  await db.insert(listSubscribers).values(values).onDuplicateKeyUpdate({ set: { addedAt: new Date() } });
+  const uniqueIds = Array.from(new Set(subscriberIds));
+  const existingRows = await db
+    .select({ subscriberId: listSubscribers.subscriberId })
+    .from(listSubscribers)
+    .where(
+      and(
+        eq(listSubscribers.listId, listId),
+        inArray(listSubscribers.subscriberId, uniqueIds)
+      )
+    );
+  const existingIds = new Set(existingRows.map((row) => row.subscriberId));
+  const values = uniqueIds
+    .filter((id) => !existingIds.has(id))
+    .map((id) => ({ subscriberId: id, listId }));
+  if (values.length > 0) {
+    await db.insert(listSubscribers).values(values);
+  }
 }
 
 export async function bulkRemoveSubscribersFromList(subscriberIds: number[], listId: number) {

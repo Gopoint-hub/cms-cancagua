@@ -2,7 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
-import { createList } from "./db";
+import * as db from "./db";
 
 const EVENTOS_EMAIL = "Cancagua Eventos <eventos@cancagua.cl>";
 
@@ -244,9 +244,117 @@ status: "published"
     ];
     const created: string[] = [];
     for (const list of LISTS) {
-      await createList(list);
+      await db.createList(list);
       created.push(list.name);
     }
     return { success: true, created };
   }),
+
+  // ─── ROI & Investments ──────────────────────────────────────────────────
+  getAllInvestments: protectedProcedure.query(async ({ ctx }) => {
+    if (
+      ctx.user.role !== "super_admin" &&
+      ctx.user.role !== "admin" &&
+      ctx.user.role !== "editor"
+    ) {
+      throw new TRPCError({ code: "FORBIDDEN" });
+    }
+    return await db.getAllMarketingInvestments();
+  }),
+
+  createInvestment: protectedProcedure
+    .input(
+      z.object({
+        channel: z.enum([
+          "seo",
+          "facebook_organic",
+          "instagram_organic",
+          "tiktok_organic",
+          "facebook_ads",
+          "instagram_ads",
+          "google_ads",
+          "tiktok_ads",
+          "other",
+        ]),
+        amount: z.number(),
+        startDate: z.date(),
+        endDate: z.date(),
+        description: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (
+        ctx.user.role !== "super_admin" &&
+        ctx.user.role !== "admin" &&
+        ctx.user.role !== "editor"
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      await db.createMarketingInvestment(input);
+      return { success: true };
+    }),
+
+  updateInvestment: protectedProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        channel: z
+          .enum([
+            "seo",
+            "facebook_organic",
+            "instagram_organic",
+            "tiktok_organic",
+            "facebook_ads",
+            "instagram_ads",
+            "google_ads",
+            "tiktok_ads",
+            "other",
+          ])
+          .optional(),
+        amount: z.number().optional(),
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+        description: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (
+        ctx.user.role !== "super_admin" &&
+        ctx.user.role !== "admin" &&
+        ctx.user.role !== "editor"
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const { id, ...data } = input;
+      await db.updateMarketingInvestment(id, data);
+      return { success: true };
+    }),
+
+  deleteInvestment: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      await db.deleteMarketingInvestment(input.id);
+      return { success: true };
+    }),
+
+  getROIReport: protectedProcedure
+    .input(
+      z.object({
+        startDate: z.date(),
+        endDate: z.date(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      if (
+        ctx.user.role !== "super_admin" &&
+        ctx.user.role !== "admin" &&
+        ctx.user.role !== "editor"
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      return await db.getMarketingROIReport(input);
+    }),
 });
