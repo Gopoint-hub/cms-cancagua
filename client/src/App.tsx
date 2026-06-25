@@ -26,6 +26,7 @@ import CMSCodigosDescuento from "./pages/cms/CodigosDescuento";
 import CMSAnalytics from "./pages/cms/Analytics";
 import CMSConfiguracion from "./pages/cms/Configuracion";
 import CMSCRMPipeline from "./pages/cms/CRMPipeline";
+import CMSMarketing from "./pages/cms/Marketing";
 import CMSMarketingROI from "./pages/cms/MarketingROI";
 import CMSTraducciones from "./pages/cms/Traducciones";
 import CMSReportesMantencion from "./pages/cms/ReportesMantencion";
@@ -91,6 +92,7 @@ function Router() {
       <Route path="/cms/analytics" component={CMSAnalytics} />
       <Route path="/cms/configuracion" component={CMSConfiguracion} />
       <Route path="/cms/crm-pipeline" component={CMSCRMPipeline} />
+      <Route path="/cms/marketing" component={CMSMarketing} />
       <Route path="/cms/marketing-roi" component={CMSMarketingROI} />
       <Route path="/cms/integraciones" component={CMSIntegraciones} />
       <Route path="/cms/cerebro" component={CMSCerebro} />
