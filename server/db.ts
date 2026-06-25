@@ -2616,3 +2616,109 @@ export async function upsertAnalyticsCache(periodKey: string, data: any) {
     await db.insert(analyticsCache).values({ periodKey, data: jsonData });
   }
 }
+
+// ============================================
+// MARKETING MODULE PERSISTENCE
+// ============================================
+
+export async function getMarketingCalendarEvents() {
+  const db = await getDb();
+  if (!db) return [];
+  const { marketingCalendarEvents } = await import("../drizzle/schema");
+  return await db.select().from(marketingCalendarEvents).orderBy(asc(marketingCalendarEvents.date), asc(marketingCalendarEvents.id));
+}
+
+export async function createMarketingCalendarEvent(event: any) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const { marketingCalendarEvents } = await import("../drizzle/schema");
+  await db.insert(marketingCalendarEvents).values(event);
+  const rows = await db.select().from(marketingCalendarEvents).orderBy(desc(marketingCalendarEvents.id)).limit(1);
+  return rows[0];
+}
+
+export async function updateMarketingCalendarEvent(id: number, data: any) {
+  const db = await getDb();
+  if (!db) return;
+  const { marketingCalendarEvents } = await import("../drizzle/schema");
+  await db.update(marketingCalendarEvents).set(data).where(eq(marketingCalendarEvents.id, id));
+}
+
+export async function deleteMarketingCalendarEvent(id: number) {
+  const db = await getDb();
+  if (!db) return;
+  const { marketingCalendarEvents } = await import("../drizzle/schema");
+  await db.delete(marketingCalendarEvents).where(eq(marketingCalendarEvents.id, id));
+}
+
+function normalizeBlogArticle(row: any) {
+  return {
+    ...row,
+    metaKeywords: row.metaKeywords ? JSON.parse(row.metaKeywords) : [],
+  };
+}
+
+export async function getMarketingBlogArticles() {
+  const db = await getDb();
+  if (!db) return [];
+  const { marketingBlogArticles } = await import("../drizzle/schema");
+  const rows = await db.select().from(marketingBlogArticles).orderBy(desc(marketingBlogArticles.createdAt));
+  return rows.map(normalizeBlogArticle);
+}
+
+export async function createMarketingBlogArticle(article: any) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const { marketingBlogArticles } = await import("../drizzle/schema");
+  const metaKeywords = Array.isArray(article.metaKeywords)
+    ? JSON.stringify(article.metaKeywords)
+    : article.metaKeywords || "[]";
+  let slug = article.slug;
+  const existingSlug = await db
+    .select({ id: marketingBlogArticles.id })
+    .from(marketingBlogArticles)
+    .where(eq(marketingBlogArticles.slug, slug))
+    .limit(1);
+  if (existingSlug.length > 0) {
+    slug = `${slug}-${Date.now()}`;
+  }
+  await db.insert(marketingBlogArticles).values({
+    ...article,
+    slug,
+    metaKeywords,
+  });
+  const rows = await db.select().from(marketingBlogArticles).orderBy(desc(marketingBlogArticles.id)).limit(1);
+  return normalizeBlogArticle(rows[0]);
+}
+
+export async function updateMarketingBlogArticle(id: number, data: any) {
+  const db = await getDb();
+  if (!db) return;
+  const { marketingBlogArticles } = await import("../drizzle/schema");
+  const values = {
+    ...data,
+    ...(Array.isArray(data.metaKeywords) ? { metaKeywords: JSON.stringify(data.metaKeywords) } : {}),
+  };
+  await db.update(marketingBlogArticles).set(values).where(eq(marketingBlogArticles.id, id));
+}
+
+export async function deleteMarketingBlogArticle(id: number) {
+  const db = await getDb();
+  if (!db) return;
+  const { marketingBlogArticles } = await import("../drizzle/schema");
+  await db.delete(marketingBlogArticles).where(eq(marketingBlogArticles.id, id));
+}
+
+export async function logPersonalEmail(entry: any) {
+  const db = await getDb();
+  if (!db) return;
+  const { personalEmailLogs } = await import("../drizzle/schema");
+  await db.insert(personalEmailLogs).values(entry);
+}
+
+export async function getPersonalEmailLogs(limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  const { personalEmailLogs } = await import("../drizzle/schema");
+  return await db.select().from(personalEmailLogs).orderBy(desc(personalEmailLogs.sentAt)).limit(limit);
+}

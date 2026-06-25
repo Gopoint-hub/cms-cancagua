@@ -733,6 +733,65 @@ export const marketingInvestments = mysqlTable("marketing_investments", {
 export type MarketingInvestment = typeof marketingInvestments.$inferSelect;
 export type InsertMarketingInvestment = typeof marketingInvestments.$inferInsert;
 
+// Calendario operativo del módulo de marketing
+export const marketingCalendarEvents = mysqlTable("marketing_calendar_events", {
+  id: int("id").autoincrement().primaryKey(),
+  date: varchar("date", { length: 10 }).notNull(),
+  title: text("title").notNull(),
+  type: mysqlEnum("type", ["newsletter", "personal", "social", "otro"]).default("newsletter").notNull(),
+  audience: text("audience"),
+  subject: text("subject"),
+  notes: text("notes"),
+  status: mysqlEnum("status", ["pending", "done", "cancelled"]).default("pending").notNull(),
+  htmlTemplate: text("html_template"),
+  createdById: int("created_by_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MarketingCalendarEvent = typeof marketingCalendarEvents.$inferSelect;
+export type InsertMarketingCalendarEvent = typeof marketingCalendarEvents.$inferInsert;
+
+// Artículos de blog generados desde campañas, pendientes de publicar en cancagua.cl/blog
+export const marketingBlogArticles = mysqlTable("marketing_blog_articles", {
+  id: int("id").autoincrement().primaryKey(),
+  title: text("title").notNull(),
+  slug: varchar("slug", { length: 255 }).notNull().unique(),
+  content: text("content").notNull(),
+  metaDescription: text("meta_description"),
+  metaKeywords: text("meta_keywords"),
+  category: varchar("category", { length: 100 }),
+  estimatedReadingTime: int("estimated_reading_time").default(5).notNull(),
+  status: mysqlEnum("status", ["draft", "approved", "published"]).default("draft").notNull(),
+  campaignSubject: text("campaign_subject"),
+  publishedUrl: text("published_url"),
+  publishedAt: timestamp("published_at"),
+  createdById: int("created_by_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MarketingBlogArticle = typeof marketingBlogArticles.$inferSelect;
+export type InsertMarketingBlogArticle = typeof marketingBlogArticles.$inferInsert;
+
+// Bitácora de emails personales enviados desde eventos@cancagua.cl
+export const personalEmailLogs = mysqlTable("personal_email_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  to: varchar("to", { length: 320 }).notNull(),
+  primerNombre: varchar("primer_nombre", { length: 120 }),
+  subject: text("subject").notNull(),
+  bodyText: text("body_text").notNull(),
+  replyTo: varchar("reply_to", { length: 320 }),
+  status: mysqlEnum("status", ["sent", "failed"]).notNull(),
+  providerId: varchar("provider_id", { length: 255 }),
+  errorMessage: text("error_message"),
+  sentById: int("sent_by_id").references(() => users.id),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+});
+
+export type PersonalEmailLog = typeof personalEmailLogs.$inferSelect;
+export type InsertPersonalEmailLog = typeof personalEmailLogs.$inferInsert;
+
 
 // ============================================
 // SISTEMA DE REPORTES DE MANTENCIÓN

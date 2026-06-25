@@ -15,11 +15,69 @@ const DEFAULT_LISTS = [
   { name: "B2B-Universidades", description: "Universidades y centros educativos" },
 ];
 
+async function ensureMarketingTables(db: any) {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS marketing_calendar_events (
+      id int AUTO_INCREMENT NOT NULL,
+      date varchar(10) NOT NULL,
+      title text NOT NULL,
+      type enum('newsletter','personal','social','otro') NOT NULL DEFAULT 'newsletter',
+      audience text,
+      subject text,
+      notes text,
+      status enum('pending','done','cancelled') NOT NULL DEFAULT 'pending',
+      html_template text,
+      created_by_id int,
+      created_at timestamp NOT NULL DEFAULT (now()),
+      updated_at timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT marketing_calendar_events_id PRIMARY KEY(id)
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS marketing_blog_articles (
+      id int AUTO_INCREMENT NOT NULL,
+      title text NOT NULL,
+      slug varchar(255) NOT NULL,
+      content text NOT NULL,
+      meta_description text,
+      meta_keywords text,
+      category varchar(100),
+      estimated_reading_time int NOT NULL DEFAULT 5,
+      status enum('draft','approved','published') NOT NULL DEFAULT 'draft',
+      campaign_subject text,
+      published_url text,
+      published_at timestamp,
+      created_by_id int,
+      created_at timestamp NOT NULL DEFAULT (now()),
+      updated_at timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT marketing_blog_articles_id PRIMARY KEY(id),
+      CONSTRAINT marketing_blog_articles_slug_unique UNIQUE(slug)
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS personal_email_logs (
+      id int AUTO_INCREMENT NOT NULL,
+      \`to\` varchar(320) NOT NULL,
+      primer_nombre varchar(120),
+      subject text NOT NULL,
+      body_text text NOT NULL,
+      reply_to varchar(320),
+      status enum('sent','failed') NOT NULL,
+      provider_id varchar(255),
+      error_message text,
+      sent_by_id int,
+      sent_at timestamp NOT NULL DEFAULT (now()),
+      CONSTRAINT personal_email_logs_id PRIMARY KEY(id)
+    )
+  `);
+}
+
 export async function runSeedIfNeeded() {
   const db = await getDb();
   if (!db) return;
 
   try {
+    await ensureMarketingTables(db);
     const { subscriberLists, newsletterSubscribers } = await import("../drizzle/schema");
 
     // ── 1. Create missing default lists ────────────────────────────────────

@@ -298,18 +298,25 @@ export default function CMSCrearNewsletter() {
     },
   });
 
-  // Blog article auto-generation after send
-  const generateBlogMutation = trpc.marketing.generateBlogArticle.useMutation({
-    onSuccess: (article) => {
-      const BLOG_STORAGE_KEY = "cancagua_blog_articles";
-      const existing = JSON.parse(localStorage.getItem(BLOG_STORAGE_KEY) || "[]");
-      const newArticle = { ...article, id: Date.now().toString(), status: "draft" };
-      localStorage.setItem(BLOG_STORAGE_KEY, JSON.stringify([newArticle, ...existing]));
+  const saveGeneratedBlogMutation = trpc.marketing.createBlogArticle.useMutation({
+    onSuccess: () => {
       toast.success("Artículo de blog generado — revísalo en Blog & Contenido", {
         action: { label: "Ver", onClick: () => navigate("/cms/blog-contenido") },
         duration: 8000,
       });
       navigate("/cms/newsletter");
+    },
+    onError: () => navigate("/cms/newsletter"),
+  });
+
+  // Blog article auto-generation after send
+  const generateBlogMutation = trpc.marketing.generateBlogArticle.useMutation({
+    onSuccess: (article) => {
+      saveGeneratedBlogMutation.mutate({
+        ...article,
+        status: "draft",
+        campaignSubject: subject || requestText || "Campaña de email marketing",
+      });
     },
     onError: () => {
       // Blog generation failed silently — don't block newsletter flow

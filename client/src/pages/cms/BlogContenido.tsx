@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,43 +13,22 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
   BookOpen, Sparkles, Eye, Edit, Globe, Check, X,
-  Clock, Tag, FileText, ChevronDown, ChevronUp, Loader2,
+  Clock, Tag, FileText, ChevronUp, Loader2,
 } from "lucide-react";
 
-const BLOG_STORAGE_KEY = "cancagua_blog_articles";
-
 interface BlogArticle {
-  id: string;
+  id: number;
   title: string;
   slug: string;
   content: string;
-  metaDescription: string;
+  metaDescription?: string | null;
   metaKeywords: string[];
-  category: string;
+  category?: string | null;
   estimatedReadingTime: number;
-  generatedAt: string;
   status: "draft" | "approved" | "published";
-  campaignSubject?: string;
-  publishedAt?: string;
-  publishedUrl?: string;
-}
-
-function useBlogArticles() {
-  const [articles, setArticles] = useState<BlogArticle[]>([]);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(BLOG_STORAGE_KEY);
-      if (saved) setArticles(JSON.parse(saved));
-    } catch {}
-  }, []);
-
-  const save = (arts: BlogArticle[]) => {
-    setArticles(arts);
-    localStorage.setItem(BLOG_STORAGE_KEY, JSON.stringify(arts));
-  };
-
-  return { articles, save };
+  campaignSubject?: string | null;
+  publishedAt?: Date | string | null;
+  publishedUrl?: string | null;
 }
 
 function MarkdownPreview({ content }: { content: string }) {
@@ -78,7 +57,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function BlogContenido() {
-  const { articles, save: saveArticles } = useBlogArticles();
+  const { data: articles = [], isLoading, refetch } = trpc.marketing.listBlogArticles.useQuery();
   const [generating, setGenerating] = useState(false);
   const [genForm, setGenForm] = useState({
     campaignSubject: "",
@@ -94,20 +73,45 @@ export default function BlogContenido() {
   const [editMeta, setEditMeta] = useState("");
   const [publishingId, setPublishingId] = useState<string | null>(null);
 
+  const createArticleMutation = trpc.marketing.createBlogArticle.useMutation({
+    onSuccess: (article) => {
+      refetch();
+      setShowGenForm(false);
+      setGenForm({ campaignSubject: "", campaignBody: "", targetAudience: "", additionalContext: "" });
+      setExpandedId(String(article.id));
+      toast.success("Artículo generado — pendiente de aprobación");
+      setGenerating(false);
+    },
+    onError: (e) => {
+      toast.error(`Error guardando artículo: ${e.message}`);
+      setGenerating(false);
+    },
+  });
+
+  const updateArticleMutation = trpc.marketing.updateBlogArticle.useMutation({
+    onSuccess: () => {
+      refetch();
+      setEditingId(null);
+      toast.success("Artículo actualizado");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteArticleMutation = trpc.marketing.deleteBlogArticle.useMutation({
+    onSuccess: () => {
+      refetch();
+      toast.success("Artículo eliminado");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const generateMutation = trpc.marketing.generateBlogArticle.useMutation({
     onSuccess: (data) => {
-      const article: BlogArticle = {
-        id: Date.now().toString(),
+      createArticleMutation.mutate({
         ...data,
         status: "draft",
         campaignSubject: genForm.campaignSubject,
-      };
-      saveArticles([article, ...articles]);
-      setShowGenForm(false);
-      setGenForm({ campaignSubject: "", campaignBody: "", targetAudience: "", additionalContext: "" });
-      setExpandedId(article.id);
-      toast.success("Artículo generado — pendiente de aprobación");
-      setGenerating(false);
+      });
     },
     onError: (e) => {
       toast.error(`Error generando: ${e.message}`);
@@ -117,13 +121,14 @@ export default function BlogContenido() {
 
   const publishMutation = trpc.marketing.publishBlogArticle.useMutation({
     onSuccess: (data) => {
-      saveArticles(
-        articles.map((a) =>
-          a.id === publishingId
-            ? { ...a, status: "published", publishedAt: new Date().toISOString(), publishedUrl: data.url }
-            : a
-        )
-      );
+      if (publishingId) {
+        updateArticleMutation.mutate({
+          id: Number(publishingId),
+          status: "published",
+          publishedAt: new Date(),
+          publishedUrl: data.url,
+        });
+      }
       toast.success(`¡Publicado! Disponible en ${data.url}`);
       setPublishingId(null);
     },
@@ -143,45 +148,41 @@ export default function BlogContenido() {
   };
 
   const approveArticle = (id: string) => {
-    saveArticles(articles.map((a) => (a.id === id ? { ...a, status: "approved" } : a)));
-    toast.success("Artículo aprobado — listo para publicar");
+    updateArticleMutation.mutate({ id: Number(id), status: "approved" });
   };
 
   const startEdit = (a: BlogArticle) => {
-    setEditingId(a.id);
+    setEditingId(String(a.id));
     setEditContent(a.content);
     setEditTitle(a.title);
-    setEditMeta(a.metaDescription);
+    setEditMeta(a.metaDescription || "");
   };
 
   const saveEdit = () => {
-    saveArticles(
-      articles.map((a) =>
-        a.id === editingId
-          ? { ...a, content: editContent, title: editTitle, metaDescription: editMeta }
-          : a
-      )
-    );
-    setEditingId(null);
-    toast.success("Artículo actualizado");
+    if (!editingId) return;
+    updateArticleMutation.mutate({
+      id: Number(editingId),
+      content: editContent,
+      title: editTitle,
+      metaDescription: editMeta,
+    });
   };
 
   const publishArticle = (a: BlogArticle) => {
-    setPublishingId(a.id);
+    setPublishingId(String(a.id));
     publishMutation.mutate({
       title: a.title,
       slug: a.slug,
       content: a.content,
-      metaDescription: a.metaDescription,
+      metaDescription: a.metaDescription || undefined,
       metaKeywords: a.metaKeywords,
-      category: a.category,
+      category: a.category || undefined,
       author: "Cancagua",
     });
   };
 
   const deleteArticle = (id: string) => {
-    saveArticles(articles.filter((a) => a.id !== id));
-    toast.success("Artículo eliminado");
+    deleteArticleMutation.mutate({ id: Number(id) });
   };
 
   return (
@@ -277,7 +278,16 @@ export default function BlogContenido() {
         )}
 
         <div className="space-y-3">
-          {articles.length === 0 && (
+          {isLoading && (
+            <Card>
+              <CardContent className="py-10 text-center text-muted-foreground">
+                <Loader2 className="h-5 w-5 mx-auto mb-2 animate-spin" />
+                Cargando artículos...
+              </CardContent>
+            </Card>
+          )}
+
+          {!isLoading && articles.length === 0 && (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 <BookOpen className="h-10 w-10 mx-auto mb-3 opacity-30" />
@@ -335,7 +345,7 @@ export default function BlogContenido() {
                         variant="outline"
                         size="sm"
                         className="gap-1 text-green-700 border-green-300 hover:bg-green-50 h-7 text-xs"
-                        onClick={() => approveArticle(article.id)}
+                        onClick={() => approveArticle(String(article.id))}
                       >
                         <Check className="h-3.5 w-3.5" /> Aprobar
                       </Button>
@@ -345,34 +355,34 @@ export default function BlogContenido() {
                         size="sm"
                         className="gap-1 h-7 text-xs"
                         onClick={() => publishArticle(article)}
-                        disabled={publishingId === article.id}
+                        disabled={publishingId === String(article.id)}
                       >
-                        {publishingId === article.id ? (
+                        {publishingId === String(article.id) ? (
                           <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Publicando...</>
                         ) : (
                           <><Globe className="h-3.5 w-3.5" /> Publicar en web</>
                         )}
                       </Button>
                     )}
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(article)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(article as BlogArticle)}>
                       <Edit className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="ghost" size="icon" className="h-7 w-7"
-                      onClick={() => setExpandedId(expandedId === article.id ? null : article.id)}
+                      onClick={() => setExpandedId(expandedId === String(article.id) ? null : String(article.id))}
                     >
-                      {expandedId === article.id ? <ChevronUp className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      {expandedId === String(article.id) ? <ChevronUp className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </Button>
                     <Button
                       variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700"
-                      onClick={() => deleteArticle(article.id)}
+                      onClick={() => deleteArticle(String(article.id))}
                     >
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
 
-                {expandedId === article.id && (
+                {expandedId === String(article.id) && (
                   <div className="mt-4">
                     <Separator className="mb-4" />
                     <Tabs defaultValue="preview">
@@ -398,13 +408,13 @@ export default function BlogContenido() {
                       <TabsContent value="seo" className="mt-3 space-y-3">
                         <div>
                           <Label className="text-xs">Meta descripción</Label>
-                          <p className="text-sm mt-1 p-2 bg-gray-50 rounded border">{article.metaDescription}</p>
-                          <p className="text-xs text-muted-foreground">{article.metaDescription.length}/160 chars</p>
+                          <p className="text-sm mt-1 p-2 bg-gray-50 rounded border">{article.metaDescription || ""}</p>
+                          <p className="text-xs text-muted-foreground">{(article.metaDescription || "").length}/160 chars</p>
                         </div>
                         <div>
                           <Label className="text-xs">Keywords</Label>
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {article.metaKeywords.map((k) => (
+                            {article.metaKeywords.map((k: string) => (
                               <Badge key={k} variant="secondary" className="text-xs">{k}</Badge>
                             ))}
                           </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,113 +8,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Bell, Calendar, Upload, Edit, Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
-
-const DEFAULT_CALENDAR: CalendarEvent[] = [
-  {
-    id: "1",
-    date: "2026-06-23",
-    title: "Bienvenida Justo — Descuento Bienestar",
-    type: "newsletter",
-    audience: "B2C-VIP + Loyal",
-    subject: "Un regalo de Cancagua para ti, {{primer_nombre}}",
-    notes: "Email de bienvenida a la BBDD Justo. Descuento invierno exclusivo.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-  {
-    id: "2",
-    date: "2026-06-25",
-    title: "Tips de bienestar femenino",
-    type: "newsletter",
-    audience: "B2C-Mujeres-Activas",
-    subject: "5 rituales de invierno para reconectar contigo, {{primer_nombre}}",
-    notes: "Contenido de valor. Sin oferta directa. Activar segmento mujeres.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-  {
-    id: "3",
-    date: "2026-06-30",
-    title: "Oferta midweek spa",
-    type: "newsletter",
-    audience: "B2C-Regular",
-    subject: "Escápate entre semana — oferta especial julio",
-    notes: "Descuento lun-jue. Crear urgencia con fecha límite.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-  {
-    id: "4",
-    date: "2026-07-02",
-    title: "Relanzamiento B2B invierno",
-    type: "newsletter",
-    audience: "B2B-Prioridad-1",
-    subject: "Cancagua para tu equipo este invierno, {{primer_nombre}}",
-    notes: "Email personalizado. Propuesta corporativa con paquetes grupales.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-  {
-    id: "5",
-    date: "2026-07-07",
-    title: "Reactivación clientes fríos",
-    type: "newsletter",
-    audience: "B2C-Occasional",
-    subject: "¿Cuándo fue la última vez que te regalaste tiempo?",
-    notes: "Email emocional. Sin oferta dura. Reactivar interés.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-  {
-    id: "6",
-    date: "2026-07-09",
-    title: "Anuncio Retiro Invierno",
-    type: "newsletter",
-    audience: "Todos B2C",
-    subject: "Retiro de invierno en Cancagua — cupos limitados",
-    notes: "Anuncio evento especial. CTA reservar ahora.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-  {
-    id: "7",
-    date: "2026-07-14",
-    title: "Última oportunidad — cierre campaña",
-    type: "newsletter",
-    audience: "B2C-VIP + Regular + Occasional",
-    subject: "Últimos cupos disponibles, {{primer_nombre}}",
-    notes: "Urgencia real. Recordatorio final del retiro.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-  {
-    id: "8",
-    date: "2026-07-18",
-    title: "Seguimiento B2B Universidades",
-    type: "newsletter",
-    audience: "B2B-Universidades",
-    subject: "Bienestar para tu comunidad universitaria",
-    notes: "Propuesta específica para comunidad académica. Paquetes descuento staff.",
-    status: "pending",
-    htmlTemplate: "",
-  },
-];
+import { Bell, Calendar, Upload, Edit, Plus, Trash2, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 interface CalendarEvent {
-  id: string;
+  id: number;
   date: string;
   title: string;
   type: "newsletter" | "personal" | "social" | "otro";
-  audience: string;
-  subject: string;
-  notes: string;
+  audience?: string | null;
+  subject?: string | null;
+  notes?: string | null;
   status: "pending" | "done" | "cancelled";
-  htmlTemplate: string;
+  htmlTemplate?: string | null;
 }
-
-const STORAGE_KEY = "cancagua_marketing_calendar";
 
 const TYPE_COLORS: Record<string, string> = {
   newsletter: "bg-purple-100 text-purple-800 border-purple-200",
@@ -145,7 +53,6 @@ function formatDate(d: string) {
 }
 
 export default function CalendarioMarketing() {
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [viewDate, setViewDate] = useState("2026-06-23");
@@ -153,23 +60,30 @@ export default function CalendarioMarketing() {
 
   const today = new Date().toISOString().split("T")[0];
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        setEvents(JSON.parse(saved));
-      } else {
-        setEvents(DEFAULT_CALENDAR);
-      }
-    } catch {
-      setEvents(DEFAULT_CALENDAR);
-    }
-  }, []);
-
-  const saveEvents = (evts: CalendarEvent[]) => {
-    setEvents(evts);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(evts));
-  };
+  const { data: events = [], isLoading, refetch } = trpc.marketing.listCalendarEvents.useQuery();
+  const createMutation = trpc.marketing.createCalendarEvent.useMutation({
+    onSuccess: () => {
+      refetch();
+      setEditing(null);
+      toast.success("Evento creado");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const updateMutation = trpc.marketing.updateCalendarEvent.useMutation({
+    onSuccess: () => {
+      refetch();
+      setEditing(null);
+      toast.success("Evento actualizado");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteMutation = trpc.marketing.deleteCalendarEvent.useMutation({
+    onSuccess: () => {
+      refetch();
+      toast.success("Evento eliminado");
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const todayEvents = events.filter((e) => e.date === today && e.status === "pending");
 
@@ -180,7 +94,7 @@ export default function CalendarioMarketing() {
 
   const openNew = (date?: string) => {
     setEditing({
-      id: Date.now().toString(),
+      id: 0,
       date: date || today,
       title: "",
       type: "newsletter",
@@ -202,19 +116,23 @@ export default function CalendarioMarketing() {
 
   const saveEditing = () => {
     if (!editing) return;
-    const upd = { ...editing, htmlTemplate: templateDraft };
+    const upd = {
+      ...editing,
+      audience: editing.audience || undefined,
+      subject: editing.subject || undefined,
+      notes: editing.notes || undefined,
+      htmlTemplate: templateDraft || undefined,
+    };
     if (isNew) {
-      saveEvents([...events, upd]);
+      const { id, ...payload } = upd;
+      createMutation.mutate(payload);
     } else {
-      saveEvents(events.map((e) => (e.id === upd.id ? upd : e)));
+      updateMutation.mutate(upd);
     }
-    setEditing(null);
-    toast.success(isNew ? "Evento creado" : "Evento actualizado");
   };
 
-  const deleteEvent = (id: string) => {
-    saveEvents(events.filter((e) => e.id !== id));
-    toast.success("Evento eliminado");
+  const deleteEvent = (id: number) => {
+    deleteMutation.mutate({ id });
   };
 
   const handleTemplateUpload = (file: File) => {
@@ -336,6 +254,13 @@ export default function CalendarioMarketing() {
           ))}
         </div>
 
+        {isLoading && (
+          <div className="flex items-center justify-center py-10 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+            Cargando calendario...
+          </div>
+        )}
+
         <div className="space-y-3">
           <h2 className="text-base font-semibold">Todas las campañas</h2>
           <div className="space-y-2">
@@ -426,7 +351,7 @@ export default function CalendarioMarketing() {
                 <div>
                   <Label>Audiencia / Lista</Label>
                   <Input
-                    value={editing.audience}
+                    value={editing.audience || ""}
                     onChange={(e) => setEditing((prev) => prev ? { ...prev, audience: e.target.value } : prev)}
                     placeholder="Ej: B2C-VIP, Loyal"
                   />
@@ -434,7 +359,7 @@ export default function CalendarioMarketing() {
                 <div>
                   <Label>Asunto del email</Label>
                   <Input
-                    value={editing.subject}
+                    value={editing.subject || ""}
                     onChange={(e) => setEditing((prev) => prev ? { ...prev, subject: e.target.value } : prev)}
                     placeholder="Asunto del email"
                   />
@@ -442,7 +367,7 @@ export default function CalendarioMarketing() {
                 <div>
                   <Label>Notas</Label>
                   <Textarea
-                    value={editing.notes}
+                    value={editing.notes || ""}
                     onChange={(e) => setEditing((prev) => prev ? { ...prev, notes: e.target.value } : prev)}
                     rows={3}
                     placeholder="Notas, instrucciones, links..."

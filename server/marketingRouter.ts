@@ -6,6 +6,75 @@ import * as db from "./db";
 
 const EVENTOS_EMAIL = "Cancagua Eventos <eventos@cancagua.cl>";
 
+const DEFAULT_CALENDAR_EVENTS = [
+  {
+    date: "2026-06-23",
+    title: "Email personal de prospección — Top 15 empresas prioritarias",
+    type: "personal" as const,
+    audience: "B2B-Prioridad-1",
+    subject: "Hola {{primer_nombre}}, tengo una pregunta",
+    notes: "Texto plano desde eventos@cancagua.cl. Sin diseño. Objetivo: abrir conversación B2B.",
+    status: "pending" as const,
+    htmlTemplate: "",
+  },
+  {
+    date: "2026-06-24",
+    title: "Newsletter bienvenida — Hay lugares que cambian algo en ti",
+    type: "newsletter" as const,
+    audience: "B2C-Cold + B2C-Occasional",
+    subject: "Hay lugares que cambian algo en ti",
+    notes: "HTML diseñado en Claude Design. Primer contacto masivo, narrativo y sin venta dura.",
+    status: "pending" as const,
+    htmlTemplate: "",
+  },
+  {
+    date: "2026-06-26",
+    title: "Email VIP — Invitación exclusiva personal",
+    type: "personal" as const,
+    audience: "B2C-VIP",
+    subject: "{{primer_nombre}}, hay algo que quería contarte",
+    notes: "Enviar uno a uno en ventana 9-11am o 3-5pm. Máximo 115 contactos.",
+    status: "pending" as const,
+    htmlTemplate: "",
+  },
+  {
+    date: "2026-07-01",
+    title: "Newsletter testimonial — Llegué tensa. Volví diferente.",
+    type: "newsletter" as const,
+    audience: "B2C-Loyal + B2C-Regular",
+    subject: "Llegué con el cuerpo tenso. Volví diferente.",
+    notes: "Segmento caliente. Usar imagen testimonial de biopiscinas y CTA a disponibilidad.",
+    status: "pending" as const,
+    htmlTemplate: "",
+  },
+  {
+    date: "2026-07-03",
+    title: "Campaña segmento femenino — Para cuando necesitas un día solo tuyo",
+    type: "newsletter" as const,
+    audience: "B2C-Mujeres-Activas",
+    subject: "Para cuando necesitas un día solo tuyo",
+    notes: "Copy orientado a permiso emocional del autocuidado.",
+    status: "pending" as const,
+    htmlTemplate: "",
+  },
+  {
+    date: "2026-07-10",
+    title: "Prospección universidades — Jornada para equipos académicos",
+    type: "personal" as const,
+    audience: "B2B-Universidades",
+    subject: "Una idea para el cierre de semestre de tu equipo",
+    notes: "Texto plano para contactos universitarios. Tono académico, no empresarial tradicional.",
+    status: "pending" as const,
+    htmlTemplate: "",
+  },
+];
+
+const requireMarketingRole = (role: string) => {
+  if (role !== "super_admin" && role !== "admin" && role !== "editor") {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+};
+
 export const marketingRouter = router({
   // ─── Envío personal one-to-one desde eventos@cancagua.cl ─────────────────
   sendPersonalEmail: protectedProcedure
@@ -19,13 +88,7 @@ export const marketingRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (
-        ctx.user.role !== "super_admin" &&
-        ctx.user.role !== "admin" &&
-        ctx.user.role !== "editor"
-      ) {
-        throw new TRPCError({ code: "FORBIDDEN" });
-      }
+      requireMarketingRole(ctx.user.role);
 
       const { Resend } = await import("resend");
       const resend = new Resend(process.env.RESEND_API_KEY);
@@ -44,13 +107,156 @@ export const marketingRouter = router({
       });
 
       if (error) {
+        await db.logPersonalEmail({
+          to: input.to,
+          primerNombre: input.primerNombre || null,
+          subject: input.subject,
+          bodyText: personalizedBody,
+          replyTo: input.replyTo || "eventos@cancagua.cl",
+          status: "failed",
+          errorMessage: error.message,
+          sentById: ctx.user.id,
+        });
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: error.message,
         });
       }
 
+      await db.logPersonalEmail({
+        to: input.to,
+        primerNombre: input.primerNombre || null,
+        subject: input.subject,
+        bodyText: personalizedBody,
+        replyTo: input.replyTo || "eventos@cancagua.cl",
+        status: "sent",
+        providerId: data?.id || null,
+        sentById: ctx.user.id,
+      });
+
       return { success: true, id: data?.id };
+    }),
+
+  getPersonalEmailLogs: protectedProcedure.query(async ({ ctx }) => {
+    requireMarketingRole(ctx.user.role);
+    return await db.getPersonalEmailLogs(50);
+  }),
+
+  listCalendarEvents: protectedProcedure.query(async ({ ctx }) => {
+    requireMarketingRole(ctx.user.role);
+    const events = await db.getMarketingCalendarEvents();
+    if (events.length > 0) return events;
+    for (const event of DEFAULT_CALENDAR_EVENTS) {
+      await db.createMarketingCalendarEvent({ ...event, createdById: ctx.user.id });
+    }
+    return await db.getMarketingCalendarEvents();
+  }),
+
+  createCalendarEvent: protectedProcedure
+    .input(
+      z.object({
+        date: z.string(),
+        title: z.string().min(1),
+        type: z.enum(["newsletter", "personal", "social", "otro"]),
+        audience: z.string().optional(),
+        subject: z.string().optional(),
+        notes: z.string().optional(),
+        status: z.enum(["pending", "done", "cancelled"]).default("pending"),
+        htmlTemplate: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireMarketingRole(ctx.user.role);
+      return await db.createMarketingCalendarEvent({ ...input, createdById: ctx.user.id });
+    }),
+
+  updateCalendarEvent: protectedProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        date: z.string().optional(),
+        title: z.string().optional(),
+        type: z.enum(["newsletter", "personal", "social", "otro"]).optional(),
+        audience: z.string().optional(),
+        subject: z.string().optional(),
+        notes: z.string().optional(),
+        status: z.enum(["pending", "done", "cancelled"]).optional(),
+        htmlTemplate: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireMarketingRole(ctx.user.role);
+      const { id, ...data } = input;
+      await db.updateMarketingCalendarEvent(id, data);
+      return { success: true };
+    }),
+
+  deleteCalendarEvent: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      requireMarketingRole(ctx.user.role);
+      await db.deleteMarketingCalendarEvent(input.id);
+      return { success: true };
+    }),
+
+  listBlogArticles: protectedProcedure.query(async ({ ctx }) => {
+    requireMarketingRole(ctx.user.role);
+    return await db.getMarketingBlogArticles();
+  }),
+
+  createBlogArticle: protectedProcedure
+    .input(
+      z.object({
+        title: z.string(),
+        slug: z.string(),
+        content: z.string(),
+        metaDescription: z.string().optional(),
+        metaKeywords: z.array(z.string()).optional(),
+        category: z.string().optional(),
+        estimatedReadingTime: z.number().optional(),
+        status: z.enum(["draft", "approved", "published"]).optional(),
+        campaignSubject: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireMarketingRole(ctx.user.role);
+      return await db.createMarketingBlogArticle({
+        ...input,
+        estimatedReadingTime: input.estimatedReadingTime || 5,
+        status: input.status || "draft",
+        createdById: ctx.user.id,
+      });
+    }),
+
+  updateBlogArticle: protectedProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        title: z.string().optional(),
+        slug: z.string().optional(),
+        content: z.string().optional(),
+        metaDescription: z.string().optional(),
+        metaKeywords: z.array(z.string()).optional(),
+        category: z.string().optional(),
+        estimatedReadingTime: z.number().optional(),
+        status: z.enum(["draft", "approved", "published"]).optional(),
+        publishedUrl: z.string().optional(),
+        publishedAt: z.date().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireMarketingRole(ctx.user.role);
+      const { id, ...data } = input;
+      await db.updateMarketingBlogArticle(id, data);
+      return { success: true };
+    }),
+
+  deleteBlogArticle: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      requireMarketingRole(ctx.user.role);
+      await db.deleteMarketingBlogArticle(input.id);
+      return { success: true };
     }),
 
   // ─── Generación de artículo de blog con IA ───────────────────────────────

@@ -7,9 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Send, Eye, EyeOff, Info, Mail, User, FileText } from "lucide-react";
+import { Send, Eye, EyeOff, Info, Mail, FileText, ListChecks, Loader2, Clock } from "lucide-react";
 
 const MERGE_TAGS = [
   { tag: "{{primer_nombre}}", desc: "Primer nombre del destinatario" },
@@ -58,11 +59,24 @@ export default function EnvioPersonal() {
   });
   const [preview, setPreview] = useState(false);
   const [sent, setSent] = useState(false);
+  const [selectedListId, setSelectedListId] = useState("");
+  const [sendLimit, setSendLimit] = useState(25);
+  const [delaySeconds, setDelaySeconds] = useState(2);
+  const [queueSending, setQueueSending] = useState(false);
+  const [queueProgress, setQueueProgress] = useState({ sent: 0, failed: 0, total: 0 });
+
+  const { data: lists = [] } = trpc.lists.getAll.useQuery();
+  const { data: listSubscribers = [] } = trpc.lists.getSubscribers.useQuery(
+    { listId: Number(selectedListId || 0) },
+    { enabled: Boolean(selectedListId) }
+  );
+  const { data: emailLogs = [], refetch: refetchLogs } = trpc.marketing.getPersonalEmailLogs.useQuery();
 
   const sendMutation = trpc.marketing.sendPersonalEmail.useMutation({
     onSuccess: () => {
       toast.success("Email enviado correctamente desde eventos@cancagua.cl");
       setSent(true);
+      refetchLogs();
     },
     onError: (e) => toast.error(`Error: ${e.message}`),
   });
@@ -82,6 +96,52 @@ export default function EnvioPersonal() {
     }
     setSent(false);
     sendMutation.mutate(form);
+  };
+
+  const firstNameFromSubscriber = (name?: string | null) => {
+    const first = (name || "").trim().split(/\s+/)[0];
+    return first && first !== "Sin" ? first : "";
+  };
+
+  const handleQueueSend = async () => {
+    if (!selectedListId) {
+      toast.error("Selecciona una lista");
+      return;
+    }
+    if (!form.subject || !form.bodyText) {
+      toast.error("Completa asunto y cuerpo antes de iniciar la cola");
+      return;
+    }
+    const recipients = listSubscribers.slice(0, Math.max(1, sendLimit));
+    if (recipients.length === 0) {
+      toast.error("La lista no tiene suscriptores activos");
+      return;
+    }
+    if (!confirm(`Enviar ${recipients.length} emails uno a uno desde eventos@cancagua.cl?`)) return;
+
+    setQueueSending(true);
+    setQueueProgress({ sent: 0, failed: 0, total: recipients.length });
+
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient: any = recipients[i];
+      try {
+        await sendMutation.mutateAsync({
+          ...form,
+          to: recipient.email,
+          primerNombre: firstNameFromSubscriber(recipient.name),
+        });
+        setQueueProgress((p) => ({ ...p, sent: p.sent + 1 }));
+      } catch {
+        setQueueProgress((p) => ({ ...p, failed: p.failed + 1 }));
+      }
+      if (i < recipients.length - 1 && delaySeconds > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+      }
+    }
+
+    setQueueSending(false);
+    refetchLogs();
+    toast.success("Cola de envío finalizada");
   };
 
   const applyTemplate = (t: typeof TEMPLATE_EXAMPLES[0]) => {
@@ -254,6 +314,77 @@ export default function EnvioPersonal() {
           <div className="space-y-4">
             <Card>
               <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ListChecks className="h-4 w-4" /> Enviar por lista
+                </CardTitle>
+                <CardDescription>
+                  Cola uno-a-uno usando el asunto y cuerpo actuales.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label>Lista segmentada</Label>
+                  <Select value={selectedListId} onValueChange={setSelectedListId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona lista" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lists.map((list: any) => (
+                        <SelectItem key={list.id} value={String(list.id)}>
+                          {list.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedListId && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {listSubscribers.length} contactos disponibles
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label>Máximo</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={sendLimit}
+                      onChange={(e) => setSendLimit(Number(e.target.value))}
+                    />
+                  </div>
+                  <div>
+                    <Label>Pausa seg.</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={delaySeconds}
+                      onChange={(e) => setDelaySeconds(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+                {queueSending && (
+                  <div className="text-xs rounded border bg-muted p-2">
+                    <Loader2 className="h-3.5 w-3.5 inline mr-1 animate-spin" />
+                    {queueProgress.sent + queueProgress.failed}/{queueProgress.total} procesados · {queueProgress.sent} enviados · {queueProgress.failed} fallidos
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-2"
+                  onClick={handleQueueSend}
+                  disabled={queueSending || sendMutation.isPending}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Iniciar cola uno-a-uno
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Plantillas rápidas</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -298,6 +429,30 @@ export default function EnvioPersonal() {
                 <p className="text-xs text-muted-foreground mt-2">
                   Los emails salen como "Cancagua Eventos" para mayor personalización y apertura.
                 </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5" /> Últimos envíos
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {emailLogs.slice(0, 5).map((log: any) => (
+                  <div key={log.id} className="text-xs border-b pb-2 last:border-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium">{log.to}</span>
+                      <Badge variant={log.status === "sent" ? "secondary" : "destructive"} className="text-[10px]">
+                        {log.status === "sent" ? "Enviado" : "Falló"}
+                      </Badge>
+                    </div>
+                    <p className="truncate text-muted-foreground">{log.subject}</p>
+                  </div>
+                ))}
+                {emailLogs.length === 0 && (
+                  <p className="text-xs text-muted-foreground">Aún no hay envíos registrados.</p>
+                )}
               </CardContent>
             </Card>
           </div>
