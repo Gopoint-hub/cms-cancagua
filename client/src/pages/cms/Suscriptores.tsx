@@ -135,35 +135,6 @@ export default function CMSSuscriptores() {
     },
   });
 
-  // Verificar permisos
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-8 h-8 animate-spin text-[#44580E]" />
-      </div>
-    );
-  }
-
-  if (!user || (user.role !== "super_admin" && user.role !== "admin" && user.role !== "editor")) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Card className="w-96">
-          <CardHeader>
-            <CardTitle>Acceso Denegado</CardTitle>
-            <CardDescription>
-              No tienes permisos para ver los suscriptores.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild variant="outline" className="w-full">
-              <Link href="/cms">Volver al Dashboard</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   // Filtrar suscriptores
   const filteredSubscribers = subscribers?.filter((sub: any) => {
     const matchesStatus = statusFilter === "all" || sub.status === statusFilter;
@@ -192,6 +163,35 @@ export default function CMSSuscriptores() {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
+
+  // Verificar permisos
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-[#44580E]" />
+      </div>
+    );
+  }
+
+  if (!user || (user.role !== "super_admin" && user.role !== "admin" && user.role !== "editor")) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Card className="w-96">
+          <CardHeader>
+            <CardTitle>Acceso Denegado</CardTitle>
+            <CardDescription>
+              No tienes permisos para ver los suscriptores.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/cms">Volver al Dashboard</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
