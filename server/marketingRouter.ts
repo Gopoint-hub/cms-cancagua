@@ -373,16 +373,20 @@ Responde SOLAMENTE con un JSON con esta estructura exacta:
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
-      const token = process.env.GITHUB_TOKEN;
+      const token = process.env.GITHUB_TOKEN || process.env.GITHUB_PAT;
       if (!token) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "GITHUB_TOKEN no configurado",
+          message: "Falta configurar GITHUB_TOKEN en Render para publicar en cancagua.cl/blog",
         });
       }
 
       const date = new Date().toISOString().split("T")[0];
-      const fileName = `blog-articles/${input.slug}-${date}.md`;
+      const owner = process.env.GITHUB_BLOG_OWNER || "gopoint-hub";
+      const repo = process.env.GITHUB_BLOG_REPO || "web-cancagua";
+      const branch = process.env.GITHUB_BLOG_BRANCH || "main";
+      const blogDir = (process.env.GITHUB_BLOG_DIR || "blog-articles").replace(/^\/+|\/+$/g, "");
+      const fileName = `${blogDir}/${input.slug}-${date}.md`;
 
       const frontmatter = `---
 title: "${input.title.replace(/"/g, '\\"')}"
@@ -404,7 +408,7 @@ status: "published"
       let sha: string | undefined;
       try {
         const checkResp = await fetch(
-          `https://api.github.com/repos/gopoint-hub/web-cancagua/contents/${fileName}`,
+          `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}?ref=${branch}`,
           { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } }
         );
         if (checkResp.ok) {
@@ -416,12 +420,12 @@ status: "published"
       const body: any = {
         message: `blog: publish "${input.title}"`,
         content: encoded,
-        branch: "main",
+        branch,
       };
       if (sha) body.sha = sha;
 
       const resp = await fetch(
-        `https://api.github.com/repos/gopoint-hub/web-cancagua/contents/${fileName}`,
+        `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`,
         {
           method: "PUT",
           headers: {
