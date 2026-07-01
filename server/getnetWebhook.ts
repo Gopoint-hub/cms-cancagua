@@ -35,6 +35,11 @@ router.post("/", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Payload incompleto" });
   }
 
+  if (!signature && ENV.isProduction) {
+    console.error("[Getnet Webhook] Firma ausente en producción para requestId:", requestId);
+    return res.status(401).json({ error: "Firma requerida" });
+  }
+
   if (signature && !validateGetnetWebhookSignature(requestId, status, date, signature)) {
     console.error("[Getnet Webhook] Firma inválida para requestId:", requestId);
     return res.status(401).json({ error: "Firma inválida" });
@@ -72,7 +77,7 @@ router.post("/", async (req: Request, res: Response) => {
   } else if (status === "REJECTED" || status === "FAILED") {
     await db
       .update(massageBookings)
-      .set({ paymentStatus: "pending" })
+      .set({ paymentStatus: "pending", status: "cancelled" })
       .where(eq(massageBookings.id, booking.id));
   }
 
@@ -200,9 +205,7 @@ export async function sendBookingConfirmations(bookingId: number) {
   if (therapistType === "freelance") {
     // Freelance: queda "pending" hasta que el terapeuta confirme via WA
     console.log(`[sendBookingConfirmations] booking=${bookingId} → FREELANCE: enviando confirmación al terapeuta (booking queda pending)`);
-    sendFreelanceApprovalRequest(bookingId).catch((e) =>
-      console.error("[Confirmaciones] Error en aprobación freelance:", e)
-    );
+    await sendFreelanceApprovalRequest(bookingId);
   } else if (therapistType === "inhouse") {
     // Inhouse: no necesita confirmación, se confirma de inmediato
     console.log(`[sendBookingConfirmations] booking=${bookingId} → INHOUSE: confirmando de inmediato`);
@@ -225,10 +228,17 @@ export async function sendBookingConfirmations(bookingId: number) {
       }).catch((e) => console.error("[Confirmaciones] Email terapeuta:", e));
     }
     if (therapistPhone) {
-      await sendWhatsApp(
+      const result = await sendWhatsApp(
         therapistPhone,
         `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva de pago confirmado:\n\n*${techniqueName}* · ${bookingData.duration} min\n👤 Cliente: ${bookingData.clientName}${bookingData.clientPhone ? `\n📞 ${bookingData.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${bookingData.startTime} – ${bookingData.endTime} hrs`
-      ).catch((e) => console.error("[Confirmaciones] WhatsApp terapeuta:", e));
+      );
+      if (!result.success) {
+        console.error("[Confirmaciones] WhatsApp terapeuta falló:", result.error);
+      } else {
+        console.log(`[Confirmaciones] WhatsApp terapeuta enviado booking=${bookingId}`);
+      }
+    } else {
+      console.warn(`[Confirmaciones] booking=${bookingId} terapeuta inhouse sin teléfono registrado`);
     }
   } else {
     // Sin terapeuta asignado: queda pending, aparece en dashboard como asignación pendiente

@@ -76,6 +76,28 @@ const sanitizePrice = (v?: string | null): string | null => {
   return isNaN(num) ? null : String(Math.round(num));
 };
 
+export const serializePublicMassageTechnique = (t: typeof massageTechniques.$inferSelect) => {
+  const durations = (t.durations ?? "")
+    .split(",")
+    .map((d) => Number(d.trim()))
+    .filter(Boolean);
+  const rawPrices = [t.price50min, t.price80min, t.price110min];
+  const prices = durations.map((duration, index) => ({
+    duration,
+    price: rawPrices[index] ? Number(rawPrices[index]) : null,
+  }));
+
+  return {
+    id: t.id,
+    name: t.name,
+    description: t.description ?? "",
+    imageUrl: t.imageUrl ?? null,
+    durations,
+    prices,
+    bookingUrl: `${ENV.appUrl}/reservar/masaje/${t.id}`,
+  };
+};
+
 // ─── TÉCNICAS ────────────────────────────────────────────────
 const tecnicasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
@@ -88,6 +110,7 @@ const tecnicasRouter = router({
   create: protectedProcedure
     .input(z.object({
       name: z.string().min(2), description: z.string().optional(),
+      imageUrl: z.string().url().optional(),
       durations: z.string().default("50,80,110"),
       price50min: z.string().optional(), price80min: z.string().optional(), price110min: z.string().optional(),
     }))
@@ -96,7 +119,7 @@ const tecnicasRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(massageTechniques).values({
-        name: input.name, description: input.description || null, durations: input.durations,
+        name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, durations: input.durations,
         price50min: sanitizePrice(input.price50min), price80min: sanitizePrice(input.price80min), price110min: sanitizePrice(input.price110min),
       });
       return { success: true };
@@ -105,6 +128,7 @@ const tecnicasRouter = router({
   update: protectedProcedure
     .input(z.object({
       id: z.number(), name: z.string().optional(), description: z.string().optional(),
+      imageUrl: z.string().url().nullable().optional(),
       durations: z.string().optional(), price50min: z.string().optional(),
       price80min: z.string().optional(), price110min: z.string().optional(), active: z.number().optional(),
     }))
@@ -120,6 +144,25 @@ const tecnicasRouter = router({
         price110min: price110min !== undefined ? sanitizePrice(price110min) : undefined,
       }).where(eq(massageTechniques.id, id));
       return { success: true };
+    }),
+
+  uploadImage: protectedProcedure
+    .input(z.object({
+      imageData: z.string(),
+      mimeType: z.string().regex(/^image\//),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const { storagePut } = await import("./storage");
+      const matches = input.imageData.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (!matches) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Formato de imagen inválido" });
+      }
+      const extension = matches[1].toLowerCase() === "jpeg" ? "jpg" : matches[1].toLowerCase();
+      const buffer = Buffer.from(matches[2], "base64");
+      const fileKey = `massage-techniques/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+      const { url } = await storagePut(fileKey, buffer, input.mimeType);
+      return { url };
     }),
 
   delete: protectedProcedure
@@ -1102,6 +1145,17 @@ async function sendPublicMassageBookingNotifications(
 }
 
 const masajesPublicRouter = router({
+  getCatalog: publicProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return [];
+    const techniques = await db
+      .select()
+      .from(massageTechniques)
+      .where(eq(massageTechniques.active, 1))
+      .orderBy(asc(massageTechniques.name));
+    return techniques.map(serializePublicMassageTechnique);
+  }),
+
   getTechnique: publicProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
@@ -1462,6 +1516,9 @@ const masajesPublicRouter = router({
         requestId = session.requestId;
       } catch (err) {
         console.error("[initPayment] Getnet session error:", err);
+        await db.update(massageBookings)
+          .set({ status: "cancelled", paymentStatus: "pending" })
+          .where(eq(massageBookings.id, bookingId));
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo iniciar el pago. Intenta más tarde." });
       }
 

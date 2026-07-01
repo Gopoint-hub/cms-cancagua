@@ -1,6 +1,25 @@
 import { createHash, randomBytes } from "crypto";
 import { ENV } from "./_core/env";
 
+function requireGetnetConfig() {
+  if (!ENV.getnetLogin || !ENV.getnetSecretKey) {
+    throw new Error("Getnet no está configurado: faltan GETNET_LOGIN o GETNET_SECRET_KEY");
+  }
+  if (!ENV.appUrl) {
+    throw new Error("Getnet no está configurado: falta APP_URL para returnUrl/notificationUrl");
+  }
+  if (!ENV.frontendUrl) {
+    throw new Error("Getnet no está configurado: falta FRONTEND_URL para returnUrl");
+  }
+  try {
+    new URL(ENV.getnetBaseUrl);
+    new URL(ENV.appUrl);
+    new URL(ENV.frontendUrl);
+  } catch {
+    throw new Error("Getnet no está configurado: GETNET_BASE_URL, APP_URL o FRONTEND_URL no son URLs válidas");
+  }
+}
+
 function buildAuth() {
   const rawNonce = randomBytes(16);
   const seed = new Date().toISOString();
@@ -35,6 +54,7 @@ export interface GetnetSessionResult {
 export async function createGetnetSession(
   params: GetnetSessionParams
 ): Promise<GetnetSessionResult> {
+  requireGetnetConfig();
   const { bookingId, description, amountCLP, clientName, clientEmail, clientPhone } = params;
   const reference = `masaje-${bookingId}`;
 
@@ -49,7 +69,7 @@ export async function createGetnetSession(
       },
     },
     expiration: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().replace("Z", "+00:00"),
-    returnUrl: `${ENV.appUrl}/masajes/reserva/confirmacion?ref=${reference}`,
+    returnUrl: `${ENV.frontendUrl}/servicios/masajes?ref=${reference}`,
     notificationUrl: `${ENV.appUrl}/api/webhooks/getnet`,
     ipAddress: "127.0.0.1",
     userAgent: "CancaguaWebApp/1.0",
@@ -63,7 +83,13 @@ export async function createGetnetSession(
     };
   }
 
-  console.log("[Getnet] createSession payload:", JSON.stringify(body));
+  console.log("[Getnet] createSession:", {
+    reference,
+    amountCLP,
+    baseUrl: ENV.getnetBaseUrl,
+    returnUrl: body.returnUrl,
+    notificationUrl: body.notificationUrl,
+  });
   const res = await fetch(`${ENV.getnetBaseUrl}/api/session/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -104,6 +130,7 @@ export interface GetnetStatusResult {
 export async function getGetnetSessionInfo(
   requestId: string
 ): Promise<GetnetStatusResult> {
+  requireGetnetConfig();
   const res = await fetch(`${ENV.getnetBaseUrl}/api/session/${requestId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

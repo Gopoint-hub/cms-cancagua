@@ -3,6 +3,7 @@ import {
   buildPublicMassageBookingNotifications,
   normalizeDecimalInput,
   selectAutomaticMassageAssignment,
+  serializePublicMassageTechnique,
   serializeDateOnly,
 } from "./masajesRouter";
 
@@ -25,6 +26,31 @@ describe("normalizeDecimalInput", () => {
 
   it("rejects values that do not contain a valid number", () => {
     expect(() => normalizeDecimalInput("ml")).toThrow("Ingresa una cantidad valida");
+  });
+});
+
+describe("serializePublicMassageTechnique", () => {
+  it("exposes landing-ready technique data with duration prices and booking URL", () => {
+    const technique = serializePublicMassageTechnique({
+      id: 7,
+      name: "Masaje Relajante",
+      description: "Descanso profundo",
+      imageUrl: "https://example.com/masaje.jpg",
+      durations: "50,80",
+      price50min: "45000",
+      price80min: "81000",
+      price110min: null,
+      active: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    expect(technique.imageUrl).toBe("https://example.com/masaje.jpg");
+    expect(technique.prices).toEqual([
+      { duration: 50, price: 45000 },
+      { duration: 80, price: 81000 },
+    ]);
+    expect(technique.bookingUrl).toContain("/reservar/masaje/7");
   });
 });
 

@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save, Link2 } from "lucide-react";
+import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save, Link2, Image as ImageIcon } from "lucide-react";
 
 const DRAFT_KEY = "masajes:draft:tecnica";
 const DURATIONS = [20, 40, 50, 80, 110];
@@ -19,6 +19,7 @@ const PRICE_FIELDS = ["price50min", "price80min", "price110min"] as const;
 type TechniqueForm = {
   name: string;
   description: string;
+  imageUrl: string;
   durations: number[];
   price50min: string;
   price80min: string;
@@ -26,7 +27,7 @@ type TechniqueForm = {
 };
 
 const emptyForm: TechniqueForm = {
-  name: "", description: "", durations: [50, 80, 110],
+  name: "", description: "", imageUrl: "", durations: [50, 80, 110],
   price50min: "", price80min: "", price110min: "",
 };
 
@@ -52,6 +53,7 @@ export default function MasajesTecnicas() {
   const [recipeOpen, setRecipeOpen] = useState(false);
   const [recipeForm, setRecipeForm] = useState<RecipeForm>(emptyRecipe);
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   const { data: techniques, isLoading } = trpc.masajes.tecnicas.getAll.useQuery();
   const { data: supplies } = trpc.masajes.inventario.getAll.useQuery();
@@ -80,6 +82,7 @@ export default function MasajesTecnicas() {
     onSuccess: () => { utils.masajes.tecnicas.getAll.invalidate(); toast.success("Técnica actualizada"); setOpen(false); },
     onError: e => toast.error(e.message),
   });
+  const uploadImageMut = trpc.masajes.tecnicas.uploadImage.useMutation();
   const deleteMut = trpc.masajes.tecnicas.delete.useMutation({
     onSuccess: () => { utils.masajes.tecnicas.getAll.invalidate(); toast.success("Técnica eliminada"); },
     onError: e => toast.error(e.message),
@@ -95,6 +98,7 @@ export default function MasajesTecnicas() {
 
   const openCreate = () => {
     setEditing(null);
+    setImageFile(null);
     const saved = localStorage.getItem(DRAFT_KEY);
     setForm(saved ? { ...emptyForm, ...JSON.parse(saved) } : emptyForm);
     setOpen(true);
@@ -106,11 +110,13 @@ export default function MasajesTecnicas() {
     setForm({
       name: t.name,
       description: t.description ?? "",
+      imageUrl: t.imageUrl ?? "",
       durations: durs,
       price50min: t.price50min ?? "",
       price80min: t.price80min ?? "",
       price110min: t.price110min ?? "",
     });
+    setImageFile(null);
     setOpen(true);
   };
 
@@ -121,13 +127,27 @@ export default function MasajesTecnicas() {
     }));
   };
 
-  const handleSave = () => {
+  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+  const handleSave = async () => {
     if (!form.name.trim()) { toast.error("El nombre es requerido"); return; }
     if (form.durations.length === 0) { toast.error("Selecciona al menos una duración"); return; }
+    let imageUrl = form.imageUrl.trim();
+    if (imageFile) {
+      const imageData = await fileToDataUrl(imageFile);
+      const uploaded = await uploadImageMut.mutateAsync({ imageData, mimeType: imageFile.type });
+      imageUrl = uploaded.url;
+    }
     const sorted = [...form.durations].sort((a, b) => a - b);
     const payload = {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
+      imageUrl: imageUrl || null,
       durations: sorted.join(","),
       // Mapeo posicional: 1ª duración → price50min, 2ª → price80min, 3ª → price110min
       price50min: sorted.length >= 1 ? (form.price50min || undefined) : "0",
@@ -135,7 +155,7 @@ export default function MasajesTecnicas() {
       price110min: sorted.length >= 3 ? (form.price110min || undefined) : "0",
     };
     if (editing) updateMut.mutate({ id: editing, ...payload });
-    else createMut.mutate(payload);
+    else createMut.mutate({ ...payload, imageUrl: imageUrl || undefined });
   };
 
   const handleSaveRecipe = () => {
@@ -177,6 +197,13 @@ export default function MasajesTecnicas() {
                 <Card key={t.id}>
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-4">
+                      {t.imageUrl ? (
+                        <img src={t.imageUrl} alt={t.name} className="h-20 w-28 rounded-md object-cover border" />
+                      ) : (
+                        <div className="h-20 w-28 rounded-md border bg-muted flex items-center justify-center text-muted-foreground">
+                          <ImageIcon className="w-5 h-5" />
+                        </div>
+                      )}
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold">{t.name}</span>
@@ -291,6 +318,26 @@ export default function MasajesTecnicas() {
               <Label>Descripción</Label>
               <Textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2} />
             </div>
+            <div className="space-y-2">
+              <Label>Foto para la página web</Label>
+              {(imageFile || form.imageUrl) && (
+                <img
+                  src={imageFile ? URL.createObjectURL(imageFile) : form.imageUrl}
+                  alt="Vista previa"
+                  className="h-36 w-full rounded-md object-cover border"
+                />
+              )}
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={e => setImageFile(e.target.files?.[0] ?? null)}
+              />
+              <Input
+                value={form.imageUrl}
+                onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))}
+                placeholder="O pega una URL de imagen"
+              />
+            </div>
             <div>
               <Label>Duraciones disponibles *</Label>
               <div className="flex gap-2 mt-1 flex-wrap">
@@ -310,7 +357,7 @@ export default function MasajesTecnicas() {
             <div>
               <Label>Precio a público ($ CLP)</Label>
               <div className="grid grid-cols-3 gap-3 mt-1">
-                {[...form.durations].sort((a, b) => a - b).map((d, i) => (
+                {[...form.durations].sort((a, b) => a - b).slice(0, PRICE_FIELDS.length).map((d, i) => (
                   <div key={d}>
                     <span className="text-xs text-muted-foreground">{d} min</span>
                     <Input
@@ -331,7 +378,7 @@ export default function MasajesTecnicas() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={createMut.isPending || updateMut.isPending}>
+            <Button onClick={handleSave} disabled={createMut.isPending || updateMut.isPending || uploadImageMut.isPending}>
               {editing ? "Guardar cambios" : "Crear técnica"}
             </Button>
           </DialogFooter>

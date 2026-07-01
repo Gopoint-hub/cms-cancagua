@@ -78,14 +78,20 @@ export async function sendFreelanceApprovalRequest(bookingId: number): Promise<v
   if (!booking) return;
 
   // Already has an approval in progress
-  if (booking.freelanceApprovalStatus) return;
+  if (booking.freelanceApprovalStatus) {
+    console.log(`[FreelanceApproval] booking=${bookingId} ya tiene estado ${booking.freelanceApprovalStatus}, no se reenvía`);
+    return;
+  }
 
   // Flujo simplificado: notificar directamente al terapeuta (sin paso de aprobación del admin)
   if (!booking.therapistPhone) {
     console.warn(`[FreelanceApproval] Terapeuta sin teléfono para booking ${bookingId}, notificando a Tamara`);
-    await sendWhatsApp("+56999002232",
+    const result = await sendWhatsApp("+56999002232",
       `⚠️ *Reserva sin terapeuta contactable* — Cancagua Spa\n\nSe necesita asignación manual para:\n👤 ${booking.clientName}\n💆 ${booking.techniqueName ?? "Masaje"} · ${booking.duration} min\n📅 ${humanDate(dateStr(booking.bookingDate))}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\nEl terapeuta asignado no tiene teléfono registrado.`
-    ).catch((e) => console.error("[FreelanceApproval] WA Tamara:", e));
+    );
+    if (!result.success) {
+      console.error("[FreelanceApproval] WA Tamara falló:", result.error);
+    }
     return;
   }
 
@@ -103,10 +109,15 @@ export async function sendFreelanceApprovalRequest(bookingId: number): Promise<v
   // (evita que WhatsApp auto-confirme al hacer preview del enlace)
   const actionUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${therapistToken}`;
 
-  await sendWhatsApp(
+  const result = await sendWhatsApp(
     booking.therapistPhone,
     `📅 *Nueva reserva asignada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva asignada.\n\n💆 ${techniqueName} · ${booking.duration} min\n👤 Cliente: ${booking.clientName}\n📅 ${hd}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\n¿Puedes realizar este masaje?\nResponde aquí 👉 ${actionUrl}`
-  ).catch((e) => console.error("[FreelanceApproval] WA terapeuta:", e));
+  );
+  if (!result.success) {
+    console.error("[FreelanceApproval] WA terapeuta falló:", result.error);
+  } else {
+    console.log(`[FreelanceApproval] WA terapeuta enviado booking=${bookingId}`);
+  }
 
 }
 

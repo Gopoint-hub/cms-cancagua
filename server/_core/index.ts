@@ -12,6 +12,7 @@ import getnetWebhook from "../getnetWebhook";
 import unsubscribeRouter from "../unsubscribeRoute";
 import freelanceApprovalRouter from "../freelanceApproval";
 import cerebroRouter from "../cerebroRoute";
+import publicMasajesCatalog from "../publicMasajesCatalog";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -67,6 +68,8 @@ async function startServer() {
   app.use("/api/webhooks/getnet", getnetWebhook);
   // Aprobación de terapeutas freelance (Tamara) y confirmación de terapeutas
   app.use("/api/masajes", freelanceApprovalRouter);
+  // Catálogo público consumido por cancagua.cl
+  app.use("/api/public/masajes", publicMasajesCatalog);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
   // Cerebro: grafo de conocimiento del proyecto (solo admins)

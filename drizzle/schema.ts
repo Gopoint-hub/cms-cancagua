@@ -1013,6 +1013,7 @@ export const massageTechniques = mysqlTable("massage_techniques", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),
   description: text("description"),
+  imageUrl: text("image_url"),
   durations: varchar("durations", { length: 50 }).default("50,80,110").notNull(), // CSV: "50,80,110"
   price50min: decimal("price_50min", { precision: 10, scale: 0 }),
   price80min: decimal("price_80min", { precision: 10, scale: 0 }),
