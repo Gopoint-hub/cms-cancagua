@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { ENV } from "./_core/env";
 
 function requireGetnetConfig() {
@@ -177,8 +177,12 @@ export function validateGetnetWebhookSignature(
   date: string,
   signature: string
 ): boolean {
-  const expected = createHash("sha256")
-    .update(requestId + status + date + ENV.getnetSecretKey)
-    .digest("hex");
-  return expected === signature;
+  // PlacetoPay/Getnet documenta SHA-1(requestId + status + date + secretKey);
+  // se acepta también SHA-256 por si la plataforma migra de algoritmo
+  const payload = requestId + status + date + ENV.getnetSecretKey;
+  const received = Buffer.from(signature.toLowerCase());
+  return ["sha1", "sha256"].some((algo) => {
+    const expected = Buffer.from(createHash(algo).update(payload).digest("hex"));
+    return expected.length === received.length && timingSafeEqual(expected, received);
+  });
 }

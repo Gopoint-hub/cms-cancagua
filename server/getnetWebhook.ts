@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { massageBookings, massageTechniques, massageTherapists } from "../drizzle/schema";
-import { validateGetnetWebhookSignature } from "./getnet";
+import { validateGetnetWebhookSignature, getGetnetSessionInfo } from "./getnet";
 import {
   sendMassageBookingConfirmationEmail,
   sendMassageTherapistNotificationEmail,
@@ -21,6 +21,7 @@ const MASAJES_ADMIN_EMAIL = "terapias@cancagua.cl";
 router.post("/", async (req: Request, res: Response) => {
   const body = req.body as {
     requestId?: string;
+    signature?: string;
     status?: { status?: string; reason?: string; message?: string; date?: string; signature?: string };
     payment?: Array<{ reference?: string; amount?: { total?: number; currency?: string }; status?: { status?: string; signature?: string } }>;
   };
@@ -28,25 +29,12 @@ router.post("/", async (req: Request, res: Response) => {
   const requestId = body.requestId;
   const status = body.status?.status ?? "";
   const date = body.status?.date ?? "";
-  const signature = body.status?.signature ?? body.payment?.[0]?.status?.signature ?? "";
+  // PlacetoPay/Getnet envía la firma en el nivel superior del payload
+  const signature = body.signature ?? body.status?.signature ?? body.payment?.[0]?.status?.signature ?? "";
 
   if (!requestId || !status || !date) {
     console.warn("[Getnet Webhook] Payload incompleto:", JSON.stringify(body));
     return res.status(400).json({ error: "Payload incompleto" });
-  }
-
-  if (!signature && ENV.isProduction) {
-    console.error("[Getnet Webhook] Firma ausente en producción para requestId:", requestId);
-    return res.status(401).json({ error: "Firma requerida" });
-  }
-
-  if (signature && !validateGetnetWebhookSignature(requestId, status, date, signature)) {
-    console.error("[Getnet Webhook] Firma inválida para requestId:", requestId);
-    return res.status(401).json({ error: "Firma inválida" });
-  }
-
-  if (!signature) {
-    console.warn("[Getnet Webhook] Sin firma — procesando igual (modo pruebas)");
   }
 
   const db = await getDb();
@@ -63,7 +51,24 @@ router.post("/", async (req: Request, res: Response) => {
     return res.status(200).json({ ok: true });
   }
 
-  if (status === "APPROVED") {
+  // Sin firma válida no se confía en el payload: el estado se verifica
+  // directamente contra la API de Getnet (imposible de falsificar).
+  let effectiveStatus = status;
+  const signatureValid = Boolean(signature) && validateGetnetWebhookSignature(requestId, status, date, signature);
+  if (!signatureValid) {
+    try {
+      const info = await getGetnetSessionInfo(requestId);
+      effectiveStatus = info.status;
+      console.warn(
+        `[Getnet Webhook] Firma ${signature ? "inválida" : "ausente"}; estado verificado vía API Getnet: ${effectiveStatus} (requestId ${requestId})`
+      );
+    } catch (error) {
+      console.error("[Getnet Webhook] Verificación vía API Getnet falló para requestId:", requestId, error);
+      return res.status(503).json({ error: "No se pudo verificar el estado del pago" });
+    }
+  }
+
+  if (effectiveStatus === "APPROVED") {
     if (booking.paymentStatus !== "paid") {
       await db
         .update(massageBookings)
@@ -74,7 +79,7 @@ router.post("/", async (req: Request, res: Response) => {
         console.error("[Getnet Webhook] Error en notificaciones:", e)
       );
     }
-  } else if (status === "REJECTED" || status === "FAILED") {
+  } else if (effectiveStatus === "REJECTED" || effectiveStatus === "FAILED") {
     await db
       .update(massageBookings)
       .set({ paymentStatus: "pending", status: "cancelled" })
