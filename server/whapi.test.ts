@@ -77,3 +77,29 @@ describe("sendWhatsApp", () => {
     expect(result.error).toContain("401");
   });
 });
+
+describe("checkWhatsAppHealth", () => {
+  it("checks the Whapi channel without sending a message", async () => {
+    process.env.WHAPI_CANCAGUA_TOKEN = "test-token";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    const { checkWhatsAppHealth } = await import("./_core/whapi");
+
+    const result = await checkWhatsAppHealth();
+
+    expect(result).toEqual({ success: true, configured: true, status: 200 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gate.whapi.cloud/health",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("reports a missing production token", async () => {
+    const { checkWhatsAppHealth } = await import("./_core/whapi");
+
+    await expect(checkWhatsAppHealth()).resolves.toMatchObject({
+      success: false,
+      configured: false,
+    });
+  });
+});

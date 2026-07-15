@@ -13,6 +13,7 @@ import unsubscribeRouter from "../unsubscribeRoute";
 import freelanceApprovalRouter from "../freelanceApproval";
 import cerebroRouter from "../cerebroRoute";
 import publicMasajesCatalog from "../publicMasajesCatalog";
+import { checkWhatsAppHealth } from "./whapi";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -61,6 +62,12 @@ async function startServer() {
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }));
+
+  // Verificación no invasiva del canal WhatsApp; nunca expone el token.
+  app.get("/api/health/whapi", async (_req, res) => {
+    const health = await checkWhatsAppHealth();
+    res.status(health.success ? 200 : 503).json(health);
+  });
 
   // Webhook para Skedu (Módulo Concierge)
   app.use("/api/webhooks/skedu", conciergeWebhook);

@@ -1,12 +1,57 @@
 import { ENV } from "./env";
 
 const WHAPI_URL = "https://gate.whapi.cloud/messages/text";
+const WHAPI_HEALTH_URL = "https://gate.whapi.cloud/health";
 
 export type WhatsAppResult = {
   success: boolean;
   error?: string;
   status?: number;
 };
+
+export type WhatsAppHealthResult = {
+  success: boolean;
+  configured: boolean;
+  status?: number;
+  error?: string;
+};
+
+export async function checkWhatsAppHealth(): Promise<WhatsAppHealthResult> {
+  if (!ENV.whapiToken) {
+    return {
+      success: false,
+      configured: false,
+      error: "WHAPI_CANCAGUA_TOKEN is not configured",
+    };
+  }
+
+  try {
+    const response = await fetch(WHAPI_HEALTH_URL, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${ENV.whapiToken}`,
+        "Accept": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return {
+        success: false,
+        configured: true,
+        status: response.status,
+        error: `WHAPI health returned ${response.status}`,
+      };
+    }
+
+    return { success: true, configured: true, status: response.status };
+  } catch (error) {
+    return {
+      success: false,
+      configured: true,
+      error: String(error),
+    };
+  }
+}
 
 function normalizePhone(phone: string): string {
   let digits = phone.replace(/\D/g, "");
