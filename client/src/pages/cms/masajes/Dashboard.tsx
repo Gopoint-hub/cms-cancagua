@@ -58,7 +58,7 @@ export default function MasajesDashboard() {
   const confirmed = bookings?.filter(b => b.status === "confirmed" || b.status === "pending") ?? [];
   const activeTherapists = therapists?.filter(t => t.active === 1) ?? [];
   const todayRevenue = bookings
-    ?.filter(b => b.paymentStatus === "paid" && b.status !== "cancelled")
+    ?.filter(b => b.paymentStatus === "paid" && b.status === "completed")
     .reduce((sum, b) => sum + Number(b.amountPaid ?? 0), 0) ?? 0;
 
   return (
@@ -112,9 +112,12 @@ export default function MasajesDashboard() {
             </CardHeader>
             <CardContent>
               {loadingBookings ? <Skeleton className="h-8 w-24" /> : (
-                <span className="text-3xl font-bold text-green-600">
-                  $ {todayRevenue.toLocaleString("es-CL")}
-                </span>
+                <>
+                  <span className="text-3xl font-bold text-green-600">
+                    $ {todayRevenue.toLocaleString("es-CL")}
+                  </span>
+                  <p className="text-xs text-muted-foreground mt-1">Masajes completados hoy</p>
+                </>
               )}
             </CardContent>
           </Card>

@@ -12,6 +12,7 @@ import {
   massageRooms,
   massageBookings,
   massageProgramBookings,
+  massageSales,
   massageSupplies,
   massageTechniqueRecipes,
   massageTherapistEvaluations,
@@ -30,6 +31,7 @@ import {
 } from "./_core/email";
 import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
+import { syncMassageSale } from "./massageSales";
 import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt } from "drizzle-orm";
 import { hasMassageAdminAccess, hasMassageOperationsAccess } from "@shared/permissions";
 
@@ -951,7 +953,10 @@ const agendaRouter = router({
       await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.insert(massageBookings).values({ ...input, bookingDate: input.bookingDate as any });
+      const [inserted] = await db.insert(massageBookings)
+        .values({ ...input, bookingDate: input.bookingDate as any })
+        .$returningId();
+      if (input.paymentStatus === "paid") await syncMassageSale(inserted.id);
       return { success: true };
     }),
 
@@ -990,6 +995,10 @@ const agendaRouter = router({
       await db.update(massageBookings)
         .set({ ...data, ...(bookingDate ? { bookingDate: bookingDate as any } : {}) })
         .where(eq(massageBookings.id, id));
+
+      // Mantiene fecha de servicio, monto y reembolsos sincronizados en el
+      // libro histórico. Si aún no está pagada, la función no crea nada.
+      await syncMassageSale(id);
 
       // Notificaciones (fire and forget)
       if (sendConfirmation) {
@@ -1208,6 +1217,40 @@ const clientesRouter = router({
 });
 
 // ─── ANALYTICS ────────────────────────────────────────────────
+async function getMassageSalesRows(
+  db: MassageDb,
+  input: { from: string; to: string; limit: number; offset: number },
+) {
+  const rows = await db.select({
+    id: massageSales.id,
+    bookingId: massageSales.bookingId,
+    soldAt: massageSales.soldAt,
+    serviceDate: massageSales.serviceDate,
+    startTime: massageSales.startTime,
+    clientName: massageSales.clientName,
+    clientEmail: massageSales.clientEmail,
+    techniqueName: massageSales.techniqueName,
+    duration: massageSales.duration,
+    amount: massageSales.amount,
+    paymentMethod: massageSales.paymentMethod,
+    paymentReference: massageSales.paymentReference,
+    saleStatus: massageSales.status,
+    bookingStatus: massageBookings.status,
+    therapistName: massageTherapists.name,
+  })
+    .from(massageSales)
+    .leftJoin(massageBookings, eq(massageSales.bookingId, massageBookings.id))
+    .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
+    .where(and(
+      gte(massageSales.serviceDate, input.from as any),
+      lte(massageSales.serviceDate, input.to as any),
+    ))
+    .orderBy(desc(massageSales.serviceDate), desc(massageSales.startTime), desc(massageSales.soldAt))
+    .limit(input.limit)
+    .offset(input.offset);
+  return rows.map((row) => ({ ...row, serviceDate: serializeDateOnly(row.serviceDate) }));
+}
+
 const analyticsRouter = router({
   summary: protectedProcedure
     .input(z.object({ from: z.string(), to: z.string() }))
@@ -1216,32 +1259,72 @@ const analyticsRouter = router({
       const db = await getDb();
       if (!db) return null;
       const [totals] = await db.select({
-        totalBookings: sql<number>`COUNT(*)`, totalRevenue: sql<string>`SUM(${massageBookings.amountPaid})`,
+        totalBookings: sql<number>`COUNT(*)`,
+        paidBookings: sql<number>`SUM(CASE WHEN ${massageSales.status} = 'paid' THEN 1 ELSE 0 END)`,
+        totalRevenue: sql<string>`COALESCE(SUM(CASE WHEN ${massageSales.status} = 'paid' THEN ${massageSales.amount} ELSE 0 END), 0)`,
         completedBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'completed' THEN 1 ELSE 0 END)`,
         cancelledBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'cancelled' THEN 1 ELSE 0 END)`,
-      }).from(massageBookings).where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any)));
+      }).from(massageSales)
+        .leftJoin(massageBookings, eq(massageSales.bookingId, massageBookings.id))
+        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any)));
 
       const byTechnique = await db.select({
-        techniqueName: massageTechniques.name, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
-      }).from(massageBookings)
-        .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-        .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any), sql`${massageBookings.status} != 'cancelled'`))
-        .groupBy(massageTechniques.name).orderBy(desc(sql`COUNT(*)`));
+        techniqueName: massageSales.techniqueName, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
+      }).from(massageSales)
+        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
+        .groupBy(massageSales.techniqueName).orderBy(desc(sql`COUNT(*)`));
 
       const byDuration = await db.select({
-        duration: massageBookings.duration, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
-      }).from(massageBookings)
-        .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any), sql`${massageBookings.status} != 'cancelled'`))
-        .groupBy(massageBookings.duration).orderBy(asc(massageBookings.duration));
+        duration: massageSales.duration, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
+      }).from(massageSales)
+        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
+        .groupBy(massageSales.duration).orderBy(asc(massageSales.duration));
 
       const byTherapist = await db.select({
-        therapistName: massageTherapists.name, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageBookings.amountPaid})`,
-      }).from(massageBookings)
+        therapistName: massageTherapists.name, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
+      }).from(massageSales)
+        .leftJoin(massageBookings, eq(massageSales.bookingId, massageBookings.id))
         .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
-        .where(and(gte(massageBookings.bookingDate, input.from as any), lte(massageBookings.bookingDate, input.to as any), sql`${massageBookings.status} != 'cancelled'`))
+        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
         .groupBy(massageTherapists.name).orderBy(desc(sql`COUNT(*)`));
 
       return { totals, byTechnique, byDuration, byTherapist };
+    }),
+
+  history: protectedProcedure
+    .input(z.object({
+      from: z.string(),
+      to: z.string(),
+      page: z.number().int().min(1).default(1),
+      pageSize: z.literal(25).default(25),
+    }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return { records: [], total: 0, page: input.page, pageSize: 25, totalPages: 0 };
+      const [countRow] = await db.select({ total: sql<number>`COUNT(*)` })
+        .from(massageSales)
+        .where(and(
+          gte(massageSales.serviceDate, input.from as any),
+          lte(massageSales.serviceDate, input.to as any),
+        ));
+      const total = Number(countRow?.total ?? 0);
+      const records = await getMassageSalesRows(db, {
+        from: input.from,
+        to: input.to,
+        limit: 25,
+        offset: (input.page - 1) * 25,
+      });
+      return { records, total, page: input.page, pageSize: 25, totalPages: Math.ceil(total / 25) };
+    }),
+
+  exportHistory: protectedProcedure
+    .input(z.object({ from: z.string(), to: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return [];
+      return getMassageSalesRows(db, { ...input, limit: 100_000, offset: 0 });
     }),
 });
 
@@ -1958,6 +2041,7 @@ const masajesPublicRouter = router({
         endTime: assignment.endTime,
         bookingDate: input.bookingDate as any,
         paymentStatus: "pending",
+        amountPaid: String(price),
         status: "pending",
       }).$returningId();
       const bookingId = inserted.id;
@@ -2031,13 +2115,24 @@ const masajesPublicRouter = router({
             .from(massageBookings)
             .where(eq(massageBookings.getnetRequestId, resolvedRequestId))
             .limit(1);
-          if (existing && existing.paymentStatus !== "paid") {
-            await db.update(massageBookings)
-              .set({ paymentStatus: "paid", status: "pending" })
-              .where(eq(massageBookings.id, existing.id));
-            sendBookingConfirmations(existing.id).catch((e) =>
-              console.error("[checkPaymentStatus] Error en notificaciones:", e)
-            );
+          if (existing) {
+            if (existing.paymentStatus !== "paid") {
+              await db.update(massageBookings)
+                .set({
+                  paymentStatus: "paid",
+                  status: "pending",
+                  ...(result.amount && result.amount > 0 ? { amountPaid: String(result.amount) } : {}),
+                })
+                .where(eq(massageBookings.id, existing.id));
+              sendBookingConfirmations(existing.id).catch((e) =>
+                console.error("[checkPaymentStatus] Error en notificaciones:", e)
+              );
+            } else if (result.amount && result.amount > 0) {
+              await db.update(massageBookings)
+                .set({ amountPaid: String(result.amount) })
+                .where(eq(massageBookings.id, existing.id));
+            }
+            await syncMassageSale(existing.id);
           }
         }
       }

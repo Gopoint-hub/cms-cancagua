@@ -11,6 +11,7 @@ import {
 import { sendWhatsApp } from "./_core/whapi";
 import { ENV } from "./_core/env";
 import { sendFreelanceApprovalRequest } from "./freelanceApproval";
+import { syncMassageSale } from "./massageSales";
 
 console.log("[SERVER] getnetWebhook v3 cargado — freelance approval activo");
 
@@ -55,10 +56,12 @@ router.post("/", async (req: Request, res: Response) => {
   // directamente contra la API de Getnet (imposible de falsificar).
   let effectiveStatus = status;
   const signatureValid = Boolean(signature) && validateGetnetWebhookSignature(requestId, status, date, signature);
+  let effectiveAmount = signatureValid ? body.payment?.[0]?.amount?.total : undefined;
   if (!signatureValid) {
     try {
       const info = await getGetnetSessionInfo(requestId);
       effectiveStatus = info.status;
+      effectiveAmount = info.amount;
       console.warn(
         `[Getnet Webhook] Firma ${signature ? "inválida" : "ausente"}; estado verificado vía API Getnet: ${effectiveStatus} (requestId ${requestId})`
       );
@@ -72,13 +75,22 @@ router.post("/", async (req: Request, res: Response) => {
     if (booking.paymentStatus !== "paid") {
       await db
         .update(massageBookings)
-        .set({ paymentStatus: "paid", status: "pending" })
+        .set({
+          paymentStatus: "paid",
+          status: "pending",
+          ...(effectiveAmount && effectiveAmount > 0 ? { amountPaid: String(effectiveAmount) } : {}),
+        })
         .where(eq(massageBookings.id, booking.id));
 
       sendBookingConfirmations(booking.id).catch((e) =>
         console.error("[Getnet Webhook] Error en notificaciones:", e)
       );
+    } else if (effectiveAmount && effectiveAmount > 0) {
+      await db.update(massageBookings)
+        .set({ amountPaid: String(effectiveAmount) })
+        .where(eq(massageBookings.id, booking.id));
     }
+    await syncMassageSale(booking.id);
   } else if (effectiveStatus === "REJECTED" || effectiveStatus === "FAILED") {
     await db
       .update(massageBookings)

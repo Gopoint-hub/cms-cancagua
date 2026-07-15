@@ -1152,6 +1152,29 @@ export const massageProgramBookings = mysqlTable("massage_program_bookings", {
 export type MassageProgramBooking = typeof massageProgramBookings.$inferSelect;
 export type InsertMassageProgramBooking = typeof massageProgramBookings.$inferInsert;
 
+// Libro histórico de ingresos: un registro único por reserva pagada.
+// Conserva los datos de la venta aunque la reserva cambie posteriormente.
+export const massageSales = mysqlTable("massage_sales", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingId: int("booking_id").notNull().unique(),
+  soldAt: timestamp("sold_at").defaultNow().notNull(),
+  serviceDate: date("service_date").notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }),
+  techniqueName: varchar("technique_name", { length: 100 }).notNull(),
+  duration: int("duration").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  paymentMethod: mysqlEnum("payment_method", ["getnet", "cms_manual"]).notNull(),
+  paymentReference: varchar("payment_reference", { length: 100 }),
+  status: mysqlEnum("status", ["paid", "refunded"]).default("paid").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageSale = typeof massageSales.$inferSelect;
+export type InsertMassageSale = typeof massageSales.$inferInsert;
+
 export const massageSupplies = mysqlTable("massage_supplies", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 200 }).notNull(),
