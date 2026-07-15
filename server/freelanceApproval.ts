@@ -6,6 +6,7 @@ import { massageBookings, massageTechniques, massageTherapists } from "../drizzl
 import { sendWhatsApp } from "./_core/whapi";
 import { sendFreelanceApprovalRequestEmail } from "./_core/email";
 import { ENV } from "./_core/env";
+import { TAMARA_MUNOZ_PHONE } from "./massageContacts";
 
 const router = Router();
 
@@ -86,7 +87,7 @@ export async function sendFreelanceApprovalRequest(bookingId: number): Promise<v
   // Flujo simplificado: notificar directamente al terapeuta (sin paso de aprobación del admin)
   if (!booking.therapistPhone) {
     console.warn(`[FreelanceApproval] Terapeuta sin teléfono para booking ${bookingId}, notificando a Tamara`);
-    const result = await sendWhatsApp("+56999002232",
+    const result = await sendWhatsApp(TAMARA_MUNOZ_PHONE,
       `⚠️ *Reserva sin terapeuta contactable* — Cancagua Spa\n\nSe necesita asignación manual para:\n👤 ${booking.clientName}\n💆 ${booking.techniqueName ?? "Masaje"} · ${booking.duration} min\n📅 ${humanDate(dateStr(booking.bookingDate))}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\nEl terapeuta asignado no tiene teléfono registrado.`
     );
     if (!result.success) {
@@ -333,15 +334,13 @@ router.post("/freelance-confirmation", async (req: Request, res: Response) => {
   const hd = humanDate(ds);
   const therapistName = booking.therapistName ?? "Terapeuta";
   const techniqueName = booking.techniqueName ?? "Masaje";
-  const TAMARA_PHONE = "+56999002232";
-
   if (action === "reject") {
     await db.update(massageBookings)
       .set({ freelanceApprovalStatus: "therapist_rejected" })
       .where(eq(massageBookings.id, booking.id));
 
     await sendWhatsApp(
-      TAMARA_PHONE,
+      TAMARA_MUNOZ_PHONE,
       `❌ *${therapistName}* no puede realizar el masaje.\n\n👤 ${booking.clientName}\n💆 ${techniqueName}\n📅 ${hd} · ${booking.startTime} hrs\n\n⚠️ Se requiere asignación manual de terapeuta. Aparece en el dashboard.`
     ).catch((e) => console.error("[FreelanceApproval] WA Tamara rechazo:", e));
 
@@ -358,7 +357,7 @@ router.post("/freelance-confirmation", async (req: Request, res: Response) => {
     .where(eq(massageBookings.id, booking.id));
 
   await sendWhatsApp(
-    TAMARA_PHONE,
+    TAMARA_MUNOZ_PHONE,
     `✅ *${therapistName}* confirmó el masaje.\n\n👤 ${booking.clientName}\n💆 ${techniqueName}\n📅 ${hd} · ${booking.startTime} hrs\nYa aparece confirmado en el dashboard.`
   ).catch((e) => console.error("[FreelanceApproval] WA Tamara confirmacion:", e));
 
