@@ -1077,11 +1077,12 @@ export function selectAutomaticMassageAssignment(params: {
   });
 
   for (const therapist of therapists) {
-    if (therapist.type === "freelance" && params.bookingDate) {
+    if (params.bookingDate) {
       const now = params.now ?? new Date();
       if (params.bookingDate === getChileDateString(now)) {
         const leadMinutes = requestedStart - getChileTimeMinutes(now);
-        if (leadMinutes < FREELANCE_MIN_LEAD_MINUTES) continue;
+        if (leadMinutes < 0) continue;
+        if (therapist.type === "freelance" && leadMinutes < FREELANCE_MIN_LEAD_MINUTES) continue;
       }
     }
 

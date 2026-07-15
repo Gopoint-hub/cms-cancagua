@@ -178,6 +178,27 @@ describe("selectAutomaticMassageAssignment", () => {
     expect(assignment?.therapist.id).toBe(3);
   });
 
+  it("never offers a past slot, including for inhouse therapists", () => {
+    const assignment = selectAutomaticMassageAssignment({
+      therapists: [{
+        id: 3,
+        name: "Bárbara Frías",
+        type: "inhouse",
+        callPriority: 1,
+        scheduleStart: "10:00",
+        scheduleEnd: "18:00",
+      }],
+      bookings: [],
+      rooms,
+      startTime: "09:30",
+      duration: 20,
+      bookingDate: "2026-07-15",
+      now: new Date("2026-07-15T14:00:00.000Z"),
+    });
+
+    expect(assignment).toBeNull();
+  });
+
   it("falls back to freelance priority order when inhouse therapists are busy", () => {
     const assignment = selectAutomaticMassageAssignment({
       therapists: [
