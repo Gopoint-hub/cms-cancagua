@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPublicMassageBookingNotifications,
+  getChileDateString,
   normalizeDecimalInput,
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
   serializeDateOnly,
 } from "./masajesRouter";
+
+describe("getChileDateString", () => {
+  it("uses the calendar date in Chile for automatic pending cleanup", () => {
+    expect(getChileDateString(new Date("2026-07-15T02:30:00.000Z"))).toBe("2026-07-14");
+    expect(getChileDateString(new Date("2026-07-15T15:00:00.000Z"))).toBe("2026-07-15");
+  });
+});
 
 describe("serializeDateOnly", () => {
   it("serializes Date values as YYYY-MM-DD strings for React-safe rendering", () => {

@@ -57,6 +57,9 @@ export const normalizeDecimalInput = (value: string): string => {
   return match[0];
 };
 
+export const getChileDateString = (now = new Date()): string =>
+  now.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+
 type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & { [P in K]: string | null };
 
 const serializeDateFields = <T extends Record<string, unknown>, K extends keyof T>(
@@ -442,6 +445,23 @@ const agendaRouter = router({
     await adminOrEditor(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
+
+    // Las reservas pagadas se conservan como historial, pero dejan de aparecer
+    // como asignaciones pendientes una vez que su fecha ya pasó en Chile.
+    const todayChile = getChileDateString();
+    await db.update(massageBookings)
+      .set({
+        status: "cancelled",
+        freelanceApprovalStatus: "expired",
+        adminApprovalToken: null,
+        therapistConfirmationToken: null,
+      })
+      .where(and(
+        eq(massageBookings.paymentStatus, "paid"),
+        eq(massageBookings.status, "pending"),
+        lt(massageBookings.bookingDate, todayChile as any),
+      ));
+
     const rows = await db.select({
       id: massageBookings.id,
       clientName: massageBookings.clientName,
@@ -465,6 +485,47 @@ const agendaRouter = router({
     .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
     return rows.map(row => serializeDateFields(row, ["bookingDate"]));
   }),
+
+  dismissPendingManualAssignment: protectedProcedure
+    .input(z.object({ bookingId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [booking] = await db.select({
+        status: massageBookings.status,
+        paymentStatus: massageBookings.paymentStatus,
+      })
+        .from(massageBookings)
+        .where(eq(massageBookings.id, input.bookingId))
+        .limit(1);
+
+      if (!booking) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Reserva no encontrada" });
+      }
+      if (booking.status !== "pending" || booking.paymentStatus !== "paid") {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "La reserva ya no está pendiente de asignación manual",
+        });
+      }
+
+      await db.update(massageBookings)
+        .set({
+          status: "cancelled",
+          freelanceApprovalStatus: "dismissed",
+          adminApprovalToken: null,
+          therapistConfirmationToken: null,
+        })
+        .where(and(
+          eq(massageBookings.id, input.bookingId),
+          eq(massageBookings.paymentStatus, "paid"),
+          eq(massageBookings.status, "pending"),
+        ));
+
+      return { success: true };
+    }),
 
   notifyFreelanceTherapist: protectedProcedure
     .input(z.object({ bookingId: z.number() }))

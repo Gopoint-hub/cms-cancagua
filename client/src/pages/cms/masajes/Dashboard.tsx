@@ -7,9 +7,20 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, UserX, Send, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, UserX, Send, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const STOCK_PAGE_SIZE = 5;
 
@@ -28,6 +39,13 @@ export default function MasajesDashboard() {
     onSuccess: () => {
       utils.masajes.agenda.getPendingManualAssignment.invalidate();
       toast.success("WhatsApp enviado al terapeuta");
+    },
+    onError: e => toast.error(e.message),
+  });
+  const dismissMut = trpc.masajes.agenda.dismissPendingManualAssignment.useMutation({
+    onSuccess: () => {
+      utils.masajes.agenda.getPendingManualAssignment.invalidate();
+      toast.success("Reserva eliminada de asignaciones pendientes");
     },
     onError: e => toast.error(e.message),
   });
@@ -161,6 +179,39 @@ export default function MasajesDashboard() {
                             Asignar
                           </Button>
                         </Link>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                              disabled={dismissMut.isPending}
+                              title="Eliminar de asignaciones pendientes"
+                            >
+                              <Trash2 className="w-3 h-3 mr-1" />
+                              Eliminar
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>¿Eliminar esta asignación pendiente?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                La reserva de {b.clientName} se quitará de este listado y quedará
+                                registrada como cancelada en el historial. Esta acción no elimina
+                                el registro del pago.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Volver</AlertDialogCancel>
+                              <AlertDialogAction
+                                className="bg-red-600 text-white hover:bg-red-700"
+                                onClick={() => dismissMut.mutate({ bookingId: b.id })}
+                              >
+                                Eliminar
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </div>
                     </div>
                   );
