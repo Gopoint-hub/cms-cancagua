@@ -48,7 +48,6 @@ function LoadingView() {
 }
 
 function ApprovedView({ amount }: { amount?: number }) {
-  const [, setLocation] = useLocation();
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-8 bg-stone-50 px-4">
       <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-10 max-w-md w-full text-center flex flex-col items-center gap-6">
@@ -76,7 +75,7 @@ function ApprovedView({ amount }: { amount?: number }) {
           </p>
         </div>
         <button
-          onClick={() => setLocation("/")}
+          onClick={() => window.location.assign("https://cancagua.cl/servicios/masajes")}
           className="w-full py-3 px-6 bg-stone-800 text-white rounded-xl text-sm font-medium hover:bg-stone-700 transition-colors"
         >
           Volver al inicio
