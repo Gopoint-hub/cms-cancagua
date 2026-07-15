@@ -30,9 +30,16 @@ import {
 import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
 import { eq, and, gte, lte, desc, asc, sql, or, isNull, inArray, gt, lt } from "drizzle-orm";
+import { hasMassageAdminAccess, hasMassageOperationsAccess } from "@shared/permissions";
 
 const adminOrEditor = async (role: string) => {
-  if (role !== "super_admin" && role !== "admin" && role !== "editor") {
+  if (!hasMassageAdminAccess(role)) {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+};
+
+const massageOperations = async (role: string) => {
+  if (!hasMassageOperationsAccess(role)) {
     throw new TRPCError({ code: "FORBIDDEN" });
   }
 };
@@ -104,7 +111,7 @@ export const serializePublicMassageTechnique = (t: typeof massageTechniques.$inf
 // ─── TÉCNICAS ────────────────────────────────────────────────
 const tecnicasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    await adminOrEditor(ctx.user.role);
+    await massageOperations(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
     return db.select().from(massageTechniques).orderBy(asc(massageTechniques.name));
@@ -235,7 +242,7 @@ const tecnicasRouter = router({
 // ─── TERAPEUTAS ───────────────────────────────────────────────
 const terapeutasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    await adminOrEditor(ctx.user.role);
+    await massageOperations(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
     const therapists = await db.select().from(massageTherapists)
@@ -383,7 +390,7 @@ const terapeutasRouter = router({
 // ─── SALAS ────────────────────────────────────────────────────
 const salasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    await adminOrEditor(ctx.user.role);
+    await massageOperations(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
     return db.select().from(massageRooms).orderBy(asc(massageRooms.id));
@@ -410,7 +417,7 @@ const agendaRouter = router({
   getByDateRange: protectedProcedure
     .input(z.object({ from: z.string(), to: z.string() }))
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
       const rows = await db.select({
@@ -442,7 +449,7 @@ const agendaRouter = router({
     }),
 
   getPendingManualAssignment: protectedProcedure.query(async ({ ctx }) => {
-    await adminOrEditor(ctx.user.role);
+    await massageOperations(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
 
@@ -489,7 +496,7 @@ const agendaRouter = router({
   dismissPendingManualAssignment: protectedProcedure
     .input(z.object({ bookingId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -530,7 +537,7 @@ const agendaRouter = router({
   notifyFreelanceTherapist: protectedProcedure
     .input(z.object({ bookingId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       // Resetea estado de aprobación Y vuelve a pending para que el flujo sea correcto
@@ -545,7 +552,7 @@ const agendaRouter = router({
   getAvailableSlots: protectedProcedure
     .input(z.object({ date: z.string(), duration: z.number(), techniqueId: z.number().optional() }))
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
       const existingBookings = await db.select().from(massageBookings).where(
@@ -578,7 +585,7 @@ const agendaRouter = router({
       discountCode: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(massageBookings).values({ ...input, bookingDate: input.bookingDate as any });
@@ -588,7 +595,7 @@ const agendaRouter = router({
   updateStatus: protectedProcedure
     .input(z.object({ id: z.number(), status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]) }))
     .mutation(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.update(massageBookings).set({ status: input.status }).where(eq(massageBookings.id, input.id));
@@ -604,7 +611,7 @@ const agendaRouter = router({
       amountPaid: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -705,7 +712,7 @@ const inventarioRouter = router({
   }),
 
   getLowStock: protectedProcedure.query(async ({ ctx }) => {
-    await adminOrEditor(ctx.user.role);
+    await massageOperations(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
     const rows = await db.select().from(massageSupplies).where(and(eq(massageSupplies.active, 1), sql`${massageSupplies.currentStock} <= ${massageSupplies.minimumStock}`));

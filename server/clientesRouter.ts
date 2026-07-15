@@ -4,9 +4,10 @@ import { getDb } from "./db";
 import { clients } from "../drizzle/schema";
 import { eq, like, or, desc, asc, sql, and, gte, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { hasB2CAccess } from "@shared/permissions";
 
 const adminOrEditor = async (role: string) => {
-  if (!["super_admin", "admin", "editor"].includes(role))
+  if (!hasB2CAccess(role))
     throw new TRPCError({ code: "FORBIDDEN" });
 };
 

@@ -71,6 +71,7 @@ export default function ActivarCuenta() {
     const labels: Record<string, string> = {
       super_admin: "Super Administrador",
       admin: "Administrador",
+      cancagua_staff: "Usuario Personal Cancagua",
       user: "Usuario",
       seller: "Vendedor",
     };

@@ -81,24 +81,25 @@ function SellerDashboard() {
 function AdminDashboard() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+  const userRole = user?.role || "";
+  const isFullAdmin = userRole === "super_admin" || userRole === "admin";
 
   // Obtener estadísticas rápidas
   const { data: bookingsData } = trpc.bookings.list.useQuery();
   const { data: messagesData } = trpc.contactMessages.list.useQuery();
-  const { data: quotesData } = trpc.quotes.getAll.useQuery();
-  const { data: subscribersData } = trpc.subscribers.getAll.useQuery();
+  const { data: quotesData } = trpc.quotes.getAll.useQuery(undefined, { enabled: isFullAdmin });
+  const { data: subscribersData } = trpc.subscribers.getAll.useQuery(undefined, { enabled: isFullAdmin });
 
   const pendingBookings = bookingsData?.filter((b: any) => b.status === "pending").length || 0;
   const unreadMessages = messagesData?.filter((m: any) => m.status === "new").length || 0;
   const pendingQuotes = quotesData?.filter((q: any) => q.status === "sent").length || 0;
   const totalSubscribers = subscribersData?.filter((s: any) => s.status === "active").length || 0;
 
-  const userRole = user?.role || "";
-
   const handleCategoryClick = (categoryId: CategoryId) => {
     const category = categories.find(c => c.id === categoryId);
-    if (category && category.items.length > 0) {
-      setLocation(category.items[0].path);
+    const firstVisibleItem = category?.items.find(item => !item.roles || item.roles.includes(userRole));
+    if (firstVisibleItem) {
+      setLocation(firstVisibleItem.path);
     }
   };
 
@@ -239,7 +240,7 @@ function AdminDashboard() {
             </CardContent>
           </Card>
 
-          <Card>
+          {isFullAdmin && <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Cotizaciones Activas</CardTitle>
               <FileText className="h-4 w-4 text-muted-foreground" />
@@ -248,9 +249,9 @@ function AdminDashboard() {
               <div className="text-2xl font-bold">{pendingQuotes}</div>
               <p className="text-xs text-muted-foreground">En proceso</p>
             </CardContent>
-          </Card>
+          </Card>}
 
-          <Card>
+          {isFullAdmin && <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Suscriptores</CardTitle>
               <Newspaper className="h-4 w-4 text-muted-foreground" />
@@ -259,7 +260,7 @@ function AdminDashboard() {
               <div className="text-2xl font-bold">{totalSubscribers}</div>
               <p className="text-xs text-muted-foreground">Newsletter activos</p>
             </CardContent>
-          </Card>
+          </Card>}
         </div>
       </div>
     </DashboardLayout>

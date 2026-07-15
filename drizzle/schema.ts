@@ -9,6 +9,7 @@ import { date, decimal, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp,
  * - user: Access to specific modules only
  * - seller: Access to sales-related modules
  * - concierge: Access only to concierge sales tool
+ * - cancagua_staff: Reception/operations access to B2C, maintenance and massage agenda
  */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -20,7 +21,7 @@ export const users = mysqlTable("users", {
   passwordHash: varchar("passwordHash", { length: 255 }),
   loginMethod: varchar("loginMethod", { length: 64 }).default("email"),
   /** User role: super_admin, admin, user, seller */
-  role: mysqlEnum("role", ["super_admin", "admin", "editor", "user", "seller", "concierge"]).default("user").notNull(),
+  role: mysqlEnum("role", ["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff"]).default("user").notNull(),
   /** User status: active, pending (invited but not activated), inactive */
   status: mysqlEnum("status", ["active", "pending", "inactive"]).default("pending").notNull(),
   /** Modules the user has access to (JSON array, null = all modules for admin roles) */
@@ -40,7 +41,7 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-export type UserRole = "super_admin" | "admin" | "user" | "seller" | "concierge";
+export type UserRole = "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff";
 export type UserStatus = "active" | "pending" | "inactive";
 
 // Servicios de Skedu

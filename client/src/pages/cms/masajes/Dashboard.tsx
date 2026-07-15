@@ -10,6 +10,8 @@ import { es } from "date-fns/locale";
 import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, UserX, Send, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { CANCAGUA_STAFF_ROLE } from "@shared/permissions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,6 +27,7 @@ import {
 const STOCK_PAGE_SIZE = 5;
 
 export default function MasajesDashboard() {
+  const { user } = useAuth();
   const utils = trpc.useUtils();
   const today = format(new Date(), "yyyy-MM-dd");
   const [stockPage, setStockPage] = useState(0);
@@ -333,7 +336,7 @@ export default function MasajesDashboard() {
             { href: "/cms/masajes/clientes", label: "Clientes" },
             { href: "/cms/masajes/analytics", label: "Ventas" },
             { href: "/cms/masajes/rrhh", label: "RRHH" },
-          ].map(link => (
+          ].filter(link => user?.role !== CANCAGUA_STAFF_ROLE || link.href === "/cms/masajes/agenda").map(link => (
             <Link key={link.href} href={link.href}>
               <Card className="cursor-pointer hover:border-primary transition-colors">
                 <CardContent className="p-4 text-center">

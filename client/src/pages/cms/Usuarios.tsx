@@ -62,7 +62,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type UserRole = "super_admin" | "admin" | "user" | "seller";
+type UserRole = "super_admin" | "admin" | "user" | "seller" | "cancagua_staff";
 type UserStatus = "active" | "pending" | "inactive";
 
 export default function CMSUsuarios() {
@@ -193,6 +193,11 @@ export default function CMSUsuarios() {
         style: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
         label: "Administrador",
         icon: ShieldCheck,
+      },
+      cancagua_staff: {
+        style: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
+        label: "Usuario Personal Cancagua",
+        icon: UserCog,
       },
       user: {
         style: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
@@ -442,7 +447,20 @@ export default function CMSUsuarios() {
               </div>
 
               {/* Info de roles */}
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-5 gap-4">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <UserCog className="h-4 w-4 text-teal-500" />
+                      Personal Cancagua
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xs text-muted-foreground">
+                      B2C, mantención, dashboard y agenda operativa de masajes.
+                    </p>
+                  </CardContent>
+                </Card>
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -543,6 +561,7 @@ export default function CMSUsuarios() {
                       {canAssignRole("admin") && (
                         <SelectItem value="admin">Administrador</SelectItem>
                       )}
+                      <SelectItem value="cancagua_staff">Usuario Personal Cancagua</SelectItem>
                       <SelectItem value="user">Usuario</SelectItem>
                       <SelectItem value="seller">Vendedor</SelectItem>
                     </SelectContent>
@@ -595,6 +614,7 @@ export default function CMSUsuarios() {
                   {canAssignRole("admin") && (
                     <SelectItem value="admin">Administrador</SelectItem>
                   )}
+                  <SelectItem value="cancagua_staff">Usuario Personal Cancagua</SelectItem>
                   <SelectItem value="user">Usuario</SelectItem>
                   <SelectItem value="seller">Vendedor</SelectItem>
                 </SelectContent>

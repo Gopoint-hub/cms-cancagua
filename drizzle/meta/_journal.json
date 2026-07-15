@@ -92,6 +92,13 @@
       "when": 1750204800000,
       "tag": "0013_newsletter_mediumtext",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1784131200000,
+      "tag": "0017_cancagua_staff_role",
+      "breakpoints": true
     }
   ]
 }

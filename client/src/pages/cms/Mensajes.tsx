@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { hasB2CAccess } from "@shared/permissions";
 import { 
   Loader2, Mail, Phone, MessageSquare, Eye, CheckCheck, 
   Trash2, Download, Search, RefreshCw, MoreHorizontal,
@@ -112,7 +113,7 @@ export default function CMSMensajes() {
     );
   }
 
-  if (!user || (user.role !== "super_admin" && user.role !== "admin" && user.role !== "editor")) {
+  if (!user || !hasB2CAccess(user.role)) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center min-h-[60vh]">

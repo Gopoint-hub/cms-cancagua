@@ -38,6 +38,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { canAccessCmsPath, CANCAGUA_STAFF_ROLE } from "@shared/permissions";
 
 // Definición de categorías y sus items de menú
 export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "masajes";
@@ -68,8 +69,11 @@ export const categories: Category[] = [
     icon: Store,
     description: "Clientes & Servicios",
     color: "bg-emerald-500",
-    roles: ["super_admin", "admin"],
+    roles: ["super_admin", "admin", CANCAGUA_STAFF_ROLE],
     items: [
+      { icon: Package, label: "Servicios", path: "/cms/servicios" },
+      { icon: UtensilsCrossed, label: "Carta", path: "/cms/carta" },
+      { icon: CalendarCheck, label: "Reservas", path: "/cms/reservas" },
       { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales" },
       { icon: MessageSquare, label: "Mensajes", path: "/cms/mensajes" },
       { icon: Users, label: "Clientes", path: "/cms/clientes" },
@@ -94,6 +98,7 @@ export const categories: Category[] = [
     icon: ShoppingCart,
     description: "Canales de Venta",
     color: "bg-teal-500",
+    roles: ["super_admin", "admin", "editor", "seller", "concierge"],
     items: [
       { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta" },
       { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios", roles: ["super_admin", "admin"] },
@@ -138,7 +143,7 @@ export const categories: Category[] = [
     icon: HardHat,
     description: "Mantención & Operaciones",
     color: "bg-orange-500",
-    roles: ["super_admin", "admin"],
+    roles: ["super_admin", "admin", CANCAGUA_STAFF_ROLE],
     items: [
       { icon: Wrench, label: "Reportes Mantención", path: "/cms/reportes-mantencion" },
     ],
@@ -164,17 +169,17 @@ export const categories: Category[] = [
     icon: Sparkles,
     description: "Área de Masajes & Spa",
     color: "bg-rose-500",
-    roles: ["super_admin", "admin", "editor"],
+    roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE],
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/cms/masajes" },
       { icon: CalendarCheck, label: "Agenda", path: "/cms/masajes/agenda" },
-      { icon: Users, label: "Terapeutas", path: "/cms/masajes/terapeutas" },
-      { icon: Sparkles, label: "Técnicas", path: "/cms/masajes/tecnicas" },
-      { icon: Package, label: "Inventario", path: "/cms/masajes/inventario" },
-      { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes" },
-      { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics" },
-      { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh" },
-      { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion" },
+      { icon: Users, label: "Terapeutas", path: "/cms/masajes/terapeutas", roles: ["super_admin", "admin", "editor"] },
+      { icon: Sparkles, label: "Técnicas", path: "/cms/masajes/tecnicas", roles: ["super_admin", "admin", "editor"] },
+      { icon: Package, label: "Inventario", path: "/cms/masajes/inventario", roles: ["super_admin", "admin", "editor"] },
+      { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes", roles: ["super_admin", "admin", "editor"] },
+      { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics", roles: ["super_admin", "admin", "editor"] },
+      { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh", roles: ["super_admin", "admin", "editor"] },
+      { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion", roles: ["super_admin", "admin", "editor"] },
     ],
   },
   {
@@ -287,6 +292,23 @@ export default function DashboardLayout({
             className="w-full shadow-lg hover:shadow-xl transition-all"
           >
             Iniciar sesión
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canAccessCmsPath(user.role, location)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted/20 p-6">
+        <div className="max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
+          <Shield className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
+          <h1 className="text-xl font-semibold">Sin acceso a este módulo</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Tu rol de Usuario Personal Cancagua no tiene permisos para abrir esta sección.
+          </p>
+          <Button className="mt-6" onClick={() => window.location.assign("/cms")}>
+            Volver al panel
           </Button>
         </div>
       </div>

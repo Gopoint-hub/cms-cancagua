@@ -13,6 +13,7 @@ import { analyticsRouter } from "./analyticsRouter";
 import { masajesRouter } from "./masajesRouter";
 import { clientesRouter } from "./clientesRouter";
 import { marketingRouter } from "./marketingRouter";
+import { hasB2CAccess, hasMaintenanceAccess } from "@shared/permissions";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -301,7 +302,7 @@ export const appRouter = router({
   menuAdmin: router({
     // Categorías
     getAllCategories: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!hasB2CAccess(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para gestionar el menú" });
       }
       return await db.getAllMenuCategories();
@@ -315,7 +316,7 @@ export const appRouter = router({
         displayOrder: z.number().default(0),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.createMenuCategory(input);
@@ -332,7 +333,7 @@ export const appRouter = router({
         active: z.number().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...data } = input;
@@ -343,7 +344,7 @@ export const appRouter = router({
     deleteCategory: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "admin") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "Solo administradores pueden eliminar categorías" });
         }
         await db.deleteMenuCategory(input.id);
@@ -352,7 +353,7 @@ export const appRouter = router({
 
     // Items
     getAllItems: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!hasB2CAccess(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllMenuItems();
@@ -361,7 +362,7 @@ export const appRouter = router({
     getItemsByCategory: protectedProcedure
       .input(z.object({ categoryId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getMenuItemsByCategory(input.categoryId);
@@ -379,7 +380,7 @@ export const appRouter = router({
         displayOrder: z.number().default(0),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.createMenuItem(input);
@@ -400,7 +401,7 @@ export const appRouter = router({
         active: z.number().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...data } = input;
@@ -411,7 +412,7 @@ export const appRouter = router({
     deleteItem: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.deleteMenuItem(input.id);
@@ -428,7 +429,7 @@ export const appRouter = router({
         mimeType: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -487,7 +488,7 @@ export const appRouter = router({
 
     // Admin: listar todas las reservas
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!hasB2CAccess(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllBookings();
@@ -500,7 +501,7 @@ export const appRouter = router({
         status: z.enum(["pending", "confirmed", "cancelled"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const result = await db.updateBookingStatus(input.id, input.status);
@@ -511,7 +512,7 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "admin") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.deleteBooking(input.id);
@@ -522,7 +523,7 @@ export const appRouter = router({
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "admin") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkDeleteBookings(input.ids);
@@ -536,7 +537,7 @@ export const appRouter = router({
         status: z.enum(["pending", "confirmed", "cancelled"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkUpdateBookingsStatus(input.ids, input.status);
@@ -594,7 +595,7 @@ export const appRouter = router({
 
     // Admin: listar todos los mensajes
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!hasB2CAccess(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllContactMessages();
@@ -607,7 +608,7 @@ export const appRouter = router({
         status: z.enum(["new", "read", "replied"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const result = await db.updateContactMessageStatus(input.id, input.status);
@@ -618,7 +619,7 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.deleteContactMessage(input.id);
@@ -629,7 +630,7 @@ export const appRouter = router({
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkDeleteContactMessages(input.ids);
@@ -643,7 +644,7 @@ export const appRouter = router({
         status: z.enum(["new", "read", "replied"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkUpdateContactMessagesStatus(input.ids, input.status);
@@ -654,7 +655,7 @@ export const appRouter = router({
     resendToEmail: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         
@@ -729,7 +730,7 @@ export const appRouter = router({
       .input(z.object({
         email: z.string().email("Email inválido"),
         name: z.string().min(2, "El nombre es requerido"),
-        role: z.enum(["super_admin", "admin", "user", "seller"]),
+        role: z.enum(["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff"]),
         allowedModules: z.array(z.string()).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
@@ -837,7 +838,7 @@ export const appRouter = router({
     updateRole: protectedProcedure
       .input(z.object({
         userId: z.number(),
-        role: z.enum(["super_admin", "admin", "user", "seller"])
+        role: z.enum(["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff"])
       }))
       .mutation(async ({ ctx, input }) => {
         if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {
@@ -3644,7 +3645,7 @@ Devuelve un JSON con este formato:
   giftCardsAdmin: router({
     getAll: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
         }
         // Auto-cleanup: marcar como abandonadas las gift cards pendientes por más de 30 minutos
@@ -3660,7 +3661,7 @@ Devuelve un JSON con este formato:
     resendEmail: protectedProcedure
       .input(z.object({ giftCardId: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
         }
 
@@ -3729,7 +3730,7 @@ Devuelve un JSON con este formato:
      */
     markAbandonedGiftCards: protectedProcedure
       .mutation(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
         }
 
@@ -3754,7 +3755,7 @@ Devuelve un JSON con este formato:
         personalMessage: z.string().max(150).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasB2CAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
         }
 
@@ -4257,7 +4258,7 @@ Example output: {"key1": "Hello world"}`;
   maintenance: router({
     // Listar todos los reportes
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!hasMaintenanceAccess(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllMaintenanceReports();
@@ -4267,7 +4268,7 @@ Example output: {"key1": "Hello world"}`;
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const report = await db.getMaintenanceReportById(input.id);
@@ -4279,7 +4280,7 @@ Example output: {"key1": "Hello world"}`;
 
     // Obtener estadísticas
     stats: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!hasMaintenanceAccess(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getMaintenanceStats();
@@ -4306,7 +4307,7 @@ Example output: {"key1": "Hello world"}`;
         nextMaintenanceDate: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         
@@ -4344,7 +4345,7 @@ Example output: {"key1": "Hello world"}`;
         nextMaintenanceDate: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         
@@ -4381,7 +4382,7 @@ Example output: {"key1": "Hello world"}`;
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.deleteMaintenanceReport(input.id);
@@ -4397,7 +4398,7 @@ Example output: {"key1": "Hello world"}`;
         photoType: z.enum(["before", "during", "after", "evidence"]).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         
@@ -4437,7 +4438,7 @@ Example output: {"key1": "Hello world"}`;
     deletePhoto: protectedProcedure
       .input(z.object({ photoId: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.deleteMaintenanceReportPhoto(input.photoId);
@@ -4448,7 +4449,7 @@ Example output: {"key1": "Hello world"}`;
     getHistory: protectedProcedure
       .input(z.object({ reportId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getMaintenanceReportHistory(input.reportId);

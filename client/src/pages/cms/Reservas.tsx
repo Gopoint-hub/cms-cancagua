@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { hasB2CAccess } from "@shared/permissions";
 import { Loader2, Calendar, Users, Mail, Phone, MessageSquare, Check, X, Trash2, Download } from "lucide-react";
 import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -70,7 +71,7 @@ export default function CMSReservas() {
     );
   }
 
-  if (!user || (user.role !== "super_admin" && user.role !== "admin" && user.role !== "editor")) {
+  if (!user || !hasB2CAccess(user.role)) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Card className="w-96">
@@ -264,7 +265,7 @@ export default function CMSReservas() {
                   <X className="w-4 h-4 mr-1" />
                   Cancelar
                 </Button>
-                {user.role === "admin" && (
+                {hasB2CAccess(user.role) && (
                   <Button
                     size="sm"
                     variant="destructive"
@@ -385,7 +386,7 @@ export default function CMSReservas() {
                         </Button>
                       </>
                     )}
-                    {user.role === "admin" && (
+                    {hasB2CAccess(user.role) && (
                       <Button
                         size="sm"
                         variant="destructive"

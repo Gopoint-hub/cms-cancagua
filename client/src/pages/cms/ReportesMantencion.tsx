@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { hasMaintenanceAccess } from "@shared/permissions";
 import { 
   Loader2, Wrench, Plus, Search, RefreshCw, MoreHorizontal,
   Eye, Edit, Trash2, Camera, X, Download, Clock, CheckCircle2,
@@ -859,7 +860,7 @@ export default function CMSReportesMantencion() {
     );
   }
 
-  if (!user || (user.role !== "super_admin" && user.role !== "admin" && user.role !== "editor")) {
+  if (!user || !hasMaintenanceAccess(user.role)) {
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center min-h-[60vh]">

@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { hasB2CAccess } from "@shared/permissions";
 import { Loader2, Plus, Pencil, Trash2, Leaf, Wheat, Flame, Eye, Upload, X } from "lucide-react";
 import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -91,7 +92,7 @@ export default function CMSCarta() {
     );
   }
 
-  if (!user || (user.role !== "super_admin" && user.role !== "admin" && user.role !== "editor")) {
+  if (!user || !hasB2CAccess(user.role)) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Card className="w-96">
@@ -344,7 +345,7 @@ export default function CMSCarta() {
                           <Plus className="w-4 h-4 mr-1" />
                           Item
                         </Button>
-                        {user.role === "admin" && (
+                        {hasB2CAccess(user.role) && (
                           <Button
                             size="sm"
                             variant="destructive"
