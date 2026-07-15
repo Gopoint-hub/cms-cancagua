@@ -1025,6 +1025,25 @@ type AutomaticMassageBooking = {
 
 type AutomaticMassageRoom = { id: number };
 
+const INHOUSE_ASSIGNMENT_PRIORITY = new Map<number, number>([
+  [3, 0], // Bárbara Frías
+  [1, 1], // Daniela Caerols
+  [2, 2], // Tamara Muñoz
+]);
+const FREELANCE_MIN_LEAD_MINUTES = 120;
+
+const getChileTimeMinutes = (now: Date): number => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Santiago",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  return hour * 60 + minute;
+};
+
 const overlaps = (startA: number, endA: number, startB: number, endB: number): boolean =>
   startA < endB && endA > startB;
 
@@ -1035,6 +1054,8 @@ export function selectAutomaticMassageAssignment(params: {
   startTime: string;
   duration: number;
   prepMinutes?: number;
+  bookingDate?: string;
+  now?: Date;
 }): { therapist: AutomaticMassageTherapist; room: AutomaticMassageRoom; endTime: string } | null {
   const prep = params.prepMinutes ?? 10;
   const requestedStart = parseTimeMin(params.startTime);
@@ -1044,6 +1065,11 @@ export function selectAutomaticMassageAssignment(params: {
     const typeA = a.type === "inhouse" ? 0 : 1;
     const typeB = b.type === "inhouse" ? 0 : 1;
     if (typeA !== typeB) return typeA - typeB;
+    if (a.type === "inhouse" && b.type === "inhouse") {
+      const inhousePriorityA = INHOUSE_ASSIGNMENT_PRIORITY.get(a.id) ?? 99;
+      const inhousePriorityB = INHOUSE_ASSIGNMENT_PRIORITY.get(b.id) ?? 99;
+      if (inhousePriorityA !== inhousePriorityB) return inhousePriorityA - inhousePriorityB;
+    }
     const priorityA = a.callPriority ?? 99;
     const priorityB = b.callPriority ?? 99;
     if (priorityA !== priorityB) return priorityA - priorityB;
@@ -1051,6 +1077,14 @@ export function selectAutomaticMassageAssignment(params: {
   });
 
   for (const therapist of therapists) {
+    if (therapist.type === "freelance" && params.bookingDate) {
+      const now = params.now ?? new Date();
+      if (params.bookingDate === getChileDateString(now)) {
+        const leadMinutes = requestedStart - getChileTimeMinutes(now);
+        if (leadMinutes < FREELANCE_MIN_LEAD_MINUTES) continue;
+      }
+    }
+
     const scheduleStart = parseTimeMin(therapist.scheduleStart);
     const scheduleEnd = parseTimeMin(therapist.scheduleEnd);
     if (requestedStart < scheduleStart || requestedEnd > scheduleEnd) continue;
@@ -1329,19 +1363,9 @@ const masajesPublicRouter = router({
           rooms,
           startTime: timeStr,
           duration: input.duration,
+          bookingDate: input.date,
         });
         if (assignment) slots.push({ time: timeStr });
-      }
-
-      // Para reservas del mismo día: solo mostrar horarios con al menos 2h de anticipación (hora Chile)
-      const todayChile = new Date().toLocaleString("sv-SE", { timeZone: "America/Santiago" }).slice(0, 10);
-      if (input.date === todayChile) {
-        const nowChile = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
-        const minStartMin = nowChile.getHours() * 60 + nowChile.getMinutes() + 120;
-        return slots.filter(s => {
-          const [sh, sm] = s.time.split(":").map(Number);
-          return sh * 60 + sm >= minStartMin;
-        });
       }
       return slots;
     }),
@@ -1415,6 +1439,7 @@ const masajesPublicRouter = router({
         rooms,
         startTime: input.startTime,
         duration: input.duration,
+        bookingDate: input.bookingDate,
       });
 
       if (!assignment) {
@@ -1491,17 +1516,6 @@ const masajesPublicRouter = router({
       const priceFields = [technique.price50min, technique.price80min, technique.price110min];
       const price = durIdx >= 0 && priceFields[durIdx] ? Number(priceFields[durIdx]) : null;
       if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: "Precio no configurado para esta duración" });
-
-      // Validar anticipación mínima de 2h para reservas del mismo día
-      const todayChile = new Date().toLocaleString("sv-SE", { timeZone: "America/Santiago" }).slice(0, 10);
-      if (input.bookingDate === todayChile) {
-        const nowChile = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
-        const minStartMin = nowChile.getHours() * 60 + nowChile.getMinutes() + 120;
-        const [sh, sm] = input.startTime.split(":").map(Number);
-        if (sh * 60 + sm < minStartMin) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Para reservas del mismo día se requieren al menos 2 horas de anticipación." });
-        }
-      }
 
       // Usar primero la disponibilidad específica del día. Esta debe coincidir
       // con los bloques que se mostraron al cliente en getSlots.
@@ -1584,6 +1598,7 @@ const masajesPublicRouter = router({
         rooms,
         startTime: input.startTime,
         duration: input.duration,
+        bookingDate: input.bookingDate,
       });
 
       if (!assignment) {

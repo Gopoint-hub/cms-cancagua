@@ -81,6 +81,103 @@ describe("selectAutomaticMassageAssignment", () => {
     expect(assignment?.room.id).toBe(10);
   });
 
+  it("uses the fixed inhouse order Barbara, Daniela, then Tamara", () => {
+    const base = {
+      type: "inhouse" as const,
+      callPriority: 99,
+      scheduleStart: "10:00",
+      scheduleEnd: "18:00",
+    };
+    const therapists = [
+      { ...base, id: 2, name: "Tamara Muñoz" },
+      { ...base, id: 1, name: "Daniela Caerols" },
+      { ...base, id: 3, name: "Bárbara Frías" },
+    ];
+
+    const first = selectAutomaticMassageAssignment({
+      therapists,
+      bookings: [],
+      rooms,
+      startTime: "12:00",
+      duration: 50,
+    });
+    expect(first?.therapist.id).toBe(3);
+
+    const second = selectAutomaticMassageAssignment({
+      therapists,
+      bookings: [{ therapistId: 3, roomId: 20, startTime: "12:00", endTime: "12:50" }],
+      rooms: [{ id: 20 }, { id: 21 }],
+      startTime: "12:00",
+      duration: 50,
+    });
+    expect(second?.therapist.id).toBe(1);
+
+    const third = selectAutomaticMassageAssignment({
+      therapists,
+      bookings: [
+        { therapistId: 3, roomId: 20, startTime: "12:00", endTime: "12:50" },
+        { therapistId: 1, roomId: 21, startTime: "12:00", endTime: "12:50" },
+      ],
+      rooms: [{ id: 20 }, { id: 21 }, { id: 22 }],
+      startTime: "12:00",
+      duration: 50,
+    });
+    expect(third?.therapist.id).toBe(2);
+  });
+
+  it("never assigns freelance therapists with less than two hours notice", () => {
+    const now = new Date("2026-07-15T14:00:00.000Z"); // 10:00 en Chile
+    const freelance = [{
+      id: 20,
+      name: "Freelance",
+      type: "freelance" as const,
+      callPriority: 1,
+      scheduleStart: "10:00",
+      scheduleEnd: "18:00",
+    }];
+
+    expect(selectAutomaticMassageAssignment({
+      therapists: freelance,
+      bookings: [],
+      rooms,
+      startTime: "11:30",
+      duration: 20,
+      bookingDate: "2026-07-15",
+      now,
+    })).toBeNull();
+
+    expect(selectAutomaticMassageAssignment({
+      therapists: freelance,
+      bookings: [],
+      rooms,
+      startTime: "12:00",
+      duration: 20,
+      bookingDate: "2026-07-15",
+      now,
+    })?.therapist.id).toBe(20);
+  });
+
+  it("allows an inhouse therapist inside the two-hour freelance window", () => {
+    const assignment = selectAutomaticMassageAssignment({
+      therapists: [{
+        id: 3,
+        name: "Bárbara Frías",
+        type: "inhouse",
+        callPriority: 99,
+        scheduleStart: "10:00",
+        scheduleEnd: "18:00",
+      }],
+      bookings: [],
+      rooms,
+      startTime: "10:30",
+      duration: 20,
+      bookingDate: "2026-07-15",
+      now: new Date("2026-07-15T14:00:00.000Z"),
+    });
+
+    expect(assignment?.therapist.id).toBe(3);
+  });
+
   it("falls back to freelance priority order when inhouse therapists are busy", () => {
     const assignment = selectAutomaticMassageAssignment({
       therapists: [
