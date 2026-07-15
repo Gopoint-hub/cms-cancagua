@@ -1503,30 +1503,75 @@ const masajesPublicRouter = router({
         }
       }
 
-      const dayOfWeek = new Date(input.bookingDate + "T12:00:00").getDay();
-      const therapists = await db.select({
+      // Usar primero la disponibilidad específica del día. Esta debe coincidir
+      // con los bloques que se mostraron al cliente en getSlots.
+      let therapists = await db.select({
         id: massageTherapists.id,
         name: massageTherapists.name,
         email: massageTherapists.email,
         type: massageTherapists.type,
         callPriority: massageTherapists.callPriority,
-        scheduleStart: massageTherapistSchedules.startTime,
-        scheduleEnd: massageTherapistSchedules.endTime,
+        scheduleStart: massageTherapistAvailability.startTime,
+        scheduleEnd: massageTherapistAvailability.endTime,
       })
         .from(massageTherapistTechniques)
         .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-        .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
         .where(and(
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
-          eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
-          eq(massageTherapistSchedules.available, 1),
-          or(
-            isNull(massageTherapistSchedules.blockFrom),
-            gt(massageTherapistSchedules.blockFrom, input.bookingDate as any),
-            lt(massageTherapistSchedules.blockTo, input.bookingDate as any)
-          )
-        ));
+          eq(massageTherapistAvailability.date, input.bookingDate as any),
+          eq(massageTherapistAvailability.isAvailable, 1),
+        )) as Array<{
+          id: number;
+          name: string | null;
+          email: string | null;
+          type: "inhouse" | "freelance";
+          callPriority: number | null;
+          scheduleStart: string | null;
+          scheduleEnd: string | null;
+        }>;
+
+      let validTherapists = therapists.filter(
+        (therapist) => therapist.scheduleStart && therapist.scheduleEnd,
+      ) as Array<{
+        id: number;
+        name: string | null;
+        email: string | null;
+        type: "inhouse" | "freelance";
+        callPriority: number | null;
+        scheduleStart: string;
+        scheduleEnd: string;
+      }>;
+
+      // Compatibilidad para fechas que aún no tengan disponibilidad diaria.
+      if (validTherapists.length === 0) {
+        const dayOfWeek = new Date(input.bookingDate + "T12:00:00").getDay();
+        const legacyTherapists = await db.select({
+          id: massageTherapists.id,
+          name: massageTherapists.name,
+          email: massageTherapists.email,
+          type: massageTherapists.type,
+          callPriority: massageTherapists.callPriority,
+          scheduleStart: massageTherapistSchedules.startTime,
+          scheduleEnd: massageTherapistSchedules.endTime,
+        })
+          .from(massageTherapistTechniques)
+          .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+          .innerJoin(massageTherapistSchedules, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+          .where(and(
+            eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+            eq(massageTherapists.active, 1),
+            eq(massageTherapistSchedules.dayOfWeek, dayOfWeek),
+            eq(massageTherapistSchedules.available, 1),
+            or(
+              isNull(massageTherapistSchedules.blockFrom),
+              gt(massageTherapistSchedules.blockFrom, input.bookingDate as any),
+              lt(massageTherapistSchedules.blockTo, input.bookingDate as any),
+            ),
+          ));
+        validTherapists = legacyTherapists as typeof validTherapists;
+      }
 
       const allBookings = await db.select().from(massageBookings).where(
         and(eq(massageBookings.bookingDate, input.bookingDate as any), sql`${massageBookings.status} NOT IN ('cancelled')`)
@@ -1534,7 +1579,7 @@ const masajesPublicRouter = router({
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
 
       const assignment = selectAutomaticMassageAssignment({
-        therapists,
+        therapists: validTherapists,
         bookings: allBookings,
         rooms,
         startTime: input.startTime,
