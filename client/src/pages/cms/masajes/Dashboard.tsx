@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { AlertTriangle, CalendarCheck, Users, Clock, TrendingUp, UserX, Send, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarCheck, CalendarPlus, Users, Clock, TrendingUp, UserX, Send, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -23,6 +23,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
 
 const STOCK_PAGE_SIZE = 5;
 
@@ -31,6 +32,7 @@ export default function MasajesDashboard() {
   const utils = trpc.useUtils();
   const today = format(new Date(), "yyyy-MM-dd");
   const [stockPage, setStockPage] = useState(0);
+  const [skeduDialogOpen, setSkeduDialogOpen] = useState(false);
   const { data: bookings, isLoading: loadingBookings } = trpc.masajes.agenda.getByDateRange.useQuery(
     { from: today, to: today }
   );
@@ -62,11 +64,16 @@ export default function MasajesDashboard() {
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-wide">Área de Masajes</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
-          </p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-wide">Área de Masajes</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
+            </p>
+          </div>
+          <Button onClick={() => setSkeduDialogOpen(true)}>
+            <CalendarPlus className="w-4 h-4 mr-2" /> Agregar programa Skedu
+          </Button>
         </div>
 
         {/* KPIs del día */}
@@ -245,14 +252,19 @@ export default function MasajesDashboard() {
               ) : (
                 <div className="space-y-3">
                   {confirmed.map(b => (
-                    <div key={b.id} className="flex items-start justify-between border rounded-lg p-3">
+                    <div key={`${b.bookingKind}-${b.id}`} className="flex items-start justify-between border rounded-lg p-3">
                       <div>
-                        <p className="font-medium text-sm">{b.clientName}</p>
+                        <p className="font-medium text-sm flex items-center gap-2">
+                          {b.clientName}
+                          {b.bookingKind === "skedu_program" && <Badge variant="outline" className="text-[10px] border-violet-400 text-violet-700">Skedu</Badge>}
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           {b.techniqueName} · {b.duration} min · {b.roomName}
                         </p>
                         {b.therapistName && (
-                          <p className="text-xs text-muted-foreground">Terapeuta: {b.therapistName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Terapeuta{b.secondTherapistName ? "s" : ""}: {b.therapistName}{b.secondTherapistName ? ` + ${b.secondTherapistName}` : ""}
+                          </p>
                         )}
                       </div>
                       <div className="text-right">
@@ -347,6 +359,12 @@ export default function MasajesDashboard() {
           ))}
         </div>
       </div>
+      <SkeduProgramBookingDialog
+        open={skeduDialogOpen}
+        onOpenChange={setSkeduDialogOpen}
+        initialDate={today}
+        onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+      />
     </DashboardLayout>
   );
 }

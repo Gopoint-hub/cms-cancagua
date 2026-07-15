@@ -3,11 +3,39 @@ import {
   buildInhouseMonthRotation,
   buildPublicMassageBookingNotifications,
   getChileDateString,
+  expandSkeduProgramResourceBlocks,
+  isSkeduProgramDurationAllowed,
   normalizeDecimalInput,
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
   serializeDateOnly,
 } from "./masajesRouter";
+
+describe("Skedu massage programs", () => {
+  it("allows 30 and 50 minutes for every Reconecta variant and only 30 for Reset", () => {
+    for (const program of ["reconecta", "reconecta_detox", "bio_reconecta", "bio_reconecta_detox"]) {
+      expect(isSkeduProgramDurationAllowed(program, 30)).toBe(true);
+      expect(isSkeduProgramDurationAllowed(program, 50)).toBe(true);
+    }
+    expect(isSkeduProgramDurationAllowed("reset", 30)).toBe(true);
+    expect(isSkeduProgramDurationAllowed("reset", 50)).toBe(false);
+  });
+
+  it("expands a double program into two therapist blocks but only one room block", () => {
+    const blocks = expandSkeduProgramResourceBlocks([{
+      therapistId: 3,
+      secondTherapistId: 1,
+      roomId: 2,
+      startTime: "14:00",
+      endTime: "14:30",
+    }]);
+
+    expect(blocks).toEqual([
+      { therapistId: 3, roomId: 2, startTime: "14:00", endTime: "14:30" },
+      { therapistId: 1, roomId: null, startTime: "14:00", endTime: "14:30" },
+    ]);
+  });
+});
 
 describe("buildInhouseMonthRotation", () => {
   const rotation = buildInhouseMonthRotation({

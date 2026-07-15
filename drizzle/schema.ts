@@ -1124,6 +1124,34 @@ export const massageBookings = mysqlTable("massage_bookings", {
 export type MassageBooking = typeof massageBookings.$inferSelect;
 export type InsertMassageBooking = typeof massageBookings.$inferInsert;
 
+// Reservas ingresadas manualmente desde Skedu para programas que incluyen masaje.
+// Se mantienen separadas de massage_bookings para no mezclarlas con ventas Getnet.
+export const massageProgramBookings = mysqlTable("massage_program_bookings", {
+  id: int("id").autoincrement().primaryKey(),
+  program: varchar("program", { length: 50 }).notNull(),
+  duration: int("duration").notNull(),
+  modality: mysqlEnum("modality", ["simple", "double"]).notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  secondClientName: varchar("second_client_name", { length: 200 }),
+  clientPhone: varchar("client_phone", { length: 20 }),
+  clientEmail: varchar("client_email", { length: 320 }),
+  bookingDate: date("booking_date").notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  therapistId: int("therapist_id").notNull(),
+  secondTherapistId: int("second_therapist_id"),
+  roomId: int("room_id").notNull(),
+  externalReference: varchar("external_reference", { length: 100 }),
+  notes: text("notes"),
+  status: mysqlEnum("status", ["confirmed", "completed", "cancelled", "no_show"]).default("confirmed").notNull(),
+  createdByUserId: int("created_by_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageProgramBooking = typeof massageProgramBookings.$inferSelect;
+export type InsertMassageProgramBooking = typeof massageProgramBookings.$inferInsert;
+
 export const massageSupplies = mysqlTable("massage_supplies", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 200 }).notNull(),

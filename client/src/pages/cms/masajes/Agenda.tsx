@@ -19,6 +19,7 @@ import {
   eachDayOfInterval, isSameDay, isSameMonth,
 } from "date-fns";
 import { es } from "date-fns/locale";
+import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendiente", confirmed: "Confirmada", completed: "Completada",
@@ -57,7 +58,7 @@ function calcEndTime(start: string, duration: number): string {
 function BookingCard({ b, onEdit, onStatus }: {
   b: any;
   onEdit: (b: any) => void;
-  onStatus: (id: number, status: string) => void;
+  onStatus: (id: number, status: string, bookingKind: string) => void;
 }) {
   return (
     <Card className={b.status === "cancelled" ? "opacity-60" : ""}>
@@ -69,6 +70,11 @@ function BookingCard({ b, onEdit, onStatus }: {
               <span className="text-muted-foreground">–</span>
               <span className="text-muted-foreground">{b.endTime}</span>
               <Badge variant={STATUS_VARIANTS[b.status]}>{STATUS_LABELS[b.status]}</Badge>
+              {b.bookingKind === "skedu_program" && (
+                <Badge variant="outline" className="border-violet-400 text-violet-700 bg-violet-50">
+                  Skedu · {b.modality === "double" ? "Doble" : "Simple"}
+                </Badge>
+              )}
               {b.paymentStatus === "paid" && (
                 <Badge variant="outline" className="text-green-600 border-green-600">Pagado</Badge>
               )}
@@ -77,21 +83,33 @@ function BookingCard({ b, onEdit, onStatus }: {
             <p className="text-sm text-muted-foreground">
               {b.techniqueName} · {b.duration} min · {b.roomName}
               {b.therapistName && ` · ${b.therapistName}`}
+              {b.secondTherapistName && ` + ${b.secondTherapistName}`}
             </p>
+            {b.externalReference && <p className="text-xs text-muted-foreground mt-1">Ref. Skedu: {b.externalReference}</p>}
             {b.amountPaid && (
               <p className="text-sm text-green-600 mt-1">$ {Number(b.amountPaid).toLocaleString("es-CL")}</p>
             )}
           </div>
           <div className="flex gap-2 flex-wrap shrink-0">
             {b.status === "pending" && (
-              <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "confirmed")}>Confirmar</Button>
+              <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "confirmed", b.bookingKind)}>Confirmar</Button>
             )}
             {(b.status === "confirmed" || b.status === "pending") && (
-              <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "completed")}>Completar</Button>
+              <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "completed", b.bookingKind)}>Completar</Button>
             )}
-            <Button size="sm" variant="ghost" onClick={() => onEdit(b)}>
-              <Edit className="w-4 h-4" />
-            </Button>
+            {b.bookingKind === "skedu_program" ? (
+              b.status === "confirmed" && (
+                <Button size="sm" variant="ghost" className="text-red-600" onClick={() => {
+                  if (window.confirm("¿Cancelar este masaje de programa y liberar los recursos?")) {
+                    onStatus(b.id, "cancelled", b.bookingKind);
+                  }
+                }}>Cancelar</Button>
+              )
+            ) : (
+              <Button size="sm" variant="ghost" onClick={() => onEdit(b)}>
+                <Edit className="w-4 h-4" />
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>
@@ -104,7 +122,7 @@ function DayView({ bookings, isLoading, onEdit, onStatus }: {
   bookings: any[] | undefined;
   isLoading: boolean;
   onEdit: (b: any) => void;
-  onStatus: (id: number, status: string) => void;
+  onStatus: (id: number, status: string, bookingKind: string) => void;
 }) {
   if (isLoading) return <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full" />)}</div>;
   if (!bookings || bookings.length === 0) {
@@ -113,7 +131,7 @@ function DayView({ bookings, isLoading, onEdit, onStatus }: {
   return (
     <div className="space-y-3">
       {bookings.map(b => (
-        <BookingCard key={b.id} b={b} onEdit={onEdit} onStatus={onStatus} />
+        <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} />
       ))}
     </div>
   );
@@ -126,7 +144,7 @@ function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus
   weekStart: Date;
   onDayClick: (date: string) => void;
   onEdit: (b: any) => void;
-  onStatus: (id: number, status: string) => void;
+  onStatus: (id: number, status: string, bookingKind: string) => void;
 }) {
   const days = eachDayOfInterval({ start: weekStart, end: endOfWeek(weekStart, { locale: es }) });
 
@@ -156,7 +174,7 @@ function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus
             ) : (
               <div className="space-y-2 pl-1">
                 {dayBookings.map(b => (
-                  <BookingCard key={b.id} b={b} onEdit={onEdit} onStatus={onStatus} />
+                  <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} />
                 ))}
               </div>
             )}
@@ -244,6 +262,7 @@ export default function MasajesAgenda() {
   const [view, setView] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [open, setOpen] = useState(false);
+  const [skeduOpen, setSkeduOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<BookingForm>(emptyForm(selectedDate));
   const utils = trpc.useUtils();
@@ -279,6 +298,10 @@ export default function MasajesAgenda() {
     onSuccess: () => { utils.masajes.agenda.getByDateRange.invalidate(); toast.success("Estado actualizado"); },
     onError: e => toast.error(e.message),
   });
+  const programStatusMut = trpc.masajes.agenda.updateSkeduProgramStatus.useMutation({
+    onSuccess: () => { utils.masajes.agenda.getByDateRange.invalidate(); toast.success("Estado del programa actualizado"); },
+    onError: e => toast.error(e.message),
+  });
   const notifyMut = trpc.masajes.agenda.notifyFreelanceTherapist.useMutation({
     onSuccess: () => {
       utils.masajes.agenda.getByDateRange.invalidate();
@@ -289,7 +312,13 @@ export default function MasajesAgenda() {
     onError: e => toast.error(e.message),
   });
 
-  const handleStatus = (id: number, status: string) => statusMut.mutate({ id, status: status as any });
+  const handleStatus = (id: number, status: string, bookingKind: string) => {
+    if (bookingKind === "skedu_program") {
+      programStatusMut.mutate({ id, status: status as "confirmed" | "completed" | "cancelled" | "no_show" });
+    } else {
+      statusMut.mutate({ id, status: status as any });
+    }
+  };
 
   const openCreate = () => {
     setEditingId(null);
@@ -388,7 +417,10 @@ export default function MasajesAgenda() {
             <h1 className="text-2xl font-semibold tracking-wide">Agenda</h1>
             <p className="text-muted-foreground text-sm mt-1">Reservas de masajes</p>
           </div>
-          <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => setSkeduOpen(true)}>Agregar programa Skedu</Button>
+            <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
+          </div>
         </div>
 
         {/* Controles de navegación y vista */}
@@ -598,6 +630,12 @@ export default function MasajesAgenda() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <SkeduProgramBookingDialog
+        open={skeduOpen}
+        onOpenChange={setSkeduOpen}
+        initialDate={selectedDate}
+        onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+      />
     </DashboardLayout>
   );
 }

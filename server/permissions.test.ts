@@ -46,6 +46,17 @@ describe("Usuario Personal Cancagua permissions", () => {
     expect(hasMassageAdminAccess(CANCAGUA_STAFF_ROLE)).toBe(false);
   });
 
+  it("allows reception to open the Skedu program booking flow", async () => {
+    const caller = appRouter.createCaller(createStaffContext());
+    await expect(caller.masajes.agenda.getSkeduPrograms()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: "reconecta_detox", durations: [30, 50] }),
+        expect.objectContaining({ value: "bio_reconecta_detox", durations: [30, 50] }),
+        expect.objectContaining({ value: "reset", durations: [30] }),
+      ])
+    );
+  });
+
   it("allows only the requested CMS routes", () => {
     expect(canAccessCmsPath(CANCAGUA_STAFF_ROLE, "/cms/clientes")).toBe(true);
     expect(canAccessCmsPath(CANCAGUA_STAFF_ROLE, "/cms/reportes-mantencion")).toBe(true);
