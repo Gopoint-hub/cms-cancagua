@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildInhouseMonthRotation,
   buildPublicMassageBookingNotifications,
   getChileDateString,
   normalizeDecimalInput,
@@ -7,6 +8,41 @@ import {
   serializePublicMassageTechnique,
   serializeDateOnly,
 } from "./masajesRouter";
+
+describe("buildInhouseMonthRotation", () => {
+  const rotation = buildInhouseMonthRotation({
+    month: "2026-07",
+    barbaraFirstWeekShift: "pm",
+    barbaraId: 3,
+    danielaId: 1,
+    amStart: "10:00",
+    amEnd: "18:00",
+    pmStart: "14:00",
+    pmEnd: "22:00",
+  });
+
+  it("schedules both therapists Tuesday through Friday with a 14:00-18:00 overlap", () => {
+    const tuesday = rotation.filter((entry) => entry.date === "2026-07-07");
+    expect(tuesday).toEqual([
+      expect.objectContaining({ therapistId: 3, startTime: "10:00", endTime: "18:00" }),
+      expect.objectContaining({ therapistId: 1, startTime: "14:00", endTime: "22:00" }),
+    ]);
+  });
+
+  it("keeps Monday out of the automatic rotation", () => {
+    expect(rotation.filter((entry) => entry.date === "2026-07-06")).toEqual([]);
+  });
+
+  it("adds Daniela every other Saturday while Barbara works every Saturday", () => {
+    expect(rotation.filter((entry) => entry.date === "2026-07-04")).toEqual([
+      expect.objectContaining({ therapistId: 3, shift: "pm" }),
+    ]);
+    expect(rotation.filter((entry) => entry.date === "2026-07-11")).toEqual([
+      expect.objectContaining({ therapistId: 3, shift: "am" }),
+      expect.objectContaining({ therapistId: 1, shift: "pm" }),
+    ]);
+  });
+});
 
 describe("getChileDateString", () => {
   it("uses the calendar date in Chile for automatic pending cleanup", () => {
@@ -123,6 +159,21 @@ describe("selectAutomaticMassageAssignment", () => {
       duration: 50,
     });
     expect(third?.therapist.id).toBe(2);
+  });
+
+  it("selects Daniela before Barbara starts her shift", () => {
+    const assignment = selectAutomaticMassageAssignment({
+      therapists: [
+        { id: 3, name: "Bárbara Frías", type: "inhouse", callPriority: 1, scheduleStart: "14:00", scheduleEnd: "22:00" },
+        { id: 1, name: "Daniela Caerols", type: "inhouse", callPriority: 2, scheduleStart: "10:00", scheduleEnd: "18:00" },
+      ],
+      bookings: [],
+      rooms,
+      startTime: "12:00",
+      duration: 50,
+    });
+
+    expect(assignment?.therapist.id).toBe(1);
   });
 
   it("never assigns freelance therapists with less than two hours notice", () => {
