@@ -1108,7 +1108,7 @@ export default function CMSCrearNewsletter() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Imagen para header (opcional)</CardTitle>
-                  <CardDescription>Sube una imagen que se usará como banner principal del email. Si no subes una, la IA generará una automáticamente.</CardDescription>
+                  <CardDescription>Sube una imagen para el banner principal. Si no subes una, se usará un hero tipográfico o una fotografía aprobada de la marca.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <input

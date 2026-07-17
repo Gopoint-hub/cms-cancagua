@@ -3,6 +3,7 @@ import { router, protectedProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
 import * as db from "./db";
+import { CANCAGUA_CONTENT_VOICE } from "./brand/cancaguaDesignSystem";
 
 const EVENTOS_EMAIL = "Cancagua Eventos <eventos@cancagua.cl>";
 
@@ -293,7 +294,9 @@ export const marketingRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
-      const prompt = `Eres un experto en SEO y AEO (Answer Engine Optimization) para Cancagua Spa & Retreat Center, ubicado en Puerto Varas, Chile. Cancagua ofrece biopiscinas geotermales naturales, masajes, retiros de bienestar, y eventos corporativos.
+      const prompt = `Eres un experto en SEO y AEO (Answer Engine Optimization) para Cancagua Spa & Retreat Center, ubicado en Frutillar, Chile. Cancagua ofrece biopiscinas geotermales naturales, masajes, retiros de bienestar y eventos corporativos.
+
+${CANCAGUA_CONTENT_VOICE}
 
 Acaba de salir una campaña de email marketing con el asunto: "${input.campaignSubject}"
 ${input.campaignBody ? `Contenido de la campaña:\n${input.campaignBody.slice(0, 500)}` : ""}
@@ -375,11 +378,14 @@ Responde SOLAMENTE con un JSON con esta estructura exacta:
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
-      const token = process.env.GITHUB_TOKEN || process.env.GITHUB_PAT;
+      const token =
+        process.env.GITHUB_BLOG_TOKEN ||
+        process.env.GITHUB_TOKEN ||
+        process.env.GITHUB_PAT;
       if (!token) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "Falta configurar GITHUB_TOKEN en Render para publicar en cancagua.cl/blog",
+          message: "Falta configurar GITHUB_BLOG_TOKEN en Render con acceso de escritura a Gopoint-hub/web-cancagua",
         });
       }
 
@@ -406,27 +412,34 @@ status: "published"
 
       const fullContent = frontmatter + input.content;
       const encoded = Buffer.from(fullContent).toString("base64");
+      const githubHeaders = {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      };
 
       // Check if file exists to get SHA for update
       let sha: string | undefined;
-      try {
-        const checkResp = await fetch(
-          `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}?ref=${branch}`,
-          { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } }
-        );
-        if (checkResp.ok) {
-          const existing = await checkResp.json();
-          const existingContent = Buffer.from(existing.content || "", "base64").toString("utf-8");
-          if (!existingContent.includes(`cmsArticleId: "${input.id}"`)) {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: `Ya existe ${fileName} para otro artículo. Cambia el slug o publica como actualización intencional.`,
-            });
-          }
-          sha = existing.sha;
+      const checkResp = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}?ref=${branch}`,
+        { headers: githubHeaders }
+      );
+      if (checkResp.status === 401 || checkResp.status === 403) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "La credencial de GitHub configurada en Render no tiene acceso Contents: read/write a web-cancagua",
+        });
+      }
+      if (checkResp.ok) {
+        const existing = await checkResp.json();
+        const existingContent = Buffer.from(existing.content || "", "base64").toString("utf-8");
+        if (!existingContent.includes(`cmsArticleId: "${input.id}"`)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `Ya existe ${fileName} para otro artículo. Cambia el slug o publica como actualización intencional.`,
+          });
         }
-      } catch (error) {
-        if (error instanceof TRPCError) throw error;
+        sha = existing.sha;
       }
 
       const body: any = {
@@ -441,8 +454,7 @@ status: "published"
         {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/vnd.github+json",
+            ...githubHeaders,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),

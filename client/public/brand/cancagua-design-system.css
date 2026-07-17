@@ -1,0 +1,79 @@
+/* Cancagua brand primitives for CMS previews and generated web pieces. */
+@font-face {
+  font-family: "P22 Mackinac Pro";
+  src: url("/brand/fonts/P22MackinacPro-Book.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "P22 Mackinac Pro";
+  src: url("/brand/fonts/P22MackinacPro-BookItalic.otf") format("opentype");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "P22 Mackinac Pro";
+  src: url("/brand/fonts/P22MackinacPro-Medium.otf") format("opentype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "P22 Mackinac Pro";
+  src: url("/brand/fonts/P22MackinacPro-Bold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CoFo Sans";
+  src: url("/brand/fonts/CoFoSans-Light.otf") format("opentype");
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CoFo Sans";
+  src: url("/brand/fonts/CoFoSans-Regular.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CoFo Sans";
+  src: url("/brand/fonts/CoFoSans-Italic.otf") format("opentype");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CoFo Sans";
+  src: url("/brand/fonts/CoFoSans-Medium.otf") format("opentype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CoFo Sans";
+  src: url("/brand/fonts/CoFoSans-Bold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  --cg-paper: #f4f2ed;
+  --cg-canvas: #fcf9f9;
+  --cg-ink: #222221;
+  --cg-stone-500: #827d78;
+  --cg-stone-800: #262422;
+  --cg-sage-600: #696f4d;
+  --cg-indigo-600: #4b5872;
+  --cg-indigo-700: #333d51;
+  --cg-font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --cg-font-soft: "CoFo Sans", "IBM Plex Sans", Arial, sans-serif;
+  --cg-font-serif: "P22 Mackinac Pro", Newsreader, Georgia, serif;
+  --cg-font-mono: "IBM Plex Mono", "Courier New", monospace;
+}

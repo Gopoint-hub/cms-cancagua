@@ -1,0 +1,57 @@
+/* ============================================================
+   CANCAGUA — Typography tokens
+   ------------------------------------------------------------
+   Four roles:
+   · Sans (IBM Plex Sans)      — display headlines + long-form body.
+                                 Light(300) for the big editorial titles.
+   · Mono UI (IBM Plex Mono)   — eyebrows, labels, the header rail,
+                                 UPPERCASE micro-copy.
+   · Mono Soft (CoFo Sans) — captions / swatch codes / eyebrows, the
+                                 "organic" humanist voice. Tracked, often uppercase.
+   · Serif (P22 Mackinac Pro) — program / experience names, scientific
+                                 copy, the large editorial serif moment.
+   ============================================================ */
+
+:root {
+  /* ---- Families ------------------------------------------- */
+  --font-sans:  "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:  "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono-soft: "CoFo Sans", "Spline Sans Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace; /* CoFo Sans (real) */
+  --font-serif: "P22 Mackinac Pro", Georgia, "Times New Roman", serif;                    /* P22 Mackinac Pro (real) */
+  --font-code:  "Courier Prime", "Courier New", monospace;
+
+  /* ---- Weights -------------------------------------------- */
+  --fw-light:    300; /* @kind font */
+  --fw-regular:  400; /* @kind font */
+  --fw-medium:   500; /* @kind font */
+  --fw-semibold: 600; /* @kind font */
+  --fw-bold:     700; /* @kind font */
+
+  /* ---- Display / editorial scale (1920-canvas origins) ----
+     Tuned for hero slides + landing heros. Use the rem fallbacks
+     for product UI; the raw px reflect the source deck.          */
+  --text-display-xl: 130px;  /* slide hero — IBM Plex Sans Light */
+  --text-display-l:  76px;   /* serif program name — Newsreader   */
+  --text-display-m:  48px;   /* section header — Sans             */
+  --text-h1:         36px;
+  --text-h2:         32px;   /* mono header rule                  */
+  --text-h3:         30px;
+  --text-body-l:     30px;   /* large editorial body              */
+  --text-body:       20px;   /* default body / mono captions      */
+  --text-label:      18px;   /* mono eyebrow / header rail        */
+  --text-caption:    16px;
+
+  /* ---- Line heights --------------------------------------- */
+  --lh-tight:   1.0; /* @kind font */
+  --lh-snug:    1.1; /* @kind font */
+  --lh-display: 1.2; /* @kind font */
+  --lh-body:    1.5; /* @kind font */
+  --lh-relaxed: 1.6; /* @kind font */
+
+  /* ---- Letter spacing ------------------------------------- */
+  --tracking-tight:   -0.02em;  /* @kind font */ /* big Sans display */
+  --tracking-snug:    -0.01em;  /* @kind font */
+  --tracking-normal:  0;        /* @kind font */
+  --tracking-wide:    0.10em;   /* @kind font */ /* mono labels */
+  --tracking-wider:   0.20em;   /* @kind font */ /* rotated eyebrows */
+}

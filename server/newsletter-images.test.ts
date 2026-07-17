@@ -26,24 +26,17 @@ describe("Newsletter Image Separation Feature", () => {
   });
 
   // ============================================
-  // Backend: Conditional AI image generation
+  // Backend: Brand-safe image selection
   // ============================================
-  describe("Backend: Conditional AI image generation", () => {
+  describe("Backend: Brand-safe image selection", () => {
     const routersContent = fs.readFileSync(
       path.resolve(__dirname, "routers.ts"),
       "utf-8"
     );
 
-    it("checks for userHeaderImage before generating AI hero", () => {
-      expect(routersContent).toContain("const userHeaderImage = input.headerImage || null");
-    });
-
-    it("only generates AI hero when no user header image provided", () => {
-      expect(routersContent).toContain("if (!userHeaderImage && input.generateImages)");
-    });
-
-    it("uses finalHeaderImage which prefers user image over generated", () => {
-      expect(routersContent).toContain("const finalHeaderImage = userHeaderImage || generatedHeaderUrl");
+    it("uses the user header without generating synthetic imagery", () => {
+      expect(routersContent).toContain("const finalHeaderImage = userHeaderImage");
+      expect(routersContent).not.toContain("generateImage({ prompt: imagePrompt })");
     });
   });
 
@@ -65,11 +58,11 @@ describe("Newsletter Image Separation Feature", () => {
     });
 
     it("instructs AI to use provided header image as banner", () => {
-      expect(routersContent).toContain("Si hay una IMAGEN DE HEADER/HERO proporcionada, DEBES usarla como imagen principal/banner del email");
+      expect(routersContent).toContain("Si hay una IMAGEN DE HEADER/HERO proporcionada, DEBES usarla como imagen principal del email");
     });
 
     it("instructs AI to include body images in content", () => {
-      expect(routersContent).toContain("Si hay IMÁGENES PARA EL CUERPO, inclúyelas dentro del contenido del email");
+      expect(routersContent).toContain("Si hay IMÁGENES PARA EL CUERPO, inclúyelas dentro del contenido");
     });
   });
 
@@ -98,8 +91,8 @@ describe("Newsletter Image Separation Feature", () => {
       expect(wizardContent).toContain("Imágenes dentro del emailing (opcional)");
     });
 
-    it("indicates AI will generate header if not provided", () => {
-      expect(wizardContent).toContain("Si no subes una, la IA generará una automáticamente");
+    it("explains the brand-safe fallback when no header is provided", () => {
+      expect(wizardContent).toContain("se usará un hero tipográfico o una fotografía aprobada de la marca");
     });
 
     it("indicates AI will select brand images if body images not provided", () => {

@@ -14,6 +14,10 @@ import { masajesRouter } from "./masajesRouter";
 import { clientesRouter } from "./clientesRouter";
 import { marketingRouter } from "./marketingRouter";
 import { hasB2CAccess, hasMaintenanceAccess } from "@shared/permissions";
+import {
+  CANCAGUA_EMAIL_REFINEMENT_RULES,
+  getCancaguaEmailDesignSystem,
+} from "./brand/cancaguaDesignSystem";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -1760,7 +1764,6 @@ export const appRouter = router({
         }
 
         const { invokeLLM } = await import("./_core/llm");
-        const { generateImage } = await import("./_core/imageGeneration");
         const { getBrandImageUrls, BRAND_IMAGE_CATALOG } = await import("./upload-brand-images");
 
         // Obtener las URLs de imágenes de marca desde S3
@@ -1770,36 +1773,10 @@ export const appRouter = router({
         const userHeaderImage = input.headerImage || null;
         const userBodyImages = input.bodyImages || input.images || [];
 
-        // Paso 1: Generar imagen hero con IA SOLO si el usuario NO proporcionó una imagen de header
-        let generatedHeaderUrl: string | null = null;
-        let generatedBodyUrls: string[] = [];
-
-        if (!userHeaderImage && input.generateImages) {
-          try {
-            // Generar imagen hero basada en el prompt del usuario
-            const imagePrompt = `Fotografía profesional de alta calidad para email marketing de CANCAGUA, un spa y centro de retiro en el sur de Chile. La imagen debe transmitir serenidad, paz y conexión con la naturaleza. Estilo: elegante, cálido, tonos tierra y naturales. Contexto: ${input.prompt}. NO incluir texto ni logos en la imagen.`;
-
-            const heroImage = await generateImage({ prompt: imagePrompt });
-            if (heroImage.url) {
-              generatedHeaderUrl = heroImage.url;
-            }
-          } catch (error) {
-            console.error('Error generando imagen hero:', error);
-            // Continuar sin imagen si falla la generación
-          }
-        }
-
-        // Si no hay imágenes de cuerpo y se solicita generación, generar una
-        if (userBodyImages.length === 0 && input.generateImages && !generatedHeaderUrl && !userHeaderImage) {
-          // No generar imágenes de cuerpo extra si ya se generó header
-        }
-
-        // Determinar la imagen de header final
-        const finalHeaderImage = userHeaderImage || generatedHeaderUrl;
-        // Combinar imágenes de cuerpo proporcionadas
-        const allBodyImages = [...userBodyImages, ...generatedBodyUrls];
-        // Legacy: combinar todas las imágenes para el catálogo
-        const allImages = [finalHeaderImage, ...allBodyImages].filter(Boolean) as string[];
+        // El sistema de marca no genera imágenes sintéticas: usa material subido,
+        // una foto aprobada del catálogo o un hero puramente tipográfico.
+        const finalHeaderImage = userHeaderImage;
+        const allBodyImages = userBodyImages;
 
         // Construir el catálogo de imágenes disponibles para el prompt
         const imagesCatalog = BRAND_IMAGE_CATALOG.map(img => {
@@ -1809,7 +1786,7 @@ export const appRouter = router({
 
         // Construir sección de imagen de header
         const headerImageSection = finalHeaderImage
-          ? `\n\nIMAGEN DE HEADER/HERO (OBLIGATORIO usar esta imagen como banner principal del email):\n- URL: ${finalHeaderImage}\n- Origen: ${userHeaderImage ? 'Proporcionada por el usuario' : 'Generada por IA'}`
+          ? `\n\nIMAGEN DE HEADER/HERO (OBLIGATORIO usar esta imagen como banner principal del email):\n- URL: ${finalHeaderImage}\n- Origen: Proporcionada por el usuario`
           : '';
 
         // Construir sección de imágenes de cuerpo
@@ -1818,7 +1795,10 @@ export const appRouter = router({
           : '';
 
         // Construir el prompt para generar HTML de email con el sistema de diseño Cancagua
-        const systemPrompt = `Eres un diseñador senior de emails HTML para CANCAGUA, Restore Spa & Nature en Frutillar, Chile. Diseña piezas editoriales, silenciosas y premium: piedra, equilibrio, naturaleza. La marca no grita: narra su mundo y deja que las personas entren naturalmente.
+        const systemPrompt = `${getCancaguaEmailDesignSystem()}
+
+## CONTEXTO ADICIONAL PARA ESTA GENERACIÓN
+Diseña una pieza editorial, silenciosa y premium. La marca no grita: narra su mundo y deja que las personas entren naturalmente.
 
 ## VOZ Y COPY CANCAGUA
 - Español de Chile, calmo, sensorial y narrativo. Poético pero aterrizado.
@@ -1838,8 +1818,9 @@ export const appRouter = router({
 
 ## TIPOGRAFÍA EMAIL-SAFE
 - Usa stack sans editorial: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif.
+- Usa CoFo Sans para captions y microcopy orgánica: 'CoFo Sans', 'IBM Plex Sans', Arial, sans-serif.
 - Usa mono para eyebrows, labels, botones y footer: 'IBM Plex Mono', 'Courier New', monospace.
-- Usa serif editorial solo para nombres de experiencias, titulares emocionales o frases destacadas: 'Newsreader', Georgia, 'Times New Roman', serif.
+- Usa la serif licenciada para nombres de experiencias, titulares emocionales o frases destacadas: 'P22 Mackinac Pro', 'Newsreader', Georgia, 'Times New Roman', serif.
 - Titulares sans: peso 300/400, letter-spacing -0.02em, line-height 1.05-1.15.
 - Labels mono: MAYÚSCULA, letter-spacing 0.14em a 0.24em, font-size 11-13px.
 - Cuerpo: 16-18px, line-height 1.65-1.8, color #3f3b37 o #222221.
@@ -1853,7 +1834,7 @@ export const appRouter = router({
 - Sombras suaves y cálidas, nunca duras.
 
 ## COMPONENTES DE EMAIL
-- Contenedor máximo 640px, centrado, fondo #FCF9F9 o #F4F2ED.
+- Contenedor de 600px, centrado, fondo #FCF9F9 o #F4F2ED.
 - Header: logo Cancagua en negro sobre claro o blanco sobre oscuro. El logo nunca va teñido.
 - Hero: si hay imagen de header, debe aparecer como pieza principal. Puede ir con borde redondeado y overlay oscuro sutil si el texto va encima.
 - Eyebrow: mono, mayúscula, tracking amplio. Ej: RESTORE · SPA & NATURE, FRUTILLAR · CHILE, OFERTA DE JUNIO.
@@ -1863,7 +1844,7 @@ export const appRouter = router({
 
 ## REQUISITOS TÉCNICOS
 - Devuelve HTML completo con estilos inline y/o CSS en <style> compatible con email. No dependas de CSS externo.
-- Responsive, mobile-first, max-width 640px para contenido.
+- Responsive, mobile-first, max-width 600px para contenido.
 - Compatible con Gmail, Outlook y Apple Mail. Usa tablas para estructura principal cuando sea necesario.
 - Incluye alt text descriptivo en imágenes.
 - No uses flexbox/grid como base del layout; puedes usar CSS simple con fallback.
@@ -1974,13 +1955,15 @@ NO incluyas marcadores de código. Devuelve SOLO el JSON válido.`;
 
         const systemPrompt = `Eres un diseñador senior de emails HTML para CANCAGUA. Modifica el HTML según la solicitud del usuario, pero protege siempre el sistema de diseño de marca.
 
+${CANCAGUA_EMAIL_REFINEMENT_RULES}
+
 ## MANTENER SIEMPRE LA IDENTIDAD CANCAGUA
 - Voz: español de Chile, calmo, narrativo, sensorial; narración antes que venta agresiva.
 - Regla de oro: piedra, equilibrio, naturaleza.
 - Paleta: papel #F4F2ED, canvas #FCF9F9, tinta #222221, secundario #827D78, charcoal #262422, slate #1A272E, acento índigo #4B5872/#333D51.
 - Prohibido volver a #D3BC8D como acento principal, azul eléctrico, colores saturados, emojis y gritos comerciales.
-- Tipografías email-safe: IBM Plex Sans stack para cuerpo/títulos; IBM Plex Mono/Courier New para labels, botones y footer; Newsreader/Georgia serif solo para momentos editoriales.
-- Layout: contenedor 640px, mucho aire, hairlines finas, imágenes naturalistas, cards suaves, CTA en índigo/charcoal con flecha →.
+- Tipografías: IBM Plex Sans para cuerpo; CoFo Sans para captions; IBM Plex Mono/Courier New para labels, botones y footer; P22 Mackinac Pro/Newsreader/Georgia para momentos editoriales.
+- Layout: contenedor 600px, mucho aire, hairlines finas, imágenes naturalistas, cards suaves, CTA en índigo/charcoal con flecha →.
 - Logo: negro sobre claro o blanco sobre oscuro, nunca teñido.
 - Compatibilidad con clientes de email: estilos inline/CSS simple, responsive, sin depender de CSS externo, sin flex/grid como estructura principal.
 - Mantén o agrega el placeholder {{unsubscribe_url}} en el enlace de baja si falta.

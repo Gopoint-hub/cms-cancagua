@@ -1,0 +1,52 @@
+/* ============================================================
+   CANCAGUA — Spacing, radius, shadow & layout tokens
+   ============================================================ */
+
+:root {
+  /* ---- Spacing scale (4px base) --------------------------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  /* Slide margin in the source deck (50px gutter on 1920) */
+  --gutter-slide: 50px;
+
+  /* ---- Radius --------------------------------------------- */
+  --radius-xs:   6px;
+  --radius-sm:   10px;   /* small cards / notes               */
+  --radius-md:   20px;   /* media cards, large panels          */
+  --radius-lg:   30px;
+  --radius-pill: 60px;   /* capsule buttons                    */
+  --radius-full: 999px;  /* dots / avatars                     */
+
+  /* ---- Border widths -------------------------------------- */
+  --border-hair: 0.5px;  /* the deck's signature 0.5px rules   */
+  --border-thin: 1px;
+  --border-med:  1.5px;
+
+  /* ---- Elevation -----------------------------------------
+     The deck uses layered, low-opacity warm shadows — never a
+     single harsh drop. Two families: floating (light pills /
+     cards) and grounded (dark pills).                          */
+  --shadow-sm:   0 4px 6px rgba(0,0,0,0.04), 0 10px 18px rgba(0,0,0,0.05);
+  --shadow-md:   0 4px 6px rgba(0,0,0,0.04), 0 10px 18px rgba(0,0,0,0.05), 0 18px 56px rgba(0,0,0,0.10);
+  --shadow-lg:   0 5px 8px rgba(0,0,0,0.05), 0 12px 40px rgba(0,0,0,0.07), 0 26px 80px rgba(0,0,0,0.16);
+  --shadow-dark: inset 0 0 0 1px rgba(156,151,139,0.6), 0 5px 8px rgba(0,0,0,0.05), 0 12px 40px rgba(0,0,0,0.07), 0 26px 80px rgba(0,0,0,0.16);
+
+  /* ---- Motion --------------------------------------------
+     Calm, unhurried. Gentle ease-out, generous fades, no bounce. */
+  --ease-out:  cubic-bezier(0.22, 0.61, 0.36, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);  /* @kind other */
+  --dur-fast:  160ms; /* @kind other */
+  --dur-base:  280ms; /* @kind other */
+  --dur-slow:  600ms; /* @kind other */
+}

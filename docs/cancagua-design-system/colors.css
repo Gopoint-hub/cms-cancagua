@@ -1,0 +1,99 @@
+/* ============================================================
+   CANCAGUA — Color tokens
+   A muted, mineral palette drawn from the cancagua stone:
+   five natural hue families (slate, sage, stone, clay, indigo)
+   in 8 steps each (100 = lightest → 800 = deepest), plus the
+   paper neutrals and absolutes. The accent role draws from the
+   deep end of the indigo family — no standalone brand blue.
+   ============================================================ */
+
+:root {
+  /* ---- Slate · azul mineral -------------------------------- */
+  --slate-100: #F4F5F6;
+  --slate-200: #CCD6DB;
+  --slate-300: #B0BEC4;
+  --slate-400: #8AA1AD;
+  --slate-500: #648596;
+  --slate-600: #496674;
+  --slate-700: #324853;
+  --slate-800: #1A272E;
+
+  /* ---- Sage · verde bosque --------------------------------- */
+  --sage-100: #F5F6F4;
+  --sage-200: #D8DACD;
+  --sage-300: #BFC2B2;
+  --sage-400: #A4A98E;
+  --sage-500: #899169;
+  --sage-600: #696F4D;
+  --sage-700: #4A4F35;
+  --sage-800: #282C1C;
+
+  /* ---- Stone · gris cálido --------------------------------- */
+  --stone-100: #F4F2ED;
+  --stone-200: #D7D4D1;
+  --stone-300: #BCBAB8;
+  --stone-400: #9F9C98;
+  --stone-500: #827D78;
+  --stone-600: #635E5A;
+  --stone-700: #46423F;
+  --stone-800: #262422;
+
+  /* ---- Clay · tierra / arcilla ----------------------------- */
+  --clay-100: #F6F5F4;
+  --clay-200: #DBD3CC;
+  --clay-300: #C4B9B0;
+  --clay-400: #AD9A8A;
+  --clay-500: #967B64;
+  --clay-600: #745D49;
+  --clay-700: #534132;
+  --clay-800: #2E231A;
+
+  /* ---- Indigo · azul profundo ------------------------------ */
+  --indigo-100: #F4F5F6;
+  --indigo-200: #CCD1DB;
+  --indigo-300: #B1B7C3;
+  --indigo-400: #8C96AB;
+  --indigo-500: #667594;
+  --indigo-600: #4B5872;
+  --indigo-700: #333D51;
+  --indigo-800: #1B212D;
+
+  /* ---- Absolutes ------------------------------------------- */
+  --black:       #000000;
+  --ink:         #222221;   /* near-black used for most type */
+  --white:       #FFFFFF;
+
+  /* ---- Paper neutrals (backgrounds) ------------------------ */
+  --paper:       #F4F2ED;   /* warm paper — default light surface */
+  --canvas:      #FCF9F9;   /* soft off-white */
+  --mist:        #F5F5F5;   /* cool light gray */
+  --cream:       #FCF9F9;
+
+  /* ========================================================
+     SEMANTIC ALIASES
+     ======================================================== */
+  --bg-base:        var(--paper);
+  --bg-canvas:      var(--canvas);
+  --bg-elevated:    var(--white);
+  --bg-inverse:     var(--stone-800);   /* #262422 charcoal panels */
+  --bg-accent:      var(--indigo-700);  /* deep mineral indigo accent panels */
+
+  --surface-card:   var(--white);
+  --surface-sunken: var(--mist);
+
+  --text-primary:   var(--ink);
+  --text-secondary: var(--stone-500);   /* #827D78 */
+  --text-muted:     var(--stone-400);
+  --text-on-dark:   var(--canvas);
+  --text-on-accent: var(--canvas);
+  --text-link:      var(--indigo-600);
+
+  --border-hairline: rgba(0,0,0,0.30);  /* the 0.5px rules in the deck */
+  --border-soft:     rgba(0,0,0,0.10);
+  --border-strong:   var(--ink);
+  --border-on-dark:  rgba(255,255,255,0.30);
+
+  --accent:         var(--indigo-600);  /* mineral indigo — the system accent */
+  --accent-press:   var(--indigo-700);
+  --focus-ring:     var(--indigo-600);
+}
