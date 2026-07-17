@@ -759,6 +759,7 @@ export const marketingBlogArticles = mysqlTable("marketing_blog_articles", {
   title: text("title").notNull(),
   slug: varchar("slug", { length: 255 }).notNull().unique(),
   content: text("content").notNull(),
+  imageUrl: text("image_url"),
   metaDescription: text("meta_description"),
   metaKeywords: text("meta_keywords"),
   category: varchar("category", { length: 100 }),

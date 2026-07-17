@@ -52,6 +52,7 @@ async function ensureMarketingTables(db: any) {
       title text NOT NULL,
       slug varchar(255) NOT NULL,
       content text NOT NULL,
+      image_url text,
       meta_description text,
       meta_keywords text,
       category varchar(100),

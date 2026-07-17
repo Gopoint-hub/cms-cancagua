@@ -1155,7 +1155,7 @@ export default function CMSCrearNewsletter() {
                         <Upload className="w-4 h-4 mr-2" />
                         Subir imagen de header
                       </Button>
-                      <span className="text-xs text-gray-400">Si no subes una, la IA creará una</span>
+                      <span className="text-xs text-gray-400">Si no subes una, usará un hero tipográfico o una foto aprobada</span>
                     </div>
                   )}
                 </CardContent>

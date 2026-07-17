@@ -226,6 +226,7 @@ export const marketingRouter = router({
         title: z.string(),
         slug: z.string(),
         content: z.string(),
+        imageUrl: z.string().url().optional(),
         metaDescription: z.string().optional(),
         metaKeywords: z.array(z.string()).optional(),
         category: z.string().optional(),
@@ -251,6 +252,7 @@ export const marketingRouter = router({
         title: z.string().optional(),
         slug: z.string().optional(),
         content: z.string().optional(),
+        imageUrl: z.string().url().nullable().optional(),
         metaDescription: z.string().optional(),
         metaKeywords: z.array(z.string()).optional(),
         category: z.string().optional(),
@@ -265,6 +267,32 @@ export const marketingRouter = router({
       const { id, ...data } = input;
       await db.updateMarketingBlogArticle(id, data);
       return { success: true };
+    }),
+
+  uploadBlogImage: protectedProcedure
+    .input(
+      z.object({
+        imageData: z.string(),
+        mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireMarketingRole(ctx.user.role);
+      const matches = input.imageData.match(/^data:image\/(jpeg|png|webp);base64,(.+)$/);
+      if (!matches) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Formato de imagen inválido" });
+      }
+
+      const buffer = Buffer.from(matches[2], "base64");
+      if (buffer.length > 8 * 1024 * 1024) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "La imagen no puede superar 8 MB" });
+      }
+
+      const extension = matches[1] === "jpeg" ? "jpg" : matches[1];
+      const fileKey = `blog/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+      const { storagePut } = await import("./storage");
+      const { url } = await storagePut(fileKey, buffer, input.mimeType);
+      return { url };
     }),
 
   deleteBlogArticle: protectedProcedure
@@ -363,10 +391,12 @@ Responde SOLAMENTE con un JSON con esta estructura exacta:
         title: z.string(),
         slug: z.string().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug inválido"),
         content: z.string(),
+        imageUrl: z.string().url().optional(),
         metaDescription: z.string().optional(),
         metaKeywords: z.array(z.string()).optional(),
         category: z.string().optional(),
         author: z.string().optional(),
+        publishedAt: z.date().optional(),
         status: z.literal("published"),
       })
     )
@@ -389,7 +419,7 @@ Responde SOLAMENTE con un JSON con esta estructura exacta:
         });
       }
 
-      const date = new Date().toISOString().split("T")[0];
+      const date = (input.publishedAt || new Date()).toISOString().split("T")[0];
       const owner = process.env.GITHUB_BLOG_OWNER || "gopoint-hub";
       const repo = process.env.GITHUB_BLOG_REPO || "web-cancagua";
       const branch = process.env.GITHUB_BLOG_BRANCH || "main";
@@ -405,7 +435,7 @@ author: "${input.author || "Cancagua"}"
 category: "${input.category || "Bienestar"}"
 metaDescription: "${(input.metaDescription || "").replace(/"/g, '\\"')}"
 keywords: [${(input.metaKeywords || []).map((k) => `"${k}"`).join(", ")}]
-status: "published"
+${input.imageUrl ? `image: "${input.imageUrl.replace(/"/g, "%22")}"\n` : ""}status: "published"
 ---
 
 `;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
   BookOpen, Sparkles, Eye, Edit, Globe, Check, X,
-  Clock, Tag, FileText, ChevronUp, Loader2,
+  Clock, Tag, FileText, ChevronUp, Loader2, ImagePlus, Upload,
 } from "lucide-react";
 
 interface BlogArticle {
@@ -21,6 +21,7 @@ interface BlogArticle {
   title: string;
   slug: string;
   content: string;
+  imageUrl?: string | null;
   metaDescription?: string | null;
   metaKeywords: string[];
   category?: string | null;
@@ -71,13 +72,21 @@ export default function BlogContenido() {
   const [editContent, setEditContent] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editMeta, setEditMeta] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [genImageUrl, setGenImageUrl] = useState("");
+  const [genImagePreview, setGenImagePreview] = useState("");
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const genImageInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadBlogImageMutation = trpc.marketing.uploadBlogImage.useMutation();
 
   const createArticleMutation = trpc.marketing.createBlogArticle.useMutation({
     onSuccess: (article) => {
       refetch();
       setShowGenForm(false);
       setGenForm({ campaignSubject: "", campaignBody: "", targetAudience: "", additionalContext: "" });
+      setGenImageUrl("");
+      setGenImagePreview("");
       setExpandedId(String(article.id));
       toast.success("Artículo generado — pendiente de aprobación");
       setGenerating(false);
@@ -109,6 +118,7 @@ export default function BlogContenido() {
     onSuccess: (data) => {
       createArticleMutation.mutate({
         ...data,
+        imageUrl: genImageUrl || undefined,
         status: "draft",
         campaignSubject: genForm.campaignSubject,
       });
@@ -149,6 +159,38 @@ export default function BlogContenido() {
     generateMutation.mutate(genForm);
   };
 
+  const uploadImage = async (file: File, target: "generator" | "editor") => {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Usa una imagen JPG, PNG o WebP");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("La imagen no puede superar 8 MB");
+      return;
+    }
+
+    const imageData = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    if (target === "generator") setGenImagePreview(imageData);
+    try {
+      const uploaded = await uploadBlogImageMutation.mutateAsync({
+        imageData,
+        mimeType: file.type as "image/jpeg" | "image/png" | "image/webp",
+      });
+      if (target === "generator") setGenImageUrl(uploaded.url);
+      else setEditImageUrl(uploaded.url);
+      toast.success("Imagen de portada cargada");
+    } catch (error) {
+      if (target === "generator") setGenImagePreview("");
+      toast.error(error instanceof Error ? error.message : "No se pudo subir la imagen");
+    }
+  };
+
   const approveArticle = (id: string) => {
     updateArticleMutation.mutate({ id: Number(id), status: "approved" });
   };
@@ -158,6 +200,7 @@ export default function BlogContenido() {
     setEditContent(a.content);
     setEditTitle(a.title);
     setEditMeta(a.metaDescription || "");
+    setEditImageUrl(a.imageUrl || "");
   };
 
   const saveEdit = () => {
@@ -167,6 +210,7 @@ export default function BlogContenido() {
       content: editContent,
       title: editTitle,
       metaDescription: editMeta,
+      imageUrl: editImageUrl || null,
     });
   };
 
@@ -177,10 +221,12 @@ export default function BlogContenido() {
       title: a.title,
       slug: a.slug,
       content: a.content,
+      imageUrl: a.imageUrl || undefined,
       metaDescription: a.metaDescription || undefined,
       metaKeywords: a.metaKeywords,
       category: a.category || undefined,
       author: "Cancagua",
+      publishedAt: a.publishedAt ? new Date(a.publishedAt) : undefined,
       status: "published",
     });
   };
@@ -270,7 +316,53 @@ export default function BlogContenido() {
                   />
                 </div>
               </div>
-              <Button onClick={handleGenerate} disabled={generating} className="gap-2">
+              <div className="space-y-2">
+                <Label>Imagen principal del artículo</Label>
+                <p className="text-xs text-muted-foreground">
+                  Aparecerá en el hero del artículo y en su tarjeta del blog. JPG, PNG o WebP, máximo 8 MB.
+                </p>
+                <input
+                  ref={genImageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void uploadImage(file, "generator");
+                    event.target.value = "";
+                  }}
+                />
+                {genImagePreview || genImageUrl ? (
+                  <div className="relative overflow-hidden rounded-xl border bg-[#F4F2ED]">
+                    <img
+                      src={genImagePreview || genImageUrl}
+                      alt="Vista previa de la portada"
+                      className="h-56 w-full object-cover"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute right-3 top-3"
+                      onClick={() => {
+                        setGenImageUrl("");
+                        setGenImagePreview("");
+                      }}
+                    >
+                      <X className="mr-1 h-4 w-4" /> Quitar
+                    </Button>
+                  </div>
+                ) : (
+                  <Button type="button" variant="outline" onClick={() => genImageInputRef.current?.click()}>
+                    <Upload className="mr-2 h-4 w-4" /> Subir imagen
+                  </Button>
+                )}
+              </div>
+              <Button
+                onClick={handleGenerate}
+                disabled={generating || uploadBlogImageMutation.isPending}
+                className="gap-2"
+              >
                 {generating ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Generando con IA...</>
                 ) : (
@@ -310,6 +402,13 @@ export default function BlogContenido() {
             >
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-start justify-between gap-4">
+                  {article.imageUrl && (
+                    <img
+                      src={article.imageUrl}
+                      alt=""
+                      className="h-20 w-28 shrink-0 rounded-lg object-cover"
+                    />
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <Badge className={`text-xs ${STATUS_COLORS[article.status]}`}>
@@ -354,7 +453,7 @@ export default function BlogContenido() {
                         <Check className="h-3.5 w-3.5" /> Aprobar
                       </Button>
                     )}
-                    {article.status === "approved" && (
+                    {article.status !== "draft" && (
                       <Button
                         size="sm"
                         className="gap-1 h-7 text-xs"
@@ -364,7 +463,7 @@ export default function BlogContenido() {
                         {publishingId === String(article.id) ? (
                           <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Publicando...</>
                         ) : (
-                          <><Globe className="h-3.5 w-3.5" /> Publicar en web</>
+                          <><Globe className="h-3.5 w-3.5" /> {article.status === "published" ? "Actualizar web" : "Publicar en web"}</>
                         )}
                       </Button>
                     )}
@@ -453,6 +552,37 @@ export default function BlogContenido() {
               <Label>Meta descripción</Label>
               <Input value={editMeta} onChange={(e) => setEditMeta(e.target.value)} maxLength={160} />
               <p className="text-xs text-muted-foreground">{editMeta.length}/160</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Imagen principal</Label>
+              {editImageUrl ? (
+                <div className="relative overflow-hidden rounded-xl border">
+                  <img src={editImageUrl} alt="Portada" className="h-48 w-full object-cover" />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="absolute right-3 top-3"
+                    onClick={() => setEditImageUrl("")}
+                  >
+                    <X className="mr-1 h-4 w-4" /> Quitar
+                  </Button>
+                </div>
+              ) : (
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed p-6 text-sm text-muted-foreground hover:bg-muted/50">
+                  <ImagePlus className="h-5 w-5" /> Subir imagen de portada
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadImage(file, "editor");
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
             </div>
             <div>
               <Label>Contenido (Markdown)</Label>

@@ -120,6 +120,13 @@
       "when": 1784142000000,
       "tag": "0020_massage_sales_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1784319600000,
+      "tag": "0021_blog_article_image",
+      "breakpoints": true
     }
   ]
 }
