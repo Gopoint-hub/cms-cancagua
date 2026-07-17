@@ -14,6 +14,7 @@ import freelanceApprovalRouter from "../freelanceApproval";
 import cerebroRouter from "../cerebroRoute";
 import publicMasajesCatalog from "../publicMasajesCatalog";
 import { checkWhatsAppHealth } from "./whapi";
+import { checkGitHubBlogHealth } from "../githubBlogHealth";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -66,6 +67,12 @@ async function startServer() {
   // Verificación no invasiva del canal WhatsApp; nunca expone el token.
   app.get("/api/health/whapi", async (_req, res) => {
     const health = await checkWhatsAppHealth();
+    res.status(health.success ? 200 : 503).json(health);
+  });
+
+  // Verifica token y permiso de escritura del publicador del blog sin exponerlo.
+  app.get("/api/health/github-blog", async (_req, res) => {
+    const health = await checkGitHubBlogHealth();
     res.status(health.success ? 200 : 503).json(health);
   });
 
