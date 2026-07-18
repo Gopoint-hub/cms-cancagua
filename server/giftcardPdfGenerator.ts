@@ -13,6 +13,16 @@ export interface GiftCardData {
   code: string;
 }
 
+/** Complimentary gift cards represent a service, so their PDF must not show "$0". */
+export function shouldRenderGiftCardAmount(amount: number): boolean {
+  return amount > 0;
+}
+
+/** Preserve the complete service description and thank-you copy in complimentary PDFs. */
+export function getGiftCardMessage(message: string): string {
+  return message;
+}
+
 // Función para descargar imagen desde URL y convertirla a PNG
 async function downloadAndConvertImage(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -150,19 +160,21 @@ export async function generateGiftCardPDF(data: GiftCardData): Promise<Buffer> {
         .font("Helvetica")
         .text("Gift Card", 30, 100);
 
-      // Monto - más grande y prominente
-      doc
-        .fontSize(52)
-        .font("Helvetica-Bold")
-        .fillColor("#FFFFFF")
-        .text(
-          new Intl.NumberFormat("es-CL", {
-            style: "currency",
-            currency: "CLP",
-          }).format(data.amount),
-          30,
-          130
-        );
+      // Monto: las gift cards de cortesía ($0) representan un servicio y no muestran valor monetario.
+      if (shouldRenderGiftCardAmount(data.amount)) {
+        doc
+          .fontSize(52)
+          .font("Helvetica-Bold")
+          .fillColor("#FFFFFF")
+          .text(
+            new Intl.NumberFormat("es-CL", {
+              style: "currency",
+              currency: "CLP",
+            }).format(data.amount),
+            30,
+            130
+          );
+      }
 
       // Destinatario
       if (data.recipientName) {
@@ -173,18 +185,16 @@ export async function generateGiftCardPDF(data: GiftCardData): Promise<Buffer> {
           .text(`Para: ${data.recipientName}`, 30, 200);
       }
 
-      // Mensaje personalizado (si existe) - limitado a 150 caracteres y con altura máxima
+      // Mensaje personalizado completo. Las cortesías incluyen servicio + agradecimiento.
       if (data.message) {
-        const truncatedMessage = data.message.length > 150
-          ? data.message.slice(0, 150).trimEnd() + "..."
-          : data.message;
+        const message = getGiftCardMessage(data.message);
         doc
-          .fontSize(11)
+          .fontSize(9)
           .font("Helvetica-Oblique")
           .fillColor("#E0E0E0")
-          .text(`"${truncatedMessage}"`, 30, 235, {
+          .text(`"${message}"`, 30, 235, {
             width: 300,
-            height: 95,
+            height: 100,
             ellipsis: true,
             align: "left",
           });
