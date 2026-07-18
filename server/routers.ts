@@ -3638,6 +3638,17 @@ Devuelve un JSON con este formato:
         return await db.getAllGiftCards();
       }),
 
+    redeemService: protectedProcedure
+      .input(z.object({ code: z.string().min(1).max(20) }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          await db.redeemServiceGiftCard(input.code, ctx.user.name || ctx.user.email || undefined);
+          return { success: true };
+        } catch (error: any) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message || "No se pudo canjear la Gift Card" });
+        }
+      }),
+
     resendEmail: protectedProcedure
       .input(z.object({ giftCardId: z.number() }))
       .mutation(async ({ ctx, input }) => {
@@ -3727,10 +3738,10 @@ Devuelve un JSON con este formato:
     createManual: protectedProcedure
       .input(z.object({
         type: z.enum(["amount", "service"]),
-        amount: z.number().nonnegative().optional(),
+        amount: z.number().int().positive().max(10000000).optional(),
         serviceName: z.string().max(100).optional(),
         serviceDetails: z.string().max(200).optional(),
-        backgroundImage: z.string().default("default"),
+        backgroundImageId: z.enum(["spa-green", "spa-pink", "wellness-nature", "spa-stones", "spa-elegant"]).default("spa-green"),
         recipientName: z.string().min(1).max(150),
         recipientEmail: z.string().email().optional(),
         senderName: z.string().max(150).optional(),
@@ -3746,19 +3757,11 @@ Devuelve un JSON con este formato:
             email: ctx.user.email,
           });
 
-          await db.createGiftCard(giftCardData);
-          const giftCard = await db.getGiftCardByCode(giftCardData.code);
-
-          if (!giftCard) {
-            throw new Error("Error al crear gift card en DB");
-          }
-
-          await db.createGiftCardTransaction({
-            giftCardId: giftCard.id,
+          const giftCard = await db.createGiftCardWithTransaction(giftCardData, {
             transactionType: "purchase",
-            amount: giftCard.amount,
+            amount: giftCardData.amount,
             balanceBefore: 0,
-            balanceAfter: giftCard.amount,
+            balanceAfter: giftCardData.amount,
             notes: `Creada desde CMS por ${ctx.user.name || ctx.user.email}. Pago pendiente de gestión externa.`,
           });
 

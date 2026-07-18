@@ -8,7 +8,7 @@ describe("buildManualGiftCardData", () => {
     const result = buildManualGiftCardData({
       type: "amount",
       amount: 50000,
-      backgroundImage: "https://example.com/gift.jpg",
+      backgroundImageId: "spa-green",
       recipientName: "Cliente",
       recipientEmail: "cliente@example.com",
       personalMessage: "Un regalo",
@@ -20,6 +20,7 @@ describe("buildManualGiftCardData", () => {
     expect(result.paymentReference).toBeNull();
     expect(result.deliveredAt).toBeNull();
     expect(result.purchaseStatus).toBe("completed");
+    expect(result.backgroundImage).toContain("giftcard-backgrounds/spa-green.jpg");
   });
 
   it("creates a service gift card with zero balance and service details in the message", () => {
@@ -27,7 +28,7 @@ describe("buildManualGiftCardData", () => {
       type: "service",
       serviceName: "Biopiscinas",
       serviceDetails: "3 adultos y 2 niños",
-      backgroundImage: "https://example.com/gift.jpg",
+      backgroundImageId: "spa-green",
       recipientName: "Cliente",
       personalMessage: "Gracias por tu comprensión.",
     }, actor);
@@ -42,7 +43,7 @@ describe("buildManualGiftCardData", () => {
     expect(() => buildManualGiftCardData({
       type: "amount",
       amount: 0,
-      backgroundImage: "default",
+      backgroundImageId: "spa-green",
       recipientName: "Cliente",
     }, actor)).toThrow("monto");
   });
@@ -50,8 +51,17 @@ describe("buildManualGiftCardData", () => {
   it("rejects service gift cards without a service name", () => {
     expect(() => buildManualGiftCardData({
       type: "service",
-      backgroundImage: "default",
+      backgroundImageId: "spa-green",
       recipientName: "Cliente",
     }, actor)).toThrow("servicio");
+  });
+
+  it("rejects fractional amounts", () => {
+    expect(() => buildManualGiftCardData({
+      type: "amount",
+      amount: 1000.5,
+      backgroundImageId: "spa-green",
+      recipientName: "Cliente",
+    }, actor)).toThrow("entero");
   });
 });

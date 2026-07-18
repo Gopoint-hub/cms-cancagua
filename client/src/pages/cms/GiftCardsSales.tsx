@@ -62,7 +62,7 @@ export default function GiftCardsSales() {
     senderName: "",
     senderEmail: "",
     personalMessage: "",
-    backgroundImageId: "spa-green",
+    backgroundImageId: "spa-green" as "spa-green" | "spa-pink" | "wellness-nature" | "spa-stones" | "spa-elegant",
   });
 
   // Queries
@@ -101,6 +101,14 @@ export default function GiftCardsSales() {
     onError: (error) => {
       toast.error(`Error al canjear: ${error.message}`);
     },
+  });
+
+  const redeemService = trpc.giftCardsAdmin.redeemService.useMutation({
+    onSuccess: () => {
+      toast.success("Servicio marcado como utilizado");
+      refetch();
+    },
+    onError: (error) => toast.error(`Error al canjear: ${error.message}`),
   });
 
   const resendEmail = trpc.giftCardsAdmin.resendEmail.useMutation({
@@ -368,14 +376,30 @@ export default function GiftCardsSales() {
                           </Button>
                           {giftCard.purchaseStatus === "completed" && giftCard.status !== "redeemed" && (
                             <>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleRedeem(giftCard)}
-                                title="Canjear"
-                              >
-                                <CheckCircle className="h-4 w-4 text-green-600" />
-                              </Button>
+                              {giftCard.amount > 0 ? (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleRedeem(giftCard)}
+                                  title="Canjear monto"
+                                >
+                                  <CheckCircle className="h-4 w-4 text-green-600" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  disabled={redeemService.isPending}
+                                  onClick={() => {
+                                    if (window.confirm(`¿Marcar como utilizado el servicio de ${giftCard.recipientName || "esta Gift Card"}?`)) {
+                                      redeemService.mutate({ code: giftCard.code });
+                                    }
+                                  }}
+                                  title="Marcar servicio como utilizado"
+                                >
+                                  <CheckCircle className="h-4 w-4 text-green-600" />
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -699,7 +723,10 @@ export default function GiftCardsSales() {
                 <Label>Diseño</Label>
                 <RadioGroup 
                   value={manualGiftCard.backgroundImageId} 
-                  onValueChange={(val) => setManualGiftCard({...manualGiftCard, backgroundImageId: val})}
+                  onValueChange={(val) => setManualGiftCard({
+                    ...manualGiftCard,
+                    backgroundImageId: val as "spa-green" | "spa-pink" | "wellness-nature" | "spa-stones" | "spa-elegant",
+                  })}
                   className="grid grid-cols-3 gap-2"
                 >
                   {backgroundImages?.map((img) => (
@@ -782,13 +809,12 @@ export default function GiftCardsSales() {
             <Button variant="outline" onClick={() => setIsCreateManualDialogOpen(false)}>Cancelar</Button>
             <Button 
               onClick={() => {
-                const bgUrl = backgroundImages?.find(img => img.id === manualGiftCard.backgroundImageId)?.url || "default";
                 createManual.mutate({
                   type: manualGiftCard.type,
                   amount: manualGiftCard.type === "amount" ? manualGiftCard.amount : undefined,
                   serviceName: manualGiftCard.type === "service" ? manualGiftCard.serviceName : undefined,
                   serviceDetails: manualGiftCard.type === "service" && manualGiftCard.serviceDetails ? manualGiftCard.serviceDetails : undefined,
-                  backgroundImage: bgUrl,
+                  backgroundImageId: manualGiftCard.backgroundImageId,
                   recipientName: manualGiftCard.recipientName,
                   recipientEmail: manualGiftCard.recipientEmail || undefined,
                   senderName: manualGiftCard.senderName || undefined,

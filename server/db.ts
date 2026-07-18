@@ -1426,6 +1426,25 @@ export async function createGiftCard(giftCard: any) {
   return giftCard;
 }
 
+/** Create a gift card and its audit transaction atomically. */
+export async function createGiftCardWithTransaction(giftCard: any, transaction: any) {
+  const db = await getDb();
+  if (!db) throw new Error("Base de datos no disponible");
+  const { giftCards, giftCardTransactions } = await import("../drizzle/schema");
+
+  return await db.transaction(async (tx) => {
+    await tx.insert(giftCards).values(giftCard);
+    const [created] = await tx.select().from(giftCards).where(eq(giftCards.code, giftCard.code)).limit(1);
+    if (!created) throw new Error("No se pudo recuperar la Gift Card creada");
+
+    await tx.insert(giftCardTransactions).values({
+      ...transaction,
+      giftCardId: created.id,
+    });
+    return created;
+  });
+}
+
 export async function updateGiftCard(id: number, data: any) {
   const db = await getDb();
   if (!db) return;
@@ -1889,6 +1908,31 @@ export async function createGiftCardTransaction(transaction: any) {
   if (!db) return;
   const { giftCardTransactions } = await import("../drizzle/schema");
   await db.insert(giftCardTransactions).values(transaction);
+}
+
+export async function redeemServiceGiftCard(code: string, usedBy?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Base de datos no disponible");
+  const { giftCards, giftCardTransactions } = await import("../drizzle/schema");
+
+  return await db.transaction(async (tx) => {
+    const [giftCard] = await tx.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
+    if (!giftCard) throw new Error("Gift Card no encontrada");
+    if (giftCard.amount !== 0) throw new Error("Esta Gift Card se canjea por monto");
+    if (giftCard.status !== "active") throw new Error("La Gift Card no está activa");
+    if (giftCard.expiresAt && giftCard.expiresAt < new Date()) throw new Error("La Gift Card está vencida");
+
+    await tx.update(giftCards).set({ status: "redeemed", redeemedAt: new Date() }).where(eq(giftCards.id, giftCard.id));
+    await tx.insert(giftCardTransactions).values({
+      giftCardId: giftCard.id,
+      transactionType: "redemption",
+      amount: 0,
+      balanceBefore: 0,
+      balanceAfter: 0,
+      notes: usedBy ? `Servicio canjeado por ${usedBy}` : "Servicio canjeado",
+    });
+    return { success: true };
+  });
 }
 
 export async function getGiftCardTransactions(giftCardId: number) {

@@ -1,11 +1,20 @@
 export type ManualGiftCardType = "amount" | "service";
+export type GiftCardBackgroundId = "spa-green" | "spa-pink" | "wellness-nature" | "spa-stones" | "spa-elegant";
+
+export const GIFT_CARD_BACKGROUNDS: Record<GiftCardBackgroundId, string> = {
+  "spa-green": "https://res.cloudinary.com/dhuln9b1n/image/upload/v1769474119/giftcard-backgrounds/spa-green.jpg",
+  "spa-pink": "https://res.cloudinary.com/dhuln9b1n/image/upload/v1769474119/giftcard-backgrounds/spa-pink.jpg",
+  "wellness-nature": "https://res.cloudinary.com/dhuln9b1n/image/upload/v1769474120/giftcard-backgrounds/wellness-nature.jpg",
+  "spa-stones": "https://res.cloudinary.com/dhuln9b1n/image/upload/v1769474121/giftcard-backgrounds/spa-stones.jpg",
+  "spa-elegant": "https://res.cloudinary.com/dhuln9b1n/image/upload/v1769474122/giftcard-backgrounds/spa-elegant.jpg",
+};
 
 export interface ManualGiftCardInput {
   type: ManualGiftCardType;
   amount?: number;
   serviceName?: string;
   serviceDetails?: string;
-  backgroundImage: string;
+  backgroundImageId: GiftCardBackgroundId;
   recipientName: string;
   recipientEmail?: string;
   senderName?: string;
@@ -44,6 +53,9 @@ export function buildManualGiftCardData(
   if (input.type === "amount" && (!input.amount || input.amount <= 0)) {
     throw new Error("Debes indicar un monto mayor a cero");
   }
+  if (input.type === "amount" && !Number.isInteger(input.amount)) {
+    throw new Error("El monto debe ser un número entero");
+  }
 
   const amount = input.type === "amount" ? input.amount! : 0;
   const timestamp = now.getTime().toString(36).toUpperCase();
@@ -53,7 +65,7 @@ export function buildManualGiftCardData(
     code: `GC-M-${timestamp}-${randomPart}`,
     amount,
     balance: amount,
-    backgroundImage: input.backgroundImage,
+    backgroundImage: GIFT_CARD_BACKGROUNDS[input.backgroundImageId],
     recipientName: input.recipientName.trim(),
     recipientEmail: input.recipientEmail?.trim() || null,
     recipientPhone: null,

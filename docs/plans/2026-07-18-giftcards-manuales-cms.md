@@ -2,7 +2,7 @@
 
 > **For Hermes:** Implementar con TDD y verificar en producción.
 
-**Goal:** Permitir que cualquier usuario con acceso B2C del CMS cree y registre Gift Cards con monto o por servicio, sin integrar pago ni enviar automáticamente.
+**Goal:** Permitir que cualquier usuario autenticado del CMS cree y registre Gift Cards con monto o por servicio, sin integrar pago ni enviar automáticamente.
 
 **Architecture:** Extender el flujo manual existente. Un helper puro construirá el registro persistente; el router validará permisos e input; el formulario permitirá elegir modalidad, diseño y destinatario. Las Gift Cards se guardarán activas/completadas y quedarán disponibles para PDF o envío posterior.
 
@@ -18,7 +18,7 @@
 ### Task 2: Endpoint CMS
 - Modificar `server/routers.ts`.
 - Aceptar `type`, monto opcional, servicio y detalle.
-- Mantener `hasB2CAccess` y eliminar el envío automático.
+- Mantener autenticación CMS para creación y lectura; todos los roles autenticados pueden acceder.
 
 ### Task 3: Formulario e historial
 - Modificar `client/src/pages/cms/GiftCardsSales.tsx`.
