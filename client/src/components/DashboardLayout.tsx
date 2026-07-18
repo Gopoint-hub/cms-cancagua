@@ -74,7 +74,7 @@ export const categories: Category[] = [
       { icon: Package, label: "Servicios", path: "/cms/servicios" },
       { icon: UtensilsCrossed, label: "Carta", path: "/cms/carta" },
       { icon: CalendarCheck, label: "Reservas", path: "/cms/reservas" },
-      { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales" },
+
       { icon: MessageSquare, label: "Mensajes", path: "/cms/mensajes" },
       { icon: Users, label: "Clientes", path: "/cms/clientes" },
     ],
@@ -98,12 +98,13 @@ export const categories: Category[] = [
     icon: ShoppingCart,
     description: "Canales de Venta",
     color: "bg-teal-500",
-    roles: ["super_admin", "admin", "editor", "seller", "concierge"],
+    roles: ["super_admin", "admin", "editor", "seller", "concierge", "user", CANCAGUA_STAFF_ROLE],
     items: [
-      { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta" },
+      { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales" },
+      { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta", roles: ["super_admin", "admin", "editor", "seller", "concierge"] },
       { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios", roles: ["super_admin", "admin"] },
       { icon: DollarSign, label: "Comisiones", path: "/cms/concierge/vendedores", roles: ["super_admin", "admin"] },
-      { icon: DollarSign, label: "Mis Comisiones", path: "/cms/concierge/mis-comisiones" },
+      { icon: DollarSign, label: "Mis Comisiones", path: "/cms/concierge/mis-comisiones", roles: ["super_admin", "admin", "editor", "seller", "concierge"] },
     ],
   },
   {

@@ -3627,10 +3627,7 @@ Devuelve un JSON con este formato:
   // Gift Cards Admin (CMS)
   giftCardsAdmin: router({
     getAll: protectedProcedure
-      .query(async ({ ctx }) => {
-        if (!hasB2CAccess(ctx.user.role)) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
-        }
+      .query(async () => {
         // Auto-cleanup: marcar como abandonadas las gift cards pendientes por más de 30 minutos
         try {
           const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
@@ -3729,96 +3726,50 @@ Devuelve un JSON con este formato:
 
     createManual: protectedProcedure
       .input(z.object({
-        amount: z.number().min(5000),
+        type: z.enum(["amount", "service"]),
+        amount: z.number().nonnegative().optional(),
+        serviceName: z.string().max(100).optional(),
+        serviceDetails: z.string().max(200).optional(),
         backgroundImage: z.string().default("default"),
-        recipientName: z.string(),
-        recipientEmail: z.string().email(),
-        senderName: z.string().optional(),
+        recipientName: z.string().min(1).max(150),
+        recipientEmail: z.string().email().optional(),
+        senderName: z.string().max(150).optional(),
         senderEmail: z.string().email().optional(),
-        personalMessage: z.string().max(150).optional(),
+        personalMessage: z.string().max(500).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (!hasB2CAccess(ctx.user.role)) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
-        }
-
-        // Generar código único (máx 20 caracteres para cumplir con el esquema)
-        const timestamp = Date.now().toString(36).toUpperCase();
-        const randomPart = Math.random().toString(36).substring(2, 5).toUpperCase();
-        const code = `GC-M-${timestamp}-${randomPart}`;
-        
-        const giftCardData = {
-          code,
-          amount: input.amount,
-          balance: input.amount,
-          backgroundImage: input.backgroundImage,
-          recipientName: input.recipientName,
-          recipientEmail: input.recipientEmail,
-          recipientPhone: null,
-          senderName: input.senderName || "Cancagua (Manual)",
-          senderEmail: input.senderEmail || null,
-          personalMessage: input.personalMessage ? input.personalMessage.replace(/[^\x00-\x7F\xC0-\xFF\u00A1-\u017F]/g, "") : null,
-          deliveryMethod: "email",
-          purchaseStatus: "completed" as const,
-          status: "active" as const,
-          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 3 meses
-          paymentMethod: "manual_gift",
-          paymentReference: `MANUAL-${ctx.user.id}`,
-        };
-
-        const created = await db.createGiftCard(giftCardData);
-        // Intentar obtenerla por código para asegurar ID
-        const giftCard = await db.getGiftCardByCode(code);
-
-        if (!giftCard) {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error al crear gift card en DB" });
-        }
-
-        // Registrar transacción de compra
-        await db.createGiftCardTransaction({
-          giftCardId: giftCard.id,
-          transactionType: "purchase",
-          amount: giftCard.amount,
-          balanceBefore: 0,
-          balanceAfter: giftCard.amount,
-          notes: `Creada manualmente por ${ctx.user.name || ctx.user.email}`,
-        });
-
-        // Enviar email con la gift card
         try {
-          const { sendGiftCardEmail } = await import("./_core/email");
-          const { generateGiftCardPDF } = await import("./giftcardPdfGenerator");
-          
-          const pdfBuffer = await generateGiftCardPDF({
-            amount: giftCard.amount,
-            recipientName: giftCard.recipientName || "Destinatario",
-            recipientEmail: giftCard.recipientEmail || "",
-            message: giftCard.personalMessage || undefined,
-            backgroundImage: giftCard.backgroundImage || "/images/giftcard-backgrounds/spa-green.jpg",
-            code: giftCard.code,
+          const { buildManualGiftCardData } = await import("./manualGiftCards");
+          const giftCardData = buildManualGiftCardData(input, {
+            id: ctx.user.id,
+            name: ctx.user.name,
+            email: ctx.user.email,
           });
-          
-          const emailTo = giftCard.recipientEmail || giftCard.senderEmail;
-          if (emailTo) {
-            await sendGiftCardEmail({
-              to: emailTo,
-              recipientName: giftCard.recipientName || "Estimado/a",
-              senderName: giftCard.senderName,
-              amount: giftCard.amount,
-              code: giftCard.code,
-              message: giftCard.personalMessage,
-              pdfBuffer,
-            });
-            
-            await db.updateGiftCard(giftCard.id, {
-              deliveredAt: new Date(),
-            });
-          }
-        } catch (emailError) {
-          console.error("Error enviando email de gift card manual:", emailError);
-        }
 
-        return { success: true, giftCard };
+          await db.createGiftCard(giftCardData);
+          const giftCard = await db.getGiftCardByCode(giftCardData.code);
+
+          if (!giftCard) {
+            throw new Error("Error al crear gift card en DB");
+          }
+
+          await db.createGiftCardTransaction({
+            giftCardId: giftCard.id,
+            transactionType: "purchase",
+            amount: giftCard.amount,
+            balanceBefore: 0,
+            balanceAfter: giftCard.amount,
+            notes: `Creada desde CMS por ${ctx.user.name || ctx.user.email}. Pago pendiente de gestión externa.`,
+          });
+
+          // La creación desde CMS solo registra la Gift Card. El pago y el envío se gestionan aparte.
+          return { success: true, giftCard };
+        } catch (error: any) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error.message || "No se pudo crear la gift card",
+          });
+        }
       }),
   }),
 

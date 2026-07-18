@@ -53,7 +53,10 @@ export default function GiftCardsSales() {
   const [filterTab, setFilterTab] = useState("all");
   const [isCreateManualDialogOpen, setIsCreateManualDialogOpen] = useState(false);
   const [manualGiftCard, setManualGiftCard] = useState({
+    type: "amount" as "amount" | "service",
     amount: 50000,
+    serviceName: "Biopiscinas",
+    serviceDetails: "",
     recipientName: "",
     recipientEmail: "",
     senderName: "",
@@ -69,10 +72,13 @@ export default function GiftCardsSales() {
   // Mutations
   const createManual = trpc.giftCardsAdmin.createManual.useMutation({
     onSuccess: () => {
-      toast.success("Gift card creada y enviada correctamente");
+      toast.success("Gift Card creada y guardada. No se envió ningún email.");
       setIsCreateManualDialogOpen(false);
       setManualGiftCard({
+        type: "amount",
         amount: 50000,
+        serviceName: "Biopiscinas",
+        serviceDetails: "",
         recipientName: "",
         recipientEmail: "",
         senderName: "",
@@ -337,8 +343,14 @@ export default function GiftCardsSales() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        {formatPrecio(giftCard.amount)}
-                        {giftCard.balance < giftCard.amount && <div className="text-xs text-muted-foreground">Saldo: {formatPrecio(giftCard.balance)}</div>}
+                        {giftCard.amount > 0 ? (
+                          <>
+                            {formatPrecio(giftCard.amount)}
+                            {giftCard.balance < giftCard.amount && <div className="text-xs text-muted-foreground">Saldo: {formatPrecio(giftCard.balance)}</div>}
+                          </>
+                        ) : (
+                          <Badge variant="secondary">Por servicio</Badge>
+                        )}
                       </TableCell>
                       <TableCell>
                         {giftCard.status === "redeemed" ? <Badge className="bg-purple-100 text-purple-800"><CheckCircle className="w-3 h-3 mr-1" /> Usada</Badge> : getStatusBadge(giftCard.purchaseStatus)}
@@ -466,8 +478,10 @@ export default function GiftCardsSales() {
                   <span>{selectedGiftCard.recipientEmail || selectedGiftCard.senderEmail}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Monto:</span>
-                  <span className="font-medium">{formatPrecio(selectedGiftCard.amount)}</span>
+                  <span className="text-muted-foreground">{selectedGiftCard.amount > 0 ? "Monto:" : "Modalidad:"}</span>
+                  <span className="font-medium">
+                    {selectedGiftCard.amount > 0 ? formatPrecio(selectedGiftCard.amount) : "Por servicio"}
+                  </span>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
@@ -510,8 +524,10 @@ export default function GiftCardsSales() {
                   <code className="text-lg font-mono">{selectedGiftCard.code}</code>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Monto</p>
-                  <p className="text-lg font-bold text-primary">{formatPrecio(selectedGiftCard.amount)}</p>
+                  <p className="text-sm text-muted-foreground">{selectedGiftCard.amount > 0 ? "Monto" : "Modalidad"}</p>
+                  <p className="text-lg font-bold text-primary">
+                    {selectedGiftCard.amount > 0 ? formatPrecio(selectedGiftCard.amount) : "Gift Card por servicio"}
+                  </p>
                 </div>
               </div>
               
@@ -618,22 +634,66 @@ export default function GiftCardsSales() {
           <DialogHeader>
             <DialogTitle>Crear Nueva Gift Card</DialogTitle>
             <DialogDescription>
-              Genera una gift card manualmente. Se enviará automáticamente por email al destinatario.
+              Crea una Gift Card con monto o por servicio. Quedará guardada sin cobro ni envío automático.
             </DialogDescription>
           </DialogHeader>
           
           <div className="grid gap-6 py-4">
-            {/* Monto y Diseño */}
+            {/* Modalidad */}
+            <div className="space-y-3">
+              <Label>Tipo de Gift Card</Label>
+              <RadioGroup
+                value={manualGiftCard.type}
+                onValueChange={(value) => setManualGiftCard({ ...manualGiftCard, type: value as "amount" | "service" })}
+                className="grid grid-cols-2 gap-3"
+              >
+                <Label htmlFor="type-amount" className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                  <RadioGroupItem id="type-amount" value="amount" />
+                  <div><div className="font-medium">Con monto</div><div className="text-xs text-muted-foreground">Saldo expresado en pesos</div></div>
+                </Label>
+                <Label htmlFor="type-service" className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
+                  <RadioGroupItem id="type-service" value="service" />
+                  <div><div className="font-medium">Por servicio</div><div className="text-xs text-muted-foreground">Sin monto visible en el PDF</div></div>
+                </Label>
+              </RadioGroup>
+            </div>
+
+            {/* Valor o servicio y diseño */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="manual-amount">Monto (CLP)</Label>
-                <Input 
-                  id="manual-amount"
-                  type="number"
-                  value={manualGiftCard.amount}
-                  onChange={(e) => setManualGiftCard({...manualGiftCard, amount: Number(e.target.value)})}
-                  min={5000}
-                />
+              <div className="space-y-3">
+                {manualGiftCard.type === "amount" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="manual-amount">Monto (CLP) *</Label>
+                    <Input
+                      id="manual-amount"
+                      type="number"
+                      value={manualGiftCard.amount}
+                      onChange={(e) => setManualGiftCard({ ...manualGiftCard, amount: Number(e.target.value) })}
+                      min={1}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="service-name">Servicio *</Label>
+                      <Input
+                        id="service-name"
+                        placeholder="Ej: Biopiscinas"
+                        value={manualGiftCard.serviceName}
+                        onChange={(e) => setManualGiftCard({ ...manualGiftCard, serviceName: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="service-details">Cantidad o detalle</Label>
+                      <Input
+                        id="service-details"
+                        placeholder="Ej: 3 adultos y 2 niños"
+                        value={manualGiftCard.serviceDetails}
+                        onChange={(e) => setManualGiftCard({ ...manualGiftCard, serviceDetails: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Diseño</Label>
@@ -670,7 +730,7 @@ export default function GiftCardsSales() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="dest-email">Email Destinatario *</Label>
+                <Label htmlFor="dest-email">Email Destinatario (Opcional)</Label>
                 <Input 
                   id="dest-email"
                   type="email"
@@ -706,15 +766,15 @@ export default function GiftCardsSales() {
 
             {/* Mensaje */}
             <div className="space-y-2 border-t pt-4">
-              <Label htmlFor="manual-msg">Mensaje Personalizado (Max 150 caracteres)</Label>
+              <Label htmlFor="manual-msg">Mensaje personalizado (máx. 500 caracteres)</Label>
               <Textarea 
                 id="manual-msg"
-                placeholder="¡Feliz cumpleaños! Que disfrutes mucho tu momento en Cancagua."
-                maxLength={150}
+                placeholder="Ej: Gracias por tu comprensión. ¡Te esperamos pronto!"
+                maxLength={500}
                 value={manualGiftCard.personalMessage}
                 onChange={(e) => setManualGiftCard({...manualGiftCard, personalMessage: e.target.value})}
               />
-              <p className="text-right text-xs text-muted-foreground">{manualGiftCard.personalMessage.length}/150</p>
+              <p className="text-right text-xs text-muted-foreground">{manualGiftCard.personalMessage.length}/500</p>
             </div>
           </div>
 
@@ -724,16 +784,24 @@ export default function GiftCardsSales() {
               onClick={() => {
                 const bgUrl = backgroundImages?.find(img => img.id === manualGiftCard.backgroundImageId)?.url || "default";
                 createManual.mutate({
-                  amount: manualGiftCard.amount,
+                  type: manualGiftCard.type,
+                  amount: manualGiftCard.type === "amount" ? manualGiftCard.amount : undefined,
+                  serviceName: manualGiftCard.type === "service" ? manualGiftCard.serviceName : undefined,
+                  serviceDetails: manualGiftCard.type === "service" && manualGiftCard.serviceDetails ? manualGiftCard.serviceDetails : undefined,
                   backgroundImage: bgUrl,
                   recipientName: manualGiftCard.recipientName,
-                  recipientEmail: manualGiftCard.recipientEmail,
+                  recipientEmail: manualGiftCard.recipientEmail || undefined,
                   senderName: manualGiftCard.senderName || undefined,
                   senderEmail: manualGiftCard.senderEmail || undefined,
                   personalMessage: manualGiftCard.personalMessage || undefined,
                 });
               }}
-              disabled={createManual.isPending || !manualGiftCard.recipientName || !manualGiftCard.recipientEmail || manualGiftCard.amount < 5000}
+              disabled={
+                createManual.isPending ||
+                !manualGiftCard.recipientName.trim() ||
+                (manualGiftCard.type === "amount" && manualGiftCard.amount <= 0) ||
+                (manualGiftCard.type === "service" && !manualGiftCard.serviceName.trim())
+              }
             >
               {createManual.isPending ? (
                 <>
@@ -743,7 +811,7 @@ export default function GiftCardsSales() {
               ) : (
                 <>
                   <Gift className="mr-2 h-4 w-4" />
-                  Crear y Enviar Gift Card
+                  Guardar Gift Card
                 </>
               )}
             </Button>
