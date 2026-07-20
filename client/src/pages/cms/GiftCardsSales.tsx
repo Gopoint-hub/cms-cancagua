@@ -42,6 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { matchesGiftCardFilter, type GiftCardFilter } from "@shared/giftCardFilters";
 
 export default function GiftCardsSales() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -50,7 +51,7 @@ export default function GiftCardsSales() {
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [isRedeemDialogOpen, setIsRedeemDialogOpen] = useState(false);
   const [redeemAmount, setRedeemAmount] = useState<number>(0);
-  const [filterTab, setFilterTab] = useState("all");
+  const [filterTab, setFilterTab] = useState<GiftCardFilter>("all");
   const [isCreateManualDialogOpen, setIsCreateManualDialogOpen] = useState(false);
   const [manualGiftCard, setManualGiftCard] = useState({
     type: "amount" as "amount" | "service",
@@ -223,10 +224,7 @@ export default function GiftCardsSales() {
 
   // Filtrar gift cards
   const filteredGiftCards = giftCards?.filter((gc: any) => {
-    // Filtro por pestañas
-    if (filterTab === "completed" && (gc.purchaseStatus !== "completed" || gc.status === "redeemed")) return false;
-    if (filterTab === "used" && gc.status !== "redeemed") return false;
-    if (filterTab === "pending" && gc.purchaseStatus === "completed") return false;
+    if (!matchesGiftCardFilter(gc, filterTab)) return false;
 
     // Filtro por búsqueda
     if (!searchTerm) return true;
@@ -286,12 +284,13 @@ export default function GiftCardsSales() {
         <CardContent>
           {/* Search and Filters */}
           <div className="flex flex-col gap-4 mb-4">
-            <Tabs value={filterTab} onValueChange={setFilterTab}>
+            <Tabs value={filterTab} onValueChange={(value) => setFilterTab(value as GiftCardFilter)}>
               <TabsList>
                 <TabsTrigger value="all">Todas</TabsTrigger>
                 <TabsTrigger value="completed">Compradas</TabsTrigger>
                 <TabsTrigger value="used">Usadas</TabsTrigger>
-                <TabsTrigger value="pending">Pendientes/Fallidas</TabsTrigger>
+                <TabsTrigger value="pending" title="Usadas parcialmente y con saldo restante">Pendientes</TabsTrigger>
+                <TabsTrigger value="failed" title="No fueron compradas">Fallidas</TabsTrigger>
               </TabsList>
             </Tabs>
             <div className="relative flex-1 max-w-sm">
