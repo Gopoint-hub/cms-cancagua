@@ -136,6 +136,18 @@ export const normalizeDecimalInput = (value: string): string => {
 export const getChileDateString = (now = new Date()): string =>
   now.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 
+export const getChileTimeString = (now = new Date()): string => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Santiago",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "00";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+  return `${hour}:${minute}`;
+};
+
 type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & { [P in K]: string | null };
 
 const serializeDateFields = <T extends Record<string, unknown>, K extends keyof T>(
@@ -736,6 +748,35 @@ const agendaRouter = router({
       await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
+
+      // Una reserva confirmada con terapeuta se considera completada
+      // automáticamente cuando ya pasó su hora de término en Chile.
+      const now = new Date();
+      const todayChile = getChileDateString(now);
+      const timeChile = getChileTimeString(now);
+
+      await Promise.all([
+        db.update(massageBookings)
+          .set({ status: "completed" })
+          .where(and(
+            eq(massageBookings.status, "confirmed"),
+            sql`${massageBookings.therapistId} IS NOT NULL`,
+            or(
+              lt(massageBookings.bookingDate, todayChile as any),
+              and(eq(massageBookings.bookingDate, todayChile as any), lte(massageBookings.endTime, timeChile)),
+            ),
+          )),
+        db.update(massageProgramBookings)
+          .set({ status: "completed" })
+          .where(and(
+            eq(massageProgramBookings.status, "confirmed"),
+            or(
+              lt(massageProgramBookings.bookingDate, todayChile as any),
+              and(eq(massageProgramBookings.bookingDate, todayChile as any), lte(massageProgramBookings.endTime, timeChile)),
+            ),
+          )),
+      ]);
+
       const rows = await db.select({
         id: massageBookings.id, clientName: massageBookings.clientName, clientPhone: massageBookings.clientPhone,
         techniqueId: massageBookings.techniqueId, techniqueName: massageTechniques.name,

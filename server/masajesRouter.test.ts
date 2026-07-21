@@ -3,6 +3,7 @@ import {
   buildInhouseMonthRotation,
   buildPublicMassageBookingNotifications,
   getChileDateString,
+  getChileTimeString,
   expandSkeduProgramResourceBlocks,
   isSkeduProgramDurationAllowed,
   normalizeDecimalInput,
@@ -76,6 +77,13 @@ describe("getChileDateString", () => {
   it("uses the calendar date in Chile for automatic pending cleanup", () => {
     expect(getChileDateString(new Date("2026-07-15T02:30:00.000Z"))).toBe("2026-07-14");
     expect(getChileDateString(new Date("2026-07-15T15:00:00.000Z"))).toBe("2026-07-15");
+  });
+});
+
+describe("getChileTimeString", () => {
+  it("uses the local time in Chile for automatic completion", () => {
+    expect(getChileTimeString(new Date("2026-07-15T02:30:00.000Z"))).toBe("22:30");
+    expect(getChileTimeString(new Date("2026-07-15T15:05:00.000Z"))).toBe("11:05");
   });
 });
 

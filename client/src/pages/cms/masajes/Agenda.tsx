@@ -94,9 +94,6 @@ function BookingCard({ b, onEdit, onStatus }: {
             {b.status === "pending" && (
               <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "confirmed", b.bookingKind)}>Confirmar</Button>
             )}
-            {(b.status === "confirmed" || b.status === "pending") && (
-              <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "completed", b.bookingKind)}>Completar</Button>
-            )}
             {b.bookingKind === "skedu_program" ? (
               b.status === "confirmed" && (
                 <Button size="sm" variant="ghost" className="text-red-600" onClick={() => {
@@ -277,7 +274,10 @@ export default function MasajesAgenda() {
     : view === "week" ? format(endOfWeek(parsedDate, { locale: es }), "yyyy-MM-dd")
     : format(endOfMonth(parsedDate), "yyyy-MM-dd");
 
-  const { data: bookings, isLoading } = trpc.masajes.agenda.getByDateRange.useQuery({ from, to });
+  const { data: bookings, isLoading } = trpc.masajes.agenda.getByDateRange.useQuery(
+    { from, to },
+    { refetchInterval: 60_000 },
+  );
   const { data: techniques } = trpc.masajes.tecnicas.getAll.useQuery();
   const { data: therapists } = trpc.masajes.terapeutas.getAll.useQuery();
   const { data: rooms } = trpc.masajes.salas.getAll.useQuery();
