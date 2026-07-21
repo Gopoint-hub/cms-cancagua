@@ -58,7 +58,7 @@ function ApprovedView({ amount }: { amount?: number }) {
         </div>
         <div>
           <h1 className="text-2xl font-semibold text-stone-800 mb-2">¡Pago exitoso!</h1>
-          <p className="text-stone-600">Tu reserva está confirmada.</p>
+          <p className="text-stone-600">Tu compra fue procesada y tus reservas están confirmadas.</p>
           {amount && (
             <p className="text-stone-500 text-sm mt-1">
               Monto pagado:{" "}
@@ -70,7 +70,7 @@ function ApprovedView({ amount }: { amount?: number }) {
         </div>
         <div className="bg-green-50 rounded-xl p-4 w-full text-left">
           <p className="text-green-800 text-sm">
-            Te llegará un <strong>email y WhatsApp</strong> con todos los detalles de tu reserva.
+            Te llegará un <strong>email y WhatsApp</strong> con los detalles de tus reservas.
             ¡Te esperamos en Cancagua Spa!
           </p>
         </div>

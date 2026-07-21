@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Calendar, Clock, User, ShieldAlert, Check } from "lucide-react";
+import { Calendar, Clock, User, ShieldAlert, Check, ShoppingCart, Trash2, Plus } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -49,7 +49,8 @@ const buildInternationalPhone = (countryCode: string, phone: string): string | u
 
 export default function ReservarMasaje() {
   const { id } = useParams<{ id: string }>();
-  const techniqueId = Number(id);
+  const routeTechniqueId = Number(id);
+  const [techniqueId, setTechniqueId] = useState(routeTechniqueId);
 
   const [duration, setDuration] = useState<number | null>(null);
   const [date, setDate] = useState("");
@@ -62,11 +63,19 @@ export default function ReservarMasaje() {
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [subscribeNewsletter, setSubscribeNewsletter] = useState(false);
+  const [cart, setCart] = useState<Array<{
+    techniqueId: number; techniqueName: string; duration: number; bookingDate: string;
+    startTime: string; price: number; notes?: string;
+  }>>([]);
 
-  const { data: technique, isLoading } = trpc.masajes.public.getTechnique.useQuery(
-    { id: techniqueId },
-    { enabled: !isNaN(techniqueId) }
+  const { data: catalog, isLoading } = trpc.masajes.public.getCatalog.useQuery();
+  const technique = catalog?.find((item) => item.id === techniqueId);
+
+  const { data: fallbackTechnique } = trpc.masajes.public.getTechnique.useQuery(
+    { id: routeTechniqueId },
+    { enabled: !catalog && !isNaN(routeTechniqueId) }
   );
+  const selectedTechnique = technique ?? fallbackTechnique;
 
   const { data: disclaimer } = trpc.masajes.config.getDisclaimer.useQuery();
 
@@ -75,30 +84,46 @@ export default function ReservarMasaje() {
     { enabled: !!date && !!duration && !isNaN(techniqueId) }
   );
 
-  const initPaymentMut = trpc.masajes.public.initPayment.useMutation({
+  const initPaymentMut = trpc.masajes.public.initCartPayment.useMutation({
     onSuccess: (data) => {
       window.location.href = data.processUrl;
     },
     onError: (e) => toast.error(e.message ?? "Error al iniciar el pago. Intenta de nuevo."),
   });
 
+  const handleAddToCart = () => {
+    if (!duration || !date || !slot || !selectedTechnique) {
+      toast.error("Elige duración, fecha y horario");
+      return;
+    }
+    if (cart.length >= 4) { toast.error("Puedes comprar hasta 4 masajes por vez"); return; }
+    const price = getPriceForDuration(selectedTechnique, duration);
+    if (!price) { toast.error("Este masaje no tiene precio configurado"); return; }
+    setCart((current) => [...current, {
+      techniqueId, techniqueName: selectedTechnique.name, duration,
+      bookingDate: date, startTime: slot.time, price, notes: notes.trim() || undefined,
+    }]);
+    setSlot(null);
+    setNotes("");
+    setDisclaimerAccepted(false);
+    toast.success("Masaje agregado al carrito");
+  };
+
   const handleSubmit = () => {
-    if (!duration || !date || !slot || !name.trim()) {
-      toast.error("Completa todos los campos requeridos");
+    if (cart.length === 0 || !name.trim()) {
+      toast.error("Agrega al menos un masaje y completa tus datos");
       return;
     }
     if (!disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
 
     initPaymentMut.mutate({
-      techniqueId,
-      duration,
-      bookingDate: date,
-      startTime: slot.time,
+      items: cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({
+        techniqueId, duration, bookingDate, startTime, notes,
+      })),
       clientName: name.trim(),
       clientPhone: buildInternationalPhone(countryCode, phone),
       clientEmail: email.trim() || undefined,
-      notes: notes.trim() || undefined,
       subscribeNewsletter: subscribeNewsletter || undefined,
     });
   };
@@ -113,14 +138,14 @@ export default function ReservarMasaje() {
     </div>
   );
 
-  if (!technique) return (
+  if (!selectedTechnique) return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center">
       <p className="text-lg font-medium text-muted-foreground">Este servicio no está disponible.</p>
     </div>
   );
 
-  const durs = getDurations(technique);
-  const allInfoFilled = slot && name.trim();
+  const durs = getDurations(selectedTechnique);
+  const allInfoFilled = cart.length > 0 && name.trim();
 
   return (
     <div className="min-h-screen bg-stone-50 pb-16">
@@ -133,8 +158,16 @@ export default function ReservarMasaje() {
 
         {/* Técnica */}
         <div className="bg-white rounded-2xl border p-5 space-y-1.5">
-          <h2 className="text-lg font-semibold">{technique.name}</h2>
-          {technique.description && <p className="text-sm text-muted-foreground">{technique.description}</p>}
+          <p className="text-sm font-medium">Elige el masaje</p>
+          <Select value={String(techniqueId)} onValueChange={(value) => {
+            setTechniqueId(Number(value)); setDuration(null); setDate(""); setSlot(null);
+          }}>
+            <SelectTrigger className="mt-2 rounded-xl"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(catalog ?? []).map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {selectedTechnique.description && <p className="text-sm text-muted-foreground pt-2">{selectedTechnique.description}</p>}
         </div>
 
         {/* 1. Duración */}
@@ -142,7 +175,7 @@ export default function ReservarMasaje() {
           <p className="text-sm font-medium">1. Elige la duración</p>
           <div className="flex gap-2 flex-wrap">
             {durs.map((d) => {
-              const price = getPriceForDuration(technique, d);
+              const price = getPriceForDuration(selectedTechnique, d);
               return (
                 <button key={d} onClick={() => { setDuration(d); setDate(""); setSlot(null); setDisclaimerAccepted(false); }}
                   className={`flex flex-col items-center px-5 py-3 rounded-xl border-2 transition-colors ${duration === d ? "border-teal-600 bg-teal-50 text-teal-700" : "border-stone-200 hover:border-stone-300 text-foreground"}`}>
@@ -182,11 +215,36 @@ export default function ReservarMasaje() {
                 ))}
               </div>
             )}
+            {slot && (
+              <Button className="w-full rounded-xl bg-teal-600 hover:bg-teal-700" onClick={handleAddToCart} disabled={cart.length >= 4}>
+                <Plus className="w-4 h-4 mr-2" />{cart.length >= 4 ? "Carrito completo" : "Agregar al carrito"}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {cart.length > 0 && (
+          <div className="bg-white rounded-2xl border p-5 space-y-3">
+            <p className="text-sm font-medium flex items-center gap-2"><ShoppingCart className="w-4 h-4" />Carrito ({cart.length}/4)</p>
+            {cart.map((item, index) => (
+              <div key={`${item.techniqueId}-${item.bookingDate}-${item.startTime}-${index}`} className="flex items-start justify-between gap-3 border-t pt-3 first:border-0 first:pt-0">
+                <div className="text-sm">
+                  <p className="font-medium">{item.techniqueName} · {item.duration} min</p>
+                  <p className="text-muted-foreground capitalize">{format(new Date(item.bookingDate + "T12:00:00"), "d MMM", { locale: es })} · {item.startTime} hrs</p>
+                  <p className="font-medium text-teal-700">${item.price.toLocaleString("es-CL")}</p>
+                </div>
+                <Button size="icon" variant="ghost" className="text-red-600" onClick={() => setCart((items) => items.filter((_, itemIndex) => itemIndex !== index))}>
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            ))}
+            {cart.length < 4 && <p className="text-xs text-muted-foreground">Puedes agregar {4 - cart.length} masaje{4 - cart.length === 1 ? "" : "s"} más, incluso en el mismo horario.</p>}
+            <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2.5">Dos o más masajes en el mismo horario requieren al menos 2 horas de anticipación y disponibilidad de terapeutas y salas.</p>
           </div>
         )}
 
         {/* 4. Datos cliente */}
-        {slot && (
+        {cart.length > 0 && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
             <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />4. Tus datos</p>
             <div className="space-y-3">
@@ -282,22 +340,14 @@ export default function ReservarMasaje() {
 
             {/* Resumen */}
             <div className="bg-teal-50 rounded-2xl p-4 text-sm space-y-1.5 border border-teal-100">
-              <div className="flex justify-between">
-                <span className="text-teal-700">Servicio</span>
-                <span className="font-medium text-teal-900">{technique.name} · {duration} min</span>
+              <div className="flex justify-between border-b border-teal-200 pb-2">
+                <span className="text-teal-700">Servicios</span>
+                <span className="font-medium text-teal-900">{cart.length} masaje{cart.length === 1 ? "" : "s"}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-teal-700">Fecha y hora</span>
-                <span className="font-medium text-teal-900 capitalize">
-                  {format(new Date(date + "T12:00:00"), "d MMM", { locale: es })} · {slot.time} hrs
-                </span>
+              <div className="flex justify-between pt-1">
+                <span className="text-teal-700 font-medium">Total</span>
+                <span className="font-bold text-teal-900">${cart.reduce((sum, item) => sum + item.price, 0).toLocaleString("es-CL")}</span>
               </div>
-              {getPriceForDuration(technique, duration!) && (
-                <div className="flex justify-between border-t border-teal-200 pt-2 mt-1">
-                  <span className="text-teal-700 font-medium">Total</span>
-                  <span className="font-bold text-teal-900">${getPriceForDuration(technique, duration!)!.toLocaleString("es-CL")}</span>
-                </div>
-              )}
             </div>
 
             <Button

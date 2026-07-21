@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import { massageBookings, massageTechniques, massageTherapists } from "../drizzle/schema";
 import { validateGetnetWebhookSignature, getGetnetSessionInfo } from "./getnet";
@@ -41,13 +41,12 @@ router.post("/", async (req: Request, res: Response) => {
   const db = await getDb();
   if (!db) return res.status(500).json({ error: "DB no disponible" });
 
-  const [booking] = await db
+  const bookings = await db
     .select({ id: massageBookings.id, paymentStatus: massageBookings.paymentStatus })
     .from(massageBookings)
-    .where(eq(massageBookings.getnetRequestId, requestId))
-    .limit(1);
+    .where(eq(massageBookings.getnetRequestId, requestId));
 
-  if (!booking) {
+  if (bookings.length === 0) {
     console.warn("[Getnet Webhook] No se encontró booking para requestId:", requestId);
     return res.status(200).json({ ok: true });
   }
@@ -72,30 +71,30 @@ router.post("/", async (req: Request, res: Response) => {
   }
 
   if (effectiveStatus === "APPROVED") {
-    if (booking.paymentStatus !== "paid") {
+    const unpaidBookings = bookings.filter((booking) => booking.paymentStatus !== "paid");
+    if (unpaidBookings.length > 0) {
       await db
         .update(massageBookings)
         .set({
           paymentStatus: "paid",
           status: "pending",
-          ...(effectiveAmount && effectiveAmount > 0 ? { amountPaid: String(effectiveAmount) } : {}),
         })
-        .where(eq(massageBookings.id, booking.id));
+        .where(inArray(massageBookings.id, unpaidBookings.map((booking) => booking.id)));
 
-      sendBookingConfirmations(booking.id).catch((e) =>
-        console.error("[Getnet Webhook] Error en notificaciones:", e)
-      );
-    } else if (effectiveAmount && effectiveAmount > 0) {
-      await db.update(massageBookings)
-        .set({ amountPaid: String(effectiveAmount) })
-        .where(eq(massageBookings.id, booking.id));
+      for (const booking of unpaidBookings) {
+        sendBookingConfirmations(booking.id).catch((e) =>
+          console.error("[Getnet Webhook] Error en notificaciones:", e)
+        );
+      }
     }
-    await syncMassageSale(booking.id);
+    for (const booking of bookings) {
+      await syncMassageSale(booking.id);
+    }
   } else if (effectiveStatus === "REJECTED" || effectiveStatus === "FAILED") {
     await db
       .update(massageBookings)
       .set({ paymentStatus: "pending", status: "cancelled" })
-      .where(eq(massageBookings.id, booking.id));
+      .where(inArray(massageBookings.id, bookings.map((booking) => booking.id)));
   }
 
   return res.status(200).json({ ok: true });

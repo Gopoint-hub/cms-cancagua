@@ -10,6 +10,7 @@ import {
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
   serializeDateOnly,
+  validateSimultaneousMassageLeadTime,
 } from "./masajesRouter";
 
 describe("Skedu massage programs", () => {
@@ -84,6 +85,29 @@ describe("getChileTimeString", () => {
   it("uses the local time in Chile for automatic completion", () => {
     expect(getChileTimeString(new Date("2026-07-15T02:30:00.000Z"))).toBe("22:30");
     expect(getChileTimeString(new Date("2026-07-15T15:05:00.000Z"))).toBe("11:05");
+  });
+});
+
+describe("validateSimultaneousMassageLeadTime", () => {
+  const now = new Date("2026-07-15T15:00:00.000Z"); // 11:00 en Chile
+
+  it("allows up to four simultaneous massages with two hours notice", () => {
+    expect(() => validateSimultaneousMassageLeadTime(Array.from({ length: 4 }, () => ({
+      bookingDate: "2026-07-15", startTime: "13:00",
+    })), now)).not.toThrow();
+  });
+
+  it("rejects simultaneous massages with less than two hours notice", () => {
+    expect(() => validateSimultaneousMassageLeadTime([
+      { bookingDate: "2026-07-15", startTime: "12:30" },
+      { bookingDate: "2026-07-15", startTime: "12:30" },
+    ], now)).toThrow("al menos 2 horas");
+  });
+
+  it("does not apply the two-hour rule to a single massage", () => {
+    expect(() => validateSimultaneousMassageLeadTime([
+      { bookingDate: "2026-07-15", startTime: "11:30" },
+    ], now)).not.toThrow();
   });
 });
 

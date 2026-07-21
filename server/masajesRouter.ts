@@ -148,6 +148,38 @@ export const getChileTimeString = (now = new Date()): string => {
   return `${hour}:${minute}`;
 };
 
+export function validateSimultaneousMassageLeadTime(
+  items: Array<{ bookingDate: string; startTime: string }>,
+  now = new Date(),
+): void {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = `${item.bookingDate}|${item.startTime}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const todayChile = getChileDateString(now);
+  const nowMinutes = getChileTimeString(now).split(":").reduce((total, part, index) =>
+    total + Number(part) * (index === 0 ? 60 : 1), 0);
+
+  for (const [key, count] of Array.from(counts.entries())) {
+    if (count < 2) continue;
+    const [bookingDate, startTime] = key.split("|");
+    if (bookingDate < todayChile) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "El horario seleccionado ya pasó." });
+    }
+    if (bookingDate === todayChile) {
+      const [hour, minute] = startTime.split(":").map(Number);
+      if (hour * 60 + minute - nowMinutes < 120) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Los masajes simultáneos deben reservarse con al menos 2 horas de anticipación.",
+        });
+      }
+    }
+  }
+}
+
 type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & { [P in K]: string | null };
 
 const serializeDateFields = <T extends Record<string, unknown>, K extends keyof T>(
@@ -2124,6 +2156,168 @@ const masajesPublicRouter = router({
       return { processUrl, bookingId };
     }),
 
+  initCartPayment: publicProcedure
+    .input(z.object({
+      items: z.array(z.object({
+        techniqueId: z.number(),
+        duration: z.number().positive(),
+        bookingDate: z.string(),
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        notes: z.string().optional(),
+      })).min(1).max(4),
+      clientName: z.string().min(2),
+      clientPhone: z.string().optional(),
+      clientEmail: z.string().optional(),
+      subscribeNewsletter: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      validateSimultaneousMassageLeadTime(input.items);
+
+      const blockingByDate = new Map<string, Awaited<ReturnType<typeof loadBlockingMassageBookings>>>();
+      const roomsByDate = new Map<string, Array<{ id: number }>>();
+      const prepared: Array<{
+        item: typeof input.items[number];
+        techniqueName: string;
+        price: number;
+        therapistId: number;
+        roomId: number;
+        endTime: string;
+      }> = [];
+
+      for (const item of input.items) {
+        const [technique] = await db.select().from(massageTechniques)
+          .where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1)))
+          .limit(1);
+        if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes ya no está disponible." });
+
+        const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
+        const durationIndex = durations.indexOf(item.duration);
+        const prices = [technique.price50min, technique.price80min, technique.price110min];
+        const price = durationIndex >= 0 && prices[durationIndex] ? Number(prices[durationIndex]) : 0;
+        if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}.` });
+
+        const therapists = await db.select({
+          id: massageTherapists.id,
+          name: massageTherapists.name,
+          email: massageTherapists.email,
+          type: massageTherapists.type,
+          callPriority: massageTherapists.callPriority,
+          scheduleStart: massageTherapistAvailability.startTime,
+          scheduleEnd: massageTherapistAvailability.endTime,
+        })
+          .from(massageTherapistTechniques)
+          .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+          .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
+          .where(and(
+            eq(massageTherapistTechniques.techniqueId, item.techniqueId),
+            eq(massageTherapists.active, 1),
+            eq(massageTherapistAvailability.date, item.bookingDate as any),
+            eq(massageTherapistAvailability.isAvailable, 1),
+          ));
+        const validTherapists = therapists.filter((therapist) => therapist.scheduleStart && therapist.scheduleEnd) as Array<{
+          id: number; name: string | null; email: string | null; type: "inhouse" | "freelance";
+          callPriority: number | null; scheduleStart: string; scheduleEnd: string;
+        }>;
+
+        let blocking = blockingByDate.get(item.bookingDate);
+        if (!blocking) {
+          blocking = await loadBlockingMassageBookings(db, item.bookingDate);
+          blockingByDate.set(item.bookingDate, blocking);
+        }
+        let rooms = roomsByDate.get(item.bookingDate);
+        if (!rooms) {
+          rooms = await db.select({ id: massageRooms.id }).from(massageRooms).where(eq(massageRooms.active, 1));
+          roomsByDate.set(item.bookingDate, rooms);
+        }
+
+        const assignment = selectAutomaticMassageAssignment({
+          therapists: validTherapists,
+          bookings: blocking,
+          rooms,
+          startTime: item.startTime,
+          duration: item.duration,
+          bookingDate: item.bookingDate,
+        });
+        if (!assignment) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `No quedan terapeuta y sala disponibles para ${technique.name} el ${item.bookingDate} a las ${item.startTime}.`,
+          });
+        }
+
+        blocking.push({
+          therapistId: assignment.therapist.id,
+          roomId: assignment.room.id,
+          startTime: item.startTime,
+          endTime: assignment.endTime,
+        });
+        prepared.push({
+          item,
+          techniqueName: technique.name,
+          price,
+          therapistId: assignment.therapist.id,
+          roomId: assignment.room.id,
+          endTime: assignment.endTime,
+        });
+      }
+
+      const bookingIds: number[] = [];
+      for (const preparedItem of prepared) {
+        const [inserted] = await db.insert(massageBookings).values({
+          techniqueId: preparedItem.item.techniqueId,
+          duration: preparedItem.item.duration,
+          bookingDate: preparedItem.item.bookingDate as any,
+          startTime: preparedItem.item.startTime,
+          endTime: preparedItem.endTime,
+          clientName: input.clientName,
+          clientPhone: input.clientPhone,
+          clientEmail: input.clientEmail,
+          notes: preparedItem.item.notes,
+          therapistId: preparedItem.therapistId,
+          roomId: preparedItem.roomId,
+          paymentStatus: "pending",
+          amountPaid: String(preparedItem.price),
+          status: "pending",
+        }).$returningId();
+        bookingIds.push(inserted.id);
+      }
+
+      const total = prepared.reduce((sum, item) => sum + item.price, 0);
+      try {
+        const session = await createGetnetSession({
+          bookingId: bookingIds[0],
+          description: `${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(0, 80),
+          amountCLP: total,
+          clientName: input.clientName,
+          clientEmail: input.clientEmail,
+          clientPhone: input.clientPhone,
+        });
+        await db.update(massageBookings)
+          .set({ getnetRequestId: session.requestId })
+          .where(inArray(massageBookings.id, bookingIds));
+
+        if (input.subscribeNewsletter && input.clientEmail) {
+          try {
+            await db.insert(newsletterSubscribers).values({
+              email: input.clientEmail, name: input.clientName,
+              source: "masajes_booking", status: "active",
+            });
+          } catch { /* email duplicado */ }
+        }
+
+        return { processUrl: session.processUrl, bookingIds, total };
+      } catch (error) {
+        console.error("[initCartPayment] Getnet session error:", error);
+        await db.update(massageBookings)
+          .set({ status: "cancelled", paymentStatus: "pending" })
+          .where(inArray(massageBookings.id, bookingIds));
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo iniciar el pago. Intenta más tarde." });
+      }
+    }),
+
   checkPaymentStatus: publicProcedure
     .input(z.object({ requestId: z.string().optional(), ref: z.string().optional() }))
     .query(async ({ input }) => {
@@ -2151,29 +2345,28 @@ const masajesPublicRouter = router({
       if (result.status === "APPROVED") {
         const db = await getDb();
         if (db) {
-          const [existing] = await db
+          const existingBookings = await db
             .select({ id: massageBookings.id, paymentStatus: massageBookings.paymentStatus })
             .from(massageBookings)
-            .where(eq(massageBookings.getnetRequestId, resolvedRequestId))
-            .limit(1);
-          if (existing) {
-            if (existing.paymentStatus !== "paid") {
+            .where(eq(massageBookings.getnetRequestId, resolvedRequestId));
+          if (existingBookings.length > 0) {
+            const unpaidBookings = existingBookings.filter((booking) => booking.paymentStatus !== "paid");
+            if (unpaidBookings.length > 0) {
               await db.update(massageBookings)
                 .set({
                   paymentStatus: "paid",
                   status: "pending",
-                  ...(result.amount && result.amount > 0 ? { amountPaid: String(result.amount) } : {}),
                 })
-                .where(eq(massageBookings.id, existing.id));
-              sendBookingConfirmations(existing.id).catch((e) =>
-                console.error("[checkPaymentStatus] Error en notificaciones:", e)
-              );
-            } else if (result.amount && result.amount > 0) {
-              await db.update(massageBookings)
-                .set({ amountPaid: String(result.amount) })
-                .where(eq(massageBookings.id, existing.id));
+                .where(inArray(massageBookings.id, unpaidBookings.map((booking) => booking.id)));
+              for (const booking of unpaidBookings) {
+                sendBookingConfirmations(booking.id).catch((e) =>
+                  console.error("[checkPaymentStatus] Error en notificaciones:", e)
+                );
+              }
             }
-            await syncMassageSale(existing.id);
+            for (const booking of existingBookings) {
+              await syncMassageSale(booking.id);
+            }
           }
         }
       }
