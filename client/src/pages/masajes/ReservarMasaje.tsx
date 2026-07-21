@@ -12,10 +12,18 @@ import { Calendar, Clock, User, ShieldAlert, Check, ShoppingCart, Trash2, Plus }
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
-const getDurations = (t: any): number[] =>
-  (t.durations ?? "").split(",").map((d: string) => Number(d.trim())).filter(Boolean).sort((a: number, b: number) => a - b);
+const getDurations = (t: any): number[] => {
+  const durations = Array.isArray(t.durations)
+    ? t.durations
+    : String(t.durations ?? "").split(",");
+  return durations.map((duration: string | number) => Number(duration)).filter(Boolean).sort((a: number, b: number) => a - b);
+};
 
 const getPriceForDuration = (t: any, dur: number): number | null => {
+  if (Array.isArray(t.prices)) {
+    const catalogPrice = t.prices.find((item: { duration: number; price: number | null }) => item.duration === dur)?.price;
+    return catalogPrice ? Number(catalogPrice) : null;
+  }
   const durs = getDurations(t);
   const idx = durs.indexOf(dur);
   const vals = [t.price50min, t.price80min, t.price110min];
