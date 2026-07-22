@@ -389,6 +389,12 @@ export async function sendWelcomeEmail(
 /**
  * Send gift card email with PDF attachment
  */
+export const GIFT_CARD_CONTACT_EMAIL = "contacto@cancagua.cl";
+
+export function buildGiftCardContactHtml(): string {
+  return `Si tienes alguna pregunta, contáctanos en <a href="mailto:${GIFT_CARD_CONTACT_EMAIL}" style="color: #0f766e;">${GIFT_CARD_CONTACT_EMAIL}</a>`;
+}
+
 export async function sendGiftCardEmail(params: {
   to: string;
   cc?: string[];
@@ -487,7 +493,7 @@ export async function sendGiftCardEmail(params: {
               <hr style="margin: 32px 0; border: none; border-top: 1px solid #e4e4e7;">
               
               <p style="margin: 0; color: #71717a; font-size: 14px; line-height: 1.6;">
-                Si tienes alguna pregunta, contáctanos en <a href="mailto:eventos@cancagua.cl" style="color: #0f766e;">eventos@cancagua.cl</a>
+                ${buildGiftCardContactHtml()}
               </p>
             </td>
           </tr>
