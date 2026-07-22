@@ -122,6 +122,7 @@ function Router() {
       <Route path="/cms/masajes/configuracion" component={MasajesConfiguracion} />
 
       {/* Reserva pública de masajes (sin auth) */}
+      <Route path="/reservar/masajes" component={ReservarMasaje} />
       <Route path="/reservar/masaje/:id" component={ReservarMasaje} />
       <Route path="/masajes/reserva/confirmacion" component={ConfirmacionPago} />
 

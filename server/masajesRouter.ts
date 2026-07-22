@@ -180,6 +180,38 @@ export function validateSimultaneousMassageLeadTime(
   }
 }
 
+export function validateMassageCartCapacity(
+  items: Array<{ bookingDate: string; startTime: string; duration: number }>,
+  maximumSimultaneous = 4,
+): void {
+  const eventsByDate = new Map<string, Array<{ minute: number; delta: number }>>();
+  for (const item of items) {
+    const [hour, minute] = item.startTime.split(":").map(Number);
+    const startMinute = hour * 60 + minute;
+    const events = eventsByDate.get(item.bookingDate) ?? [];
+    events.push(
+      { minute: startMinute, delta: 1 },
+      { minute: startMinute + item.duration, delta: -1 },
+    );
+    eventsByDate.set(item.bookingDate, events);
+  }
+
+  for (const events of Array.from(eventsByDate.values())) {
+    let simultaneous = 0;
+    // Procesar las salidas antes que las entradas cuando dos bloques son contiguos.
+    events.sort((a, b) => a.minute - b.minute || a.delta - b.delta);
+    for (const event of events) {
+      simultaneous += event.delta;
+      if (simultaneous > maximumSimultaneous) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Puedes reservar un máximo de ${maximumSimultaneous} masajes simultáneos. Distribuye el resto en otro horario.`,
+        });
+      }
+    }
+  }
+}
+
 type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & { [P in K]: string | null };
 
 const serializeDateFields = <T extends Record<string, unknown>, K extends keyof T>(
@@ -1874,7 +1906,12 @@ const masajesPublicRouter = router({
     }),
 
   getSlots: publicProcedure
-    .input(z.object({ date: z.string(), duration: z.number().positive(), techniqueId: z.number() }))
+    .input(z.object({
+      date: z.string(),
+      duration: z.number().positive(),
+      techniqueId: z.number(),
+      quantity: z.number().int().min(1).max(4).default(1),
+    }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
@@ -1912,15 +1949,29 @@ const masajesPublicRouter = router({
       const slots: { time: string }[] = [];
       for (let t = schedStart; t + input.duration <= schedEnd; t += 30) {
         const timeStr = formatTimeMin(t);
-        const assignment = selectAutomaticMassageAssignment({
-          therapists: validTherapists,
-          bookings: allBookings,
-          rooms,
-          startTime: timeStr,
-          duration: input.duration,
-          bookingDate: input.date,
-        });
-        if (assignment) slots.push({ time: timeStr });
+        const candidateBookings = [...allBookings];
+        let groupIsAvailable = true;
+        for (let itemIndex = 0; itemIndex < input.quantity; itemIndex += 1) {
+          const assignment = selectAutomaticMassageAssignment({
+            therapists: validTherapists,
+            bookings: candidateBookings,
+            rooms,
+            startTime: timeStr,
+            duration: input.duration,
+            bookingDate: input.date,
+          });
+          if (!assignment) {
+            groupIsAvailable = false;
+            break;
+          }
+          candidateBookings.push({
+            therapistId: assignment.therapist.id,
+            roomId: assignment.room.id,
+            startTime: timeStr,
+            endTime: assignment.endTime,
+          });
+        }
+        if (groupIsAvailable) slots.push({ time: timeStr });
       }
       return slots;
     }),
@@ -2164,7 +2215,7 @@ const masajesPublicRouter = router({
         bookingDate: z.string(),
         startTime: z.string().regex(/^\d{2}:\d{2}$/),
         notes: z.string().optional(),
-      })).min(1).max(4),
+      })).min(1).max(40),
       clientName: z.string().min(2),
       clientPhone: z.string().optional(),
       clientEmail: z.string().optional(),
@@ -2175,6 +2226,7 @@ const masajesPublicRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
       validateSimultaneousMassageLeadTime(input.items);
+      validateMassageCartCapacity(input.items);
 
       const blockingByDate = new Map<string, Awaited<ReturnType<typeof loadBlockingMassageBookings>>>();
       const roomsByDate = new Map<string, Array<{ id: number }>>();

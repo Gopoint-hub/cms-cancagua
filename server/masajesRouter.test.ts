@@ -10,6 +10,7 @@ import {
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
   serializeDateOnly,
+  validateMassageCartCapacity,
   validateSimultaneousMassageLeadTime,
 } from "./masajesRouter";
 
@@ -108,6 +109,29 @@ describe("validateSimultaneousMassageLeadTime", () => {
     expect(() => validateSimultaneousMassageLeadTime([
       { bookingDate: "2026-07-15", startTime: "11:30" },
     ], now)).not.toThrow();
+  });
+});
+
+describe("validateMassageCartCapacity", () => {
+  it("allows more than four massages in a cart when they use different times or days", () => {
+    expect(() => validateMassageCartCapacity([
+      ...Array.from({ length: 4 }, () => ({ bookingDate: "2026-07-20", startTime: "13:00", duration: 50 })),
+      ...Array.from({ length: 2 }, () => ({ bookingDate: "2026-07-21", startTime: "14:00", duration: 50 })),
+    ])).not.toThrow();
+  });
+
+  it("rejects more than four overlapping massages even when their start times differ", () => {
+    expect(() => validateMassageCartCapacity([
+      ...Array.from({ length: 4 }, () => ({ bookingDate: "2026-07-20", startTime: "13:00", duration: 80 })),
+      { bookingDate: "2026-07-20", startTime: "13:30", duration: 50 },
+    ])).toThrow("máximo de 4 masajes simultáneos");
+  });
+
+  it("allows back-to-back groups because they do not overlap", () => {
+    expect(() => validateMassageCartCapacity([
+      ...Array.from({ length: 4 }, () => ({ bookingDate: "2026-07-20", startTime: "13:00", duration: 50 })),
+      ...Array.from({ length: 4 }, () => ({ bookingDate: "2026-07-20", startTime: "13:50", duration: 50 })),
+    ])).not.toThrow();
   });
 });
 

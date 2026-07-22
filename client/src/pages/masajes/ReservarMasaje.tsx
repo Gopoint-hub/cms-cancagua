@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,47 @@ const getPriceForDuration = (t: any, dur: number): number | null => {
 
 const today = new Date().toISOString().split("T")[0];
 
+type CartSelection = { techniqueId: number; duration: number; quantity: number };
+
+const readCartSelections = (): CartSelection[] => {
+  if (typeof window === "undefined") return [];
+  const raw = new URLSearchParams(window.location.search).get("cart");
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        techniqueId: Number(item.techniqueId),
+        duration: Number(item.duration),
+        quantity: Math.min(4, Math.max(1, Number(item.quantity) || 1)),
+      }))
+      .filter((item) => Number.isFinite(item.techniqueId) && item.techniqueId > 0 && Number.isFinite(item.duration) && item.duration > 0);
+  } catch {
+    return [];
+  }
+};
+
+const exceedsSimultaneousLimit = (items: Array<{ bookingDate: string; startTime: string; duration: number }>) => {
+  const byDate = new Map<string, Array<{ minute: number; delta: number }>>();
+  for (const item of items) {
+    const [hour, minute] = item.startTime.split(":").map(Number);
+    const start = hour * 60 + minute;
+    const events = byDate.get(item.bookingDate) ?? [];
+    events.push({ minute: start, delta: 1 }, { minute: start + item.duration, delta: -1 });
+    byDate.set(item.bookingDate, events);
+  }
+  for (const events of Array.from(byDate.values())) {
+    let simultaneous = 0;
+    events.sort((a, b) => a.minute - b.minute || a.delta - b.delta);
+    for (const event of events) {
+      simultaneous += event.delta;
+      if (simultaneous > 4) return true;
+    }
+  }
+  return false;
+};
+
 const countryCodes = [
   { value: "56", label: "+56 Chile" },
   { value: "54", label: "+54 Argentina" },
@@ -57,10 +98,15 @@ const buildInternationalPhone = (countryCode: string, phone: string): string | u
 
 export default function ReservarMasaje() {
   const { id } = useParams<{ id: string }>();
-  const routeTechniqueId = Number(id);
-  const [techniqueId, setTechniqueId] = useState(routeTechniqueId);
+  const initialSelections = useMemo(readCartSelections, []);
+  const hasPresetCart = initialSelections.length > 0;
+  const firstSelection = initialSelections[0];
+  const routeTechniqueId = Number(id ?? firstSelection?.techniqueId);
+  const [pendingSelections, setPendingSelections] = useState<CartSelection[]>(initialSelections);
+  const [techniqueId, setTechniqueId] = useState(firstSelection?.techniqueId ?? routeTechniqueId);
 
-  const [duration, setDuration] = useState<number | null>(null);
+  const [duration, setDuration] = useState<number | null>(firstSelection?.duration ?? null);
+  const [quantity, setQuantity] = useState(firstSelection?.quantity ?? 1);
   const [date, setDate] = useState("");
   const [slot, setSlot] = useState<{ time: string } | null>(null);
   const [name, setName] = useState("");
@@ -88,7 +134,7 @@ export default function ReservarMasaje() {
   const { data: disclaimer } = trpc.masajes.config.getDisclaimer.useQuery();
 
   const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getSlots.useQuery(
-    { date, duration: duration ?? 0, techniqueId },
+    { date, duration: duration ?? 0, techniqueId, quantity },
     { enabled: !!date && !!duration && !isNaN(techniqueId) }
   );
 
@@ -104,17 +150,32 @@ export default function ReservarMasaje() {
       toast.error("Elige duración, fecha y horario");
       return;
     }
-    if (cart.length >= 4) { toast.error("Puedes comprar hasta 4 masajes por vez"); return; }
     const price = getPriceForDuration(selectedTechnique, duration);
     if (!price) { toast.error("Este masaje no tiene precio configurado"); return; }
-    setCart((current) => [...current, {
+    const newItems = Array.from({ length: quantity }, () => ({
       techniqueId, techniqueName: selectedTechnique.name, duration,
       bookingDate: date, startTime: slot.time, price, notes: notes.trim() || undefined,
-    }]);
+    }));
+    if (exceedsSimultaneousLimit([...cart, ...newItems])) {
+      toast.error("Puedes agendar un máximo de 4 masajes simultáneos. Elige otro horario para este grupo.");
+      return;
+    }
+    setCart((current) => [...current, ...newItems]);
+    if (hasPresetCart) {
+      const nextPending = pendingSelections.slice(1);
+      setPendingSelections(nextPending);
+      const next = nextPending[0];
+      if (next) {
+        setTechniqueId(next.techniqueId);
+        setDuration(next.duration);
+        setQuantity(next.quantity);
+      }
+    }
+    setDate("");
     setSlot(null);
     setNotes("");
     setDisclaimerAccepted(false);
-    toast.success("Masaje agregado al carrito");
+    toast.success(`${quantity} masaje${quantity === 1 ? "" : "s"} agendado${quantity === 1 ? "" : "s"}`);
   };
 
   const handleSubmit = () => {
@@ -153,7 +214,8 @@ export default function ReservarMasaje() {
   );
 
   const durs = getDurations(selectedTechnique);
-  const allInfoFilled = cart.length > 0 && name.trim();
+  const allSelectionsScheduled = !hasPresetCart || pendingSelections.length === 0;
+  const allInfoFilled = cart.length > 0 && allSelectionsScheduled && name.trim();
 
   return (
     <div className="min-h-screen bg-stone-50 pb-16">
@@ -164,36 +226,61 @@ export default function ReservarMasaje() {
 
       <div className="max-w-md mx-auto p-4 space-y-3 mt-2">
 
-        {/* Técnica */}
-        <div className="bg-white rounded-2xl border p-5 space-y-1.5">
-          <p className="text-sm font-medium">Elige el masaje</p>
-          <Select value={String(techniqueId)} onValueChange={(value) => {
-            setTechniqueId(Number(value)); setDuration(null); setDate(""); setSlot(null);
-          }}>
-            <SelectTrigger className="mt-2 rounded-xl"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(catalog ?? []).map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          {selectedTechnique.description && <p className="text-sm text-muted-foreground pt-2">{selectedTechnique.description}</p>}
-        </div>
-
-        {/* 1. Duración */}
-        <div className="bg-white rounded-2xl border p-5 space-y-3">
-          <p className="text-sm font-medium">1. Elige la duración</p>
-          <div className="flex gap-2 flex-wrap">
-            {durs.map((d) => {
-              const price = getPriceForDuration(selectedTechnique, d);
-              return (
-                <button key={d} onClick={() => { setDuration(d); setDate(""); setSlot(null); setDisclaimerAccepted(false); }}
-                  className={`flex flex-col items-center px-5 py-3 rounded-xl border-2 transition-colors ${duration === d ? "border-teal-600 bg-teal-50 text-teal-700" : "border-stone-200 hover:border-stone-300 text-foreground"}`}>
-                  <span className="font-semibold text-sm">{d} min</span>
-                  {price && <span className="text-xs mt-0.5 opacity-80">${price.toLocaleString("es-CL")}</span>}
-                </button>
-              );
-            })}
+        {hasPresetCart ? (
+          <div className="bg-white rounded-2xl border p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-medium uppercase tracking-wider text-teal-700">
+                {pendingSelections.length > 0 ? `Faltan ${pendingSelections.length} selecciones por agendar` : "Carrito completamente agendado"}
+              </p>
+              <span className="text-xs text-muted-foreground">{cart.length} agendado{cart.length === 1 ? "" : "s"}</span>
+            </div>
+            {pendingSelections.length > 0 && (
+              <div className="rounded-xl bg-teal-50 p-4">
+                <p className="font-semibold text-stone-900">{selectedTechnique.name}</p>
+                <p className="mt-1 text-sm text-stone-600">{duration} min · {quantity} masaje{quantity === 1 ? "" : "s"} en el mismo horario</p>
+              </div>
+            )}
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="bg-white rounded-2xl border p-5 space-y-1.5">
+              <p className="text-sm font-medium">Elige el masaje</p>
+              <Select value={String(techniqueId)} onValueChange={(value) => {
+                setTechniqueId(Number(value)); setDuration(null); setDate(""); setSlot(null);
+              }}>
+                <SelectTrigger className="mt-2 rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(catalog ?? []).map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {selectedTechnique.description && <p className="text-sm text-muted-foreground pt-2">{selectedTechnique.description}</p>}
+            </div>
+
+            <div className="bg-white rounded-2xl border p-5 space-y-3">
+              <p className="text-sm font-medium">1. Elige la duración y cantidad</p>
+              <div className="flex gap-2 flex-wrap">
+                {durs.map((d) => {
+                  const price = getPriceForDuration(selectedTechnique, d);
+                  return (
+                    <button key={d} onClick={() => { setDuration(d); setDate(""); setSlot(null); setDisclaimerAccepted(false); }}
+                      className={`flex flex-col items-center px-5 py-3 rounded-xl border-2 transition-colors ${duration === d ? "border-teal-600 bg-teal-50 text-teal-700" : "border-stone-200 hover:border-stone-300 text-foreground"}`}>
+                      <span className="font-semibold text-sm">{d} min</span>
+                      {price && <span className="text-xs mt-0.5 opacity-80">${price.toLocaleString("es-CL")}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between border-t pt-3">
+                <span className="text-sm text-muted-foreground">Cantidad simultánea</span>
+                <div className="flex items-center rounded-xl border">
+                  <Button type="button" size="icon" variant="ghost" disabled={quantity <= 1} onClick={() => setQuantity((value) => Math.max(1, value - 1))}>−</Button>
+                  <span className="w-8 text-center font-semibold">{quantity}</span>
+                  <Button type="button" size="icon" variant="ghost" disabled={quantity >= 4} onClick={() => setQuantity((value) => Math.min(4, value + 1))}>+</Button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* 2. Fecha */}
         {duration && (
@@ -224,8 +311,8 @@ export default function ReservarMasaje() {
               </div>
             )}
             {slot && (
-              <Button className="w-full rounded-xl bg-teal-600 hover:bg-teal-700" onClick={handleAddToCart} disabled={cart.length >= 4}>
-                <Plus className="w-4 h-4 mr-2" />{cart.length >= 4 ? "Carrito completo" : "Agregar al carrito"}
+              <Button className="w-full rounded-xl bg-teal-600 hover:bg-teal-700" onClick={handleAddToCart}>
+                <Plus className="w-4 h-4 mr-2" />Agendar {quantity} masaje{quantity === 1 ? "" : "s"} a las {slot.time}
               </Button>
             )}
           </div>
@@ -233,7 +320,7 @@ export default function ReservarMasaje() {
 
         {cart.length > 0 && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-2"><ShoppingCart className="w-4 h-4" />Carrito ({cart.length}/4)</p>
+            <p className="text-sm font-medium flex items-center gap-2"><ShoppingCart className="w-4 h-4" />Masajes agendados ({cart.length})</p>
             {cart.map((item, index) => (
               <div key={`${item.techniqueId}-${item.bookingDate}-${item.startTime}-${index}`} className="flex items-start justify-between gap-3 border-t pt-3 first:border-0 first:pt-0">
                 <div className="text-sm">
@@ -246,13 +333,12 @@ export default function ReservarMasaje() {
                 </Button>
               </div>
             ))}
-            {cart.length < 4 && <p className="text-xs text-muted-foreground">Puedes agregar {4 - cart.length} masaje{4 - cart.length === 1 ? "" : "s"} más, incluso en el mismo horario.</p>}
-            <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2.5">Dos o más masajes en el mismo horario requieren al menos 2 horas de anticipación y disponibilidad de terapeutas y salas.</p>
+            <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2.5">Puedes combinar distintos días y horarios. El máximo es de 4 masajes que se superpongan en un mismo horario.</p>
           </div>
         )}
 
         {/* 4. Datos cliente */}
-        {cart.length > 0 && (
+        {cart.length > 0 && allSelectionsScheduled && (
           <div className="bg-white rounded-2xl border p-5 space-y-3">
             <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />4. Tus datos</p>
             <div className="space-y-3">
