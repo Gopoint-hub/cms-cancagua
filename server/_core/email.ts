@@ -6,6 +6,7 @@ import { Resend } from "resend";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { ENV } from "./env";
+import { buildGiftCardEmailPresentation } from "../giftCardEmailContent";
 
 function getTerminosBase64(): string {
   // process.cwd() apunta al root del proyecto tanto en dev como en producción (Render)
@@ -407,11 +408,10 @@ export async function sendGiftCardEmail(params: {
 }): Promise<EmailResult> {
   try {
     const client = getResendClient();
-    const formattedAmount = new Intl.NumberFormat("es-CL", {
-      style: "currency",
-      currency: "CLP",
-      minimumFractionDigits: 0,
-    }).format(params.amount);
+    const presentation = buildGiftCardEmailPresentation({
+      amount: params.amount,
+      message: params.message,
+    });
 
     const senderText = params.senderName 
       ? `<strong>${params.senderName}</strong> te ha enviado` 
@@ -422,11 +422,20 @@ export async function sendGiftCardEmail(params: {
       ...(params.cc || []),
     ].filter((email): email is string => Boolean(email) && email !== params.to)));
 
-    const messageSection = params.message 
+    const serviceDetailSection = presentation.serviceDetail
+      ? `
+        <div style="margin: 24px 0; padding: 20px; background-color: #f0fdf4; border-left: 4px solid #0f766e; border-radius: 4px;">
+          <p style="margin: 0 0 8px; color: #0f766e; font-size: 12px; font-weight: 600; text-transform: uppercase;">Detalle del servicio</p>
+          <p style="margin: 0; color: #18181b; font-size: 16px; line-height: 1.6;">${escapeHtml(presentation.serviceDetail)}</p>
+        </div>
+      `
+      : "";
+
+    const messageSection = presentation.personalMessage
       ? `
         <div style="margin: 24px 0; padding: 20px; background-color: #f0fdf4; border-left: 4px solid #0f766e; border-radius: 4px;">
           <p style="margin: 0 0 8px; color: #0f766e; font-size: 12px; font-weight: 600; text-transform: uppercase;">Mensaje personal</p>
-          <p style="margin: 0; color: #18181b; font-size: 16px; line-height: 1.6; font-style: italic;">"${params.message}"</p>
+          <p style="margin: 0; color: #18181b; font-size: 16px; line-height: 1.6; font-style: italic;">"${escapeHtml(presentation.personalMessage)}"</p>
         </div>
       ` 
       : "";
@@ -435,7 +444,7 @@ export async function sendGiftCardEmail(params: {
       from: FROM_EMAIL,
       to: [params.to],
       cc: ccRecipients,
-      subject: `🎁 ¡Has recibido una Gift Card de Cancagua por ${formattedAmount}!`,
+      subject: presentation.subject,
       attachments: [
         {
           filename: `giftcard-${params.code}.pdf`,
@@ -468,15 +477,17 @@ export async function sendGiftCardEmail(params: {
             <td style="padding: 40px;">
               <h2 style="margin: 0 0 16px; color: #18181b; font-size: 20px; font-weight: 600;">¡Hola ${params.recipientName}!</h2>
               <p style="margin: 0 0 24px; color: #52525b; font-size: 16px; line-height: 1.6;">
-                ${senderText} una <strong>Gift Card de Cancagua</strong> por un valor de:
+                ${senderText} una <strong>Gift Card de Cancagua</strong> ${presentation.introSuffix}
               </p>
               
               <!-- Amount Box -->
               <div style="margin: 24px 0; padding: 24px; background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%); border-radius: 12px; text-align: center;">
-                <p style="margin: 0; color: #ffffff; font-size: 36px; font-weight: 700;">${formattedAmount}</p>
+                <p style="margin: 0; color: #ffffff; font-size: 36px; font-weight: 700;">${escapeHtml(presentation.headline)}</p>
                 <p style="margin: 8px 0 0; color: #99f6e4; font-size: 14px;">Código: <strong>${params.code}</strong></p>
               </div>
               
+              ${serviceDetailSection}
+
               ${messageSection}
               
               <p style="margin: 24px 0; color: #52525b; font-size: 16px; line-height: 1.6;">
