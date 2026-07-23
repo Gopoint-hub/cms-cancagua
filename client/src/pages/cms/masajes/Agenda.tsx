@@ -20,6 +20,7 @@ import {
 } from "date-fns";
 import { es } from "date-fns/locale";
 import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
+import SkeduTherapistAssignmentDialog from "./SkeduTherapistAssignmentDialog";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendiente", confirmed: "Confirmada", completed: "Completada",
@@ -95,13 +96,21 @@ function BookingCard({ b, onEdit, onStatus }: {
               <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "confirmed", b.bookingKind)}>Confirmar</Button>
             )}
             {b.bookingKind === "skedu_program" ? (
-              b.status === "confirmed" && (
-                <Button size="sm" variant="ghost" className="text-red-600" onClick={() => {
-                  if (window.confirm("¿Cancelar este masaje de programa y liberar los recursos?")) {
-                    onStatus(b.id, "cancelled", b.bookingKind);
-                  }
-                }}>Cancelar</Button>
-              )
+              <>
+                {b.status !== "cancelled" && (
+                  <Button size="sm" variant="outline" onClick={() => onEdit(b)} title="Editar terapeutas asignados">
+                    <Edit className="mr-1.5 h-4 w-4" />
+                    Terapeutas
+                  </Button>
+                )}
+                {b.status === "confirmed" && (
+                  <Button size="sm" variant="ghost" className="text-red-600" onClick={() => {
+                    if (window.confirm("¿Cancelar este masaje de programa y liberar los recursos?")) {
+                      onStatus(b.id, "cancelled", b.bookingKind);
+                    }
+                  }}>Cancelar</Button>
+                )}
+              </>
             ) : (
               <Button size="sm" variant="ghost" onClick={() => onEdit(b)}>
                 <Edit className="w-4 h-4" />
@@ -260,6 +269,7 @@ export default function MasajesAgenda() {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [open, setOpen] = useState(false);
   const [skeduOpen, setSkeduOpen] = useState(false);
+  const [editingSkeduBooking, setEditingSkeduBooking] = useState<any | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<BookingForm>(emptyForm(selectedDate));
   const utils = trpc.useUtils();
@@ -327,6 +337,10 @@ export default function MasajesAgenda() {
   };
 
   const openEdit = (b: any) => {
+    if (b.bookingKind === "skedu_program") {
+      setEditingSkeduBooking(b);
+      return;
+    }
     setEditingId(b.id);
     setForm({
       clientName: b.clientName, clientEmail: b.clientEmail ?? "", clientPhone: b.clientPhone ?? "",
@@ -635,6 +649,12 @@ export default function MasajesAgenda() {
         onOpenChange={setSkeduOpen}
         initialDate={selectedDate}
         onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+      />
+      <SkeduTherapistAssignmentDialog
+        open={!!editingSkeduBooking}
+        onOpenChange={(next) => { if (!next) setEditingSkeduBooking(null); }}
+        booking={editingSkeduBooking}
+        onUpdated={() => utils.masajes.agenda.getByDateRange.invalidate()}
       />
     </DashboardLayout>
   );

@@ -12,6 +12,7 @@ import {
   serializePublicMassageTechnique,
   serializeDateOnly,
   validateMassageCartCapacity,
+  validateSkeduTherapistSelection,
   validateSimultaneousMassageLeadTime,
 } from "./masajesRouter";
 
@@ -38,6 +39,13 @@ describe("Skedu massage programs", () => {
       { therapistId: 3, roomId: 2, startTime: "14:00", endTime: "14:30" },
       { therapistId: 1, roomId: null, startTime: "14:00", endTime: "14:30" },
     ]);
+  });
+
+  it("requires two different therapists for double programs", () => {
+    expect(() => validateSkeduTherapistSelection("simple", 1)).not.toThrow();
+    expect(() => validateSkeduTherapistSelection("double", 1, 2)).not.toThrow();
+    expect(() => validateSkeduTherapistSelection("double", 1)).toThrow("requiere dos terapeutas");
+    expect(() => validateSkeduTherapistSelection("double", 1, 1)).toThrow("dos terapeutas distintos");
   });
 });
 

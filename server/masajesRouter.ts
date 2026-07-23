@@ -36,7 +36,7 @@ import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
 import { calculateMassageDiscount } from "./massageDiscounts";
-import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne } from "drizzle-orm";
 import { hasMassageAdminAccess, hasMassageOperationsAccess } from "@shared/permissions";
 
 const adminOrEditor = async (role: string) => {
@@ -64,6 +64,19 @@ export function isSkeduProgramDurationAllowed(programValue: string, duration: nu
   return !!program && (program.durations as readonly number[]).includes(duration);
 }
 
+export function validateSkeduTherapistSelection(
+  modality: "simple" | "double",
+  therapistId: number,
+  secondTherapistId?: number | null,
+): void {
+  if (modality === "double" && !secondTherapistId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Un masaje doble requiere dos terapeutas" });
+  }
+  if (secondTherapistId && secondTherapistId === therapistId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Selecciona dos terapeutas distintos" });
+  }
+}
+
 export function expandSkeduProgramResourceBlocks(programs: Array<{
   therapistId: number;
   secondTherapistId: number | null;
@@ -89,7 +102,11 @@ export function expandSkeduProgramResourceBlocks(programs: Array<{
 
 type MassageDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
-async function loadBlockingMassageBookings(db: MassageDb, bookingDate: string) {
+async function loadBlockingMassageBookings(
+  db: MassageDb,
+  bookingDate: string,
+  options: { excludeProgramBookingId?: number } = {},
+) {
   const standard = await db.select({
     therapistId: massageBookings.therapistId,
     roomId: massageBookings.roomId,
@@ -101,16 +118,21 @@ async function loadBlockingMassageBookings(db: MassageDb, bookingDate: string) {
     sql`${massageBookings.status} NOT IN ('cancelled')`,
   ));
 
+  const programFilters = [
+    eq(massageProgramBookings.bookingDate, bookingDate as any),
+    sql`${massageProgramBookings.status} NOT IN ('cancelled')`,
+  ];
+  if (options.excludeProgramBookingId) {
+    programFilters.push(ne(massageProgramBookings.id, options.excludeProgramBookingId));
+  }
+
   const programs = await db.select({
     therapistId: massageProgramBookings.therapistId,
     secondTherapistId: massageProgramBookings.secondTherapistId,
     roomId: massageProgramBookings.roomId,
     startTime: massageProgramBookings.startTime,
     endTime: massageProgramBookings.endTime,
-  }).from(massageProgramBookings).where(and(
-    eq(massageProgramBookings.bookingDate, bookingDate as any),
-    sql`${massageProgramBookings.status} NOT IN ('cancelled')`,
-  ));
+  }).from(massageProgramBookings).where(and(...programFilters));
 
   return [
     ...standard.map(({ coupleBookingId, ...booking }) => ({
@@ -573,11 +595,14 @@ async function getSkeduProgramResourceAvailability(params: {
   startTime: string;
   duration: number;
   modality: "simple" | "double";
+  excludeProgramBookingId?: number;
   now?: Date;
 }) {
   const requestedStart = parseTimeMin(params.startTime);
   const requestedEnd = requestedStart + params.duration;
-  const blocks = await loadBlockingMassageBookings(params.db, params.bookingDate);
+  const blocks = await loadBlockingMassageBookings(params.db, params.bookingDate, {
+    excludeProgramBookingId: params.excludeProgramBookingId,
+  });
 
   const therapistRows = await params.db.select({
     id: massageTherapists.id,
@@ -659,12 +684,18 @@ const agendaRouter = router({
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       duration: z.union([z.literal(30), z.literal(50)]),
       modality: z.enum(["simple", "double"]),
+      excludeBookingId: z.number().int().positive().optional(),
     }))
     .query(async ({ ctx, input }) => {
       await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) return { therapists: [], rooms: [], endTime: "" };
-      const resources = await getSkeduProgramResourceAvailability({ db, ...input });
+      const { excludeBookingId, ...availabilityInput } = input;
+      const resources = await getSkeduProgramResourceAvailability({
+        db,
+        ...availabilityInput,
+        excludeProgramBookingId: excludeBookingId,
+      });
       return {
         therapists: resources.availableTherapists.map(({ phone: _phone, email: _email, ...therapist }) => therapist),
         rooms: resources.availableRooms,
@@ -702,9 +733,7 @@ const agendaRouter = router({
       if (input.modality === "double" && (!input.secondClientName?.trim() || !input.secondTherapistId)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Un masaje doble requiere dos clientes y dos terapeutas" });
       }
-      if (input.secondTherapistId && input.secondTherapistId === input.therapistId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Selecciona dos terapeutas distintos" });
-      }
+      validateSkeduTherapistSelection(input.modality, input.therapistId, input.secondTherapistId);
 
       if (input.externalReference?.trim()) {
         const [duplicate] = await db.select({ id: massageProgramBookings.id })
@@ -797,6 +826,65 @@ const agendaRouter = router({
       }
 
       return { success: true, id: inserted.id };
+    }),
+
+  updateSkeduProgramTherapists: protectedProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      therapistId: z.number().int().positive(),
+      secondTherapistId: z.number().int().positive().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await massageOperations(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [booking] = await db.select().from(massageProgramBookings)
+        .where(eq(massageProgramBookings.id, input.id))
+        .limit(1);
+      if (!booking) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Reserva de programa no encontrada" });
+      }
+      if (booking.status === "cancelled") {
+        throw new TRPCError({ code: "CONFLICT", message: "No puedes reasignar una reserva cancelada" });
+      }
+
+      validateSkeduTherapistSelection(booking.modality, input.therapistId, input.secondTherapistId);
+
+      const bookingDate = serializeDateOnly(booking.bookingDate);
+      if (!bookingDate) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "La reserva no tiene una fecha válida" });
+      }
+      const resources = await getSkeduProgramResourceAvailability({
+        db,
+        bookingDate,
+        startTime: booking.startTime,
+        duration: booking.duration,
+        modality: booking.modality,
+        excludeProgramBookingId: booking.id,
+      });
+      const selectableTherapistIds = new Set(resources.availableTherapists.map((therapist) => therapist.id));
+      // Los terapeutas actuales siguen siendo seleccionables aunque después se
+      // hayan desactivado; conservarlos no agrega un nuevo bloqueo a la agenda.
+      selectableTherapistIds.add(booking.therapistId);
+      if (booking.secondTherapistId) selectableTherapistIds.add(booking.secondTherapistId);
+
+      if (!selectableTherapistIds.has(input.therapistId)
+          || (booking.modality === "double" && !selectableTherapistIds.has(input.secondTherapistId!))) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Uno de los terapeutas seleccionados no está disponible en ese horario",
+        });
+      }
+
+      await db.update(massageProgramBookings)
+        .set({
+          therapistId: input.therapistId,
+          secondTherapistId: booking.modality === "double" ? input.secondTherapistId! : null,
+        })
+        .where(eq(massageProgramBookings.id, input.id));
+
+      return { success: true };
     }),
 
   updateSkeduProgramStatus: protectedProcedure
