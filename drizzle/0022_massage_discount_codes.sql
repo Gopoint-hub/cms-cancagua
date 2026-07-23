@@ -4,7 +4,7 @@ CREATE TABLE `massage_discount_code_techniques` (
   `technique_id` int NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT (now()),
   CONSTRAINT `massage_discount_code_techniques_id` PRIMARY KEY(`id`),
-  CONSTRAINT `massage_discount_code_techniques_discount_code_id_discount_codes_id_fk`
+  CONSTRAINT `mdct_discount_code_fk`
     FOREIGN KEY (`discount_code_id`) REFERENCES `discount_codes`(`id`) ON DELETE CASCADE
 );
 --> statement-breakpoint

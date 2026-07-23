@@ -3855,8 +3855,8 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "massage_discount_code_techniques_discount_code_id_discount_codes_id_fk": {
-          "name": "massage_discount_code_techniques_discount_code_id_discount_codes_id_fk",
+        "mdct_discount_code_fk": {
+          "name": "mdct_discount_code_fk",
           "tableFrom": "massage_discount_code_techniques",
           "tableTo": "discount_codes",
           "columnsFrom": [

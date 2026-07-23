@@ -1,4 +1,4 @@
-import { date, decimal, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { date, decimal, foreignKey, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -505,7 +505,7 @@ export type InsertDiscountCode = typeof discountCodes.$inferInsert;
 // Uso de códigos de descuento (historial)
 export const discountCodeUsages = mysqlTable("discount_code_usages", {
   id: int("id").autoincrement().primaryKey(),
-  discountCodeId: int("discount_code_id").references(() => discountCodes.id, { onDelete: "cascade" }).notNull(),
+  discountCodeId: int("discount_code_id").notNull(),
   userId: int("user_id").references(() => users.id),
   userEmail: varchar("user_email", { length: 320 }), // Email del usuario que usó el código
   orderId: varchar("order_id", { length: 100 }), // ID de la orden/reserva donde se aplicó
@@ -526,7 +526,13 @@ export const massageDiscountCodeTechniques = mysqlTable("massage_discount_code_t
   discountCodeId: int("discount_code_id").references(() => discountCodes.id, { onDelete: "cascade" }).notNull(),
   techniqueId: int("technique_id").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  discountCodeFk: foreignKey({
+    name: "mdct_discount_code_fk",
+    columns: [table.discountCodeId],
+    foreignColumns: [discountCodes.id],
+  }).onDelete("cascade"),
+}));
 
 export type MassageDiscountCodeTechnique = typeof massageDiscountCodeTechniques.$inferSelect;
 
