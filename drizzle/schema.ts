@@ -1125,6 +1125,7 @@ export const massageBookings = mysqlTable("massage_bookings", {
   status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
   paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "refunded"]).default("pending").notNull(),
   getnetRequestId: varchar("getnet_request_id", { length: 64 }),
+  bookingSource: mysqlEnum("booking_source", ["web", "cms"]).default("cms").notNull(),
   // Flujo de aprobación para terapeutas freelance
   freelanceApprovalStatus: varchar("freelance_approval_status", { length: 30 }),
   adminApprovalToken: varchar("admin_approval_token", { length: 64 }),
@@ -1213,6 +1214,33 @@ export const massageSales = mysqlTable("massage_sales", {
 
 export type MassageSale = typeof massageSales.$inferSelect;
 export type InsertMassageSale = typeof massageSales.$inferInsert;
+
+// Encuestas NPS enviadas por WhatsApp después de cada masaje.
+export const massageNpsResponses = mysqlTable("massage_nps_responses", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingType: mysqlEnum("booking_type", ["massage", "skedu_program"]).notNull(),
+  bookingId: int("booking_id").notNull(),
+  surveyToken: varchar("survey_token", { length: 64 }).notNull().unique(),
+  serviceName: varchar("service_name", { length: 200 }).notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientPhone: varchar("client_phone", { length: 30 }).notNull(),
+  serviceDate: date("service_date").notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  scheduledSendAt: timestamp("scheduled_send_at").notNull(),
+  deliveryStatus: mysqlEnum("delivery_status", ["pending", "sending", "sent", "failed", "skipped"]).default("pending").notNull(),
+  attemptCount: int("attempt_count").default(0).notNull(),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  sentAt: timestamp("sent_at"),
+  deliveryError: text("delivery_error"),
+  score: int("score"),
+  comment: text("comment"),
+  respondedAt: timestamp("responded_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageNpsResponse = typeof massageNpsResponses.$inferSelect;
+export type InsertMassageNpsResponse = typeof massageNpsResponses.$inferInsert;
 
 export const massageSupplies = mysqlTable("massage_supplies", {
   id: int("id").autoincrement().primaryKey(),

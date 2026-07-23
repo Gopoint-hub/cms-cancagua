@@ -59,6 +59,7 @@ import MasajesConfiguracion from "./pages/cms/masajes/Configuracion";
 import MasajesDescuentos from "./pages/cms/masajes/Descuentos";
 import ReservarMasaje from "./pages/masajes/ReservarMasaje";
 import ConfirmacionPago from "./pages/masajes/ConfirmacionPago";
+import NpsMasaje from "./pages/masajes/NpsMasaje";
 
 function Router() {
   return (
@@ -127,6 +128,7 @@ function Router() {
       <Route path="/reservar/masajes" component={ReservarMasaje} />
       <Route path="/reservar/masaje/:id" component={ReservarMasaje} />
       <Route path="/masajes/reserva/confirmacion" component={ConfirmacionPago} />
+      <Route path="/nps/masajes/:token" component={NpsMasaje} />
 
       {/* Fallback */}
       <Route path="/404" component={NotFound} />

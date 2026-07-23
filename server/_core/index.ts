@@ -18,6 +18,7 @@ import { checkGitHubBlogHealth } from "../githubBlogHealth";
 import { ensureMassageDiscountSchema } from "../ensureMassageDiscountSchema";
 import { ensureMassageAvailabilitySchema } from "../ensureMassageAvailabilitySchema";
 import { ensureMassageTherapistUsersSchema } from "../ensureMassageTherapistUsersSchema";
+import { ensureMassageNpsSchema } from "../ensureMassageNpsSchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -42,6 +43,7 @@ async function startServer() {
   await ensureMassageDiscountSchema();
   await ensureMassageAvailabilitySchema();
   await ensureMassageTherapistUsersSchema();
+  await ensureMassageNpsSchema();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -123,6 +125,8 @@ async function startServer() {
 
 startServer()
   .then(async () => {
+    const { startMassageNpsScheduler } = await import("../massageNps");
+    startMassageNpsScheduler();
     const { runSeedIfNeeded } = await import("../seed");
     try {
       await runSeedIfNeeded();

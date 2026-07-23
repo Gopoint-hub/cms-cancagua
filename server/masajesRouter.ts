@@ -13,6 +13,7 @@ import {
   massageBookings,
   massageProgramBookings,
   massageSales,
+  massageNpsResponses,
   massageSupplies,
   massageTechniqueRecipes,
   massageTherapistEvaluations,
@@ -38,6 +39,7 @@ import { syncMassageSale } from "./massageSales";
 import { calculateMassageDiscount } from "./massageDiscounts";
 import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne } from "drizzle-orm";
 import { hasMassageAdminAccess, hasMassageOperationsAccess, hasMassageReadAccess } from "@shared/permissions";
+import { chileLocalDateTimeToUtc } from "./massageNps";
 
 const adminOrEditor = async (role: string) => {
   if (!hasMassageAdminAccess(role)) {
@@ -1513,7 +1515,7 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const [inserted] = await db.insert(massageBookings)
-        .values({ ...input, bookingDate: input.bookingDate as any })
+        .values({ ...input, bookingDate: input.bookingDate as any, bookingSource: "cms" })
         .$returningId();
       if (input.paymentStatus === "paid") await syncMassageSale(inserted.id);
       return { success: true };
@@ -1979,23 +1981,241 @@ async function getMassageSalesRows(
 
 const analyticsRouter = router({
   summary: protectedProcedure
-    .input(z.object({ from: z.string(), to: z.string() }))
+    .input(z.object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }))
     .query(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return null;
-      const [totals] = await db.select({
-        totalBookings: sql<number>`COUNT(*)`,
-        paidBookings: sql<number>`SUM(CASE WHEN ${massageSales.status} = 'paid' THEN 1 ELSE 0 END)`,
-        totalRevenue: sql<string>`COALESCE(SUM(CASE WHEN ${massageSales.status} = 'paid' THEN ${massageSales.amount} ELSE 0 END), 0)`,
-        grossRevenue: sql<string>`COALESCE(SUM(CASE WHEN ${massageSales.status} = 'paid' THEN ${massageSales.originalAmount} ELSE 0 END), 0)`,
-        totalDiscounted: sql<string>`COALESCE(SUM(CASE WHEN ${massageSales.status} = 'paid' THEN ${massageSales.discountAmount} ELSE 0 END), 0)`,
-        salesWithDiscount: sql<number>`SUM(CASE WHEN ${massageSales.status} = 'paid' AND ${massageSales.discountAmount} > 0 THEN 1 ELSE 0 END)`,
-        completedBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'completed' THEN 1 ELSE 0 END)`,
-        cancelledBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'cancelled' THEN 1 ELSE 0 END)`,
-      }).from(massageSales)
-        .leftJoin(massageBookings, eq(massageSales.bookingId, massageBookings.id))
-        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any)));
+
+      const addDays = (date: string, days: number) => {
+        const value = new Date(`${date}T12:00:00Z`);
+        value.setUTCDate(value.getUTCDate() + days);
+        return value.toISOString().slice(0, 10);
+      };
+      const dateDiff = Math.round(
+        (Date.parse(`${input.to}T12:00:00Z`) - Date.parse(`${input.from}T12:00:00Z`)) / 86_400_000,
+      );
+      if (dateDiff < 0 || dateDiff > 730) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "El rango de fechas no es válido." });
+      }
+      const previousTo = addDays(input.from, -1);
+      const isCompleteCalendarMonth = input.from.endsWith("-01") && addDays(input.to, 1).endsWith("-01");
+      const previousFrom = isCompleteCalendarMonth
+        ? previousTo.slice(0, 8) + "01"
+        : addDays(previousTo, -dateDiff);
+      const today = getChileDateString();
+      const tomorrow = addDays(today, 1);
+      const todayStart = chileLocalDateTimeToUtc(today, "00:00");
+      const tomorrowStart = chileLocalDateTimeToUtc(tomorrow, "00:00");
+
+      const [
+        salesTotalsRows,
+        previousSalesRows,
+        todayPaymentsRows,
+        standardPeriod,
+        programPeriod,
+        standardToday,
+        programToday,
+        standardCreatedToday,
+        programCreatedToday,
+        allStandardCustomers,
+        allProgramCustomers,
+        npsRows,
+      ] = await Promise.all([
+        db.select({
+          amount: massageSales.amount,
+          originalAmount: massageSales.originalAmount,
+          discountAmount: massageSales.discountAmount,
+          paymentMethod: massageSales.paymentMethod,
+          status: massageSales.status,
+        }).from(massageSales).where(and(
+          gte(massageSales.serviceDate, input.from as any),
+          lte(massageSales.serviceDate, input.to as any),
+        )),
+        db.select({ amount: massageSales.amount, status: massageSales.status })
+          .from(massageSales).where(and(
+            gte(massageSales.serviceDate, previousFrom as any),
+            lte(massageSales.serviceDate, previousTo as any),
+          )),
+        db.select({ amount: massageSales.amount }).from(massageSales).where(and(
+          gte(massageSales.soldAt, todayStart),
+          lt(massageSales.soldAt, tomorrowStart),
+          eq(massageSales.status, "paid"),
+        )),
+        db.select({
+          status: massageBookings.status,
+          startTime: massageBookings.startTime,
+          bookingSource: massageBookings.bookingSource,
+        }).from(massageBookings).where(and(
+          gte(massageBookings.bookingDate, input.from as any),
+          lte(massageBookings.bookingDate, input.to as any),
+        )),
+        db.select({
+          status: massageProgramBookings.status,
+          startTime: massageProgramBookings.startTime,
+        }).from(massageProgramBookings).where(and(
+          gte(massageProgramBookings.bookingDate, input.from as any),
+          lte(massageProgramBookings.bookingDate, input.to as any),
+        )),
+        db.select({
+          status: massageBookings.status,
+          bookingSource: massageBookings.bookingSource,
+        }).from(massageBookings).where(eq(massageBookings.bookingDate, today as any)),
+        db.select({ status: massageProgramBookings.status })
+          .from(massageProgramBookings).where(eq(massageProgramBookings.bookingDate, today as any)),
+        db.select({ id: massageBookings.id }).from(massageBookings).where(and(
+          gte(massageBookings.createdAt, todayStart),
+          lt(massageBookings.createdAt, tomorrowStart),
+        )),
+        db.select({ id: massageProgramBookings.id }).from(massageProgramBookings).where(and(
+          gte(massageProgramBookings.createdAt, todayStart),
+          lt(massageProgramBookings.createdAt, tomorrowStart),
+        )),
+        db.select({
+          email: massageBookings.clientEmail,
+          phone: massageBookings.clientPhone,
+          name: massageBookings.clientName,
+          bookingDate: massageBookings.bookingDate,
+        }).from(massageBookings).where(lte(massageBookings.bookingDate, input.to as any)),
+        db.select({
+          email: massageProgramBookings.clientEmail,
+          phone: massageProgramBookings.clientPhone,
+          name: massageProgramBookings.clientName,
+          bookingDate: massageProgramBookings.bookingDate,
+        }).from(massageProgramBookings).where(lte(massageProgramBookings.bookingDate, input.to as any)),
+        db.select({
+          id: massageNpsResponses.id,
+          clientName: massageNpsResponses.clientName,
+          serviceName: massageNpsResponses.serviceName,
+          serviceDate: massageNpsResponses.serviceDate,
+          score: massageNpsResponses.score,
+          comment: massageNpsResponses.comment,
+          deliveryStatus: massageNpsResponses.deliveryStatus,
+          respondedAt: massageNpsResponses.respondedAt,
+        }).from(massageNpsResponses).where(and(
+          gte(massageNpsResponses.serviceDate, input.from as any),
+          lte(massageNpsResponses.serviceDate, input.to as any),
+        )).orderBy(desc(massageNpsResponses.respondedAt)),
+      ]);
+
+      const paidSales = salesTotalsRows.filter((sale) => sale.status === "paid");
+      const revenue = paidSales.reduce((sum, sale) => sum + Number(sale.amount), 0);
+      const previousRevenue = previousSalesRows
+        .filter((sale) => sale.status === "paid")
+        .reduce((sum, sale) => sum + Number(sale.amount), 0);
+      const revenueChangePercent = previousRevenue > 0
+        ? ((revenue - previousRevenue) / previousRevenue) * 100
+        : revenue > 0 ? 100 : 0;
+      const onlineRevenue = paidSales
+        .filter((sale) => sale.paymentMethod === "getnet")
+        .reduce((sum, sale) => sum + Number(sale.amount), 0);
+      const otherRevenue = paidSales
+        .filter((sale) => sale.paymentMethod !== "getnet")
+        .reduce((sum, sale) => sum + Number(sale.amount), 0);
+      const allPeriodBookings = [...standardPeriod, ...programPeriod];
+      const confirmedBookings = allPeriodBookings.filter(
+        (booking) => booking.status === "confirmed" || booking.status === "completed",
+      ).length;
+      const cancelledBookings = allPeriodBookings.filter((booking) => booking.status === "cancelled").length;
+      const completedBookings = allPeriodBookings.filter((booking) => booking.status === "completed").length;
+      const hourly = Array.from({ length: 24 }, (_, hour) => ({
+        hour,
+        label: `${String(hour).padStart(2, "0")}:00`,
+        reservations: 0,
+      }));
+      for (const booking of allPeriodBookings) {
+        if (booking.status === "cancelled") continue;
+        const hour = Number(booking.startTime.slice(0, 2));
+        if (hourly[hour]) hourly[hour].reservations += 1;
+      }
+
+      const customerKey = (customer: { email: string | null; phone: string | null; name: string }) => {
+        const email = customer.email?.trim().toLowerCase();
+        if (email) return `email:${email}`;
+        const phone = customer.phone?.replace(/\D/g, "");
+        if (phone) return `phone:${phone}`;
+        return `name:${customer.name.trim().toLowerCase()}`;
+      };
+      const firstBooking = new Map<string, string>();
+      for (const customer of [...allStandardCustomers, ...allProgramCustomers]) {
+        const date = serializeDateOnly(customer.bookingDate) ?? "";
+        const key = customerKey(customer);
+        const current = firstBooking.get(key);
+        if (!current || date < current) firstBooking.set(key, date);
+      }
+      const newCustomers = Array.from(firstBooking.values())
+        .filter((date) => date >= input.from && date <= input.to).length;
+
+      const npsAnswers = npsRows.filter((response) => response.score !== null);
+      const promoters = npsAnswers.filter((response) => Number(response.score) >= 9).length;
+      const passives = npsAnswers.filter((response) => Number(response.score) >= 7 && Number(response.score) <= 8).length;
+      const detractors = npsAnswers.filter((response) => Number(response.score) <= 6).length;
+      const npsScore = npsAnswers.length
+        ? Math.round(((promoters - detractors) / npsAnswers.length) * 100)
+        : null;
+      const averageNps = npsAnswers.length
+        ? npsAnswers.reduce((sum, response) => sum + Number(response.score), 0) / npsAnswers.length
+        : null;
+      const sentNps = npsRows.filter((response) => response.deliveryStatus === "sent").length;
+
+      const totals = {
+        totalBookings: allPeriodBookings.length,
+        paidBookings: paidSales.length,
+        totalRevenue: revenue,
+        grossRevenue: paidSales.reduce((sum, sale) => sum + Number(sale.originalAmount), 0),
+        totalDiscounted: paidSales.reduce((sum, sale) => sum + Number(sale.discountAmount), 0),
+        salesWithDiscount: paidSales.filter((sale) => Number(sale.discountAmount) > 0).length,
+        completedBookings,
+        confirmedBookings,
+        cancelledBookings,
+        newCustomers,
+      };
+
+      const daily = {
+        date: today,
+        reservationsForToday: [...standardToday, ...programToday]
+          .filter((booking) => booking.status !== "cancelled").length,
+        reservationsCreatedToday: standardCreatedToday.length + programCreatedToday.length,
+        paymentsReceivedToday: todayPaymentsRows.reduce((sum, sale) => sum + Number(sale.amount), 0),
+        massageServicesToday: standardToday.filter((booking) => booking.status !== "cancelled").length,
+        webMassageServicesToday: standardToday.filter(
+          (booking) => booking.status !== "cancelled" && booking.bookingSource === "web",
+        ).length,
+        skeduProgramsToday: programToday.filter((booking) => booking.status !== "cancelled").length,
+      };
+
+      const period = {
+        from: input.from,
+        to: input.to,
+        previousFrom,
+        previousTo,
+        previousRevenue,
+        revenueChangePercent,
+        onlineRevenue,
+        otherRevenue,
+        massageServices: standardPeriod.length,
+        webMassageServices: standardPeriod.filter((booking) => booking.bookingSource === "web").length,
+        skeduPrograms: programPeriod.length,
+        hourly: hourly.filter((row) => row.reservations > 0),
+      };
+
+      const nps = {
+        score: npsScore,
+        average: averageNps,
+        responses: npsAnswers.length,
+        sent: sentNps,
+        responseRate: sentNps > 0 ? (npsAnswers.length / sentNps) * 100 : 0,
+        promoters,
+        passives,
+        detractors,
+        recent: npsAnswers.slice(0, 10).map((response) => ({
+          ...response,
+          serviceDate: serializeDateOnly(response.serviceDate),
+        })),
+      };
 
       const byTechnique = await db.select({
         techniqueName: massageSales.techniqueName, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
@@ -2017,7 +2237,7 @@ const analyticsRouter = router({
         .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
         .groupBy(massageTherapists.name).orderBy(desc(sql`COUNT(*)`));
 
-      return { totals, byTechnique, byDuration, byTherapist };
+      return { totals, daily, period, nps, byTechnique, byDuration, byTherapist };
     }),
 
   history: protectedProcedure
@@ -2549,6 +2769,58 @@ async function sendPublicMassageBookingNotifications(
 }
 
 const masajesPublicRouter = router({
+  getNpsSurvey: publicProcedure
+    .input(z.object({ token: z.string().regex(/^[a-f0-9]{48}$/) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [survey] = await db.select({
+        clientName: massageNpsResponses.clientName,
+        serviceName: massageNpsResponses.serviceName,
+        serviceDate: massageNpsResponses.serviceDate,
+        score: massageNpsResponses.score,
+        respondedAt: massageNpsResponses.respondedAt,
+      }).from(massageNpsResponses)
+        .where(eq(massageNpsResponses.surveyToken, input.token))
+        .limit(1);
+      if (!survey) throw new TRPCError({ code: "NOT_FOUND", message: "Esta encuesta no existe o ya no está disponible." });
+      return {
+        ...survey,
+        serviceDate: serializeDateOnly(survey.serviceDate),
+        alreadyResponded: survey.respondedAt !== null,
+      };
+    }),
+
+  submitNps: publicProcedure
+    .input(z.object({
+      token: z.string().regex(/^[a-f0-9]{48}$/),
+      score: z.number().int().min(0).max(10),
+      comment: z.string().trim().max(1500).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [survey] = await db.select({
+        id: massageNpsResponses.id,
+        respondedAt: massageNpsResponses.respondedAt,
+      }).from(massageNpsResponses)
+        .where(eq(massageNpsResponses.surveyToken, input.token))
+        .limit(1);
+      if (!survey) throw new TRPCError({ code: "NOT_FOUND", message: "Esta encuesta no existe o ya no está disponible." });
+      if (survey.respondedAt) {
+        throw new TRPCError({ code: "CONFLICT", message: "Esta encuesta ya fue respondida. ¡Muchas gracias!" });
+      }
+      await db.update(massageNpsResponses).set({
+        score: input.score,
+        comment: input.comment || null,
+        respondedAt: new Date(),
+      }).where(and(
+        eq(massageNpsResponses.id, survey.id),
+        sql`${massageNpsResponses.respondedAt} IS NULL`,
+      ));
+      return { success: true };
+    }),
+
   getCatalog: publicProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
@@ -2867,6 +3139,7 @@ const masajesPublicRouter = router({
 
       await db.insert(massageBookings).values({
         ...bookingData,
+        bookingSource: "web",
         therapistId: assignment.therapist.id,
         roomId: assignment.room.id,
         endTime: assignment.endTime,
@@ -2997,6 +3270,7 @@ const masajesPublicRouter = router({
       const { subscribeNewsletter, ...bookingData } = input;
       const [inserted] = await db.insert(massageBookings).values({
         ...bookingData,
+        bookingSource: "web",
         therapistId: assignment.therapist.id,
         roomId: assignment.room.id,
         endTime: assignment.endTime,
@@ -3206,6 +3480,7 @@ const masajesPublicRouter = router({
           discountCodeId: discountResult?.discountCodeId,
           discountCode: discountResult?.code,
           status: "pending",
+          bookingSource: "web",
         }).$returningId();
         bookingIds.push(inserted.id);
       }

@@ -8,7 +8,22 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
-import { BarChart3, TrendingUp, CalendarCheck, XCircle, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  BarChart3,
+  TrendingUp,
+  CalendarCheck,
+  XCircle,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
+  CircleDollarSign,
+  Clock3,
+  Globe2,
+  MessageCircleHeart,
+  UserPlus,
+  WalletCards,
+} from "lucide-react";
 import { toast } from "sonner";
 
 const fmt = (d: Date) => format(d, "yyyy-MM-dd");
@@ -38,6 +53,8 @@ export default function MasajesAnalytics() {
   const completed = Number(data?.totals?.completedBookings ?? 0);
   const cancelled = Number(data?.totals?.cancelledBookings ?? 0);
   const avgTicket = paidBookings > 0 ? totalRevenue / paidBookings : 0;
+  const money = (value: number) => `$ ${value.toLocaleString("es-CL", { maximumFractionDigits: 0 })}`;
+  const maxHourly = Math.max(1, ...(data?.period.hourly.map(row => row.reservations) ?? [1]));
 
   const downloadExcel = async () => {
     try {
@@ -120,6 +137,71 @@ export default function MasajesAnalytics() {
           <Card><CardContent className="py-12 text-center text-muted-foreground">Sin datos para el período seleccionado.</CardContent></Card>
         ) : (
           <>
+            <div>
+              <h2 className="mb-3 text-lg font-semibold">Resumen de hoy</h2>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <Card>
+                  <CardHeader className="pb-1">
+                    <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <CalendarDays className="h-4 w-4" /> Reservas para hoy
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-1">
+                    <p className="text-2xl font-bold">{data.daily.reservationsForToday}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {data.daily.massageServicesToday} masajes · {data.daily.skeduProgramsToday} programas Skedu
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-1">
+                    <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <CalendarCheck className="h-4 w-4" /> Reservas creadas hoy
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-1">
+                    <p className="text-2xl font-bold">{data.daily.reservationsCreatedToday}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Creadas durante el día calendario de Chile</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-1">
+                    <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <CircleDollarSign className="h-4 w-4" /> Pagos recibidos hoy
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-1">
+                    <p className="text-2xl font-bold">{money(data.daily.paymentsReceivedToday)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Pagos registrados hoy, sin importar fecha del masaje</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-1">
+                    <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <Globe2 className="h-4 w-4" /> Reservas vía web hoy
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-1">
+                    <p className="text-2xl font-bold">{data.daily.webMassageServicesToday}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Masaje solo vía web · Skedu: {data.daily.skeduProgramsToday}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Reporte del período</h2>
+                <p className="text-xs text-muted-foreground">{from} al {to}</p>
+              </div>
+              <Badge variant={data.period.revenueChangePercent >= 0 ? "outline" : "destructive"} className="whitespace-nowrap">
+                {data.period.revenueChangePercent >= 0 ? "+" : ""}
+                {data.period.revenueChangePercent.toFixed(1)}% vs. período anterior
+              </Badge>
+            </div>
+
             {/* KPIs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
@@ -166,11 +248,166 @@ export default function MasajesAnalytics() {
                 </CardContent>
               </Card>
             </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <Card>
+                <CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Reservas confirmadas</CardTitle></CardHeader>
+                <CardContent className="pt-1"><p className="text-xl font-bold text-emerald-700">{data.totals.confirmedBookings}</p></CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Reservas anuladas</CardTitle></CardHeader>
+                <CardContent className="pt-1"><p className="text-xl font-bold text-red-600">{data.totals.cancelledBookings}</p></CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-1">
+                  <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <UserPlus className="h-4 w-4" /> Clientes nuevos
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-1"><p className="text-xl font-bold">{data.totals.newCustomers}</p></CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Ingresos período anterior</CardTitle></CardHeader>
+                <CardContent className="pt-1">
+                  <p className="text-xl font-bold">{money(data.period.previousRevenue)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{data.period.previousFrom} al {data.period.previousTo}</p>
+                </CardContent>
+              </Card>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Ventas brutas</CardTitle></CardHeader><CardContent className="pt-1"><p className="text-xl font-bold">$ {grossRevenue.toLocaleString("es-CL")}</p></CardContent></Card>
               <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Descontado por códigos</CardTitle></CardHeader><CardContent className="pt-1"><p className="text-xl font-bold text-amber-700">$ {totalDiscounted.toLocaleString("es-CL")}</p></CardContent></Card>
               <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Ventas con código</CardTitle></CardHeader><CardContent className="pt-1"><p className="text-xl font-bold">{salesWithDiscount}</p></CardContent></Card>
             </div>
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <WalletCards className="h-4 w-4" /> Pagos online versus otros pagos
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  {[
+                    { label: "Pagos online (Getnet)", value: data.period.onlineRevenue, color: "bg-indigo-500" },
+                    { label: "Otros pagos (CMS manual)", value: data.period.otherRevenue, color: "bg-emerald-500" },
+                  ].map((payment) => {
+                    const percentage = totalRevenue > 0 ? (payment.value / totalRevenue) * 100 : 0;
+                    return (
+                      <div key={payment.label}>
+                        <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                          <span>{payment.label}</span>
+                          <span className="font-semibold">{money(payment.value)} · {percentage.toFixed(1)}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-muted">
+                          <div className={`h-full rounded-full ${payment.color}`} style={{ width: `${percentage}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="text-xs text-muted-foreground">
+                    Los programas Skedu no incluyen información de pago en el CMS y no se suman a ingresos.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Globe2 className="h-4 w-4" /> Origen de reservas
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border p-4">
+                    <p className="text-xs text-muted-foreground">Servicios de masaje</p>
+                    <p className="mt-1 text-2xl font-bold">{data.period.massageServices}</p>
+                  </div>
+                  <div className="rounded-lg border p-4">
+                    <p className="text-xs text-muted-foreground">Masajes vía web</p>
+                    <p className="mt-1 text-2xl font-bold">{data.period.webMassageServices}</p>
+                  </div>
+                  <div className="rounded-lg border p-4">
+                    <p className="text-xs text-muted-foreground">Programas Skedu</p>
+                    <p className="mt-1 text-2xl font-bold">{data.period.skeduPrograms}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Clock3 className="h-4 w-4" /> Reservas por rango horario
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {data.period.hourly.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">No hay reservas en el período.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {data.period.hourly.map((row) => (
+                      <div key={row.hour} className="grid grid-cols-[52px_1fr_32px] items-center gap-3">
+                        <span className="text-xs text-muted-foreground">{row.label}</span>
+                        <div className="h-3 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-400"
+                            style={{ width: `${(row.reservations / maxHourly) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-right text-sm font-semibold">{row.reservations}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <MessageCircleHeart className="h-4 w-4" /> NPS de masajes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+                  <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">NPS</p><p className="mt-1 text-2xl font-bold">{data.nps.score ?? "—"}</p></div>
+                  <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Promedio</p><p className="mt-1 text-2xl font-bold">{data.nps.average?.toFixed(1) ?? "—"}</p></div>
+                  <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Respuestas</p><p className="mt-1 text-2xl font-bold">{data.nps.responses}</p></div>
+                  <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Tasa respuesta</p><p className="mt-1 text-2xl font-bold">{data.nps.responseRate.toFixed(1)}%</p></div>
+                  <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Promotores</p><p className="mt-1 text-2xl font-bold text-emerald-700">{data.nps.promoters}</p></div>
+                  <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">Detractores</p><p className="mt-1 text-2xl font-bold text-red-600">{data.nps.detractors}</p></div>
+                </div>
+                {data.nps.recent.length > 0 && (
+                  <div className="mt-5 overflow-x-auto">
+                    <table className="w-full min-w-[650px] text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-muted-foreground">
+                          <th className="py-2 pr-4 font-medium">Fecha</th>
+                          <th className="py-2 pr-4 font-medium">Cliente</th>
+                          <th className="py-2 pr-4 font-medium">Servicio</th>
+                          <th className="py-2 pr-4 font-medium">Nota</th>
+                          <th className="py-2 font-medium">Comentario</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.nps.recent.map((response) => (
+                          <tr key={response.id} className="border-b last:border-0">
+                            <td className="py-3 pr-4 whitespace-nowrap">{response.serviceDate}</td>
+                            <td className="py-3 pr-4">{response.clientName}</td>
+                            <td className="py-3 pr-4">{response.serviceName}</td>
+                            <td className="py-3 pr-4 font-semibold">{response.score}/10</td>
+                            <td className="py-3">{response.comment || "Sin comentario"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="mt-4 text-xs text-muted-foreground">
+                  La encuesta se envía automáticamente por WhatsApp 30 minutos después de terminar el masaje.
+                  NPS = % promotores (9–10) menos % detractores (0–6).
+                </p>
+              </CardContent>
+            </Card>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Por técnica */}
