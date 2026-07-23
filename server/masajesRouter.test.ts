@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildInhouseMonthRotation,
+  buildRecurringMassageAvailability,
   buildPublicMassageBookingNotifications,
   getChileDateString,
   getChileTimeString,
+  getRecurringMassageAvailabilityHorizon,
   expandSkeduProgramResourceBlocks,
   isSkeduProgramDurationAllowed,
   listAutomaticMassageSlots,
@@ -16,6 +18,75 @@ import {
   validateSkeduTherapistSelection,
   validateSimultaneousMassageLeadTime,
 } from "./masajesRouter";
+
+describe("recurring therapist availability", () => {
+  it("expands enabled weekly schedules into concrete future dates", () => {
+    const availability = buildRecurringMassageAvailability({
+      from: "2026-07-06",
+      to: "2026-07-15",
+      schedules: [
+        {
+          therapistId: 10,
+          dayOfWeek: 1,
+          startTime: "10:00",
+          endTime: "18:00",
+          available: 1,
+        },
+        {
+          therapistId: 10,
+          dayOfWeek: 2,
+          startTime: "10:00",
+          endTime: "18:00",
+          available: 0,
+        },
+      ],
+    });
+
+    expect(availability.map((entry) => entry.date)).toEqual(["2026-07-06", "2026-07-13"]);
+    expect(availability[0]).toEqual(expect.objectContaining({
+      therapistId: 10,
+      isAvailable: 1,
+      startTime: "10:00",
+      endTime: "18:00",
+      generationSource: "weekly_schedule",
+    }));
+  });
+
+  it("keeps temporary absences blocked but restores the recurring hours outside the range", () => {
+    const availability = buildRecurringMassageAvailability({
+      from: "2026-07-07",
+      to: "2026-07-21",
+      schedules: [{
+        therapistId: 12,
+        dayOfWeek: 2,
+        startTime: "14:00",
+        endTime: "22:00",
+        available: 1,
+        blockFrom: "2026-07-08",
+        blockTo: "2026-07-14",
+        blockReason: "Vacaciones",
+      }],
+    });
+
+    expect(availability).toEqual([
+      expect.objectContaining({ date: "2026-07-07", isAvailable: 1, startTime: "14:00" }),
+      expect.objectContaining({
+        date: "2026-07-14",
+        isAvailable: 0,
+        startTime: null,
+        blockNotes: "Vacaciones",
+      }),
+      expect.objectContaining({ date: "2026-07-21", isAvailable: 1, startTime: "14:00" }),
+    ]);
+  });
+
+  it("maintains a rolling horizon through the end of the twelfth future month", () => {
+    expect(getRecurringMassageAvailabilityHorizon(new Date("2026-07-23T16:00:00.000Z"))).toEqual({
+      from: "2026-07-23",
+      to: "2027-07-31",
+    });
+  });
+});
 
 describe("Skedu massage programs", () => {
   it("allows 30 and 50 minutes for every Reconecta variant and only 30 for Reset", () => {

@@ -195,7 +195,7 @@ export default function MasajesTerapeutas() {
     onSuccess: () => { utils.masajes.terapeutas.getAll.invalidate(); toast.success("Terapeuta actualizado"); setOpen(false); },
     onError: e => toast.error(e.message),
   });
-  const scheduleMut = trpc.masajes.terapeutas.upsertSchedule.useMutation({
+  const saveSchedulesMut = trpc.masajes.terapeutas.saveSchedules.useMutation({
     onError: e => toast.error(e.message),
   });
   const blockMut = trpc.masajes.terapeutas.blockAvailability.useMutation({
@@ -277,19 +277,26 @@ export default function MasajesTerapeutas() {
 
   const handleSaveSchedules = async () => {
     if (!editing) return;
-    let saved = 0;
-    for (const row of scheduleRows) {
-      await scheduleMut.mutateAsync({
+    try {
+      await saveSchedulesMut.mutateAsync({
         therapistId: editing,
-        dayOfWeek: row.dayOfWeek,
-        startTime: row.startTime,
-        endTime: row.endTime,
-        available: row.available ? 1 : 0,
+        schedules: scheduleRows.map((row) => ({
+          dayOfWeek: row.dayOfWeek,
+          startTime: row.startTime,
+          endTime: row.endTime,
+          available: row.available ? 1 : 0,
+        })),
       });
-      saved++;
+      await Promise.all([
+        utils.masajes.terapeutas.getAll.invalidate(),
+        utils.masajes.terapeutas.getSchedules.invalidate(),
+        utils.masajes.disponibilidad.getMonth.invalidate(),
+        utils.masajes.disponibilidad.getAllForMonth.invalidate(),
+      ]);
+      toast.success("Horario guardado y disponibilidad actualizada por 12 meses");
+    } catch {
+      // El mensaje específico se muestra desde onError.
     }
-    utils.masajes.terapeutas.getAll.invalidate();
-    toast.success(`Horario guardado (${saved} días)`);
   };
 
   const openBlockDialog = (dayOfWeek: number) => {
@@ -319,7 +326,7 @@ export default function MasajesTerapeutas() {
     if (!vacationFrom || !vacationTo) { toast.error("Indica las fechas del período de ausencia"); return; }
     if (vacationFrom > vacationTo) { toast.error("La fecha de inicio debe ser anterior al fin"); return; }
     // Solo bloquea los días que ya tienen fila en la DB (id definido)
-    const daysWithSchedule = scheduleRows.filter(r => r.id !== undefined);
+    const daysWithSchedule = scheduleRows.filter(r => r.id !== undefined && r.available);
     if (daysWithSchedule.length === 0) {
       toast.error("Guarda el horario primero antes de aplicar un bloqueo general");
       return;
@@ -557,7 +564,9 @@ export default function MasajesTerapeutas() {
                     <div>
                       <p className="text-sm font-medium mb-2">Horario semanal</p>
                       <p className="text-xs text-muted-foreground mb-3">
-                        Configura días y horarios habituales. Usa "Bloquear" para excepciones puntuales por día.
+                        Configura días y horarios habituales. Al guardar, se actualizará automáticamente
+                        el calendario de los próximos 12 meses y cada nuevo mes futuro.
+                        Usa "Bloquear" para excepciones puntuales por día.
                         {form.type === "freelance" && " (Martes a Domingo)"}
                       </p>
                     </div>
@@ -620,8 +629,8 @@ export default function MasajesTerapeutas() {
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setOpen(false)}>Cerrar</Button>
-                      <Button onClick={handleSaveSchedules} disabled={scheduleMut.isPending}>
-                        Guardar horario
+                      <Button onClick={handleSaveSchedules} disabled={saveSchedulesMut.isPending}>
+                        {saveSchedulesMut.isPending ? "Actualizando calendario..." : "Guardar horario"}
                       </Button>
                     </DialogFooter>
                   </div>

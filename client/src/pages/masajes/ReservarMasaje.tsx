@@ -368,7 +368,7 @@ export default function ReservarMasaje() {
                       available: "text-teal-700 [&_button]:font-semibold [&_button]:hover:bg-teal-50",
                     }}
                     startMonth={startOfMonth(todayDate)}
-                    endMonth={addMonths(startOfMonth(todayDate), 6)}
+                    endMonth={addMonths(startOfMonth(todayDate), 12)}
                     showOutsideDays={false}
                     className="w-full p-0 [--cell-size:2.5rem] sm:[--cell-size:3rem] [&_[data-selected-single=true]]:!bg-teal-600 [&_[data-selected-single=true]]:!text-white"
                     classNames={{ root: "w-full" }}

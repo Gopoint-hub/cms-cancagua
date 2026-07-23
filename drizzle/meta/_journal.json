@@ -141,6 +141,13 @@
       "when": 1784833200000,
       "tag": "0023_massage_cancellation_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1784836800000,
+      "tag": "0024_recurring_massage_availability",
+      "breakpoints": true
     }
   ]
 }

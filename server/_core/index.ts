@@ -16,6 +16,7 @@ import publicMasajesCatalog from "../publicMasajesCatalog";
 import { checkWhatsAppHealth } from "./whapi";
 import { checkGitHubBlogHealth } from "../githubBlogHealth";
 import { ensureMassageDiscountSchema } from "../ensureMassageDiscountSchema";
+import { ensureMassageAvailabilitySchema } from "../ensureMassageAvailabilitySchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -38,6 +39,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   await ensureMassageDiscountSchema();
+  await ensureMassageAvailabilitySchema();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
