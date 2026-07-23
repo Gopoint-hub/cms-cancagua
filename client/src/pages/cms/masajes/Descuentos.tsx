@@ -135,16 +135,16 @@ export default function MasajesDescuentos() {
             <h1 className="text-2xl font-semibold">Códigos de descuento</h1>
             <p className="text-sm text-muted-foreground">Promociones exclusivas para servicios de masajes</p>
           </div>
-          <Button onClick={() => { setForm(emptyForm); setOpen(true); }}><Plus className="w-4 h-4 mr-2" />Nuevo código</Button>
+          <Button className="w-full sm:w-auto" onClick={() => { setForm(emptyForm); setOpen(true); }}><Plus className="w-4 h-4 mr-2" />Nuevo código</Button>
         </div>
         <Card>
           <CardContent className="p-4 flex flex-wrap gap-3">
-            <div className="relative min-w-[240px] flex-1">
+            <div className="relative min-w-0 w-full flex-1 sm:min-w-[240px]">
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por código o nombre" className="pl-9" />
             </div>
-            <Button variant="outline" onClick={() => setDescending((value) => !value)}>Orden {descending ? "Z–A" : "A–Z"}</Button>
-            <Button variant="outline" onClick={download} disabled={!visible.length}><Download className="w-4 h-4 mr-2" />Excel</Button>
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setDescending((value) => !value)}>Orden {descending ? "Z–A" : "A–Z"}</Button>
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={download} disabled={!visible.length}><Download className="w-4 h-4 mr-2" />Excel</Button>
           </CardContent>
         </Card>
         <Card>

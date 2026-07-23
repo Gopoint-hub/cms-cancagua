@@ -177,12 +177,12 @@ export default function MasajesTecnicas() {
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-wide">Técnicas</h1>
             <p className="text-muted-foreground text-sm mt-1">Tipos de masaje, precios y recetas de insumos</p>
           </div>
-          <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva técnica</Button>
+          <Button className="w-full sm:w-auto" onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva técnica</Button>
         </div>
 
         {isLoading ? (
@@ -196,11 +196,11 @@ export default function MasajesTecnicas() {
               return (
                 <Card key={t.id}>
                   <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                       {t.imageUrl ? (
-                        <img src={t.imageUrl} alt={t.name} className="h-20 w-28 rounded-md object-cover border" />
+                        <img src={t.imageUrl} alt={t.name} className="h-36 w-full rounded-md object-cover border sm:h-20 sm:w-28" />
                       ) : (
-                        <div className="h-20 w-28 rounded-md border bg-muted flex items-center justify-center text-muted-foreground">
+                        <div className="h-28 w-full rounded-md border bg-muted flex items-center justify-center text-muted-foreground sm:h-20 sm:w-28">
                           <ImageIcon className="w-5 h-5" />
                         </div>
                       )}
@@ -222,7 +222,7 @@ export default function MasajesTecnicas() {
                           })}
                         </div>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex w-full flex-wrap justify-end gap-1 sm:w-auto sm:flex-nowrap">
                         <Button size="sm" variant="ghost" onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}>
                           {expandedId === t.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                           <span className="text-xs ml-1">Insumos</span>
@@ -245,7 +245,7 @@ export default function MasajesTecnicas() {
 
                     {expandedId === t.id && (
                       <div className="mt-4 border-t pt-4">
-                        <div className="flex items-center justify-between mb-3">
+                        <div className="mb-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <span className="text-sm font-medium">Insumos requeridos por sesión</span>
                           <Button size="sm" variant="outline" onClick={() => { setRecipeForm(emptyRecipe); setRecipeOpen(true); }}>
                             <Plus className="w-3 h-3 mr-1" />Agregar insumo
@@ -254,13 +254,13 @@ export default function MasajesTecnicas() {
                         {!recipes || recipes.length === 0 ? (
                           <p className="text-sm text-muted-foreground">Sin insumos asignados.</p>
                         ) : (
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-5 gap-2 text-xs text-muted-foreground font-medium px-2">
+                          <div className="space-y-2 overflow-x-auto pb-1">
+                            <div className="grid min-w-[420px] grid-cols-5 gap-2 text-xs text-muted-foreground font-medium px-2">
                               <span className="col-span-2">Insumo</span>
                               {durs.map(d => <span key={d}>{d} min</span>)}
                             </div>
                             {recipes.map(r => (
-                              <div key={r.id} className="grid grid-cols-5 gap-2 items-center text-sm border rounded-lg px-2 py-2">
+                              <div key={r.id} className="grid min-w-[420px] grid-cols-5 gap-2 items-center text-sm border rounded-lg px-2 py-2">
                                 <span className="col-span-2 font-medium">{r.supplyName} ({r.unit})</span>
                                 <span>{r.quantityPer50min}</span>
                                 <span>{r.quantityPer80min ?? "—"}</span>
@@ -304,7 +304,7 @@ export default function MasajesTecnicas() {
       <Dialog open={open} onOpenChange={o => { setOpen(o); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex flex-wrap items-center gap-2">
               {editing ? "Editar técnica" : "Nueva técnica"}
               {!editing && <span className="text-xs font-normal text-muted-foreground flex items-center gap-1"><Save className="w-3 h-3" />Borrador guardado automáticamente</span>}
             </DialogTitle>

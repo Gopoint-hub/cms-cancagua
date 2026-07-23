@@ -76,7 +76,7 @@ function TherapistCard({
   return (
     <Card className={t.active === 0 ? "opacity-50" : ""}>
       <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold">{t.name}</span>
@@ -106,7 +106,7 @@ function TherapistCard({
             )}
             {t.notes && <p className="text-xs text-muted-foreground mt-2 italic">"{t.notes}"</p>}
           </div>
-          <div className="flex gap-1 shrink-0">
+          <div className="flex justify-end gap-1 sm:shrink-0">
             <Button
               size="sm"
               variant="ghost"
@@ -355,12 +355,12 @@ export default function MasajesTerapeutas() {
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-wide">Terapeutas</h1>
             <p className="text-muted-foreground text-sm mt-1">Gestión de terapeutas inhouse y freelance</p>
           </div>
-          <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Agregar terapeuta</Button>
+          <Button className="w-full sm:w-auto" onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Agregar terapeuta</Button>
         </div>
 
         <Tabs defaultValue="inhouse">
@@ -396,7 +396,7 @@ export default function MasajesTerapeutas() {
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+              <DialogTitle className="flex flex-wrap items-center gap-2">
                 {editing ? "Editar terapeuta" : "Nuevo terapeuta"}
                 {!editing && (
                   <span className="text-xs font-normal text-muted-foreground flex items-center gap-1 ml-2">

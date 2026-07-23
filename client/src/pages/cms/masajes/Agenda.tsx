@@ -417,21 +417,21 @@ export default function MasajesAgenda() {
             <h1 className="text-2xl font-semibold tracking-wide">Agenda</h1>
             <p className="text-muted-foreground text-sm mt-1">Reservas de masajes</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <Button variant="outline" onClick={() => setSkeduOpen(true)}>Agregar programa Skedu</Button>
-            <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
+          <div className="flex w-full gap-2 flex-wrap sm:w-auto">
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setSkeduOpen(true)}>Agregar programa Skedu</Button>
+            <Button className="flex-1 sm:flex-none" onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
           </div>
         </div>
 
         {/* Controles de navegación y vista */}
         <div className="flex items-center gap-3 flex-wrap">
           {/* Toggle HOY / SEMANA / MES */}
-          <div className="flex rounded-lg border overflow-hidden">
+          <div className="flex w-full rounded-lg border overflow-hidden sm:w-auto">
             {(["day", "week", "month"] as ViewMode[]).map((v) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`min-h-10 flex-1 px-3 py-1.5 text-sm font-medium transition-colors sm:min-h-0 sm:flex-none ${
                   view === v ? "bg-stone-800 text-white" : "bg-background hover:bg-accent text-foreground"
                 }`}
               >
@@ -449,11 +449,11 @@ export default function MasajesAgenda() {
           </Button>
 
           {/* Navegación anterior/siguiente */}
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center gap-2 sm:w-auto">
             <Button variant="outline" size="icon" onClick={navPrev}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <span className="text-sm text-muted-foreground capitalize min-w-[200px] text-center">
+            <span className="min-w-0 flex-1 text-center text-sm capitalize text-muted-foreground sm:min-w-[200px]">
               {navLabel}
             </span>
             <Button variant="outline" size="icon" onClick={navNext}>
@@ -467,7 +467,7 @@ export default function MasajesAgenda() {
               type="date"
               value={selectedDate}
               onChange={e => setSelectedDate(e.target.value)}
-              className="w-40"
+              className="w-full sm:w-40"
             />
           )}
         </div>

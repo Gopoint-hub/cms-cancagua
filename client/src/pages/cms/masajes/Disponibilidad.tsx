@@ -119,7 +119,7 @@ function DayCell({
         <div className="flex flex-col items-center gap-0.5">
           <Sun className="w-3 h-3" />
           <span className="text-[10px]">AM</span>
-          {record.startTime && <span className="text-[9px] text-amber-600">{record.startTime}–{record.endTime}</span>}
+          {record.startTime && <span className="hidden text-[9px] text-amber-600 sm:inline">{record.startTime}–{record.endTime}</span>}
         </div>
       );
     } else if (record.shift === "pm") {
@@ -128,7 +128,7 @@ function DayCell({
         <div className="flex flex-col items-center gap-0.5">
           <Moon className="w-3 h-3" />
           <span className="text-[10px]">PM</span>
-          {record.startTime && <span className="text-[9px] text-indigo-600">{record.startTime}–{record.endTime}</span>}
+          {record.startTime && <span className="hidden text-[9px] text-indigo-600 sm:inline">{record.startTime}–{record.endTime}</span>}
         </div>
       );
     } else if (record.isAvailable === 1) {
@@ -136,7 +136,7 @@ function DayCell({
       content = (
         <div className="flex flex-col items-center gap-0.5">
           <span className="text-[10px] font-medium">Disp.</span>
-          {record.startTime && <span className="text-[9px] text-green-600">{record.startTime}–{record.endTime}</span>}
+          {record.startTime && <span className="hidden text-[9px] text-green-600 sm:inline">{record.startTime}–{record.endTime}</span>}
         </div>
       );
     }
@@ -145,7 +145,7 @@ function DayCell({
   return (
     <button
       onClick={onClick}
-      className={`relative rounded-lg p-1.5 text-center cursor-pointer transition-all hover:opacity-80 min-h-[60px] flex flex-col items-center justify-start gap-0.5 w-full ${cellClass} ${isPast ? "opacity-50" : ""} ${isToday ? "ring-2 ring-primary" : ""}`}
+      className={`relative min-h-[52px] w-full overflow-hidden rounded-lg p-1 text-center cursor-pointer transition-all hover:opacity-80 flex flex-col items-center justify-start gap-0.5 sm:min-h-[60px] sm:p-1.5 ${cellClass} ${isPast ? "opacity-50" : ""} ${isToday ? "ring-2 ring-primary" : ""}`}
     >
       <span className={`text-xs font-semibold ${isToday ? "text-primary" : ""}`}>{day}</span>
       {content}

@@ -75,7 +75,7 @@ export default function MasajesClientes() {
                 onClick={() => c.clientEmail && setSelectedEmail(c.clientEmail)}
               >
                 <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between sm:gap-4">
                     <div className="flex-1">
                       <p className="font-semibold">{c.clientName}</p>
                       <div className="flex gap-3 flex-wrap mt-1 text-xs text-muted-foreground">
@@ -84,7 +84,7 @@ export default function MasajesClientes() {
                         {c.clientOrigin && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{c.clientOrigin}</span>}
                       </div>
                     </div>
-                    <div className="text-right text-sm shrink-0">
+                    <div className="w-full border-t pt-3 text-left text-sm sm:w-auto sm:border-0 sm:pt-0 sm:text-right">
                       <p className="font-semibold">{c.totalBookings} reserva{Number(c.totalBookings) !== 1 ? "s" : ""}</p>
                       {c.totalSpent && Number(c.totalSpent) > 0 && (
                         <p className="text-green-600 font-medium">$ {Number(c.totalSpent).toLocaleString("es-CL")}</p>

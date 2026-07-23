@@ -141,7 +141,7 @@ export default function MasajesDashboard() {
         {/* Asignación manual pendiente — siempre visible */}
         <Card className="border-amber-300 bg-amber-50">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2 text-amber-800">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2 text-amber-800">
               <UserX className="w-5 h-5" />
               Asignación manual pendiente
               {!loadingPending && pendingAssignment && pendingAssignment.length > 0 && (
@@ -167,7 +167,7 @@ export default function MasajesDashboard() {
                     b.freelanceApprovalStatus === "admin_rejected" ? "Sin terapeuta disponible" :
                     "Sin terapeuta asignado";
                   return (
-                    <div key={b.id} className="flex items-center justify-between border border-amber-200 rounded-lg p-3 bg-white">
+                    <div key={b.id} className="flex flex-col items-stretch gap-3 rounded-lg border border-amber-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <p className="font-medium text-sm truncate">{b.clientName}</p>
                         <p className="text-xs text-muted-foreground">
@@ -175,11 +175,11 @@ export default function MasajesDashboard() {
                         </p>
                         <p className="text-xs text-amber-700 mt-0.5">{reason}</p>
                       </div>
-                      <div className="flex gap-1 ml-3 shrink-0">
+                      <div className="flex flex-wrap gap-1 sm:ml-3 sm:shrink-0 sm:flex-nowrap">
                         <Button
                           variant="outline"
                           size="sm"
-                          className="text-xs border-amber-400 hover:bg-amber-100"
+                          className="flex-1 text-xs border-amber-400 hover:bg-amber-100 sm:flex-none"
                           onClick={() => notifyMut.mutate({ bookingId: b.id })}
                           disabled={notifyMut.isPending}
                           title="Enviar WhatsApp de confirmación al terapeuta asignado"
@@ -188,7 +188,7 @@ export default function MasajesDashboard() {
                           Notificar
                         </Button>
                         <Link href={`/cms/masajes/agenda?date=${b.bookingDate}`}>
-                          <Button variant="outline" size="sm" className="text-xs border-amber-400 hover:bg-amber-100">
+                          <Button variant="outline" size="sm" className="w-full text-xs border-amber-400 hover:bg-amber-100 sm:w-auto">
                             Asignar
                           </Button>
                         </Link>
@@ -197,7 +197,7 @@ export default function MasajesDashboard() {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                              className="flex-1 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 sm:flex-none"
                               disabled={dismissMut.isPending}
                               title="Eliminar de asignaciones pendientes"
                             >
@@ -238,7 +238,7 @@ export default function MasajesDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center justify-between">
+              <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
                 Reservas de hoy
                 <Link href="/cms/masajes/agenda">
                   <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver agenda completa →</span>
@@ -286,7 +286,7 @@ export default function MasajesDashboard() {
           {/* Alertas de stock */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center justify-between">
+              <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
                 <span className="flex items-center gap-1">
                   {(lowStock?.length ?? 0) > 0 && <AlertTriangle className="w-4 h-4 text-destructive" />}
                   Stock bajo
@@ -313,7 +313,7 @@ export default function MasajesDashboard() {
                   <div className="space-y-3">
                     <div className="space-y-2">
                       {paginated.map(s => (
-                        <div key={s.id} className="flex items-center justify-between border border-destructive/30 rounded-lg p-3 bg-destructive/5">
+                        <div key={s.id} className="flex flex-col gap-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3 sm:flex-row sm:items-center sm:justify-between">
                           <span className="text-sm font-medium">{s.name}</span>
                           <span className="text-sm text-destructive font-semibold whitespace-nowrap ml-2">
                             {s.currentStock} {s.unit} (mín: {s.minimumStock})

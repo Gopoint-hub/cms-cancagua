@@ -319,6 +319,7 @@ export default function DashboardLayout({
 
   return (
     <SidebarProvider
+      className="cms-shell"
       style={
         {
           "--sidebar-width": `${sidebarWidth}px`,
@@ -351,7 +352,7 @@ function DashboardLayoutContent({
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
-  const { state, toggleSidebar } = useSidebar();
+  const { state, toggleSidebar, setOpenMobile } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -449,7 +450,7 @@ function DashboardLayoutContent({
                     <CollapsibleTrigger asChild>
                       <button
                         className={cn(
-                          "flex items-center gap-2 w-full px-2 py-2 rounded-lg transition-colors text-left",
+                          "flex min-h-11 items-center gap-2 w-full px-2 py-2 rounded-lg transition-colors text-left md:min-h-0",
                           "hover:bg-accent/50",
                           hasActiveItem && "bg-accent/30"
                         )}
@@ -487,9 +488,12 @@ function DashboardLayoutContent({
                             <SidebarMenuItem key={item.path}>
                               <SidebarMenuButton
                                 isActive={isActive}
-                                onClick={() => setLocation(item.path)}
+                                onClick={() => {
+                                  setLocation(item.path);
+                                  if (isMobile) setOpenMobile(false);
+                                }}
                                 tooltip={item.label}
-                                className="h-9 transition-all font-normal"
+                                className="h-11 transition-all font-normal md:h-9"
                               >
                                 <item.icon
                                   className={cn("h-4 w-4", isActive && "text-primary")}
@@ -546,7 +550,7 @@ function DashboardLayoutContent({
           </SidebarFooter>
         </Sidebar>
         <div
-          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/20 transition-colors ${isCollapsed ? "hidden" : ""}`}
+          className={`absolute top-0 right-0 hidden w-1 h-full cursor-col-resize hover:bg-primary/20 transition-colors md:block ${isCollapsed ? "md:hidden" : ""}`}
           onMouseDown={() => {
             if (isCollapsed) return;
             setIsResizing(true);
@@ -557,18 +561,18 @@ function DashboardLayoutContent({
 
       <SidebarInset>
         {isMobile && (
-          <div className="flex border-b h-14 items-center justify-between bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
-            <div className="flex items-center gap-2">
-              <SidebarTrigger className="h-9 w-9 rounded-lg bg-background" />
-              <div className="flex items-center gap-3">
+          <div className="sticky top-0 z-40 flex min-h-14 items-center border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:backdrop-blur">
+            <div className="flex min-w-0 items-center gap-2">
+              <SidebarTrigger className="h-10 w-10 shrink-0 rounded-lg bg-background" />
+              <div className="flex min-w-0 items-center gap-3">
                 {activeCategory && (
-                  <div className={cn("h-6 w-6 rounded flex items-center justify-center", activeCategory.color)}>
+                  <div className={cn("h-6 w-6 shrink-0 rounded flex items-center justify-center", activeCategory.color)}>
                     <activeCategory.icon className="h-3.5 w-3.5 text-white" />
                   </div>
                 )}
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-xs text-muted-foreground">{activeCategory?.label ?? "CMS"}</span>
-                  <span className="tracking-tight text-foreground text-sm">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate text-xs text-muted-foreground">{activeCategory?.label ?? "CMS"}</span>
+                  <span className="truncate text-sm tracking-tight text-foreground">
                     {activeMenuItem?.label ?? "Menu"}
                   </span>
                 </div>
@@ -576,7 +580,7 @@ function DashboardLayoutContent({
             </div>
           </div>
         )}
-        <main className="flex-1 p-4">{children}</main>
+        <main className="cms-main min-w-0 flex-1 p-3 sm:p-4">{children}</main>
       </SidebarInset>
     </>
   );

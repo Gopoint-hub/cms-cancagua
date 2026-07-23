@@ -91,20 +91,20 @@ export default function MasajesAnalytics() {
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-wrap items-end gap-4">
-              <div>
+              <div className="w-full sm:w-auto">
                 <Label>Desde</Label>
-                <Input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} className="w-40" />
+                <Input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} className="w-full sm:w-40" />
               </div>
-              <div>
+              <div className="w-full sm:w-auto">
                 <Label>Hasta</Label>
-                <Input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} className="w-40" />
+                <Input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} className="w-full sm:w-40" />
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap">
                 <Button variant="outline" size="sm" onClick={() => setPreset(0)}>Este mes</Button>
                 <Button variant="outline" size="sm" onClick={() => setPreset(3)}>Últimos 3 meses</Button>
                 <Button variant="outline" size="sm" onClick={() => setPreset(6)}>Últimos 6 meses</Button>
               </div>
-              <Button onClick={downloadExcel} disabled={exportQuery.isFetching || !history?.total}>
+              <Button className="w-full sm:w-auto" onClick={downloadExcel} disabled={exportQuery.isFetching || !history?.total}>
                 <Download className="w-4 h-4 mr-2" />
                 {exportQuery.isFetching ? "Generando..." : "Descargar Excel"}
               </Button>
@@ -113,7 +113,7 @@ export default function MasajesAnalytics() {
         </Card>
 
         {isLoading ? (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 w-full" />)}
           </div>
         ) : !data ? (
@@ -121,7 +121,7 @@ export default function MasajesAnalytics() {
         ) : (
           <>
             {/* KPIs */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
                 <CardHeader className="pb-1">
                   <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
@@ -329,16 +329,16 @@ export default function MasajesAnalytics() {
                       </table>
                     </div>
 
-                    <div className="flex items-center justify-between gap-3 mt-5 pt-4 border-t">
+                    <div className="flex flex-col items-stretch gap-3 mt-5 pt-4 border-t sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-xs text-muted-foreground">
                         Mostrando {(history.page - 1) * 25 + 1}–{Math.min(history.page * 25, history.total)} de {history.total}
                       </p>
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" disabled={history.page <= 1} onClick={() => setPage(current => current - 1)}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button className="order-2 flex-1 sm:order-none sm:flex-none" variant="outline" size="sm" disabled={history.page <= 1} onClick={() => setPage(current => current - 1)}>
                           <ChevronLeft className="w-4 h-4 mr-1" /> Anterior
                         </Button>
-                        <span className="text-sm">Página {history.page} de {history.totalPages}</span>
-                        <Button variant="outline" size="sm" disabled={history.page >= history.totalPages} onClick={() => setPage(current => current + 1)}>
+                        <span className="order-1 w-full text-center text-sm sm:order-none sm:w-auto">Página {history.page} de {history.totalPages}</span>
+                        <Button className="order-2 flex-1 sm:order-none sm:flex-none" variant="outline" size="sm" disabled={history.page >= history.totalPages} onClick={() => setPage(current => current + 1)}>
                           Siguiente <ChevronRight className="w-4 h-4 ml-1" />
                         </Button>
                       </div>

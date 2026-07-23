@@ -173,7 +173,7 @@ export default function MasajesInventario() {
   const SupplyCard = ({ s }: { s: any }) => (
     <Card className={s.active === 0 ? "opacity-50" : ""}>
       <CardContent className="p-4">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold">{s.name}</span>
@@ -207,7 +207,7 @@ export default function MasajesInventario() {
             </div>
             {s.notes && <p className="text-xs text-muted-foreground mt-1 italic">{s.notes}</p>}
           </div>
-          <div className="flex gap-1">
+          <div className="flex w-full justify-end gap-1 sm:w-auto">
             <Button size="sm" variant="ghost" onClick={() => openEdit(s)}><Edit className="w-4 h-4" /></Button>
             <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10"
               onClick={() => { if (confirm(`¿Eliminar "${s.name}"? Esta acción no se puede deshacer.`)) deleteMut.mutate({ id: s.id }); }}>
@@ -222,12 +222,12 @@ export default function MasajesInventario() {
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-wide">Inventario</h1>
             <p className="text-muted-foreground text-sm mt-1">Insumos consumibles y herramientas del área de masajes</p>
           </div>
-          <Button onClick={() => openCreate(viewCategoria)}>
+          <Button className="w-full sm:w-auto" onClick={() => openCreate(viewCategoria)}>
             <Plus className="w-4 h-4 mr-2" />Agregar / Recibir
           </Button>
         </div>
