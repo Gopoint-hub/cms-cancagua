@@ -62,7 +62,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type UserRole = "super_admin" | "admin" | "user" | "seller" | "cancagua_staff";
+type UserRole = "super_admin" | "admin" | "user" | "seller" | "cancagua_staff" | "massage_therapist";
 type UserStatus = "active" | "pending" | "inactive";
 
 export default function CMSUsuarios() {
@@ -197,6 +197,11 @@ export default function CMSUsuarios() {
       cancagua_staff: {
         style: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
         label: "Usuario Personal Cancagua",
+        icon: UserCog,
+      },
+      massage_therapist: {
+        style: "bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200",
+        label: "Terapeuta de Masajes",
         icon: UserCog,
       },
       user: {
@@ -562,6 +567,7 @@ export default function CMSUsuarios() {
                         <SelectItem value="admin">Administrador</SelectItem>
                       )}
                       <SelectItem value="cancagua_staff">Usuario Personal Cancagua</SelectItem>
+                      <SelectItem value="massage_therapist">Terapeuta de Masajes (solo lectura)</SelectItem>
                       <SelectItem value="user">Usuario</SelectItem>
                       <SelectItem value="seller">Vendedor</SelectItem>
                     </SelectContent>
@@ -615,6 +621,7 @@ export default function CMSUsuarios() {
                     <SelectItem value="admin">Administrador</SelectItem>
                   )}
                   <SelectItem value="cancagua_staff">Usuario Personal Cancagua</SelectItem>
+                  <SelectItem value="massage_therapist">Terapeuta de Masajes (solo lectura)</SelectItem>
                   <SelectItem value="user">Usuario</SelectItem>
                   <SelectItem value="seller">Vendedor</SelectItem>
                 </SelectContent>

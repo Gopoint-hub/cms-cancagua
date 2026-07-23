@@ -154,7 +154,7 @@ export async function createUser(userData: {
   email: string;
   name?: string;
   passwordHash?: string;
-  role: "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff";
+  role: "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff" | "massage_therapist";
   status: "active" | "pending" | "inactive";
   invitationToken?: string;
   invitationExpiresAt?: Date;
@@ -178,7 +178,7 @@ export async function createUser(userData: {
   }
 }
 
-export async function updateUserRole(userId: number, role: "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff") {
+export async function updateUserRole(userId: number, role: "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff" | "massage_therapist") {
   const db = await getDb();
   if (!db) {
     console.warn("[Database] Cannot update user role: database not available");

@@ -25,6 +25,8 @@ import MassageCancellationDialog, {
   getMassageCancellationLabel,
   type MassageCancellationCategory,
 } from "./MassageCancellationDialog";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendiente", confirmed: "Confirmada", completed: "Completada",
@@ -60,11 +62,12 @@ function calcEndTime(start: string, duration: number): string {
 }
 
 // ─── Tarjeta individual de reserva ────────────────────────────────────────────
-function BookingCard({ b, onEdit, onStatus, onCancel }: {
+function BookingCard({ b, onEdit, onStatus, onCancel, readOnly }: {
   b: any;
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
+  readOnly: boolean;
 }) {
   return (
     <Card className={b.status === "cancelled" ? "border-red-200 bg-red-50/20" : ""}>
@@ -102,7 +105,7 @@ function BookingCard({ b, onEdit, onStatus, onCancel }: {
               </div>
             )}
           </div>
-          <div className="flex gap-2 flex-wrap shrink-0">
+          {!readOnly && <div className="flex gap-2 flex-wrap shrink-0">
             {b.status === "pending" && (
               <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "confirmed", b.bookingKind)}>Confirmar</Button>
             )}
@@ -134,7 +137,7 @@ function BookingCard({ b, onEdit, onStatus, onCancel }: {
                 )}
               </>
             )}
-          </div>
+          </div>}
         </div>
       </CardContent>
     </Card>
@@ -142,12 +145,13 @@ function BookingCard({ b, onEdit, onStatus, onCancel }: {
 }
 
 // ─── Vista Día ─────────────────────────────────────────────────────────────────
-function DayView({ bookings, isLoading, onEdit, onStatus, onCancel }: {
+function DayView({ bookings, isLoading, onEdit, onStatus, onCancel, readOnly }: {
   bookings: any[] | undefined;
   isLoading: boolean;
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
+  readOnly: boolean;
 }) {
   if (isLoading) return <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full" />)}</div>;
   if (!bookings || bookings.length === 0) {
@@ -156,14 +160,14 @@ function DayView({ bookings, isLoading, onEdit, onStatus, onCancel }: {
   return (
     <div className="space-y-3">
       {bookings.map(b => (
-        <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} onCancel={onCancel} />
+        <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} onCancel={onCancel} readOnly={readOnly} />
       ))}
     </div>
   );
 }
 
 // ─── Vista Semana ──────────────────────────────────────────────────────────────
-function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus, onCancel }: {
+function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus, onCancel, readOnly }: {
   bookings: any[] | undefined;
   isLoading: boolean;
   weekStart: Date;
@@ -171,6 +175,7 @@ function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
+  readOnly: boolean;
 }) {
   const days = eachDayOfInterval({ start: weekStart, end: endOfWeek(weekStart, { locale: es }) });
 
@@ -200,7 +205,7 @@ function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus
             ) : (
               <div className="space-y-2 pl-1">
                 {dayBookings.map(b => (
-                  <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} onCancel={onCancel} />
+                  <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} onCancel={onCancel} readOnly={readOnly} />
                 ))}
               </div>
             )}
@@ -278,6 +283,8 @@ function MonthView({ bookings, isLoading, monthDate, onDayClick }: {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function MasajesAgenda() {
+  const { user } = useAuth();
+  const isTherapistReadOnly = user?.role === MASSAGE_THERAPIST_ROLE;
   const search = useSearch();
   const initialDate = (() => {
     const p = new URLSearchParams(search);
@@ -309,12 +316,21 @@ export default function MasajesAgenda() {
     { from, to },
     { refetchInterval: 60_000 },
   );
-  const { data: techniques } = trpc.masajes.tecnicas.getAll.useQuery();
-  const { data: therapists } = trpc.masajes.terapeutas.getAll.useQuery();
-  const { data: rooms } = trpc.masajes.salas.getAll.useQuery();
+  const { data: techniques } = trpc.masajes.tecnicas.getAll.useQuery(
+    undefined,
+    { enabled: !isTherapistReadOnly },
+  );
+  const { data: therapists } = trpc.masajes.terapeutas.getAll.useQuery(
+    undefined,
+    { enabled: !isTherapistReadOnly },
+  );
+  const { data: rooms } = trpc.masajes.salas.getAll.useQuery(
+    undefined,
+    { enabled: !isTherapistReadOnly },
+  );
   const { data: slots } = trpc.masajes.agenda.getAvailableSlots.useQuery(
     { date: selectedDate, duration: form.duration },
-    { enabled: open }
+    { enabled: open && !isTherapistReadOnly }
   );
 
   const createMut = trpc.masajes.agenda.create.useMutation({
@@ -475,10 +491,14 @@ export default function MasajesAgenda() {
             <h1 className="text-2xl font-semibold tracking-wide">Agenda</h1>
             <p className="text-muted-foreground text-sm mt-1">Reservas de masajes</p>
           </div>
-          <div className="flex w-full gap-2 flex-wrap sm:w-auto">
-            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setSkeduOpen(true)}>Agregar programa Skedu</Button>
-            <Button className="flex-1 sm:flex-none" onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
-          </div>
+          {isTherapistReadOnly ? (
+            <Badge variant="outline">Solo lectura</Badge>
+          ) : (
+            <div className="flex w-full gap-2 flex-wrap sm:w-auto">
+              <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setSkeduOpen(true)}>Agregar programa Skedu</Button>
+              <Button className="flex-1 sm:flex-none" onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
+            </div>
+          )}
         </div>
 
         {/* Controles de navegación y vista */}
@@ -538,6 +558,7 @@ export default function MasajesAgenda() {
             onEdit={openEdit}
             onStatus={handleStatus}
             onCancel={setCancellationTarget}
+            readOnly={isTherapistReadOnly}
           />
         )}
         {view === "week" && (
@@ -549,6 +570,7 @@ export default function MasajesAgenda() {
             onEdit={openEdit}
             onStatus={handleStatus}
             onCancel={setCancellationTarget}
+            readOnly={isTherapistReadOnly}
           />
         )}
         {view === "month" && (
@@ -562,7 +584,7 @@ export default function MasajesAgenda() {
       </div>
 
       {/* Modal reserva */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      {!isTherapistReadOnly && <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? "Editar reserva" : "Nueva reserva"}</DialogTitle>
@@ -694,28 +716,32 @@ export default function MasajesAgenda() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
-      <SkeduProgramBookingDialog
-        open={skeduOpen}
-        onOpenChange={setSkeduOpen}
-        initialDate={selectedDate}
-        onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
-      />
-      <SkeduTherapistAssignmentDialog
-        open={!!editingSkeduBooking}
-        onOpenChange={(next) => { if (!next) setEditingSkeduBooking(null); }}
-        booking={editingSkeduBooking}
-        onUpdated={() => utils.masajes.agenda.getByDateRange.invalidate()}
-      />
-      <MassageCancellationDialog
-        open={!!cancellationTarget}
-        onOpenChange={(next) => { if (!next) setCancellationTarget(null); }}
-        bookingLabel={cancellationTarget
-          ? `${cancellationTarget.clientName} · ${cancellationTarget.techniqueName}`
-          : undefined}
-        isPending={statusMut.isPending || programStatusMut.isPending}
-        onConfirm={handleCancellation}
-      />
+      </Dialog>}
+      {!isTherapistReadOnly && (
+        <>
+          <SkeduProgramBookingDialog
+            open={skeduOpen}
+            onOpenChange={setSkeduOpen}
+            initialDate={selectedDate}
+            onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+          />
+          <SkeduTherapistAssignmentDialog
+            open={!!editingSkeduBooking}
+            onOpenChange={(next) => { if (!next) setEditingSkeduBooking(null); }}
+            booking={editingSkeduBooking}
+            onUpdated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+          />
+          <MassageCancellationDialog
+            open={!!cancellationTarget}
+            onOpenChange={(next) => { if (!next) setCancellationTarget(null); }}
+            bookingLabel={cancellationTarget
+              ? `${cancellationTarget.clientName} · ${cancellationTarget.techniqueName}`
+              : undefined}
+            isPending={statusMut.isPending || programStatusMut.isPending}
+            onConfirm={handleCancellation}
+          />
+        </>
+      )}
     </DashboardLayout>
   );
 }

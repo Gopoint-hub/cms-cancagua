@@ -734,7 +734,7 @@ export const appRouter = router({
       .input(z.object({
         email: z.string().email("Email inválido"),
         name: z.string().min(2, "El nombre es requerido"),
-        role: z.enum(["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff"]),
+        role: z.enum(["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff", "massage_therapist"]),
         allowedModules: z.array(z.string()).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
@@ -842,7 +842,7 @@ export const appRouter = router({
     updateRole: protectedProcedure
       .input(z.object({
         userId: z.number(),
-        role: z.enum(["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff"])
+        role: z.enum(["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff", "massage_therapist"])
       }))
       .mutation(async ({ ctx, input }) => {
         if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") {

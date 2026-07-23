@@ -17,6 +17,7 @@ import { checkWhatsAppHealth } from "./whapi";
 import { checkGitHubBlogHealth } from "../githubBlogHealth";
 import { ensureMassageDiscountSchema } from "../ensureMassageDiscountSchema";
 import { ensureMassageAvailabilitySchema } from "../ensureMassageAvailabilitySchema";
+import { ensureMassageTherapistUsersSchema } from "../ensureMassageTherapistUsersSchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -40,6 +41,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   await ensureMassageDiscountSchema();
   await ensureMassageAvailabilitySchema();
+  await ensureMassageTherapistUsersSchema();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -122,6 +124,16 @@ async function startServer() {
 startServer()
   .then(async () => {
     const { runSeedIfNeeded } = await import("../seed");
-    runSeedIfNeeded().catch(e => console.error("[seed] Startup seed failed:", e));
+    try {
+      await runSeedIfNeeded();
+    } catch (error) {
+      console.error("[seed] Startup seed failed:", error);
+    }
+    try {
+      const { runInitialMassageTherapistInvitations } = await import("../massageTherapistInvitations");
+      await runInitialMassageTherapistInvitations();
+    } catch (error) {
+      console.error("[startup] Therapist invitations failed:", error);
+    }
   })
   .catch(console.error);

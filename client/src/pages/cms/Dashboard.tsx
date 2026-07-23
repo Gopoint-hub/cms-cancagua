@@ -11,6 +11,8 @@ import {
 import { useLocation } from "wouter";
 import { SEOHead } from "@/components/SEOHead";
 import { useEffect } from "react";
+import { MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
+import MasajesDashboard from "./masajes/Dashboard";
 
 /** Dashboard simplificado para vendedores (rol concierge) */
 function SellerDashboard() {
@@ -279,6 +281,10 @@ export default function CMSDashboard() {
   // Vendedores ven un dashboard simplificado
   if (user?.role === "concierge" || user?.role === "seller") {
     return <SellerDashboard />;
+  }
+
+  if (user?.role === MASSAGE_THERAPIST_ROLE) {
+    return <MasajesDashboard />;
   }
 
   // Admin y superadmin ven el dashboard completo

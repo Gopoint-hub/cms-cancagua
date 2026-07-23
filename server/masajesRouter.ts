@@ -37,7 +37,7 @@ import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
 import { calculateMassageDiscount } from "./massageDiscounts";
 import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne } from "drizzle-orm";
-import { hasMassageAdminAccess, hasMassageOperationsAccess } from "@shared/permissions";
+import { hasMassageAdminAccess, hasMassageOperationsAccess, hasMassageReadAccess } from "@shared/permissions";
 
 const adminOrEditor = async (role: string) => {
   if (!hasMassageAdminAccess(role)) {
@@ -47,6 +47,12 @@ const adminOrEditor = async (role: string) => {
 
 const massageOperations = async (role: string) => {
   if (!hasMassageOperationsAccess(role)) {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+};
+
+const massageRead = async (role: string) => {
+  if (!hasMassageReadAccess(role)) {
     throw new TRPCError({ code: "FORBIDDEN" });
   }
 };
@@ -642,6 +648,16 @@ const terapeutasRouter = router({
     return withTechniques;
   }),
 
+  getActiveCount: protectedProcedure.query(async ({ ctx }) => {
+    await massageRead(ctx.user.role);
+    const db = await getDb();
+    if (!db) return 0;
+    const [result] = await db.select({ total: sql<number>`count(*)` })
+      .from(massageTherapists)
+      .where(eq(massageTherapists.active, 1));
+    return Number(result?.total ?? 0);
+  }),
+
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -1215,7 +1231,7 @@ const agendaRouter = router({
   getByDateRange: protectedProcedure
     .input(z.object({ from: z.string(), to: z.string() }))
     .query(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageRead(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
 
@@ -1225,27 +1241,30 @@ const agendaRouter = router({
       const todayChile = getChileDateString(now);
       const timeChile = getChileTimeString(now);
 
-      await Promise.all([
-        db.update(massageBookings)
-          .set({ status: "completed" })
-          .where(and(
-            eq(massageBookings.status, "confirmed"),
-            sql`${massageBookings.therapistId} IS NOT NULL`,
-            or(
-              lt(massageBookings.bookingDate, todayChile as any),
-              and(eq(massageBookings.bookingDate, todayChile as any), lte(massageBookings.endTime, timeChile)),
-            ),
-          )),
-        db.update(massageProgramBookings)
-          .set({ status: "completed" })
-          .where(and(
-            eq(massageProgramBookings.status, "confirmed"),
-            or(
-              lt(massageProgramBookings.bookingDate, todayChile as any),
-              and(eq(massageProgramBookings.bookingDate, todayChile as any), lte(massageProgramBookings.endTime, timeChile)),
-            ),
-          )),
-      ]);
+      // Un terapeuta de solo lectura nunca provoca escrituras al consultar la agenda.
+      if (hasMassageOperationsAccess(ctx.user.role)) {
+        await Promise.all([
+          db.update(massageBookings)
+            .set({ status: "completed" })
+            .where(and(
+              eq(massageBookings.status, "confirmed"),
+              sql`${massageBookings.therapistId} IS NOT NULL`,
+              or(
+                lt(massageBookings.bookingDate, todayChile as any),
+                and(eq(massageBookings.bookingDate, todayChile as any), lte(massageBookings.endTime, timeChile)),
+              ),
+            )),
+          db.update(massageProgramBookings)
+            .set({ status: "completed" })
+            .where(and(
+              eq(massageProgramBookings.status, "confirmed"),
+              or(
+                lt(massageProgramBookings.bookingDate, todayChile as any),
+                and(eq(massageProgramBookings.bookingDate, todayChile as any), lte(massageProgramBookings.endTime, timeChile)),
+              ),
+            )),
+        ]);
+      }
 
       const rows = await db.select({
         id: massageBookings.id, clientName: massageBookings.clientName, clientPhone: massageBookings.clientPhone,
@@ -1656,7 +1675,7 @@ const inventarioRouter = router({
   }),
 
   getLowStock: protectedProcedure.query(async ({ ctx }) => {
-    await massageOperations(ctx.user.role);
+    await massageRead(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
     const rows = await db.select().from(massageSupplies).where(and(eq(massageSupplies.active, 1), sql`${massageSupplies.currentStock} <= ${massageSupplies.minimumStock}`));

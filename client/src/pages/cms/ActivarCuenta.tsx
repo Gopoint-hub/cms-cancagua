@@ -72,6 +72,7 @@ export default function ActivarCuenta() {
       super_admin: "Super Administrador",
       admin: "Administrador",
       cancagua_staff: "Usuario Personal Cancagua",
+      massage_therapist: "Terapeuta de Masajes (solo lectura)",
       user: "Usuario",
       seller: "Vendedor",
     };

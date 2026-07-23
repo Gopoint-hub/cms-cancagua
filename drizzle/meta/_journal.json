@@ -148,6 +148,13 @@
       "when": 1784836800000,
       "tag": "0024_recurring_massage_availability",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1784840400000,
+      "tag": "0025_massage_therapist_users",
+      "breakpoints": true
     }
   ]
 }

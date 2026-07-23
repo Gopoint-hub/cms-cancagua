@@ -38,7 +38,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { canAccessCmsPath, CANCAGUA_STAFF_ROLE } from "@shared/permissions";
+import { canAccessCmsPath, CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
 
 // Definición de categorías y sus items de menú
 export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "masajes";
@@ -170,10 +170,10 @@ export const categories: Category[] = [
     icon: Sparkles,
     description: "Área de Masajes & Spa",
     color: "bg-rose-500",
-    roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE],
+    roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE],
     items: [
-      { icon: LayoutDashboard, label: "Dashboard", path: "/cms/masajes" },
-      { icon: CalendarCheck, label: "Agenda", path: "/cms/masajes/agenda" },
+      { icon: LayoutDashboard, label: "Dashboard", path: "/cms/masajes", roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE] },
+      { icon: CalendarCheck, label: "Agenda", path: "/cms/masajes/agenda", roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE] },
       { icon: Users, label: "Terapeutas", path: "/cms/masajes/terapeutas", roles: ["super_admin", "admin", "editor"] },
       { icon: Sparkles, label: "Técnicas", path: "/cms/masajes/tecnicas", roles: ["super_admin", "admin", "editor"] },
       { icon: Package, label: "Inventario", path: "/cms/masajes/inventario", roles: ["super_admin", "admin", "editor"] },
@@ -307,7 +307,7 @@ export default function DashboardLayout({
           <Shield className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
           <h1 className="text-xl font-semibold">Sin acceso a este módulo</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Tu rol de Usuario Personal Cancagua no tiene permisos para abrir esta sección.
+            Tu rol no tiene permisos para abrir esta sección.
           </p>
           <Button className="mt-6" onClick={() => window.location.assign("/cms")}>
             Volver al panel

@@ -10,6 +10,7 @@ import { date, decimal, foreignKey, int, mediumtext, mysqlEnum, mysqlTable, text
  * - seller: Access to sales-related modules
  * - concierge: Access only to concierge sales tool
  * - cancagua_staff: Reception/operations access to B2C, maintenance and massage agenda
+ * - massage_therapist: Read-only access to massage dashboard and agenda
  */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -21,7 +22,7 @@ export const users = mysqlTable("users", {
   passwordHash: varchar("passwordHash", { length: 255 }),
   loginMethod: varchar("loginMethod", { length: 64 }).default("email"),
   /** User role: super_admin, admin, user, seller */
-  role: mysqlEnum("role", ["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff"]).default("user").notNull(),
+  role: mysqlEnum("role", ["super_admin", "admin", "editor", "user", "seller", "concierge", "cancagua_staff", "massage_therapist"]).default("user").notNull(),
   /** User status: active, pending (invited but not activated), inactive */
   status: mysqlEnum("status", ["active", "pending", "inactive"]).default("pending").notNull(),
   /** Modules the user has access to (JSON array, null = all modules for admin roles) */
@@ -41,7 +42,7 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-export type UserRole = "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff";
+export type UserRole = "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff" | "massage_therapist";
 export type UserStatus = "active" | "pending" | "inactive";
 
 // Servicios de Skedu
@@ -1051,6 +1052,9 @@ export const massageTherapists = mysqlTable("massage_therapists", {
   type: mysqlEnum("type", ["inhouse", "freelance"]).notNull(),
   phone: varchar("phone", { length: 20 }),
   email: varchar("email", { length: 320 }),
+  cmsUserId: int("cms_user_id"),
+  cmsInvitationEmailSentAt: timestamp("cms_invitation_email_sent_at"),
+  cmsInvitationWhatsappSentAt: timestamp("cms_invitation_whatsapp_sent_at"),
   contractType: varchar("contract_type", { length: 100 }),
   leadTimeMinutes: int("lead_time_minutes").default(120),
   currentShift: mysqlEnum("current_shift", ["am", "pm"]).default("am"),

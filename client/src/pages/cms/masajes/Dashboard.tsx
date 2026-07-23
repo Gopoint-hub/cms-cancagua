@@ -11,7 +11,7 @@ import { AlertTriangle, CalendarCheck, CalendarPlus, Users, Clock, TrendingUp, U
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { CANCAGUA_STAFF_ROLE } from "@shared/permissions";
+import { CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
 import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
 import MassageCancellationDialog, { type MassageCancellationCategory } from "./MassageCancellationDialog";
 
@@ -19,6 +19,7 @@ const STOCK_PAGE_SIZE = 5;
 
 export default function MasajesDashboard() {
   const { user } = useAuth();
+  const isTherapistReadOnly = user?.role === MASSAGE_THERAPIST_ROLE;
   const utils = trpc.useUtils();
   const today = format(new Date(), "yyyy-MM-dd");
   const [stockPage, setStockPage] = useState(0);
@@ -28,9 +29,12 @@ export default function MasajesDashboard() {
     { from: today, to: today }
   );
   const { data: lowStock, isLoading: loadingStock } = trpc.masajes.inventario.getLowStock.useQuery();
-  const { data: therapists, isLoading: loadingTherapists } = trpc.masajes.terapeutas.getAll.useQuery();
+  const { data: activeTherapistCount, isLoading: loadingTherapists } = trpc.masajes.terapeutas.getActiveCount.useQuery();
 
-  const { data: pendingAssignment, isLoading: loadingPending } = trpc.masajes.agenda.getPendingManualAssignment.useQuery();
+  const { data: pendingAssignment, isLoading: loadingPending } = trpc.masajes.agenda.getPendingManualAssignment.useQuery(
+    undefined,
+    { enabled: !isTherapistReadOnly },
+  );
   const notifyMut = trpc.masajes.agenda.notifyFreelanceTherapist.useMutation({
     onSuccess: () => {
       utils.masajes.agenda.getPendingManualAssignment.invalidate();
@@ -49,7 +53,6 @@ export default function MasajesDashboard() {
   });
 
   const confirmed = bookings?.filter(b => b.status === "confirmed" || b.status === "pending") ?? [];
-  const activeTherapists = therapists?.filter(t => t.active === 1) ?? [];
   const todayRevenue = bookings
     ?.filter(b => b.paymentStatus === "paid" && b.status === "completed")
     .reduce((sum, b) => sum + Number(b.amountPaid ?? 0), 0) ?? 0;
@@ -64,9 +67,13 @@ export default function MasajesDashboard() {
               {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
             </p>
           </div>
-          <Button onClick={() => setSkeduDialogOpen(true)}>
-            <CalendarPlus className="w-4 h-4 mr-2" /> Agregar programa Skedu
-          </Button>
+          {isTherapistReadOnly ? (
+            <Badge variant="outline">Solo lectura</Badge>
+          ) : (
+            <Button onClick={() => setSkeduDialogOpen(true)}>
+              <CalendarPlus className="w-4 h-4 mr-2" /> Agregar programa Skedu
+            </Button>
+          )}
         </div>
 
         {/* KPIs del día */}
@@ -92,7 +99,7 @@ export default function MasajesDashboard() {
             </CardHeader>
             <CardContent>
               {loadingTherapists ? <Skeleton className="h-8 w-12" /> : (
-                <span className="text-3xl font-bold">{activeTherapists.length}</span>
+                <span className="text-3xl font-bold">{activeTherapistCount ?? 0}</span>
               )}
             </CardContent>
           </Card>
@@ -132,7 +139,7 @@ export default function MasajesDashboard() {
         </div>
 
         {/* Asignación manual pendiente — siempre visible */}
-        <Card className="border-amber-300 bg-amber-50">
+        {!isTherapistReadOnly && <Card className="border-amber-300 bg-amber-50">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex flex-wrap items-center gap-2 text-amber-800">
               <UserX className="w-5 h-5" />
@@ -203,7 +210,7 @@ export default function MasajesDashboard() {
               </div>
             )}
           </CardContent>
-        </Card>
+        </Card>}
 
         {/* Agenda del día */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -265,9 +272,11 @@ export default function MasajesDashboard() {
                     <Badge variant="destructive" className="text-xs ml-1">{lowStock!.length}</Badge>
                   )}
                 </span>
-                <Link href="/cms/masajes/inventario">
-                  <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver inventario →</span>
-                </Link>
+                {!isTherapistReadOnly && (
+                  <Link href="/cms/masajes/inventario">
+                    <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver inventario →</span>
+                  </Link>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -322,7 +331,10 @@ export default function MasajesDashboard() {
             { href: "/cms/masajes/clientes", label: "Clientes" },
             { href: "/cms/masajes/analytics", label: "Ventas" },
             { href: "/cms/masajes/rrhh", label: "RRHH" },
-          ].filter(link => user?.role !== CANCAGUA_STAFF_ROLE || link.href === "/cms/masajes/agenda").map(link => (
+          ].filter(link =>
+            (user?.role !== CANCAGUA_STAFF_ROLE && !isTherapistReadOnly)
+            || link.href === "/cms/masajes/agenda"
+          ).map(link => (
             <Link key={link.href} href={link.href}>
               <Card className="cursor-pointer hover:border-primary transition-colors">
                 <CardContent className="p-4 text-center">
@@ -333,28 +345,32 @@ export default function MasajesDashboard() {
           ))}
         </div>
       </div>
-      <SkeduProgramBookingDialog
-        open={skeduDialogOpen}
-        onOpenChange={setSkeduDialogOpen}
-        initialDate={today}
-        onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
-      />
-      <MassageCancellationDialog
-        open={!!pendingCancellation}
-        onOpenChange={(next) => { if (!next) setPendingCancellation(null); }}
-        bookingLabel={pendingCancellation
-          ? `${pendingCancellation.clientName} · ${pendingCancellation.techniqueName}`
-          : undefined}
-        isPending={dismissMut.isPending}
-        onConfirm={(cancellationCategory: MassageCancellationCategory, cancellationReason: string) => {
-          if (!pendingCancellation) return;
-          dismissMut.mutate({
-            bookingId: pendingCancellation.id,
-            cancellationCategory,
-            cancellationReason,
-          });
-        }}
-      />
+      {!isTherapistReadOnly && (
+        <>
+          <SkeduProgramBookingDialog
+            open={skeduDialogOpen}
+            onOpenChange={setSkeduDialogOpen}
+            initialDate={today}
+            onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+          />
+          <MassageCancellationDialog
+            open={!!pendingCancellation}
+            onOpenChange={(next) => { if (!next) setPendingCancellation(null); }}
+            bookingLabel={pendingCancellation
+              ? `${pendingCancellation.clientName} · ${pendingCancellation.techniqueName}`
+              : undefined}
+            isPending={dismissMut.isPending}
+            onConfirm={(cancellationCategory: MassageCancellationCategory, cancellationReason: string) => {
+              if (!pendingCancellation) return;
+              dismissMut.mutate({
+                bookingId: pendingCancellation.id,
+                cancellationCategory,
+                cancellationReason,
+              });
+            }}
+          />
+        </>
+      )}
     </DashboardLayout>
   );
 }
