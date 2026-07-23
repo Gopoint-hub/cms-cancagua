@@ -12,18 +12,8 @@ import { Link } from "wouter";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { CANCAGUA_STAFF_ROLE } from "@shared/permissions";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
+import MassageCancellationDialog, { type MassageCancellationCategory } from "./MassageCancellationDialog";
 
 const STOCK_PAGE_SIZE = 5;
 
@@ -33,6 +23,7 @@ export default function MasajesDashboard() {
   const today = format(new Date(), "yyyy-MM-dd");
   const [stockPage, setStockPage] = useState(0);
   const [skeduDialogOpen, setSkeduDialogOpen] = useState(false);
+  const [pendingCancellation, setPendingCancellation] = useState<any | null>(null);
   const { data: bookings, isLoading: loadingBookings } = trpc.masajes.agenda.getByDateRange.useQuery(
     { from: today, to: today }
   );
@@ -50,7 +41,9 @@ export default function MasajesDashboard() {
   const dismissMut = trpc.masajes.agenda.dismissPendingManualAssignment.useMutation({
     onSuccess: () => {
       utils.masajes.agenda.getPendingManualAssignment.invalidate();
-      toast.success("Reserva eliminada de asignaciones pendientes");
+      utils.masajes.agenda.getByDateRange.invalidate();
+      toast.success("Reserva cancelada y motivo registrado");
+      setPendingCancellation(null);
     },
     onError: e => toast.error(e.message),
   });
@@ -192,39 +185,17 @@ export default function MasajesDashboard() {
                             Asignar
                           </Button>
                         </Link>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 sm:flex-none"
-                              disabled={dismissMut.isPending}
-                              title="Eliminar de asignaciones pendientes"
-                            >
-                              <Trash2 className="w-3 h-3 mr-1" />
-                              Eliminar
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>¿Eliminar esta asignación pendiente?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                La reserva de {b.clientName} se quitará de este listado y quedará
-                                registrada como cancelada en el historial. Esta acción no elimina
-                                el registro del pago.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Volver</AlertDialogCancel>
-                              <AlertDialogAction
-                                className="bg-red-600 text-white hover:bg-red-700"
-                                onClick={() => dismissMut.mutate({ bookingId: b.id })}
-                              >
-                                Eliminar
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 sm:flex-none"
+                          disabled={dismissMut.isPending}
+                          title="Cancelar y quitar de asignaciones pendientes"
+                          onClick={() => setPendingCancellation(b)}
+                        >
+                          <Trash2 className="w-3 h-3 mr-1" />
+                          Eliminar
+                        </Button>
                       </div>
                     </div>
                   );
@@ -367,6 +338,22 @@ export default function MasajesDashboard() {
         onOpenChange={setSkeduDialogOpen}
         initialDate={today}
         onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+      />
+      <MassageCancellationDialog
+        open={!!pendingCancellation}
+        onOpenChange={(next) => { if (!next) setPendingCancellation(null); }}
+        bookingLabel={pendingCancellation
+          ? `${pendingCancellation.clientName} · ${pendingCancellation.techniqueName}`
+          : undefined}
+        isPending={dismissMut.isPending}
+        onConfirm={(cancellationCategory: MassageCancellationCategory, cancellationReason: string) => {
+          if (!pendingCancellation) return;
+          dismissMut.mutate({
+            bookingId: pendingCancellation.id,
+            cancellationCategory,
+            cancellationReason,
+          });
+        }}
       />
     </DashboardLayout>
   );

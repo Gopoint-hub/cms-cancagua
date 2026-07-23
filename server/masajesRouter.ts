@@ -51,6 +51,22 @@ const massageOperations = async (role: string) => {
   }
 };
 
+export const MASSAGE_CANCELLATION_CATEGORIES = [
+  "client_cancelled",
+  "business_issue",
+  "therapist_unavailable",
+  "scheduling_error",
+  "duplicate_booking",
+  "other",
+] as const;
+
+const cancellationCategorySchema = z.enum(MASSAGE_CANCELLATION_CATEGORIES);
+const cancellationReasonSchema = z.string().trim().min(5, "Escribe el motivo de la cancelación").max(1000);
+
+export function validateMassageCancellationReason(reason: string): string {
+  return cancellationReasonSchema.parse(reason);
+}
+
 export const SKEDU_MASSAGE_PROGRAMS = [
   { value: "reconecta", label: "Reconecta", durations: [30, 50] },
   { value: "reconecta_detox", label: "Reconecta Detox", durations: [30, 50] },
@@ -891,13 +907,26 @@ const agendaRouter = router({
     .input(z.object({
       id: z.number(),
       status: z.enum(["confirmed", "completed", "cancelled", "no_show"]),
+      cancellationCategory: cancellationCategorySchema.optional(),
+      cancellationReason: cancellationReasonSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Debes indicar por qué se cancela el masaje" });
+      }
       await db.update(massageProgramBookings)
-        .set({ status: input.status })
+        .set({
+          status: input.status,
+          ...(input.status === "cancelled" ? {
+            cancellationCategory: input.cancellationCategory,
+            cancellationReason: input.cancellationReason,
+            cancelledAt: new Date(),
+            cancelledByUserId: ctx.user.id,
+          } : {}),
+        })
         .where(eq(massageProgramBookings.id, input.id));
       return { success: true };
     }),
@@ -947,6 +976,10 @@ const agendaRouter = router({
         status: massageBookings.status, paymentStatus: massageBookings.paymentStatus,
         amountPaid: massageBookings.amountPaid, notes: massageBookings.notes,
         crossSellServices: massageBookings.crossSellServices, rescheduleCount: massageBookings.rescheduleCount,
+        cancellationCategory: massageBookings.cancellationCategory,
+        cancellationReason: massageBookings.cancellationReason,
+        cancelledAt: massageBookings.cancelledAt,
+        cancelledByUserId: massageBookings.cancelledByUserId,
         createdAt: massageBookings.createdAt,
       })
       .from(massageBookings)
@@ -958,6 +991,10 @@ const agendaRouter = router({
         lte(massageBookings.bookingDate, input.to as any),
         or(
           inArray(massageBookings.status, ["confirmed", "completed", "no_show"]),
+          and(
+            eq(massageBookings.status, "cancelled"),
+            inArray(massageBookings.cancellationCategory, [...MASSAGE_CANCELLATION_CATEGORIES]),
+          ),
           and(eq(massageBookings.status, "pending"), eq(massageBookings.paymentStatus, "paid"))
         )
       ))
@@ -966,7 +1003,13 @@ const agendaRouter = router({
       const programRows = await db.select().from(massageProgramBookings).where(and(
         gte(massageProgramBookings.bookingDate, input.from as any),
         lte(massageProgramBookings.bookingDate, input.to as any),
-        inArray(massageProgramBookings.status, ["confirmed", "completed", "no_show"]),
+        or(
+          inArray(massageProgramBookings.status, ["confirmed", "completed", "no_show"]),
+          and(
+            eq(massageProgramBookings.status, "cancelled"),
+            inArray(massageProgramBookings.cancellationCategory, [...MASSAGE_CANCELLATION_CATEGORIES]),
+          ),
+        ),
       ));
       const therapists = await db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists);
       const rooms = await db.select({ id: massageRooms.id, name: massageRooms.name }).from(massageRooms);
@@ -1003,6 +1046,10 @@ const agendaRouter = router({
         paymentStatus: null,
         amountPaid: null,
         notes: row.notes,
+        cancellationCategory: row.cancellationCategory,
+        cancellationReason: row.cancellationReason,
+        cancelledAt: row.cancelledAt,
+        cancelledByUserId: row.cancelledByUserId,
         crossSellServices: null,
         rescheduleCount: 0,
         createdAt: row.createdAt,
@@ -1030,6 +1077,10 @@ const agendaRouter = router({
         freelanceApprovalStatus: "expired",
         adminApprovalToken: null,
         therapistConfirmationToken: null,
+        cancellationCategory: "system",
+        cancellationReason: "Reserva vencida sin asignación manual.",
+        cancelledAt: new Date(),
+        cancelledByUserId: null,
       })
       .where(and(
         eq(massageBookings.paymentStatus, "paid"),
@@ -1062,7 +1113,11 @@ const agendaRouter = router({
   }),
 
   dismissPendingManualAssignment: protectedProcedure
-    .input(z.object({ bookingId: z.number() }))
+    .input(z.object({
+      bookingId: z.number(),
+      cancellationCategory: cancellationCategorySchema,
+      cancellationReason: cancellationReasonSchema,
+    }))
     .mutation(async ({ ctx, input }) => {
       await massageOperations(ctx.user.role);
       const db = await getDb();
@@ -1092,6 +1147,10 @@ const agendaRouter = router({
           freelanceApprovalStatus: "dismissed",
           adminApprovalToken: null,
           therapistConfirmationToken: null,
+          cancellationCategory: input.cancellationCategory,
+          cancellationReason: input.cancellationReason,
+          cancelledAt: new Date(),
+          cancelledByUserId: ctx.user.id,
         })
         .where(and(
           eq(massageBookings.id, input.bookingId),
@@ -1162,12 +1221,28 @@ const agendaRouter = router({
     }),
 
   updateStatus: protectedProcedure
-    .input(z.object({ id: z.number(), status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]) }))
+    .input(z.object({
+      id: z.number(),
+      status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]),
+      cancellationCategory: cancellationCategorySchema.optional(),
+      cancellationReason: cancellationReasonSchema.optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       await massageOperations(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(massageBookings).set({ status: input.status }).where(eq(massageBookings.id, input.id));
+      if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Debes indicar por qué se cancela el masaje" });
+      }
+      await db.update(massageBookings).set({
+        status: input.status,
+        ...(input.status === "cancelled" ? {
+          cancellationCategory: input.cancellationCategory,
+          cancellationReason: input.cancellationReason,
+          cancelledAt: new Date(),
+          cancelledByUserId: ctx.user.id,
+        } : {}),
+      }).where(eq(massageBookings.id, input.id));
       return { success: true };
     }),
 
@@ -1178,6 +1253,8 @@ const agendaRouter = router({
       status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]).optional(),
       paymentStatus: z.enum(["pending", "paid", "refunded"]).optional(),
       amountPaid: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
+      cancellationCategory: cancellationCategorySchema.optional(),
+      cancellationReason: cancellationReasonSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await massageOperations(ctx.user.role);
@@ -1192,9 +1269,22 @@ const agendaRouter = router({
         if (current && current.paymentStatus !== "paid") sendConfirmation = true;
       }
 
-      const { id, bookingDate, ...data } = input;
+      if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Debes indicar por qué se cancela el masaje" });
+      }
+
+      const { id, bookingDate, cancellationCategory, cancellationReason, ...data } = input;
       await db.update(massageBookings)
-        .set({ ...data, ...(bookingDate ? { bookingDate: bookingDate as any } : {}) })
+        .set({
+          ...data,
+          ...(bookingDate ? { bookingDate: bookingDate as any } : {}),
+          ...(input.status === "cancelled" ? {
+            cancellationCategory,
+            cancellationReason,
+            cancelledAt: new Date(),
+            cancelledByUserId: ctx.user.id,
+          } : {}),
+        })
         .where(eq(massageBookings.id, id));
 
       // Mantiene fecha de servicio, monto y reembolsos sincronizados en el
@@ -1407,6 +1497,9 @@ const clientesRouter = router({
         techniqueName: massageTechniques.name, therapistName: massageTherapists.name,
         status: massageBookings.status, amountPaid: massageBookings.amountPaid,
         crossSellServices: massageBookings.crossSellServices,
+        cancellationCategory: massageBookings.cancellationCategory,
+        cancellationReason: massageBookings.cancellationReason,
+        cancelledAt: massageBookings.cancelledAt,
       })
       .from(massageBookings)
       .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
@@ -2638,7 +2731,13 @@ const masajesPublicRouter = router({
       } catch (err) {
         console.error("[initPayment] Getnet session error:", err);
         await db.update(massageBookings)
-          .set({ status: "cancelled", paymentStatus: "pending" })
+          .set({
+            status: "cancelled",
+            paymentStatus: "pending",
+            cancellationCategory: "system",
+            cancellationReason: "No se pudo iniciar la sesión de pago.",
+            cancelledAt: new Date(),
+          })
           .where(eq(massageBookings.id, bookingId));
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo iniciar el pago. Intenta más tarde." });
       }
@@ -2849,7 +2948,13 @@ const masajesPublicRouter = router({
       } catch (error) {
         console.error("[initCartPayment] Getnet session error:", error);
         await db.update(massageBookings)
-          .set({ status: "cancelled", paymentStatus: "pending" })
+          .set({
+            status: "cancelled",
+            paymentStatus: "pending",
+            cancellationCategory: "system",
+            cancellationReason: "No se pudo iniciar la sesión de pago del carrito.",
+            cancelledAt: new Date(),
+          })
           .where(inArray(massageBookings.id, bookingIds));
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo iniciar el pago. Intenta más tarde." });
       }

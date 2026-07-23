@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Search, MapPin, Phone, Mail } from "lucide-react";
+import { getMassageCancellationLabel } from "./MassageCancellationDialog";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendiente", confirmed: "Confirmada", completed: "Completada",
@@ -133,6 +134,12 @@ export default function MasajesClientes() {
                       </p>
                       {h.crossSellServices && (
                         <p className="text-xs text-muted-foreground mt-0.5">Cross-sell: {h.crossSellServices}</p>
+                      )}
+                      {h.status === "cancelled" && h.cancellationReason && (
+                        <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800">
+                          <p className="font-semibold">{getMassageCancellationLabel(h.cancellationCategory)}</p>
+                          <p className="mt-0.5 whitespace-pre-wrap">{h.cancellationReason}</p>
+                        </div>
                       )}
                     </div>
                     <div className="text-right shrink-0">

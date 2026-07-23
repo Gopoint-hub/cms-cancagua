@@ -93,7 +93,13 @@ router.post("/", async (req: Request, res: Response) => {
   } else if (effectiveStatus === "REJECTED" || effectiveStatus === "FAILED") {
     await db
       .update(massageBookings)
-      .set({ paymentStatus: "pending", status: "cancelled" })
+      .set({
+        paymentStatus: "pending",
+        status: "cancelled",
+        cancellationCategory: "system",
+        cancellationReason: "Pago rechazado o fallido por Getnet.",
+        cancelledAt: new Date(),
+      })
       .where(inArray(massageBookings.id, bookings.map((booking) => booking.id)));
   }
 

@@ -1130,6 +1130,10 @@ export const massageBookings = mysqlTable("massage_bookings", {
   originalAmount: decimal("original_amount", { precision: 10, scale: 2 }),
   discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).default("0"),
   discountCodeId: int("discount_code_id"),
+  cancellationCategory: varchar("cancellation_category", { length: 50 }),
+  cancellationReason: text("cancellation_reason"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledByUserId: int("cancelled_by_user_id"),
   notes: text("notes"),
   // Cross-sell: servicios adicionales contratados
   crossSellServices: text("cross_sell_services"), // JSON array
@@ -1163,6 +1167,10 @@ export const massageProgramBookings = mysqlTable("massage_program_bookings", {
   secondTherapistId: int("second_therapist_id"),
   roomId: int("room_id").notNull(),
   externalReference: varchar("external_reference", { length: 100 }),
+  cancellationCategory: varchar("cancellation_category", { length: 50 }),
+  cancellationReason: text("cancellation_reason"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledByUserId: int("cancelled_by_user_id"),
   notes: text("notes"),
   status: mysqlEnum("status", ["confirmed", "completed", "cancelled", "no_show"]).default("confirmed").notNull(),
   createdByUserId: int("created_by_user_id").notNull(),

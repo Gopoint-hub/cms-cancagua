@@ -11,6 +11,7 @@ import {
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
   serializeDateOnly,
+  validateMassageCancellationReason,
   validateMassageCartCapacity,
   validateSkeduTherapistSelection,
   validateSimultaneousMassageLeadTime,
@@ -46,6 +47,16 @@ describe("Skedu massage programs", () => {
     expect(() => validateSkeduTherapistSelection("double", 1, 2)).not.toThrow();
     expect(() => validateSkeduTherapistSelection("double", 1)).toThrow("requiere dos terapeutas");
     expect(() => validateSkeduTherapistSelection("double", 1, 1)).toThrow("dos terapeutas distintos");
+  });
+});
+
+describe("validateMassageCancellationReason", () => {
+  it("requires an explicit written reason before cancelling a massage", () => {
+    expect(validateMassageCancellationReason("El cliente canceló por enfermedad")).toBe(
+      "El cliente canceló por enfermedad",
+    );
+    expect(() => validateMassageCancellationReason("   ")).toThrow("motivo de la cancelación");
+    expect(() => validateMassageCancellationReason("No")).toThrow("motivo de la cancelación");
   });
 });
 
