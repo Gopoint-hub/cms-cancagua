@@ -59,6 +59,11 @@ export async function ensureMassageDiscountSchema() {
     SET \`original_amount\` = \`amount\`
     WHERE \`original_amount\` = 0
   `));
+  await db.execute(sql.raw(`
+    UPDATE \`massage_rooms\`
+    SET \`allow_couple_booking\` = 1
+    WHERE \`type\` = 'double'
+  `));
 
   console.log("[database] Esquema de descuentos de masajes verificado");
 }

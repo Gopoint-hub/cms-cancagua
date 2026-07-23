@@ -95,6 +95,7 @@ async function loadBlockingMassageBookings(db: MassageDb, bookingDate: string) {
     roomId: massageBookings.roomId,
     startTime: massageBookings.startTime,
     endTime: massageBookings.endTime,
+    coupleBookingId: massageBookings.coupleBookingId,
   }).from(massageBookings).where(and(
     eq(massageBookings.bookingDate, bookingDate as any),
     sql`${massageBookings.status} NOT IN ('cancelled')`,
@@ -112,8 +113,11 @@ async function loadBlockingMassageBookings(db: MassageDb, bookingDate: string) {
   ));
 
   return [
-    ...standard,
-    ...expandSkeduProgramResourceBlocks(programs),
+    ...standard.map(({ coupleBookingId, ...booking }) => ({
+      ...booking,
+      groupKey: coupleBookingId ? `booking-group:${coupleBookingId}` : null,
+    })),
+    ...expandSkeduProgramResourceBlocks(programs).map((booking) => ({ ...booking, groupKey: null })),
   ];
 }
 
@@ -552,8 +556,8 @@ const salasRouter = router({
     const existing = await db.select().from(massageRooms);
     if (existing.length === 0) {
       await db.insert(massageRooms).values([
-        { name: "Sala Doble 1", type: "double", capacity: 2 },
-        { name: "Sala Doble 2", type: "double", capacity: 2 },
+        { name: "Sala Doble 1", type: "double", capacity: 2, allowCoupleBooking: 1 },
+        { name: "Sala Doble 2", type: "double", capacity: 2, allowCoupleBooking: 1 },
         { name: "Sala Individual", type: "individual", capacity: 1 },
       ]);
     }
@@ -1712,9 +1716,14 @@ type AutomaticMassageBooking = {
   roomId: number | null;
   startTime: string;
   endTime: string;
+  groupKey?: string | null;
 };
 
-type AutomaticMassageRoom = { id: number };
+type AutomaticMassageRoom = {
+  id: number;
+  capacity?: number;
+  allowCoupleBooking?: number;
+};
 
 const INHOUSE_ASSIGNMENT_PRIORITY = new Map<number, number>([
   [3, 0], // Bárbara Frías
@@ -1747,6 +1756,7 @@ export function selectAutomaticMassageAssignment(params: {
   prepMinutes?: number;
   bookingDate?: string;
   now?: Date;
+  groupKey?: string;
 }): { therapist: AutomaticMassageTherapist; room: AutomaticMassageRoom; endTime: string } | null {
   const prep = params.prepMinutes ?? 10;
   const requestedStart = parseTimeMin(params.startTime);
@@ -1792,8 +1802,9 @@ export function selectAutomaticMassageAssignment(params: {
     });
     if (therapistBusy) continue;
 
-    const room = params.rooms.find((candidateRoom) =>
-      !params.bookings.some((booking) => {
+    const requestedEndTime = formatTimeMin(requestedEnd);
+    const room = params.rooms.find((candidateRoom) => {
+      const overlappingBookings = params.bookings.filter((booking) => {
         if (booking.roomId !== candidateRoom.id) return false;
         return overlaps(
           requestedStart,
@@ -1801,11 +1812,22 @@ export function selectAutomaticMassageAssignment(params: {
           parseTimeMin(booking.startTime),
           parseTimeMin(booking.endTime) + prep,
         );
-      })
-    );
+      });
+      if (overlappingBookings.length === 0) return true;
+
+      const canShareWithSameCart = Boolean(params.groupKey)
+        && candidateRoom.allowCoupleBooking === 1
+        && (candidateRoom.capacity ?? 1) > overlappingBookings.length
+        && overlappingBookings.every((booking) =>
+          booking.groupKey === params.groupKey
+          && booking.startTime === params.startTime
+          && booking.endTime === requestedEndTime
+        );
+      return canShareWithSameCart;
+    });
 
     if (room) {
-      return { therapist, room, endTime: formatTimeMin(requestedEnd) };
+      return { therapist, room, endTime: requestedEndTime };
     }
   }
 
@@ -2123,6 +2145,7 @@ const masajesPublicRouter = router({
       const schedStart = Math.min(...validTherapists.map((t) => parseTimeMin(t.scheduleStart)));
       const schedEnd = Math.max(...validTherapists.map((t) => parseTimeMin(t.scheduleEnd)));
       const slots: { time: string }[] = [];
+      const previewGroupKey = "public-cart-preview";
       for (let t = schedStart; t + input.duration <= schedEnd; t += 30) {
         const timeStr = formatTimeMin(t);
         const candidateBookings = [...allBookings];
@@ -2135,6 +2158,7 @@ const masajesPublicRouter = router({
             startTime: timeStr,
             duration: input.duration,
             bookingDate: input.date,
+            groupKey: previewGroupKey,
           });
           if (!assignment) {
             groupIsAvailable = false;
@@ -2145,6 +2169,7 @@ const masajesPublicRouter = router({
             roomId: assignment.room.id,
             startTime: timeStr,
             endTime: assignment.endTime,
+            groupKey: previewGroupKey,
           });
         }
         if (groupIsAvailable) slots.push({ time: timeStr });
@@ -2406,7 +2431,8 @@ const masajesPublicRouter = router({
       validateMassageCartCapacity(input.items);
 
       const blockingByDate = new Map<string, Awaited<ReturnType<typeof loadBlockingMassageBookings>>>();
-      const roomsByDate = new Map<string, Array<{ id: number }>>();
+      const roomsByDate = new Map<string, Array<{ id: number; capacity: number; allowCoupleBooking: number }>>();
+      const cartGroupKey = "public-cart";
       const prepared: Array<{
         item: typeof input.items[number];
         techniqueName: string;
@@ -2458,7 +2484,11 @@ const masajesPublicRouter = router({
         }
         let rooms = roomsByDate.get(item.bookingDate);
         if (!rooms) {
-          rooms = await db.select({ id: massageRooms.id }).from(massageRooms).where(eq(massageRooms.active, 1));
+          rooms = await db.select({
+            id: massageRooms.id,
+            capacity: massageRooms.capacity,
+            allowCoupleBooking: massageRooms.allowCoupleBooking,
+          }).from(massageRooms).where(eq(massageRooms.active, 1));
           roomsByDate.set(item.bookingDate, rooms);
         }
 
@@ -2469,6 +2499,7 @@ const masajesPublicRouter = router({
           startTime: item.startTime,
           duration: item.duration,
           bookingDate: item.bookingDate,
+          groupKey: cartGroupKey,
         });
         if (!assignment) {
           throw new TRPCError({
@@ -2482,6 +2513,7 @@ const masajesPublicRouter = router({
           roomId: assignment.room.id,
           startTime: item.startTime,
           endTime: assignment.endTime,
+          groupKey: cartGroupKey,
         });
         prepared.push({
           item,
@@ -2534,6 +2566,11 @@ const masajesPublicRouter = router({
           status: "pending",
         }).$returningId();
         bookingIds.push(inserted.id);
+      }
+      if (bookingIds.length > 1) {
+        await db.update(massageBookings)
+          .set({ coupleBookingId: bookingIds[0] })
+          .where(inArray(massageBookings.id, bookingIds));
       }
 
       const originalTotal = prepared.reduce((sum, item) => sum + item.price, 0);

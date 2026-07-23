@@ -245,6 +245,68 @@ describe("selectAutomaticMassageAssignment", () => {
     expect(third?.therapist.id).toBe(2);
   });
 
+  it("fits four massages from the same cart into two double rooms", () => {
+    const therapists = Array.from({ length: 4 }, (_, index) => ({
+      id: index + 10,
+      name: `Terapeuta ${index + 1}`,
+      type: "freelance" as const,
+      callPriority: index + 1,
+      scheduleStart: "10:00",
+      scheduleEnd: "18:00",
+    }));
+    const doubleRooms = [
+      { id: 20, capacity: 2, allowCoupleBooking: 1 },
+      { id: 21, capacity: 2, allowCoupleBooking: 1 },
+    ];
+    const candidateBookings: Array<{
+      therapistId: number;
+      roomId: number;
+      startTime: string;
+      endTime: string;
+      groupKey: string;
+    }> = [];
+
+    for (let index = 0; index < 4; index += 1) {
+      const assignment = selectAutomaticMassageAssignment({
+        therapists,
+        bookings: candidateBookings,
+        rooms: doubleRooms,
+        startTime: "12:00",
+        duration: 50,
+        groupKey: "cart-1",
+      });
+      expect(assignment).not.toBeNull();
+      candidateBookings.push({
+        therapistId: assignment!.therapist.id,
+        roomId: assignment!.room.id,
+        startTime: "12:00",
+        endTime: assignment!.endTime,
+        groupKey: "cart-1",
+      });
+    }
+
+    expect(candidateBookings.filter((booking) => booking.roomId === 20)).toHaveLength(2);
+    expect(candidateBookings.filter((booking) => booking.roomId === 21)).toHaveLength(2);
+  });
+
+  it("does not mix different carts in the same double room", () => {
+    const assignment = selectAutomaticMassageAssignment({
+      therapists: [{
+        id: 2, name: "Disponible", type: "inhouse", callPriority: 1,
+        scheduleStart: "10:00", scheduleEnd: "18:00",
+      }],
+      bookings: [{
+        therapistId: 1, roomId: 20, startTime: "12:00", endTime: "12:50", groupKey: "cart-previous",
+      }],
+      rooms: [{ id: 20, capacity: 2, allowCoupleBooking: 1 }],
+      startTime: "12:00",
+      duration: 50,
+      groupKey: "cart-new",
+    });
+
+    expect(assignment).toBeNull();
+  });
+
   it("selects Daniela before Barbara starts her shift", () => {
     const assignment = selectAutomaticMassageAssignment({
       therapists: [
