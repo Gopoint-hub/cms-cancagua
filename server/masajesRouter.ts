@@ -37,7 +37,7 @@ import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
 import { calculateMassageDiscount } from "./massageDiscounts";
-import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne, isNull } from "drizzle-orm";
 import { hasMassageAdminAccess, hasMassageOperationsAccess, hasMassageReadAccess } from "@shared/permissions";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { massageAreaAdminRouter } from "./massageAreaAdmin";
@@ -68,6 +68,17 @@ export const MASSAGE_CANCELLATION_CATEGORIES = [
   "duplicate_booking",
   "other",
 ] as const;
+
+// La agenda es un historial operativo: no debe ocultar reservas por su estado.
+export const MASSAGE_AGENDA_STATUSES = [
+  "pending",
+  "confirmed",
+  "completed",
+  "cancelled",
+  "no_show",
+] as const;
+export const SKEDU_AGENDA_STATUSES = ["confirmed", "completed", "cancelled", "no_show"] as const;
+export const MANUAL_ASSIGNMENT_REJECTION_STATUSES = ["admin_rejected", "therapist_rejected"] as const;
 
 const cancellationCategorySchema = z.enum(MASSAGE_CANCELLATION_CATEGORIES);
 const cancellationReasonSchema = z.string().trim().min(5, "Escribe el motivo de la cancelación").max(1000);
@@ -1309,27 +1320,14 @@ const agendaRouter = router({
       .where(and(
         gte(massageBookings.bookingDate, input.from as any),
         lte(massageBookings.bookingDate, input.to as any),
-        or(
-          inArray(massageBookings.status, ["confirmed", "completed", "no_show"]),
-          and(
-            eq(massageBookings.status, "cancelled"),
-            inArray(massageBookings.cancellationCategory, [...MASSAGE_CANCELLATION_CATEGORIES]),
-          ),
-          and(eq(massageBookings.status, "pending"), eq(massageBookings.paymentStatus, "paid"))
-        )
+        inArray(massageBookings.status, [...MASSAGE_AGENDA_STATUSES]),
       ))
       .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
 
       const programRows = await db.select().from(massageProgramBookings).where(and(
         gte(massageProgramBookings.bookingDate, input.from as any),
         lte(massageProgramBookings.bookingDate, input.to as any),
-        or(
-          inArray(massageProgramBookings.status, ["confirmed", "completed", "no_show"]),
-          and(
-            eq(massageProgramBookings.status, "cancelled"),
-            inArray(massageProgramBookings.cancellationCategory, [...MASSAGE_CANCELLATION_CATEGORIES]),
-          ),
-        ),
+        inArray(massageProgramBookings.status, [...SKEDU_AGENDA_STATUSES]),
       ));
       const therapists = await db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists);
       const rooms = await db.select({ id: massageRooms.id, name: massageRooms.name }).from(massageRooms);
@@ -1388,26 +1386,8 @@ const agendaRouter = router({
     const db = await getDb();
     if (!db) return [];
 
-    // Las reservas pagadas se conservan como historial, pero dejan de aparecer
-    // como asignaciones pendientes una vez que su fecha ya pasó en Chile.
-    const todayChile = getChileDateString();
-    await db.update(massageBookings)
-      .set({
-        status: "cancelled",
-        freelanceApprovalStatus: "expired",
-        adminApprovalToken: null,
-        therapistConfirmationToken: null,
-        cancellationCategory: "system",
-        cancellationReason: "Reserva vencida sin asignación manual.",
-        cancelledAt: new Date(),
-        cancelledByUserId: null,
-      })
-      .where(and(
-        eq(massageBookings.paymentStatus, "paid"),
-        eq(massageBookings.status, "pending"),
-        lt(massageBookings.bookingDate, todayChile as any),
-      ));
-
+    // Esta consulta es deliberadamente de solo lectura. Una asignación vencida
+    // permanece visible hasta que Tamara la resuelva o cancele con un motivo.
     const rows = await db.select({
       id: massageBookings.id,
       clientName: massageBookings.clientName,
@@ -1425,7 +1405,11 @@ const agendaRouter = router({
     .where(
       and(
         eq(massageBookings.paymentStatus, "paid"),
-        eq(massageBookings.status, "pending")
+        eq(massageBookings.status, "pending"),
+        or(
+          isNull(massageBookings.therapistId),
+          inArray(massageBookings.freelanceApprovalStatus, [...MANUAL_ASSIGNMENT_REJECTION_STATUSES]),
+        ),
       )
     )
     .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));

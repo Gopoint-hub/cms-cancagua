@@ -11,6 +11,8 @@ import {
   expandSkeduProgramResourceBlocks,
   isSkeduProgramDurationAllowed,
   listAutomaticMassageSlots,
+  MASSAGE_AGENDA_STATUSES,
+  MANUAL_ASSIGNMENT_REJECTION_STATUSES,
   normalizeDecimalInput,
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
@@ -20,6 +22,25 @@ import {
   validateSkeduTherapistSelection,
   validatePublicMassageLeadTime,
 } from "./masajesRouter";
+
+describe("massage agenda visibility", () => {
+  it("keeps every standard booking status visible, including manual pending and system cancellations", () => {
+    expect(MASSAGE_AGENDA_STATUSES).toEqual([
+      "pending",
+      "confirmed",
+      "completed",
+      "cancelled",
+      "no_show",
+    ]);
+  });
+
+  it("limits manual-assignment cleanup to explicitly rejected assignments", () => {
+    expect(MANUAL_ASSIGNMENT_REJECTION_STATUSES).toEqual([
+      "admin_rejected",
+      "therapist_rejected",
+    ]);
+  });
+});
 
 describe("recurring therapist availability", () => {
   it("expands enabled weekly schedules into concrete future dates", () => {

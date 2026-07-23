@@ -54,5 +54,24 @@ export async function ensureMassageBookingSchema(): Promise<void> {
     "UPDATE `massage_bookings` SET `booking_source` = 'web' WHERE `getnet_request_id` IS NOT NULL",
   ));
 
+  // Entre el 15 y el 23 de julio de 2026, la limpieza de asignaciones
+  // pendientes alcanzó por error reservas manuales pagadas que sí tenían
+  // terapeuta. Se restauran como completadas porque su fecha ya había pasado.
+  await db.execute(sql.raw(`
+    UPDATE massage_bookings
+    SET status = 'completed',
+        cancellation_category = NULL,
+        cancellation_reason = NULL,
+        cancelled_at = NULL,
+        cancelled_by_user_id = NULL,
+        freelance_approval_status = NULL
+    WHERE booking_source = 'cms'
+      AND payment_status = 'paid'
+      AND therapist_id IS NOT NULL
+      AND status = 'cancelled'
+      AND cancellation_category = 'system'
+      AND cancellation_reason = 'Reserva vencida sin asignación manual.'
+  `));
+
   console.log("[database] Esquema base de reservas de masajes verificado");
 }
