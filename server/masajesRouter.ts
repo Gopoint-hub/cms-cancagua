@@ -3633,37 +3633,53 @@ const masajesPublicRouter = router({
         }
       }
 
-      const bookingIds: number[] = [];
-      for (let index = 0; index < prepared.length; index += 1) {
-        const preparedItem = prepared[index];
-        const lineDiscount = discountResult?.lineDiscounts[index] ?? 0;
-        const [inserted] = await db.insert(massageBookings).values({
-          techniqueId: preparedItem.item.techniqueId,
-          duration: preparedItem.item.duration,
-          bookingDate: preparedItem.item.bookingDate as any,
-          startTime: preparedItem.item.startTime,
-          endTime: preparedItem.endTime,
-          clientName: input.clientName,
-          clientPhone: input.clientPhone,
-          clientEmail: input.clientEmail,
-          notes: preparedItem.item.notes,
-          therapistId: preparedItem.therapistId,
-          roomId: preparedItem.roomId,
-          paymentStatus: "pending",
-          originalAmount: String(preparedItem.price),
-          discountAmount: String(lineDiscount),
-          amountPaid: String(preparedItem.price - lineDiscount),
-          discountCodeId: discountResult?.discountCodeId,
-          discountCode: discountResult?.code,
-          status: "pending",
-          bookingSource: "web",
-        }).$returningId();
-        bookingIds.push(inserted.id);
-      }
-      if (bookingIds.length > 1) {
-        await db.update(massageBookings)
-          .set({ coupleBookingId: bookingIds[0] })
-          .where(inArray(massageBookings.id, bookingIds));
+      let bookingIds: number[];
+      try {
+        bookingIds = await db.transaction(async (tx) => {
+          const insertedIds: number[] = [];
+          for (let index = 0; index < prepared.length; index += 1) {
+            const preparedItem = prepared[index];
+            const lineDiscount = discountResult?.lineDiscounts[index] ?? 0;
+            if (!Number.isFinite(lineDiscount) || lineDiscount < 0 || lineDiscount > preparedItem.price) {
+              throw new Error(`Invalid line discount ${lineDiscount} for price ${preparedItem.price}`);
+            }
+            const [inserted] = await tx.insert(massageBookings).values({
+              techniqueId: preparedItem.item.techniqueId,
+              duration: preparedItem.item.duration,
+              bookingDate: preparedItem.item.bookingDate as any,
+              startTime: preparedItem.item.startTime,
+              endTime: preparedItem.endTime,
+              clientName: input.clientName,
+              clientPhone: input.clientPhone,
+              clientEmail: input.clientEmail,
+              notes: preparedItem.item.notes,
+              therapistId: preparedItem.therapistId,
+              roomId: preparedItem.roomId,
+              paymentStatus: "pending",
+              originalAmount: String(preparedItem.price),
+              discountAmount: String(lineDiscount),
+              amountPaid: String(preparedItem.price - lineDiscount),
+              discountCodeId: discountResult?.discountCodeId,
+              discountCode: discountResult?.code,
+              status: "pending",
+              bookingSource: "web",
+            }).$returningId();
+            insertedIds.push(inserted.id);
+          }
+          if (insertedIds.length > 1) {
+            await tx.update(massageBookings)
+              .set({ coupleBookingId: insertedIds[0] })
+              .where(inArray(massageBookings.id, insertedIds));
+          }
+          return insertedIds;
+        });
+      } catch (error) {
+        const cause = error instanceof Error && "cause" in error ? error.cause : undefined;
+        console.error("[initCartPayment] Booking insert failed:", cause ?? error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "No pudimos crear la reserva para iniciar el pago. Intenta nuevamente.",
+        });
       }
 
       const originalTotal = prepared.reduce((sum, item) => sum + item.price, 0);

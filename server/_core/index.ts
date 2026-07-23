@@ -19,6 +19,7 @@ import { ensureMassageDiscountSchema } from "../ensureMassageDiscountSchema";
 import { ensureMassageAvailabilitySchema } from "../ensureMassageAvailabilitySchema";
 import { ensureMassageTherapistUsersSchema } from "../ensureMassageTherapistUsersSchema";
 import { ensureMassageNpsSchema } from "../ensureMassageNpsSchema";
+import { ensureMassageBookingSchema } from "../ensureMassageBookingSchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -40,6 +41,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  await ensureMassageBookingSchema();
   await ensureMassageDiscountSchema();
   await ensureMassageAvailabilitySchema();
   await ensureMassageTherapistUsersSchema();
