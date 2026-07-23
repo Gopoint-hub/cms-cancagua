@@ -15,6 +15,7 @@ import cerebroRouter from "../cerebroRoute";
 import publicMasajesCatalog from "../publicMasajesCatalog";
 import { checkWhatsAppHealth } from "./whapi";
 import { checkGitHubBlogHealth } from "../githubBlogHealth";
+import { ensureMassageDiscountSchema } from "../ensureMassageDiscountSchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,6 +37,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  await ensureMassageDiscountSchema();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads

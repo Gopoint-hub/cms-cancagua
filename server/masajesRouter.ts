@@ -1382,25 +1382,27 @@ const discountsRouter = router({
     const [existing] = await db.select({ id: discountCodes.id }).from(discountCodes)
       .where(eq(discountCodes.code, normalized)).limit(1);
     if (existing) throw new TRPCError({ code: "CONFLICT", message: "Ese código ya existe." });
-    const [created] = await db.insert(discountCodes).values({
-      code: normalized,
-      name: input.name,
-      description: input.description,
-      discountType: input.discountType,
-      discountValue: input.discountValue,
-      applicableServices: JSON.stringify(["masajes"]),
-      maxUsesPerUser: 1,
-      startsAt: input.startsAt ?? null,
-      expiresAt: input.expiresAt ?? null,
-      active: input.active,
-      createdBy: ctx.user.id,
-    }).$returningId();
-    if (input.techniqueIds.length) {
-      await db.insert(massageDiscountCodeTechniques).values(
-        Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: created.id, techniqueId })),
-      );
-    }
-    return { id: created.id };
+    return db.transaction(async (tx) => {
+      const [created] = await tx.insert(discountCodes).values({
+        code: normalized,
+        name: input.name,
+        description: input.description,
+        discountType: input.discountType,
+        discountValue: input.discountValue,
+        applicableServices: JSON.stringify(["masajes"]),
+        maxUsesPerUser: 1,
+        startsAt: input.startsAt ?? null,
+        expiresAt: input.expiresAt ?? null,
+        active: input.active,
+        createdBy: ctx.user.id,
+      }).$returningId();
+      if (input.techniqueIds.length) {
+        await tx.insert(massageDiscountCodeTechniques).values(
+          Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: created.id, techniqueId })),
+        );
+      }
+      return { id: created.id };
+    });
   }),
 
   update: protectedProcedure.input(massageDiscountInput.extend({ id: z.number().int().positive() }))
@@ -1418,19 +1420,21 @@ const discountsRouter = router({
       const [duplicate] = await db.select({ id: discountCodes.id }).from(discountCodes)
         .where(and(eq(discountCodes.code, normalized), sql`${discountCodes.id} <> ${input.id}`)).limit(1);
       if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "Ese código ya existe." });
-      await db.update(discountCodes).set({
-        code: normalized, name: input.name, description: input.description,
-        discountType: input.discountType, discountValue: input.discountValue,
-        startsAt: input.startsAt ?? null, expiresAt: input.expiresAt ?? null, active: input.active,
-      }).where(eq(discountCodes.id, input.id));
-      await db.delete(massageDiscountCodeTechniques)
-        .where(eq(massageDiscountCodeTechniques.discountCodeId, input.id));
-      if (input.techniqueIds.length) {
-        await db.insert(massageDiscountCodeTechniques).values(
-          Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: input.id, techniqueId })),
-        );
-      }
-      return { success: true };
+      return db.transaction(async (tx) => {
+        await tx.update(discountCodes).set({
+          code: normalized, name: input.name, description: input.description,
+          discountType: input.discountType, discountValue: input.discountValue,
+          startsAt: input.startsAt ?? null, expiresAt: input.expiresAt ?? null, active: input.active,
+        }).where(eq(discountCodes.id, input.id));
+        await tx.delete(massageDiscountCodeTechniques)
+          .where(eq(massageDiscountCodeTechniques.discountCodeId, input.id));
+        if (input.techniqueIds.length) {
+          await tx.insert(massageDiscountCodeTechniques).values(
+            Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: input.id, techniqueId })),
+          );
+        }
+        return { success: true };
+      });
     }),
 
   remove: protectedProcedure.input(z.object({ id: z.number().int().positive() }))
