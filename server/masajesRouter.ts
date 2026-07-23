@@ -1834,6 +1834,57 @@ export function selectAutomaticMassageAssignment(params: {
   return null;
 }
 
+export function listAutomaticMassageSlots(params: {
+  therapists: AutomaticMassageTherapist[];
+  bookings: AutomaticMassageBooking[];
+  rooms: AutomaticMassageRoom[];
+  duration: number;
+  quantity: number;
+  bookingDate: string;
+  now?: Date;
+}): Array<{ time: string }> {
+  if (params.therapists.length === 0 || params.rooms.length === 0) return [];
+
+  const schedStart = Math.min(...params.therapists.map((therapist) => parseTimeMin(therapist.scheduleStart)));
+  const schedEnd = Math.max(...params.therapists.map((therapist) => parseTimeMin(therapist.scheduleEnd)));
+  const slots: Array<{ time: string }> = [];
+  const previewGroupKey = "public-cart-preview";
+
+  for (let minute = schedStart; minute + params.duration <= schedEnd; minute += 30) {
+    const time = formatTimeMin(minute);
+    const candidateBookings = [...params.bookings];
+    let groupIsAvailable = true;
+
+    for (let itemIndex = 0; itemIndex < params.quantity; itemIndex += 1) {
+      const assignment = selectAutomaticMassageAssignment({
+        therapists: params.therapists,
+        bookings: candidateBookings,
+        rooms: params.rooms,
+        startTime: time,
+        duration: params.duration,
+        bookingDate: params.bookingDate,
+        now: params.now,
+        groupKey: previewGroupKey,
+      });
+      if (!assignment) {
+        groupIsAvailable = false;
+        break;
+      }
+      candidateBookings.push({
+        therapistId: assignment.therapist.id,
+        roomId: assignment.room.id,
+        startTime: time,
+        endTime: assignment.endTime,
+        groupKey: previewGroupKey,
+      });
+    }
+
+    if (groupIsAvailable) slots.push({ time });
+  }
+
+  return slots;
+}
+
 type InhouseRotationEntry = {
   therapistId: number;
   date: string;
@@ -2103,6 +2154,136 @@ const masajesPublicRouter = router({
       );
     }),
 
+  getAvailableDates: publicProcedure
+    .input(z.object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      duration: z.number().positive(),
+      techniqueId: z.number(),
+      quantity: z.number().int().min(1).max(4).default(1),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const rangeDays = Math.round(
+        (Date.parse(`${input.to}T00:00:00Z`) - Date.parse(`${input.from}T00:00:00Z`)) / 86_400_000,
+      );
+      if (!Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > 62) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "El rango del calendario no es válido." });
+      }
+
+      const availabilityRows = await db.select({
+        date: massageTherapistAvailability.date,
+        id: massageTherapists.id,
+        name: massageTherapists.name,
+        type: massageTherapists.type,
+        callPriority: massageTherapists.callPriority,
+        scheduleStart: massageTherapistAvailability.startTime,
+        scheduleEnd: massageTherapistAvailability.endTime,
+      })
+        .from(massageTherapistTechniques)
+        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
+        .where(and(
+          eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+          eq(massageTherapists.active, 1),
+          eq(massageTherapistAvailability.isAvailable, 1),
+          gte(massageTherapistAvailability.date, input.from as any),
+          lte(massageTherapistAvailability.date, input.to as any),
+        ));
+
+      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      if (availabilityRows.length === 0 || rooms.length === 0) return [];
+
+      const standardBookings = await db.select({
+        bookingDate: massageBookings.bookingDate,
+        therapistId: massageBookings.therapistId,
+        roomId: massageBookings.roomId,
+        startTime: massageBookings.startTime,
+        endTime: massageBookings.endTime,
+        coupleBookingId: massageBookings.coupleBookingId,
+      }).from(massageBookings).where(and(
+        gte(massageBookings.bookingDate, input.from as any),
+        lte(massageBookings.bookingDate, input.to as any),
+        sql`${massageBookings.status} NOT IN ('cancelled')`,
+      ));
+
+      const programBookings = await db.select({
+        bookingDate: massageProgramBookings.bookingDate,
+        therapistId: massageProgramBookings.therapistId,
+        secondTherapistId: massageProgramBookings.secondTherapistId,
+        roomId: massageProgramBookings.roomId,
+        startTime: massageProgramBookings.startTime,
+        endTime: massageProgramBookings.endTime,
+      }).from(massageProgramBookings).where(and(
+        gte(massageProgramBookings.bookingDate, input.from as any),
+        lte(massageProgramBookings.bookingDate, input.to as any),
+        sql`${massageProgramBookings.status} NOT IN ('cancelled')`,
+      ));
+
+      const therapistsByDate = new Map<string, Map<number, AutomaticMassageTherapist>>();
+      for (const row of availabilityRows) {
+        const bookingDate = serializeDateOnly(row.date);
+        if (!bookingDate || !row.scheduleStart || !row.scheduleEnd) continue;
+        const therapists = therapistsByDate.get(bookingDate) ?? new Map<number, AutomaticMassageTherapist>();
+        therapists.set(row.id, {
+          id: row.id,
+          name: row.name,
+          type: row.type,
+          callPriority: row.callPriority,
+          scheduleStart: row.scheduleStart,
+          scheduleEnd: row.scheduleEnd,
+        });
+        therapistsByDate.set(bookingDate, therapists);
+      }
+
+      const bookingsByDate = new Map<string, AutomaticMassageBooking[]>();
+      const appendBooking = (bookingDate: string, booking: AutomaticMassageBooking) => {
+        const bookings = bookingsByDate.get(bookingDate) ?? [];
+        bookings.push(booking);
+        bookingsByDate.set(bookingDate, bookings);
+      };
+      for (const row of standardBookings) {
+        const bookingDate = serializeDateOnly(row.bookingDate);
+        if (!bookingDate) continue;
+        appendBooking(bookingDate, {
+          therapistId: row.therapistId,
+          roomId: row.roomId,
+          startTime: row.startTime,
+          endTime: row.endTime,
+          groupKey: row.coupleBookingId ? `booking-group:${row.coupleBookingId}` : null,
+        });
+      }
+      for (const row of programBookings) {
+        const bookingDate = serializeDateOnly(row.bookingDate);
+        if (!bookingDate) continue;
+        const blocks = expandSkeduProgramResourceBlocks([{
+          therapistId: row.therapistId,
+          secondTherapistId: row.secondTherapistId,
+          roomId: row.roomId,
+          startTime: row.startTime,
+          endTime: row.endTime,
+        }]);
+        for (const block of blocks) appendBooking(bookingDate, { ...block, groupKey: null });
+      }
+
+      const todayChile = getChileDateString();
+      return Array.from(therapistsByDate.entries())
+        .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+        .filter(([bookingDate, therapists]) =>
+          bookingDate >= todayChile
+          && listAutomaticMassageSlots({
+            therapists: Array.from(therapists.values()),
+            bookings: bookingsByDate.get(bookingDate) ?? [],
+            rooms,
+            duration: input.duration,
+            quantity: input.quantity,
+            bookingDate,
+          }).length > 0
+        )
+        .map(([bookingDate]) => bookingDate);
+    }),
+
   getSlots: publicProcedure
     .input(z.object({
       date: z.string(),
@@ -2140,41 +2321,14 @@ const masajesPublicRouter = router({
 
       const allBookings = await loadBlockingMassageBookings(db, input.date);
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
-      if (rooms.length === 0) return [];
-
-      const schedStart = Math.min(...validTherapists.map((t) => parseTimeMin(t.scheduleStart)));
-      const schedEnd = Math.max(...validTherapists.map((t) => parseTimeMin(t.scheduleEnd)));
-      const slots: { time: string }[] = [];
-      const previewGroupKey = "public-cart-preview";
-      for (let t = schedStart; t + input.duration <= schedEnd; t += 30) {
-        const timeStr = formatTimeMin(t);
-        const candidateBookings = [...allBookings];
-        let groupIsAvailable = true;
-        for (let itemIndex = 0; itemIndex < input.quantity; itemIndex += 1) {
-          const assignment = selectAutomaticMassageAssignment({
-            therapists: validTherapists,
-            bookings: candidateBookings,
-            rooms,
-            startTime: timeStr,
-            duration: input.duration,
-            bookingDate: input.date,
-            groupKey: previewGroupKey,
-          });
-          if (!assignment) {
-            groupIsAvailable = false;
-            break;
-          }
-          candidateBookings.push({
-            therapistId: assignment.therapist.id,
-            roomId: assignment.room.id,
-            startTime: timeStr,
-            endTime: assignment.endTime,
-            groupKey: previewGroupKey,
-          });
-        }
-        if (groupIsAvailable) slots.push({ time: timeStr });
-      }
-      return slots;
+      return listAutomaticMassageSlots({
+        therapists: validTherapists,
+        bookings: allBookings,
+        rooms,
+        duration: input.duration,
+        quantity: input.quantity,
+        bookingDate: input.date,
+      });
     }),
 
   book: publicProcedure

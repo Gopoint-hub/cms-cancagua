@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Calendar, Clock, User, ShieldAlert, Check, ShoppingCart, Trash2, Plus } from "lucide-react";
-import { format } from "date-fns";
+import { CalendarDays, Clock, User, ShieldAlert, Check, ShoppingCart, Trash2, Plus } from "lucide-react";
+import { addMonths, endOfMonth, format, startOfDay, startOfMonth } from "date-fns";
 import { es } from "date-fns/locale";
 
 const getDurations = (t: any): number[] => {
@@ -29,8 +30,6 @@ const getPriceForDuration = (t: any, dur: number): number | null => {
   const vals = [t.price50min, t.price80min, t.price110min];
   return vals[idx] ? Number(vals[idx]) : null;
 };
-
-const today = new Date().toISOString().split("T")[0];
 
 type CartSelection = { techniqueId: number; duration: number; quantity: number };
 
@@ -114,6 +113,7 @@ export default function ReservarMasaje() {
   const [quantity, setQuantity] = useState(firstSelection?.quantity ?? 1);
   const [date, setDate] = useState("");
   const [slot, setSlot] = useState<{ time: string } | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [name, setName] = useState("");
   const [countryCode, setCountryCode] = useState("56");
   const [phone, setPhone] = useState("");
@@ -137,6 +137,16 @@ export default function ReservarMasaje() {
   const selectedTechnique = technique ?? fallbackTechnique;
 
   const { data: disclaimer } = trpc.masajes.config.getDisclaimer.useQuery();
+
+  const calendarFrom = format(startOfMonth(calendarMonth), "yyyy-MM-dd");
+  const calendarTo = format(endOfMonth(calendarMonth), "yyyy-MM-dd");
+  const { data: availableDates, isLoading: loadingAvailableDates } = trpc.masajes.public.getAvailableDates.useQuery(
+    { from: calendarFrom, to: calendarTo, duration: duration ?? 0, techniqueId, quantity },
+    { enabled: !!duration && !isNaN(techniqueId) }
+  );
+  const availableDateSet = useMemo(() => new Set(availableDates ?? []), [availableDates]);
+  const selectedCalendarDate = date ? new Date(`${date}T12:00:00`) : undefined;
+  const todayDate = useMemo(() => startOfDay(new Date()), []);
 
   const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getSlots.useQuery(
     { date, duration: duration ?? 0, techniqueId, quantity },
@@ -199,6 +209,7 @@ export default function ReservarMasaje() {
         setTechniqueId(next.techniqueId);
         setDuration(next.duration);
         setQuantity(next.quantity);
+        setCalendarMonth(startOfMonth(new Date()));
       }
     }
     setDate("");
@@ -255,10 +266,10 @@ export default function ReservarMasaje() {
         <h1 className="text-xl font-semibold mt-0.5">Agendar masaje</h1>
       </div>
 
-      <div className="max-w-md mx-auto p-4 space-y-3 mt-2">
+      <div className="max-w-5xl mx-auto p-4 space-y-3 mt-2">
 
         {hasPresetCart ? (
-          <div className="bg-white rounded-2xl border p-5 space-y-3">
+          <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs font-medium uppercase tracking-wider text-teal-700">
                 {pendingSelections.length > 0 ? `Faltan ${pendingSelections.length} selecciones por agendar` : "Carrito completamente agendado"}
@@ -274,7 +285,7 @@ export default function ReservarMasaje() {
           </div>
         ) : (
           <>
-            <div className="bg-white rounded-2xl border p-5 space-y-1.5">
+            <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-1.5">
               <p className="text-sm font-medium">Elige el masaje</p>
               <Select value={String(techniqueId)} onValueChange={(value) => {
                 setTechniqueId(Number(value)); setDuration(null); setDate(""); setSlot(null);
@@ -287,7 +298,7 @@ export default function ReservarMasaje() {
               {selectedTechnique.description && <p className="text-sm text-muted-foreground pt-2">{selectedTechnique.description}</p>}
             </div>
 
-            <div className="bg-white rounded-2xl border p-5 space-y-3">
+            <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-3">
               <p className="text-sm font-medium">1. Elige la duración y cantidad</p>
               <div className="flex gap-2 flex-wrap">
                 {durs.map((d) => {
@@ -304,53 +315,138 @@ export default function ReservarMasaje() {
               <div className="flex items-center justify-between border-t pt-3">
                 <span className="text-sm text-muted-foreground">Cantidad simultánea</span>
                 <div className="flex items-center rounded-xl border">
-                  <Button type="button" size="icon" variant="ghost" disabled={quantity <= 1} onClick={() => setQuantity((value) => Math.max(1, value - 1))}>−</Button>
+                  <Button type="button" size="icon" variant="ghost" disabled={quantity <= 1} onClick={() => {
+                    setQuantity((value) => Math.max(1, value - 1)); setDate(""); setSlot(null); setDisclaimerAccepted(false);
+                  }}>−</Button>
                   <span className="w-8 text-center font-semibold">{quantity}</span>
-                  <Button type="button" size="icon" variant="ghost" disabled={quantity >= 4} onClick={() => setQuantity((value) => Math.min(4, value + 1))}>+</Button>
+                  <Button type="button" size="icon" variant="ghost" disabled={quantity >= 4} onClick={() => {
+                    setQuantity((value) => Math.min(4, value + 1)); setDate(""); setSlot(null); setDisclaimerAccepted(false);
+                  }}>+</Button>
                 </div>
               </div>
             </div>
           </>
         )}
 
-        {/* 2. Fecha */}
+        {/* 2. Fecha y horario */}
         {duration && (
-          <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><Calendar className="w-4 h-4" />2. Elige la fecha</p>
-            <input type="date" min={today} value={date}
-              onChange={e => { setDate(e.target.value); setSlot(null); setDisclaimerAccepted(false); }}
-              className="w-full border rounded-xl px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-teal-500" />
-          </div>
-        )}
+          <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+            <div className="border-b px-5 py-4 sm:px-6">
+              <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+                <CalendarDays className="h-4 w-4 text-teal-600" />
+                2. Elige fecha y horario
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">Selecciona un día disponible y luego el horario que prefieras.</p>
+            </div>
 
-        {/* 3. Horarios */}
-        {date && duration && (
-          <div className="bg-white rounded-2xl border p-5 space-y-3">
-            <p className="text-sm font-medium flex items-center gap-1.5"><Clock className="w-4 h-4" />3. Elige el horario</p>
-            {loadingSlots ? (
-              <div className="flex gap-2 flex-wrap">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-9 w-16 rounded-xl" />)}</div>
-            ) : !slots || slots.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hay disponibilidad para esta fecha. Prueba con otro día.</p>
-            ) : (
-              <div className="flex gap-2 flex-wrap">
-                {slots.map(s => (
-                  <button key={s.time} onClick={() => { setSlot(s); setDisclaimerAccepted(false); }}
-                    className={`px-3.5 py-2 rounded-xl border-2 text-sm font-medium transition-colors ${slot?.time === s.time ? "border-teal-600 bg-teal-50 text-teal-700" : "border-stone-200 hover:border-stone-300"}`}>
-                    {s.time}
-                  </button>
-                ))}
+            <div className="grid md:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+              <div className="p-4 sm:p-6">
+                <div className="relative mx-auto max-w-md">
+                  <CalendarPicker
+                    mode="single"
+                    locale={es}
+                    month={calendarMonth}
+                    onMonthChange={(month) => {
+                      setCalendarMonth(month);
+                      setDate("");
+                      setSlot(null);
+                      setDisclaimerAccepted(false);
+                    }}
+                    selected={selectedCalendarDate}
+                    onSelect={(selected) => {
+                      if (!selected) return;
+                      setDate(format(selected, "yyyy-MM-dd"));
+                      setSlot(null);
+                      setDisclaimerAccepted(false);
+                    }}
+                    disabled={(day) => {
+                      const dateKey = format(day, "yyyy-MM-dd");
+                      return day < todayDate || loadingAvailableDates || !availableDateSet.has(dateKey);
+                    }}
+                    modifiers={{ available: (day) => availableDateSet.has(format(day, "yyyy-MM-dd")) }}
+                    modifiersClassNames={{
+                      available: "text-teal-700 [&_button]:font-semibold [&_button]:hover:bg-teal-50",
+                    }}
+                    startMonth={startOfMonth(todayDate)}
+                    endMonth={addMonths(startOfMonth(todayDate), 6)}
+                    showOutsideDays={false}
+                    className="w-full p-0 [--cell-size:2.5rem] sm:[--cell-size:3rem] [&_[data-selected-single=true]]:!bg-teal-600 [&_[data-selected-single=true]]:!text-white"
+                    classNames={{ root: "w-full" }}
+                  />
+                  {loadingAvailableDates && (
+                    <div className="pointer-events-none absolute inset-x-12 top-14 flex justify-center rounded-lg bg-white/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur-sm">
+                      Buscando disponibilidad…
+                    </div>
+                  )}
+                </div>
+                {!loadingAvailableDates && availableDates?.length === 0 && (
+                  <p className="mx-auto mt-3 max-w-sm rounded-xl bg-amber-50 px-4 py-3 text-center text-xs text-amber-800">
+                    No hay fechas disponibles este mes. Prueba avanzando al mes siguiente.
+                  </p>
+                )}
+                <div className="mt-4 flex items-center justify-center gap-2 border-t pt-4 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" />
+                  Horario de Chile
+                </div>
               </div>
-            )}
-            {slot && (
-              <Button className="w-full rounded-xl bg-teal-600 hover:bg-teal-700" onClick={handleAddToCart}>
-                <Plus className="w-4 h-4 mr-2" />Agendar {quantity} masaje{quantity === 1 ? "" : "s"} a las {slot.time}
-              </Button>
-            )}
+
+              <div className="min-h-64 border-t bg-stone-50/70 p-4 sm:p-6 md:border-l md:border-t-0">
+                {date ? (
+                  <>
+                    <p className="text-sm font-semibold text-stone-900 first-letter:uppercase">
+                      {format(selectedCalendarDate!, "EEEE d 'de' MMMM", { locale: es })}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">Horarios disponibles</p>
+
+                    {loadingSlots ? (
+                      <div className="mt-4 space-y-2">
+                        {[1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-11 w-full rounded-xl" />)}
+                      </div>
+                    ) : !slots || slots.length === 0 ? (
+                      <p className="mt-4 rounded-xl border border-dashed bg-white p-4 text-sm text-muted-foreground">
+                        Este día acaba de quedarse sin disponibilidad. Selecciona otra fecha.
+                      </p>
+                    ) : (
+                      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-1">
+                        {slots.map((availableSlot) => (
+                          <button
+                            key={availableSlot.time}
+                            onClick={() => { setSlot(availableSlot); setDisclaimerAccepted(false); }}
+                            className={`h-11 rounded-xl border-2 bg-white px-4 text-sm font-semibold transition-colors ${
+                              slot?.time === availableSlot.time
+                                ? "border-teal-600 bg-teal-600 text-white"
+                                : "border-stone-200 text-teal-700 hover:border-teal-500 hover:bg-teal-50"
+                            }`}
+                          >
+                            {availableSlot.time}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex min-h-56 flex-col items-center justify-center text-center">
+                    <CalendarDays className="h-8 w-8 text-stone-300" />
+                    <p className="mt-3 text-sm font-medium text-stone-700">Selecciona una fecha</p>
+                    <p className="mt-1 max-w-52 text-xs leading-relaxed text-muted-foreground">
+                      Los días resaltados tienen horarios disponibles.
+                    </p>
+                  </div>
+                )}
+
+                {slot && (
+                  <Button className="mt-4 w-full rounded-xl bg-teal-600 hover:bg-teal-700" onClick={handleAddToCart}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Agendar {quantity} masaje{quantity === 1 ? "" : "s"} a las {slot.time}
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
         {cart.length > 0 && (
-          <div className="bg-white rounded-2xl border p-5 space-y-3">
+          <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-3">
             <p className="text-sm font-medium flex items-center gap-2"><ShoppingCart className="w-4 h-4" />Masajes agendados ({cart.length})</p>
             {cart.map((item, index) => (
               <div key={`${item.techniqueId}-${item.bookingDate}-${item.startTime}-${index}`} className="flex items-start justify-between gap-3 border-t pt-3 first:border-0 first:pt-0">
@@ -370,7 +466,7 @@ export default function ReservarMasaje() {
 
         {/* 4. Datos cliente */}
         {cart.length > 0 && allSelectionsScheduled && (
-          <div className="bg-white rounded-2xl border p-5 space-y-3">
+          <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-3">
             <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />4. Tus datos</p>
             <div className="space-y-3">
               <div>
@@ -417,7 +513,7 @@ export default function ReservarMasaje() {
 
         {/* 5. Exención de responsabilidad */}
         {allInfoFilled && !disclaimerAccepted && (
-          <div className="bg-white rounded-2xl border border-amber-200 p-5 space-y-4">
+          <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-amber-200 p-5 space-y-4">
             <p className="text-sm font-medium flex items-center gap-1.5 text-amber-700">
               <ShieldAlert className="w-4 h-4" />Exención de responsabilidad
             </p>
@@ -432,7 +528,7 @@ export default function ReservarMasaje() {
 
         {/* 6. Checkboxes + resumen + pago */}
         {allInfoFilled && disclaimerAccepted && (
-          <div className="space-y-3">
+          <div className="max-w-2xl mx-auto space-y-3">
             <div className="bg-white rounded-2xl border p-5 space-y-3">
               <label className="flex items-start gap-3 cursor-pointer">
                 <div onClick={() => setTermsAccepted(!termsAccepted)}

@@ -6,6 +6,7 @@ import {
   getChileTimeString,
   expandSkeduProgramResourceBlocks,
   isSkeduProgramDurationAllowed,
+  listAutomaticMassageSlots,
   normalizeDecimalInput,
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
@@ -427,6 +428,43 @@ describe("selectAutomaticMassageAssignment", () => {
     });
 
     expect(assignment?.therapist.id).toBe(2);
+  });
+});
+
+describe("listAutomaticMassageSlots", () => {
+  it("lists a time only when the complete simultaneous group can be assigned", () => {
+    const therapists = Array.from({ length: 4 }, (_, index) => ({
+      id: index + 1,
+      name: `Terapeuta ${index + 1}`,
+      type: "inhouse" as const,
+      callPriority: index + 1,
+      scheduleStart: "12:00",
+      scheduleEnd: "13:00",
+    }));
+    const rooms = [
+      { id: 20, capacity: 2, allowCoupleBooking: 1 },
+      { id: 21, capacity: 2, allowCoupleBooking: 1 },
+    ];
+
+    expect(listAutomaticMassageSlots({
+      therapists,
+      bookings: [],
+      rooms,
+      duration: 50,
+      quantity: 4,
+      bookingDate: "2026-07-25",
+      now: new Date("2026-07-23T12:00:00.000Z"),
+    })).toEqual([{ time: "12:00" }]);
+
+    expect(listAutomaticMassageSlots({
+      therapists: therapists.slice(0, 3),
+      bookings: [],
+      rooms,
+      duration: 50,
+      quantity: 4,
+      bookingDate: "2026-07-25",
+      now: new Date("2026-07-23T12:00:00.000Z"),
+    })).toEqual([]);
   });
 });
 
