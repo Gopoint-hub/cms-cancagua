@@ -150,8 +150,17 @@ export default function ReservarMasaje() {
 
   const { data: slots, isLoading: loadingSlots } = trpc.masajes.public.getSlots.useQuery(
     { date, duration: duration ?? 0, techniqueId, quantity },
-    { enabled: !!date && !!duration && !isNaN(techniqueId) }
+    {
+      enabled: !!date && !!duration && !isNaN(techniqueId),
+      refetchInterval: 60_000,
+    }
   );
+
+  useEffect(() => {
+    if (slot && slots && !slots.some((availableSlot) => availableSlot.time === slot.time)) {
+      setSlot(null);
+    }
+  }, [slot, slots]);
 
   const initPaymentMut = trpc.masajes.public.initCartPayment.useMutation({
     onSuccess: (data) => {
@@ -396,7 +405,9 @@ export default function ReservarMasaje() {
                     <p className="text-sm font-semibold text-stone-900 first-letter:uppercase">
                       {format(selectedCalendarDate!, "EEEE d 'de' MMMM", { locale: es })}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">Horarios disponibles</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Horarios disponibles · mínimo 2 horas de anticipación
+                    </p>
 
                     {loadingSlots ? (
                       <div className="mt-4 space-y-2">

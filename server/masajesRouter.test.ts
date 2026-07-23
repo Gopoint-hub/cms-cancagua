@@ -16,7 +16,7 @@ import {
   validateMassageCancellationReason,
   validateMassageCartCapacity,
   validateSkeduTherapistSelection,
-  validateSimultaneousMassageLeadTime,
+  validatePublicMassageLeadTime,
 } from "./masajesRouter";
 
 describe("recurring therapist availability", () => {
@@ -180,25 +180,30 @@ describe("getChileTimeString", () => {
   });
 });
 
-describe("validateSimultaneousMassageLeadTime", () => {
+describe("validatePublicMassageLeadTime", () => {
   const now = new Date("2026-07-15T15:00:00.000Z"); // 11:00 en Chile
 
-  it("allows up to four simultaneous massages with two hours notice", () => {
-    expect(() => validateSimultaneousMassageLeadTime(Array.from({ length: 4 }, () => ({
+  it("allows up to four simultaneous massages with exactly two hours notice", () => {
+    expect(() => validatePublicMassageLeadTime(Array.from({ length: 4 }, () => ({
       bookingDate: "2026-07-15", startTime: "13:00",
     })), now)).not.toThrow();
   });
 
-  it("rejects simultaneous massages with less than two hours notice", () => {
-    expect(() => validateSimultaneousMassageLeadTime([
-      { bookingDate: "2026-07-15", startTime: "12:30" },
+  it("rejects even one massage with less than two hours notice", () => {
+    expect(() => validatePublicMassageLeadTime([
       { bookingDate: "2026-07-15", startTime: "12:30" },
     ], now)).toThrow("al menos 2 horas");
   });
 
-  it("does not apply the two-hour rule to a single massage", () => {
-    expect(() => validateSimultaneousMassageLeadTime([
-      { bookingDate: "2026-07-15", startTime: "11:30" },
+  it("rejects dates or times that have already passed", () => {
+    expect(() => validatePublicMassageLeadTime([
+      { bookingDate: "2026-07-14", startTime: "18:00" },
+    ], now)).toThrow("al menos 2 horas");
+  });
+
+  it("does not restrict a future date", () => {
+    expect(() => validatePublicMassageLeadTime([
+      { bookingDate: "2026-07-16", startTime: "10:00" },
     ], now)).not.toThrow();
   });
 });
@@ -413,7 +418,7 @@ describe("selectAutomaticMassageAssignment", () => {
     expect(assignment?.therapist.id).toBe(1);
   });
 
-  it("never assigns freelance therapists with less than two hours notice", () => {
+  it("never assigns any therapist with less than two hours notice", () => {
     const now = new Date("2026-07-15T14:00:00.000Z"); // 10:00 en Chile
     const freelance = [{
       id: 20,
@@ -445,7 +450,7 @@ describe("selectAutomaticMassageAssignment", () => {
     })?.therapist.id).toBe(20);
   });
 
-  it("allows an inhouse therapist inside the two-hour freelance window", () => {
+  it("does not exempt inhouse therapists from the two-hour minimum", () => {
     const assignment = selectAutomaticMassageAssignment({
       therapists: [{
         id: 3,
@@ -463,7 +468,7 @@ describe("selectAutomaticMassageAssignment", () => {
       now: new Date("2026-07-15T14:00:00.000Z"),
     });
 
-    expect(assignment?.therapist.id).toBe(3);
+    expect(assignment).toBeNull();
   });
 
   it("never offers a past slot, including for inhouse therapists", () => {
@@ -555,6 +560,28 @@ describe("listAutomaticMassageSlots", () => {
       bookingDate: "2026-07-25",
       now: new Date("2026-07-23T12:00:00.000Z"),
     })).toEqual([]);
+  });
+
+  it("hides same-day slots that start before the two-hour minimum", () => {
+    expect(listAutomaticMassageSlots({
+      therapists: [{
+        id: 1,
+        name: "Inhouse",
+        type: "inhouse",
+        callPriority: 1,
+        scheduleStart: "14:00",
+        scheduleEnd: "18:00",
+      }],
+      bookings: [],
+      rooms: [{ id: 20 }],
+      duration: 50,
+      quantity: 1,
+      bookingDate: "2026-07-23",
+      now: new Date("2026-07-23T18:28:00.000Z"), // 14:28 en Chile
+    })).toEqual([
+      { time: "16:30" },
+      { time: "17:00" },
+    ]);
   });
 });
 

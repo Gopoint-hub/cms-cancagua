@@ -200,34 +200,33 @@ export const getChileTimeString = (now = new Date()): string => {
   return `${hour}:${minute}`;
 };
 
-export function validateSimultaneousMassageLeadTime(
+export const PUBLIC_MASSAGE_MIN_LEAD_MINUTES = 120;
+
+export function hasPublicMassageMinimumLeadTime(
+  bookingDate: string,
+  startTime: string,
+  now = new Date(),
+): boolean {
+  const todayChile = getChileDateString(now);
+  if (bookingDate < todayChile) return false;
+  if (bookingDate > todayChile) return true;
+  if (!/^\d{2}:\d{2}$/.test(startTime)) return false;
+
+  const [hour, minute] = startTime.split(":").map(Number);
+  const [nowHour, nowMinute] = getChileTimeString(now).split(":").map(Number);
+  return hour * 60 + minute - (nowHour * 60 + nowMinute) >= PUBLIC_MASSAGE_MIN_LEAD_MINUTES;
+}
+
+export function validatePublicMassageLeadTime(
   items: Array<{ bookingDate: string; startTime: string }>,
   now = new Date(),
 ): void {
-  const counts = new Map<string, number>();
   for (const item of items) {
-    const key = `${item.bookingDate}|${item.startTime}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-
-  const todayChile = getChileDateString(now);
-  const nowMinutes = getChileTimeString(now).split(":").reduce((total, part, index) =>
-    total + Number(part) * (index === 0 ? 60 : 1), 0);
-
-  for (const [key, count] of Array.from(counts.entries())) {
-    if (count < 2) continue;
-    const [bookingDate, startTime] = key.split("|");
-    if (bookingDate < todayChile) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "El horario seleccionado ya pasó." });
-    }
-    if (bookingDate === todayChile) {
-      const [hour, minute] = startTime.split(":").map(Number);
-      if (hour * 60 + minute - nowMinutes < 120) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Los masajes simultáneos deben reservarse con al menos 2 horas de anticipación.",
-        });
-      }
+    if (!hasPublicMassageMinimumLeadTime(item.bookingDate, item.startTime, now)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Los masajes deben reservarse con al menos 2 horas de anticipación.",
+      });
     }
   }
 }
@@ -2214,14 +2213,7 @@ const INHOUSE_ASSIGNMENT_PRIORITY = new Map<number, number>([
 const FREELANCE_MIN_LEAD_MINUTES = 120;
 
 const getChileTimeMinutes = (now: Date): number => {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "America/Santiago",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  const [hour, minute] = getChileTimeString(now).split(":").map(Number);
   return hour * 60 + minute;
 };
 
@@ -2242,6 +2234,12 @@ export function selectAutomaticMassageAssignment(params: {
   const prep = params.prepMinutes ?? 10;
   const requestedStart = parseTimeMin(params.startTime);
   const requestedEnd = requestedStart + params.duration;
+  if (
+    params.bookingDate
+    && !hasPublicMassageMinimumLeadTime(params.bookingDate, params.startTime, params.now)
+  ) {
+    return null;
+  }
 
   const therapists = [...params.therapists].sort((a, b) => {
     const typeA = a.type === "inhouse" ? 0 : 1;
@@ -2259,15 +2257,6 @@ export function selectAutomaticMassageAssignment(params: {
   });
 
   for (const therapist of therapists) {
-    if (params.bookingDate) {
-      const now = params.now ?? new Date();
-      if (params.bookingDate === getChileDateString(now)) {
-        const leadMinutes = requestedStart - getChileTimeMinutes(now);
-        if (leadMinutes < 0) continue;
-        if (therapist.type === "freelance" && leadMinutes < FREELANCE_MIN_LEAD_MINUTES) continue;
-      }
-    }
-
     const scheduleStart = parseTimeMin(therapist.scheduleStart);
     const scheduleEnd = parseTimeMin(therapist.scheduleEnd);
     if (requestedStart < scheduleStart || requestedEnd > scheduleEnd) continue;
@@ -2831,6 +2820,7 @@ const masajesPublicRouter = router({
       subscribeNewsletter: z.boolean().optional(),
     }))
     .mutation(async ({ input }) => {
+      validatePublicMassageLeadTime([input]);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { subscribeNewsletter, ...bookingData } = input;
@@ -2929,6 +2919,7 @@ const masajesPublicRouter = router({
       subscribeNewsletter: z.boolean().optional(),
     }))
     .mutation(async ({ input }) => {
+      validatePublicMassageLeadTime([input]);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -3078,7 +3069,7 @@ const masajesPublicRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      validateSimultaneousMassageLeadTime(input.items);
+      validatePublicMassageLeadTime(input.items);
       validateMassageCartCapacity(input.items);
 
       const blockingByDate = new Map<string, Awaited<ReturnType<typeof loadBlockingMassageBookings>>>();
