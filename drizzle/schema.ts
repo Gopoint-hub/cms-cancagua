@@ -519,6 +519,17 @@ export const discountCodeUsages = mysqlTable("discount_code_usages", {
 export type DiscountCodeUsage = typeof discountCodeUsages.$inferSelect;
 export type InsertDiscountCodeUsage = typeof discountCodeUsages.$inferInsert;
 
+// Técnicas específicas a las que aplica un código del área de masajes.
+// Sin filas asociadas, el código aplica a todas las técnicas activas.
+export const massageDiscountCodeTechniques = mysqlTable("massage_discount_code_techniques", {
+  id: int("id").autoincrement().primaryKey(),
+  discountCodeId: int("discount_code_id").references(() => discountCodes.id, { onDelete: "cascade" }).notNull(),
+  techniqueId: int("technique_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MassageDiscountCodeTechnique = typeof massageDiscountCodeTechniques.$inferSelect;
+
 // Gift Cards
 export const giftCards = mysqlTable("gift_cards", {
   id: int("id").autoincrement().primaryKey(),
@@ -1110,6 +1121,9 @@ export const massageBookings = mysqlTable("massage_bookings", {
   therapistConfirmationToken: varchar("therapist_confirmation_token", { length: 64 }),
   amountPaid: decimal("amount_paid", { precision: 10, scale: 2 }),
   discountCode: varchar("discount_code", { length: 50 }),
+  originalAmount: decimal("original_amount", { precision: 10, scale: 2 }),
+  discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).default("0"),
+  discountCodeId: int("discount_code_id"),
   notes: text("notes"),
   // Cross-sell: servicios adicionales contratados
   crossSellServices: text("cross_sell_services"), // JSON array
@@ -1166,6 +1180,12 @@ export const massageSales = mysqlTable("massage_sales", {
   techniqueName: varchar("technique_name", { length: 100 }).notNull(),
   duration: int("duration").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  originalAmount: decimal("original_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  discountCodeId: int("discount_code_id"),
+  discountCode: varchar("discount_code", { length: 50 }),
+  discountType: mysqlEnum("discount_type", ["fixed", "percentage"]),
+  discountValue: int("discount_value"),
   paymentMethod: mysqlEnum("payment_method", ["getnet", "cms_manual"]).notNull(),
   paymentReference: varchar("payment_reference", { length: 100 }),
   status: mysqlEnum("status", ["paid", "refunded"]).default("paid").notNull(),

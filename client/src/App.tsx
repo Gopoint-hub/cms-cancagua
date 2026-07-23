@@ -56,6 +56,7 @@ import MasajesClientes from "./pages/cms/masajes/Clientes";
 import MasajesAnalytics from "./pages/cms/masajes/Analytics";
 import MasajesRRHH from "./pages/cms/masajes/RRHH";
 import MasajesConfiguracion from "./pages/cms/masajes/Configuracion";
+import MasajesDescuentos from "./pages/cms/masajes/Descuentos";
 import ReservarMasaje from "./pages/masajes/ReservarMasaje";
 import ConfirmacionPago from "./pages/masajes/ConfirmacionPago";
 
@@ -118,6 +119,7 @@ function Router() {
       <Route path="/cms/masajes/inventario" component={MasajesInventario} />
       <Route path="/cms/masajes/clientes" component={MasajesClientes} />
       <Route path="/cms/masajes/analytics" component={MasajesAnalytics} />
+      <Route path="/cms/masajes/descuentos" component={MasajesDescuentos} />
       <Route path="/cms/masajes/rrhh" component={MasajesRRHH} />
       <Route path="/cms/masajes/configuracion" component={MasajesConfiguracion} />
 

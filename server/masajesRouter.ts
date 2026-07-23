@@ -21,6 +21,9 @@ import {
   massageTherapistAvailability,
   massageHrLeaves,
   newsletterSubscribers,
+  discountCodes,
+  discountCodeUsages,
+  massageDiscountCodeTechniques,
 } from "../drizzle/schema";
 import {
   sendMassageBookingConfirmationEmail,
@@ -32,6 +35,7 @@ import {
 import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
+import { calculateMassageDiscount } from "./massageDiscounts";
 import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt } from "drizzle-orm";
 import { hasMassageAdminAccess, hasMassageOperationsAccess } from "@shared/permissions";
 
@@ -1321,6 +1325,130 @@ const clientesRouter = router({
     }),
 });
 
+// ─── CÓDIGOS DE DESCUENTO ─────────────────────────────────────
+const massageDiscountInput = z.object({
+  code: z.string().trim().min(3).max(50),
+  name: z.string().trim().min(2),
+  description: z.string().optional(),
+  discountType: z.enum(["percentage", "fixed"]),
+  discountValue: z.number().int().positive(),
+  startsAt: z.date().nullable().optional(),
+  expiresAt: z.date().nullable().optional(),
+  active: z.number().int().min(0).max(1).default(1),
+  techniqueIds: z.array(z.number().int().positive()).default([]),
+});
+
+const discountsRouter = router({
+  list: protectedProcedure.query(async ({ ctx }) => {
+    await adminOrEditor(ctx.user.role);
+    const db = await getDb();
+    if (!db) return [];
+    const rows = await db.select({
+      id: discountCodes.id,
+      code: discountCodes.code,
+      name: discountCodes.name,
+      description: discountCodes.description,
+      discountType: discountCodes.discountType,
+      discountValue: discountCodes.discountValue,
+      startsAt: discountCodes.startsAt,
+      expiresAt: discountCodes.expiresAt,
+      active: discountCodes.active,
+      currentUses: discountCodes.currentUses,
+      createdAt: discountCodes.createdAt,
+      totalDiscounted: sql<string>`COALESCE(SUM(${discountCodeUsages.discountAmount}), 0)`,
+    }).from(discountCodes)
+      .leftJoin(discountCodeUsages, eq(discountCodeUsages.discountCodeId, discountCodes.id))
+      .where(sql`JSON_CONTAINS(COALESCE(${discountCodes.applicableServices}, '[]'), '"masajes"')`)
+      .groupBy(discountCodes.id)
+      .orderBy(asc(discountCodes.code));
+    const mappings = await db.select().from(massageDiscountCodeTechniques);
+    return rows.map((row: any) => ({
+      ...row,
+      techniqueIds: mappings.filter((mapping: any) => mapping.discountCodeId === row.id).map((mapping: any) => mapping.techniqueId),
+    }));
+  }),
+
+  create: protectedProcedure.input(massageDiscountInput).mutation(async ({ ctx, input }) => {
+    await adminOrEditor(ctx.user.role);
+    if (input.discountType === "percentage" && input.discountValue > 100) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "El porcentaje no puede superar 100%." });
+    }
+    if (input.startsAt && input.expiresAt && input.startsAt >= input.expiresAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha de término debe ser posterior al inicio." });
+    }
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const normalized = input.code.toUpperCase();
+    const [existing] = await db.select({ id: discountCodes.id }).from(discountCodes)
+      .where(eq(discountCodes.code, normalized)).limit(1);
+    if (existing) throw new TRPCError({ code: "CONFLICT", message: "Ese código ya existe." });
+    const [created] = await db.insert(discountCodes).values({
+      code: normalized,
+      name: input.name,
+      description: input.description,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+      applicableServices: JSON.stringify(["masajes"]),
+      maxUsesPerUser: 1,
+      startsAt: input.startsAt ?? null,
+      expiresAt: input.expiresAt ?? null,
+      active: input.active,
+      createdBy: ctx.user.id,
+    }).$returningId();
+    if (input.techniqueIds.length) {
+      await db.insert(massageDiscountCodeTechniques).values(
+        Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: created.id, techniqueId })),
+      );
+    }
+    return { id: created.id };
+  }),
+
+  update: protectedProcedure.input(massageDiscountInput.extend({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      if (input.discountType === "percentage" && input.discountValue > 100) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "El porcentaje no puede superar 100%." });
+      }
+      if (input.startsAt && input.expiresAt && input.startsAt >= input.expiresAt) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha de término debe ser posterior al inicio." });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const normalized = input.code.toUpperCase();
+      const [duplicate] = await db.select({ id: discountCodes.id }).from(discountCodes)
+        .where(and(eq(discountCodes.code, normalized), sql`${discountCodes.id} <> ${input.id}`)).limit(1);
+      if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "Ese código ya existe." });
+      await db.update(discountCodes).set({
+        code: normalized, name: input.name, description: input.description,
+        discountType: input.discountType, discountValue: input.discountValue,
+        startsAt: input.startsAt ?? null, expiresAt: input.expiresAt ?? null, active: input.active,
+      }).where(eq(discountCodes.id, input.id));
+      await db.delete(massageDiscountCodeTechniques)
+        .where(eq(massageDiscountCodeTechniques.discountCodeId, input.id));
+      if (input.techniqueIds.length) {
+        await db.insert(massageDiscountCodeTechniques).values(
+          Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: input.id, techniqueId })),
+        );
+      }
+      return { success: true };
+    }),
+
+  remove: protectedProcedure.input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [usage] = await db.select({ count: sql<number>`COUNT(*)` }).from(discountCodeUsages)
+        .where(eq(discountCodeUsages.discountCodeId, input.id));
+      if (Number(usage?.count ?? 0) > 0) {
+        await db.update(discountCodes).set({ active: 0 }).where(eq(discountCodes.id, input.id));
+        return { archived: true };
+      }
+      await db.delete(discountCodes).where(eq(discountCodes.id, input.id));
+      return { archived: false };
+    }),
+});
+
 // ─── ANALYTICS ────────────────────────────────────────────────
 async function getMassageSalesRows(
   db: MassageDb,
@@ -1337,6 +1465,11 @@ async function getMassageSalesRows(
     techniqueName: massageSales.techniqueName,
     duration: massageSales.duration,
     amount: massageSales.amount,
+    originalAmount: massageSales.originalAmount,
+    discountAmount: massageSales.discountAmount,
+    discountCode: massageSales.discountCode,
+    discountType: massageSales.discountType,
+    discountValue: massageSales.discountValue,
     paymentMethod: massageSales.paymentMethod,
     paymentReference: massageSales.paymentReference,
     saleStatus: massageSales.status,
@@ -1367,6 +1500,9 @@ const analyticsRouter = router({
         totalBookings: sql<number>`COUNT(*)`,
         paidBookings: sql<number>`SUM(CASE WHEN ${massageSales.status} = 'paid' THEN 1 ELSE 0 END)`,
         totalRevenue: sql<string>`COALESCE(SUM(CASE WHEN ${massageSales.status} = 'paid' THEN ${massageSales.amount} ELSE 0 END), 0)`,
+        grossRevenue: sql<string>`COALESCE(SUM(CASE WHEN ${massageSales.status} = 'paid' THEN ${massageSales.originalAmount} ELSE 0 END), 0)`,
+        totalDiscounted: sql<string>`COALESCE(SUM(CASE WHEN ${massageSales.status} = 'paid' THEN ${massageSales.discountAmount} ELSE 0 END), 0)`,
+        salesWithDiscount: sql<number>`SUM(CASE WHEN ${massageSales.status} = 'paid' AND ${massageSales.discountAmount} > 0 THEN 1 ELSE 0 END)`,
         completedBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'completed' THEN 1 ELSE 0 END)`,
         cancelledBookings: sql<number>`SUM(CASE WHEN ${massageBookings.status} = 'cancelled' THEN 1 ELSE 0 END)`,
       }).from(massageSales)
@@ -1885,6 +2021,42 @@ const masajesPublicRouter = router({
       return t ?? null;
     }),
 
+  validateDiscount: publicProcedure
+    .input(z.object({
+      code: z.string().max(50),
+      items: z.array(z.object({
+        techniqueId: z.number().int().positive(),
+        duration: z.number().int().positive(),
+        quantity: z.number().int().min(1).max(4).default(1),
+      })).min(1).max(40),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const lines: Array<{ techniqueId: number; originalAmount: number }> = [];
+      for (const item of input.items) {
+        const [technique] = await db.select().from(massageTechniques)
+          .where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1))).limit(1);
+        if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes ya no está disponible." });
+        const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
+        const index = durations.indexOf(item.duration);
+        const configuredPrices = [technique.price50min, technique.price80min, technique.price110min];
+        const price = index >= 0 && configuredPrices[index] ? Number(configuredPrices[index]) : 0;
+        if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}.` });
+        for (let quantity = 0; quantity < item.quantity; quantity += 1) {
+          lines.push({ techniqueId: item.techniqueId, originalAmount: price });
+        }
+      }
+      try {
+        return await calculateMassageDiscount(db, input.code, lines);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "El código no es válido.",
+        });
+      }
+    }),
+
   getTherapists: publicProcedure
     .input(z.object({ techniqueId: z.number() }))
     .query(async ({ input }) => {
@@ -2220,6 +2392,7 @@ const masajesPublicRouter = router({
       clientPhone: z.string().optional(),
       clientEmail: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
+      discountCode: z.string().trim().max(50).optional(),
     }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -2316,8 +2489,26 @@ const masajesPublicRouter = router({
         });
       }
 
+      let discountResult: Awaited<ReturnType<typeof calculateMassageDiscount>> | null = null;
+      if (input.discountCode) {
+        try {
+          discountResult = await calculateMassageDiscount(
+            db,
+            input.discountCode,
+            prepared.map((item) => ({ techniqueId: item.item.techniqueId, originalAmount: item.price })),
+          );
+        } catch (error) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error instanceof Error ? error.message : "El código ya no es válido.",
+          });
+        }
+      }
+
       const bookingIds: number[] = [];
-      for (const preparedItem of prepared) {
+      for (let index = 0; index < prepared.length; index += 1) {
+        const preparedItem = prepared[index];
+        const lineDiscount = discountResult?.lineDiscounts[index] ?? 0;
         const [inserted] = await db.insert(massageBookings).values({
           techniqueId: preparedItem.item.techniqueId,
           duration: preparedItem.item.duration,
@@ -2331,13 +2522,18 @@ const masajesPublicRouter = router({
           therapistId: preparedItem.therapistId,
           roomId: preparedItem.roomId,
           paymentStatus: "pending",
-          amountPaid: String(preparedItem.price),
+          originalAmount: String(preparedItem.price),
+          discountAmount: String(lineDiscount),
+          amountPaid: String(preparedItem.price - lineDiscount),
+          discountCodeId: discountResult?.discountCodeId,
+          discountCode: discountResult?.code,
           status: "pending",
         }).$returningId();
         bookingIds.push(inserted.id);
       }
 
-      const total = prepared.reduce((sum, item) => sum + item.price, 0);
+      const originalTotal = prepared.reduce((sum, item) => sum + item.price, 0);
+      const total = discountResult?.finalTotal ?? originalTotal;
       try {
         const session = await createGetnetSession({
           bookingId: bookingIds[0],
@@ -2360,7 +2556,13 @@ const masajesPublicRouter = router({
           } catch { /* email duplicado */ }
         }
 
-        return { processUrl: session.processUrl, bookingIds, total };
+        return {
+          processUrl: session.processUrl,
+          bookingIds,
+          total,
+          originalTotal,
+          discountTotal: discountResult?.discountTotal ?? 0,
+        };
       } catch (error) {
         console.error("[initCartPayment] Getnet session error:", error);
         await db.update(massageBookings)
@@ -2745,6 +2947,7 @@ export const masajesRouter = router({
   agenda: agendaRouter,
   inventario: inventarioRouter,
   clientes: clientesRouter,
+  descuentos: discountsRouter,
   analytics: analyticsRouter,
   rrhh: rrhhRouter,
   public: masajesPublicRouter,

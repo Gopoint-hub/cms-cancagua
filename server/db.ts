@@ -1238,7 +1238,9 @@ export async function getAllDiscountCodes() {
   const db = await getDb();
   if (!db) return [];
   const { discountCodes } = await import("../drizzle/schema");
-  return await db.select().from(discountCodes).orderBy(desc(discountCodes.createdAt));
+  return await db.select().from(discountCodes)
+    .where(sql`NOT JSON_CONTAINS(COALESCE(${discountCodes.applicableServices}, '[]'), '"masajes"')`)
+    .orderBy(desc(discountCodes.createdAt));
 }
 
 export async function getDiscountCodeById(id: number) {

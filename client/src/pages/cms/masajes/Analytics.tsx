@@ -32,6 +32,9 @@ export default function MasajesAnalytics() {
   const totalRevenue = Number(data?.totals?.totalRevenue ?? 0);
   const totalBookings = Number(data?.totals?.totalBookings ?? 0);
   const paidBookings = Number(data?.totals?.paidBookings ?? 0);
+  const grossRevenue = Number(data?.totals?.grossRevenue ?? 0);
+  const totalDiscounted = Number(data?.totals?.totalDiscounted ?? 0);
+  const salesWithDiscount = Number(data?.totals?.salesWithDiscount ?? 0);
   const completed = Number(data?.totals?.completedBookings ?? 0);
   const cancelled = Number(data?.totals?.cancelledBookings ?? 0);
   const avgTicket = paidBookings > 0 ? totalRevenue / paidBookings : 0;
@@ -53,14 +56,19 @@ export default function MasajesAnalytics() {
         "Técnica": sale.techniqueName,
         "Duración (min)": sale.duration,
         "Terapeuta": sale.therapistName ?? "Sin asignar",
-        "Monto": Number(sale.amount),
+        "Valor original": Number(sale.originalAmount),
+        "Código de descuento": sale.discountCode ?? "No",
+        "Tipo descuento": sale.discountType === "percentage" ? "Porcentaje" : sale.discountType === "fixed" ? "Monto fijo" : "",
+        "Valor configurado": sale.discountValue ?? "",
+        "Monto descontado": Number(sale.discountAmount),
+        "Valor realmente pagado": Number(sale.amount),
         "Medio de pago": sale.paymentMethod === "getnet" ? "Getnet" : "CMS manual",
         "Referencia": sale.paymentReference ?? "",
         "Estado venta": sale.saleStatus === "refunded" ? "Reembolsada" : "Pagada",
         "Estado reserva": sale.bookingStatus ?? "",
       }));
       const worksheet = XLSX.utils.json_to_sheet(rows);
-      worksheet["!cols"] = [10, 11, 22, 18, 9, 24, 28, 26, 15, 22, 14, 16, 22, 16, 16].map(wch => ({ wch }));
+      worksheet["!cols"] = [10, 11, 22, 18, 9, 24, 28, 26, 15, 22, 16, 20, 18, 18, 18, 22, 16, 22, 16, 16].map(wch => ({ wch }));
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Ventas masajes");
       XLSX.writeFile(workbook, `ventas-masajes-${from}-${to}.xlsx`);
@@ -157,6 +165,11 @@ export default function MasajesAnalytics() {
                   </p>
                 </CardContent>
               </Card>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Ventas brutas</CardTitle></CardHeader><CardContent className="pt-1"><p className="text-xl font-bold">$ {grossRevenue.toLocaleString("es-CL")}</p></CardContent></Card>
+              <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Descontado por códigos</CardTitle></CardHeader><CardContent className="pt-1"><p className="text-xl font-bold text-amber-700">$ {totalDiscounted.toLocaleString("es-CL")}</p></CardContent></Card>
+              <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium text-muted-foreground">Ventas con código</CardTitle></CardHeader><CardContent className="pt-1"><p className="text-xl font-bold">{salesWithDiscount}</p></CardContent></Card>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -275,8 +288,11 @@ export default function MasajesAnalytics() {
                             <th className="py-3 pr-4 font-medium">Cliente</th>
                             <th className="py-3 pr-4 font-medium">Técnica</th>
                             <th className="py-3 pr-4 font-medium">Terapeuta</th>
-                            <th className="py-3 pr-4 font-medium">Pago</th>
-                            <th className="py-3 text-right font-medium">Ingreso</th>
+                            <th className="py-3 pr-4 font-medium">Valor original</th>
+                            <th className="py-3 pr-4 font-medium">Descuento</th>
+                            <th className="py-3 pr-4 font-medium">Valor pagado</th>
+                            <th className="py-3 pr-4 font-medium">Código</th>
+                            <th className="py-3 font-medium">Medio de pago</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -295,14 +311,17 @@ export default function MasajesAnalytics() {
                                 <p className="text-xs text-muted-foreground">{sale.duration} min · Reserva #{sale.bookingId}</p>
                               </td>
                               <td className="py-3 pr-4 whitespace-nowrap">{sale.therapistName ?? "Sin asignar"}</td>
-                              <td className="py-3 pr-4 whitespace-nowrap">
+                              <td className="py-3 pr-4 whitespace-nowrap">$ {Number(sale.originalAmount).toLocaleString("es-CL")}</td>
+                              <td className="py-3 pr-4 whitespace-nowrap text-amber-700">−$ {Number(sale.discountAmount).toLocaleString("es-CL")}</td>
+                              <td className={`py-3 pr-4 font-semibold whitespace-nowrap ${sale.saleStatus === "refunded" ? "text-red-600 line-through" : "text-green-700"}`}>
+                                $ {Number(sale.amount).toLocaleString("es-CL")}
+                              </td>
+                              <td className="py-3 pr-4 whitespace-nowrap">{sale.discountCode ?? "No"}</td>
+                              <td className="py-3 whitespace-nowrap">
                                 <Badge variant={sale.saleStatus === "paid" ? "outline" : "destructive"}>
                                   {sale.saleStatus === "paid" ? "Pagada" : "Reembolsada"}
                                 </Badge>
                                 <p className="text-xs text-muted-foreground mt-1">{sale.paymentMethod === "getnet" ? "Getnet" : "CMS manual"}</p>
-                              </td>
-                              <td className={`py-3 text-right font-semibold whitespace-nowrap ${sale.saleStatus === "refunded" ? "text-red-600 line-through" : "text-green-700"}`}>
-                                $ {Number(sale.amount).toLocaleString("es-CL")}
                               </td>
                             </tr>
                           ))}

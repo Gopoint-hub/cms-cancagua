@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -103,6 +103,11 @@ export default function ReservarMasaje() {
   const firstSelection = initialSelections[0];
   const routeTechniqueId = Number(id ?? firstSelection?.techniqueId);
   const [pendingSelections, setPendingSelections] = useState<CartSelection[]>(initialSelections);
+  const initialDiscountCode = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("discount") ?? "";
+  const [discountCode, setDiscountCode] = useState(initialDiscountCode);
+  const [appliedDiscount, setAppliedDiscount] = useState<{
+    code: string; originalTotal: number; discountTotal: number; finalTotal: number;
+  } | null>(null);
   const [techniqueId, setTechniqueId] = useState(firstSelection?.techniqueId ?? routeTechniqueId);
 
   const [duration, setDuration] = useState<number | null>(firstSelection?.duration ?? null);
@@ -144,6 +149,30 @@ export default function ReservarMasaje() {
     },
     onError: (e) => toast.error(e.message ?? "Error al iniciar el pago. Intenta de nuevo."),
   });
+  const validateDiscountMut = trpc.masajes.public.validateDiscount.useMutation({
+    onSuccess: (data) => {
+      setAppliedDiscount(data);
+      setDiscountCode(data.code);
+      toast.success(`Código ${data.code} aplicado`);
+    },
+    onError: (error) => { setAppliedDiscount(null); toast.error(error.message); },
+  });
+
+  useEffect(() => {
+    if (initialDiscountCode && cart.length > 0 && pendingSelections.length === 0 && !appliedDiscount && !validateDiscountMut.isPending) {
+      validateDiscountMut.mutate({
+        code: initialDiscountCode,
+        items: cart.map(({ techniqueId, duration }) => ({ techniqueId, duration, quantity: 1 })),
+      });
+    }
+  }, [cart.length, pendingSelections.length]);
+
+  const validateDiscount = () => {
+    validateDiscountMut.mutate({
+      code: discountCode,
+      items: cart.map(({ techniqueId, duration }) => ({ techniqueId, duration, quantity: 1 })),
+    });
+  };
 
   const handleAddToCart = () => {
     if (!duration || !date || !slot || !selectedTechnique) {
@@ -161,6 +190,7 @@ export default function ReservarMasaje() {
       return;
     }
     setCart((current) => [...current, ...newItems]);
+    setAppliedDiscount(null);
     if (hasPresetCart) {
       const nextPending = pendingSelections.slice(1);
       setPendingSelections(nextPending);
@@ -194,6 +224,7 @@ export default function ReservarMasaje() {
       clientPhone: buildInternationalPhone(countryCode, phone),
       clientEmail: email.trim() || undefined,
       subscribeNewsletter: subscribeNewsletter || undefined,
+      discountCode: appliedDiscount?.code,
     });
   };
 
@@ -328,7 +359,7 @@ export default function ReservarMasaje() {
                   <p className="text-muted-foreground capitalize">{format(new Date(item.bookingDate + "T12:00:00"), "d MMM", { locale: es })} · {item.startTime} hrs</p>
                   <p className="font-medium text-teal-700">${item.price.toLocaleString("es-CL")}</p>
                 </div>
-                <Button size="icon" variant="ghost" className="text-red-600" onClick={() => setCart((items) => items.filter((_, itemIndex) => itemIndex !== index))}>
+                <Button size="icon" variant="ghost" className="text-red-600" onClick={() => { setCart((items) => items.filter((_, itemIndex) => itemIndex !== index)); setAppliedDiscount(null); }}>
                   <Trash2 className="w-4 h-4" />
                 </Button>
               </div>
@@ -438,10 +469,21 @@ export default function ReservarMasaje() {
                 <span className="text-teal-700">Servicios</span>
                 <span className="font-medium text-teal-900">{cart.length} masaje{cart.length === 1 ? "" : "s"}</span>
               </div>
-              <div className="flex justify-between pt-1">
-                <span className="text-teal-700 font-medium">Total</span>
-                <span className="font-bold text-teal-900">${cart.reduce((sum, item) => sum + item.price, 0).toLocaleString("es-CL")}</span>
+              <div className="pt-2 space-y-2">
+                <Label htmlFor="massage-discount-code" className="text-teal-800">¿Tienes un código de descuento?</Label>
+                <div className="flex gap-2">
+                  <Input id="massage-discount-code" value={discountCode} onChange={(event) => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); }} placeholder="Ingresa tu código" className="bg-white" />
+                  <Button type="button" variant="outline" onClick={validateDiscount} disabled={!discountCode.trim() || validateDiscountMut.isPending}>
+                    {validateDiscountMut.isPending ? "Validando…" : "Aplicar"}
+                  </Button>
+                </div>
               </div>
+              <div className="flex justify-between pt-1">
+                <span className="text-teal-700">Subtotal</span>
+                <span className={appliedDiscount ? "line-through text-teal-700" : "font-medium text-teal-900"}>${cart.reduce((sum, item) => sum + item.price, 0).toLocaleString("es-CL")}</span>
+              </div>
+              {appliedDiscount && <div className="flex justify-between text-green-700"><span>Descuento {appliedDiscount.code}</span><span>−${appliedDiscount.discountTotal.toLocaleString("es-CL")}</span></div>}
+              <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${(appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0)).toLocaleString("es-CL")}</span></div>
             </div>
 
             <Button

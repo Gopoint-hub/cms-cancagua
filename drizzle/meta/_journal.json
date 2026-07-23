@@ -127,6 +127,13 @@
       "when": 1784319600000,
       "tag": "0021_blog_article_image",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1784822127784,
+      "tag": "0022_massage_discount_codes",
+      "breakpoints": true
     }
   ]
 }

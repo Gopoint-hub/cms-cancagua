@@ -179,6 +179,7 @@ export const categories: Category[] = [
       { icon: Package, label: "Inventario", path: "/cms/masajes/inventario", roles: ["super_admin", "admin", "editor"] },
       { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes", roles: ["super_admin", "admin", "editor"] },
       { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics", roles: ["super_admin", "admin", "editor"] },
+      { icon: Tag, label: "Códigos de descuento", path: "/cms/masajes/descuentos", roles: ["super_admin", "admin", "editor"] },
       { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh", roles: ["super_admin", "admin", "editor"] },
       { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion", roles: ["super_admin", "admin", "editor"] },
     ],
