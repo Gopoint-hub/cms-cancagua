@@ -5,6 +5,8 @@ import {
   buildPublicMassageBookingNotifications,
   getChileDateString,
   getChileTimeString,
+  getSkeduMassageQuantity,
+  getSkeduMassageUnitPrice,
   getRecurringMassageAvailabilityHorizon,
   expandSkeduProgramResourceBlocks,
   isSkeduProgramDurationAllowed,
@@ -89,6 +91,14 @@ describe("recurring therapist availability", () => {
 });
 
 describe("Skedu massage programs", () => {
+  it("uses the configured fixed price for each individual massage", () => {
+    expect(getSkeduMassageUnitPrice(30)).toBe(35_000);
+    expect(getSkeduMassageUnitPrice(50)).toBe(45_000);
+    expect(getSkeduMassageUnitPrice(80)).toBe(0);
+    expect(getSkeduMassageQuantity("simple")).toBe(1);
+    expect(getSkeduMassageQuantity("double")).toBe(2);
+  });
+
   it("allows 30 and 50 minutes for every Reconecta variant and only 30 for Reset", () => {
     for (const program of ["reconecta", "reconecta_detox", "bio_reconecta", "bio_reconecta_detox"]) {
       expect(isSkeduProgramDurationAllowed(program, 30)).toBe(true);

@@ -83,6 +83,24 @@ export const SKEDU_MASSAGE_PROGRAMS = [
   { value: "reset", label: "Reset", durations: [30] },
 ] as const;
 
+export const SKEDU_MASSAGE_PRICES: Record<30 | 50, number> = {
+  30: 35_000,
+  50: 45_000,
+};
+
+export function getSkeduMassageUnitPrice(duration: number): number {
+  return duration === 30 || duration === 50 ? SKEDU_MASSAGE_PRICES[duration] : 0;
+}
+
+export function getSkeduMassageQuantity(modality: "simple" | "double"): number {
+  return modality === "double" ? 2 : 1;
+}
+
+function getSkeduProgramLabel(programValue: string): string {
+  return SKEDU_MASSAGE_PROGRAMS.find((option) => option.value === programValue)?.label
+    ?? programValue.replaceAll("_", " ");
+}
+
 export function isSkeduProgramDurationAllowed(programValue: string, duration: number): boolean {
   const program = SKEDU_MASSAGE_PROGRAMS.find((option) => option.value === programValue);
   return !!program && (program.durations as readonly number[]).includes(duration);
@@ -1976,7 +1994,73 @@ async function getMassageSalesRows(
     .orderBy(desc(massageSales.serviceDate), desc(massageSales.startTime), desc(massageSales.soldAt))
     .limit(input.limit)
     .offset(input.offset);
-  return rows.map((row) => ({ ...row, serviceDate: serializeDateOnly(row.serviceDate) }));
+  return rows.map((row) => ({
+    ...row,
+    source: "massage" as const,
+    serviceDate: serializeDateOnly(row.serviceDate),
+  }));
+}
+
+async function getCombinedMassageSalesRows(
+  db: MassageDb,
+  input: { from: string; to: string; limit: number; offset: number },
+) {
+  const [standardRows, programRows, therapistRows] = await Promise.all([
+    getMassageSalesRows(db, { ...input, limit: 100_000, offset: 0 }),
+    db.select().from(massageProgramBookings).where(and(
+      gte(massageProgramBookings.bookingDate, input.from as any),
+      lte(massageProgramBookings.bookingDate, input.to as any),
+    )),
+    db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists),
+  ]);
+  const therapistNames = new Map(therapistRows.map((therapist) => [therapist.id, therapist.name]));
+  const programSales = programRows.flatMap((booking) => {
+    const serviceDate = serializeDateOnly(booking.bookingDate);
+    const unitPrice = getSkeduMassageUnitPrice(booking.duration);
+    const programLabel = getSkeduProgramLabel(booking.program);
+    const clients = [
+      {
+        name: booking.clientName,
+        therapistId: booking.therapistId,
+      },
+      ...(booking.modality === "double" ? [{
+        name: booking.secondClientName ?? "Segundo cliente",
+        therapistId: booking.secondTherapistId,
+      }] : []),
+    ];
+    return clients.map((client, unitIndex) => ({
+      id: `SKEDU-${booking.id}-${unitIndex + 1}`,
+      bookingId: booking.id,
+      soldAt: booking.createdAt,
+      serviceDate,
+      startTime: booking.startTime,
+      clientName: client.name,
+      clientEmail: booking.clientEmail,
+      techniqueName: `Programa ${programLabel}`,
+      duration: booking.duration,
+      amount: unitPrice,
+      originalAmount: unitPrice,
+      discountAmount: 0,
+      discountCode: null,
+      discountType: null,
+      discountValue: null,
+      paymentMethod: "skedu_program" as const,
+      paymentReference: booking.externalReference,
+      saleStatus: booking.status === "cancelled" ? "cancelled" as const : "paid" as const,
+      bookingStatus: booking.status,
+      therapistName: client.therapistId ? therapistNames.get(client.therapistId) ?? null : null,
+      source: "skedu_program" as const,
+    }));
+  });
+  return [...standardRows, ...programSales]
+    .sort((a, b) => {
+      const byDate = String(b.serviceDate).localeCompare(String(a.serviceDate));
+      if (byDate !== 0) return byDate;
+      const byTime = b.startTime.localeCompare(a.startTime);
+      if (byTime !== 0) return byTime;
+      return new Date(b.soldAt).getTime() - new Date(a.soldAt).getTime();
+    })
+    .slice(input.offset, input.offset + input.limit);
 }
 
 const analyticsRouter = router({
@@ -2014,6 +2098,7 @@ const analyticsRouter = router({
       const [
         salesTotalsRows,
         previousSalesRows,
+        previousProgramPeriod,
         todayPaymentsRows,
         standardPeriod,
         programPeriod,
@@ -2024,6 +2109,7 @@ const analyticsRouter = router({
         allStandardCustomers,
         allProgramCustomers,
         npsRows,
+        therapistRows,
       ] = await Promise.all([
         db.select({
           amount: massageSales.amount,
@@ -2040,6 +2126,14 @@ const analyticsRouter = router({
             gte(massageSales.serviceDate, previousFrom as any),
             lte(massageSales.serviceDate, previousTo as any),
           )),
+        db.select({
+          duration: massageProgramBookings.duration,
+          modality: massageProgramBookings.modality,
+          status: massageProgramBookings.status,
+        }).from(massageProgramBookings).where(and(
+          gte(massageProgramBookings.bookingDate, previousFrom as any),
+          lte(massageProgramBookings.bookingDate, previousTo as any),
+        )),
         db.select({ amount: massageSales.amount }).from(massageSales).where(and(
           gte(massageSales.soldAt, todayStart),
           lt(massageSales.soldAt, tomorrowStart),
@@ -2056,6 +2150,11 @@ const analyticsRouter = router({
         db.select({
           status: massageProgramBookings.status,
           startTime: massageProgramBookings.startTime,
+          duration: massageProgramBookings.duration,
+          modality: massageProgramBookings.modality,
+          program: massageProgramBookings.program,
+          therapistId: massageProgramBookings.therapistId,
+          secondTherapistId: massageProgramBookings.secondTherapistId,
         }).from(massageProgramBookings).where(and(
           gte(massageProgramBookings.bookingDate, input.from as any),
           lte(massageProgramBookings.bookingDate, input.to as any),
@@ -2070,7 +2169,12 @@ const analyticsRouter = router({
           gte(massageBookings.createdAt, todayStart),
           lt(massageBookings.createdAt, tomorrowStart),
         )),
-        db.select({ id: massageProgramBookings.id }).from(massageProgramBookings).where(and(
+        db.select({
+          id: massageProgramBookings.id,
+          duration: massageProgramBookings.duration,
+          modality: massageProgramBookings.modality,
+          status: massageProgramBookings.status,
+        }).from(massageProgramBookings).where(and(
           gte(massageProgramBookings.createdAt, todayStart),
           lt(massageProgramBookings.createdAt, tomorrowStart),
         )),
@@ -2099,13 +2203,22 @@ const analyticsRouter = router({
           gte(massageNpsResponses.serviceDate, input.from as any),
           lte(massageNpsResponses.serviceDate, input.to as any),
         )).orderBy(desc(massageNpsResponses.respondedAt)),
+        db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists),
       ]);
 
       const paidSales = salesTotalsRows.filter((sale) => sale.status === "paid");
-      const revenue = paidSales.reduce((sum, sale) => sum + Number(sale.amount), 0);
+      const programRevenue = programPeriod
+        .filter((booking) => booking.status !== "cancelled")
+        .reduce((sum, booking) =>
+          sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0);
+      const previousProgramRevenue = previousProgramPeriod
+        .filter((booking) => booking.status !== "cancelled")
+        .reduce((sum, booking) =>
+          sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0);
+      const revenue = paidSales.reduce((sum, sale) => sum + Number(sale.amount), 0) + programRevenue;
       const previousRevenue = previousSalesRows
         .filter((sale) => sale.status === "paid")
-        .reduce((sum, sale) => sum + Number(sale.amount), 0);
+        .reduce((sum, sale) => sum + Number(sale.amount), 0) + previousProgramRevenue;
       const revenueChangePercent = previousRevenue > 0
         ? ((revenue - previousRevenue) / previousRevenue) * 100
         : revenue > 0 ? 100 : 0;
@@ -2114,7 +2227,10 @@ const analyticsRouter = router({
         .reduce((sum, sale) => sum + Number(sale.amount), 0);
       const otherRevenue = paidSales
         .filter((sale) => sale.paymentMethod !== "getnet")
-        .reduce((sum, sale) => sum + Number(sale.amount), 0);
+        .reduce((sum, sale) => sum + Number(sale.amount), 0) + programRevenue;
+      const paidProgramMassages = programPeriod
+        .filter((booking) => booking.status !== "cancelled")
+        .reduce((sum, booking) => sum + getSkeduMassageQuantity(booking.modality), 0);
       const allPeriodBookings = [...standardPeriod, ...programPeriod];
       const confirmedBookings = allPeriodBookings.filter(
         (booking) => booking.status === "confirmed" || booking.status === "completed",
@@ -2163,9 +2279,9 @@ const analyticsRouter = router({
 
       const totals = {
         totalBookings: allPeriodBookings.length,
-        paidBookings: paidSales.length,
+        paidBookings: paidSales.length + paidProgramMassages,
         totalRevenue: revenue,
-        grossRevenue: paidSales.reduce((sum, sale) => sum + Number(sale.originalAmount), 0),
+        grossRevenue: paidSales.reduce((sum, sale) => sum + Number(sale.originalAmount), 0) + programRevenue,
         totalDiscounted: paidSales.reduce((sum, sale) => sum + Number(sale.discountAmount), 0),
         salesWithDiscount: paidSales.filter((sale) => Number(sale.discountAmount) > 0).length,
         completedBookings,
@@ -2179,7 +2295,11 @@ const analyticsRouter = router({
         reservationsForToday: [...standardToday, ...programToday]
           .filter((booking) => booking.status !== "cancelled").length,
         reservationsCreatedToday: standardCreatedToday.length + programCreatedToday.length,
-        paymentsReceivedToday: todayPaymentsRows.reduce((sum, sale) => sum + Number(sale.amount), 0),
+        paymentsReceivedToday: todayPaymentsRows.reduce((sum, sale) => sum + Number(sale.amount), 0)
+          + programCreatedToday
+            .filter((booking) => booking.status !== "cancelled")
+            .reduce((sum, booking) =>
+              sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0),
         massageServicesToday: standardToday.filter((booking) => booking.status !== "cancelled").length,
         webMassageServicesToday: standardToday.filter(
           (booking) => booking.status !== "cancelled" && booking.bookingSource === "web",
@@ -2199,6 +2319,7 @@ const analyticsRouter = router({
         massageServices: standardPeriod.length,
         webMassageServices: standardPeriod.filter((booking) => booking.bookingSource === "web").length,
         skeduPrograms: programPeriod.length,
+        skeduRevenue: programRevenue,
         hourly: hourly.filter((row) => row.reservations > 0),
       };
 
@@ -2217,25 +2338,85 @@ const analyticsRouter = router({
         })),
       };
 
-      const byTechnique = await db.select({
+      const standardByTechnique = await db.select({
         techniqueName: massageSales.techniqueName, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
       }).from(massageSales)
         .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
         .groupBy(massageSales.techniqueName).orderBy(desc(sql`COUNT(*)`));
 
-      const byDuration = await db.select({
+      const standardByDuration = await db.select({
         duration: massageSales.duration, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
       }).from(massageSales)
         .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
         .groupBy(massageSales.duration).orderBy(asc(massageSales.duration));
 
-      const byTherapist = await db.select({
+      const standardByTherapist = await db.select({
         therapistName: massageTherapists.name, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
       }).from(massageSales)
         .leftJoin(massageBookings, eq(massageSales.bookingId, massageBookings.id))
         .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
         .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
         .groupBy(massageTherapists.name).orderBy(desc(sql`COUNT(*)`));
+
+      const techniqueMap = new Map<string, { techniqueName: string; count: number; revenue: number }>();
+      for (const row of standardByTechnique) {
+        techniqueMap.set(row.techniqueName, {
+          techniqueName: row.techniqueName,
+          count: Number(row.count),
+          revenue: Number(row.revenue),
+        });
+      }
+      for (const booking of programPeriod.filter((row) => row.status !== "cancelled")) {
+        const techniqueName = `Programa ${getSkeduProgramLabel(booking.program)}`;
+        const current = techniqueMap.get(techniqueName) ?? { techniqueName, count: 0, revenue: 0 };
+        const quantity = getSkeduMassageQuantity(booking.modality);
+        current.count += quantity;
+        current.revenue += getSkeduMassageUnitPrice(booking.duration) * quantity;
+        techniqueMap.set(techniqueName, current);
+      }
+      const byTechnique = Array.from(techniqueMap.values()).sort((a, b) => b.count - a.count);
+
+      const durationMap = new Map<number, { duration: number; count: number; revenue: number }>();
+      for (const row of standardByDuration) {
+        durationMap.set(row.duration, {
+          duration: row.duration,
+          count: Number(row.count),
+          revenue: Number(row.revenue),
+        });
+      }
+      for (const booking of programPeriod.filter((row) => row.status !== "cancelled")) {
+        const current = durationMap.get(booking.duration) ?? { duration: booking.duration, count: 0, revenue: 0 };
+        const quantity = getSkeduMassageQuantity(booking.modality);
+        current.count += quantity;
+        current.revenue += getSkeduMassageUnitPrice(booking.duration) * quantity;
+        durationMap.set(booking.duration, current);
+      }
+      const byDuration = Array.from(durationMap.values()).sort((a, b) => a.duration - b.duration);
+
+      const therapistNameById = new Map(therapistRows.map((therapist) => [therapist.id, therapist.name ?? "Sin asignar"]));
+      const therapistMap = new Map<string, { therapistName: string; count: number; revenue: number }>();
+      for (const row of standardByTherapist) {
+        const therapistName = row.therapistName ?? "Sin asignar";
+        therapistMap.set(therapistName, {
+          therapistName,
+          count: Number(row.count),
+          revenue: Number(row.revenue),
+        });
+      }
+      for (const booking of programPeriod.filter((row) => row.status !== "cancelled")) {
+        const therapistIds = [
+          booking.therapistId,
+          ...(booking.modality === "double" && booking.secondTherapistId ? [booking.secondTherapistId] : []),
+        ];
+        for (const therapistId of therapistIds) {
+          const therapistName = therapistNameById.get(therapistId) ?? "Sin asignar";
+          const current = therapistMap.get(therapistName) ?? { therapistName, count: 0, revenue: 0 };
+          current.count += 1;
+          current.revenue += getSkeduMassageUnitPrice(booking.duration);
+          therapistMap.set(therapistName, current);
+        }
+      }
+      const byTherapist = Array.from(therapistMap.values()).sort((a, b) => b.count - a.count);
 
       return { totals, daily, period, nps, byTechnique, byDuration, byTherapist };
     }),
@@ -2251,19 +2432,14 @@ const analyticsRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return { records: [], total: 0, page: input.page, pageSize: 25, totalPages: 0 };
-      const [countRow] = await db.select({ total: sql<number>`COUNT(*)` })
-        .from(massageSales)
-        .where(and(
-          gte(massageSales.serviceDate, input.from as any),
-          lte(massageSales.serviceDate, input.to as any),
-        ));
-      const total = Number(countRow?.total ?? 0);
-      const records = await getMassageSalesRows(db, {
+      const allRecords = await getCombinedMassageSalesRows(db, {
         from: input.from,
         to: input.to,
-        limit: 25,
-        offset: (input.page - 1) * 25,
+        limit: 100_000,
+        offset: 0,
       });
+      const total = allRecords.length;
+      const records = allRecords.slice((input.page - 1) * 25, input.page * 25);
       return { records, total, page: input.page, pageSize: 25, totalPages: Math.ceil(total / 25) };
     }),
 
@@ -2273,7 +2449,7 @@ const analyticsRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return getMassageSalesRows(db, { ...input, limit: 100_000, offset: 0 });
+      return getCombinedMassageSalesRows(db, { ...input, limit: 100_000, offset: 0 });
     }),
 });
 

@@ -63,9 +63,10 @@ export default function MasajesAnalytics() {
       if (records.length === 0) return toast.error("No hay ventas en el período seleccionado");
       const XLSX = await import("xlsx");
       const rows = records.map((sale) => ({
+        "Origen": sale.source === "skedu_program" ? "Programa Skedu" : "Servicio de masaje",
         "ID venta": sale.id,
         "ID reserva": sale.bookingId,
-        "Fecha de compra": new Date(sale.soldAt).toLocaleString("es-CL", { timeZone: "America/Santiago" }),
+        "Fecha de registro/compra": new Date(sale.soldAt).toLocaleString("es-CL", { timeZone: "America/Santiago" }),
         "Fecha del masaje": sale.serviceDate,
         "Hora": sale.startTime,
         "Cliente": sale.clientName,
@@ -79,17 +80,21 @@ export default function MasajesAnalytics() {
         "Valor configurado": sale.discountValue ?? "",
         "Monto descontado": Number(sale.discountAmount),
         "Valor realmente pagado": Number(sale.amount),
-        "Medio de pago": sale.paymentMethod === "getnet" ? "Getnet" : "CMS manual",
+        "Medio de pago": sale.paymentMethod === "getnet"
+          ? "Getnet"
+          : sale.paymentMethod === "skedu_program" ? "Programa Skedu" : "CMS manual",
         "Referencia": sale.paymentReference ?? "",
-        "Estado venta": sale.saleStatus === "refunded" ? "Reembolsada" : "Pagada",
+        "Estado venta": sale.saleStatus === "refunded"
+          ? "Reembolsada"
+          : sale.saleStatus === "cancelled" ? "Anulada" : "Pagada",
         "Estado reserva": sale.bookingStatus ?? "",
       }));
       const worksheet = XLSX.utils.json_to_sheet(rows);
-      worksheet["!cols"] = [10, 11, 22, 18, 9, 24, 28, 26, 15, 22, 16, 20, 18, 18, 18, 22, 16, 22, 16, 16].map(wch => ({ wch }));
+      worksheet["!cols"] = [18, 10, 11, 22, 18, 9, 24, 28, 26, 15, 22, 16, 20, 18, 18, 18, 22, 16, 22, 16, 16, 16].map(wch => ({ wch }));
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Ventas masajes");
       XLSX.writeFile(workbook, `ventas-masajes-${from}-${to}.xlsx`);
-      toast.success(`${records.length} ventas exportadas a Excel`);
+      toast.success(`${records.length} masajes exportados a Excel`);
     } catch (error) {
       console.error(error);
       toast.error("No se pudo generar el archivo Excel");
@@ -289,7 +294,7 @@ export default function MasajesAnalytics() {
                 <CardContent className="space-y-5">
                   {[
                     { label: "Pagos online (Getnet)", value: data.period.onlineRevenue, color: "bg-indigo-500" },
-                    { label: "Otros pagos (CMS manual)", value: data.period.otherRevenue, color: "bg-emerald-500" },
+                    { label: "Otros pagos (CMS manual + Skedu)", value: data.period.otherRevenue, color: "bg-emerald-500" },
                   ].map((payment) => {
                     const percentage = totalRevenue > 0 ? (payment.value / totalRevenue) * 100 : 0;
                     return (
@@ -305,7 +310,7 @@ export default function MasajesAnalytics() {
                     );
                   })}
                   <p className="text-xs text-muted-foreground">
-                    Los programas Skedu no incluyen información de pago en el CMS y no se suman a ingresos.
+                    Skedu: $35.000 por masaje de 30 min y $45.000 por masaje de 50 min.
                   </p>
                 </CardContent>
               </Card>
@@ -328,6 +333,7 @@ export default function MasajesAnalytics() {
                   <div className="rounded-lg border p-4">
                     <p className="text-xs text-muted-foreground">Programas Skedu</p>
                     <p className="mt-1 text-2xl font-bold">{data.period.skeduPrograms}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{money(data.period.skeduRevenue)} en masajes</p>
                   </div>
                 </CardContent>
               </Card>
@@ -504,9 +510,9 @@ export default function MasajesAnalytics() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base flex items-center justify-between gap-3 flex-wrap">
-                  <span>Historial de ventas</span>
+                  <span>Historial de ingresos</span>
                   <span className="text-sm font-normal text-muted-foreground">
-                    {history?.total ?? 0} venta{history?.total === 1 ? "" : "s"} en el período
+                    {history?.total ?? 0} masaje{history?.total === 1 ? "" : "s"} en el período
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -521,6 +527,7 @@ export default function MasajesAnalytics() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b text-left text-muted-foreground">
+                            <th className="py-3 pr-4 font-medium">Origen</th>
                             <th className="py-3 pr-4 font-medium">Fecha masaje</th>
                             <th className="py-3 pr-4 font-medium">Cliente</th>
                             <th className="py-3 pr-4 font-medium">Técnica</th>
@@ -536,6 +543,11 @@ export default function MasajesAnalytics() {
                           {history.records.map((sale) => (
                             <tr key={sale.id} className="border-b last:border-0 align-top">
                               <td className="py-3 pr-4 whitespace-nowrap">
+                                <Badge variant="secondary">
+                                  {sale.source === "skedu_program" ? "Skedu" : "Masaje"}
+                                </Badge>
+                              </td>
+                              <td className="py-3 pr-4 whitespace-nowrap">
                                 <p className="font-medium">{sale.serviceDate}</p>
                                 <p className="text-xs text-muted-foreground">{sale.startTime} hrs</p>
                               </td>
@@ -550,15 +562,19 @@ export default function MasajesAnalytics() {
                               <td className="py-3 pr-4 whitespace-nowrap">{sale.therapistName ?? "Sin asignar"}</td>
                               <td className="py-3 pr-4 whitespace-nowrap">$ {Number(sale.originalAmount).toLocaleString("es-CL")}</td>
                               <td className="py-3 pr-4 whitespace-nowrap text-amber-700">−$ {Number(sale.discountAmount).toLocaleString("es-CL")}</td>
-                              <td className={`py-3 pr-4 font-semibold whitespace-nowrap ${sale.saleStatus === "refunded" ? "text-red-600 line-through" : "text-green-700"}`}>
+                              <td className={`py-3 pr-4 font-semibold whitespace-nowrap ${sale.saleStatus !== "paid" ? "text-red-600 line-through" : "text-green-700"}`}>
                                 $ {Number(sale.amount).toLocaleString("es-CL")}
                               </td>
                               <td className="py-3 pr-4 whitespace-nowrap">{sale.discountCode ?? "No"}</td>
                               <td className="py-3 whitespace-nowrap">
                                 <Badge variant={sale.saleStatus === "paid" ? "outline" : "destructive"}>
-                                  {sale.saleStatus === "paid" ? "Pagada" : "Reembolsada"}
+                                  {sale.saleStatus === "paid" ? "Pagada" : sale.saleStatus === "cancelled" ? "Anulada" : "Reembolsada"}
                                 </Badge>
-                                <p className="text-xs text-muted-foreground mt-1">{sale.paymentMethod === "getnet" ? "Getnet" : "CMS manual"}</p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {sale.paymentMethod === "getnet"
+                                    ? "Getnet"
+                                    : sale.paymentMethod === "skedu_program" ? "Programa Skedu" : "CMS manual"}
+                                </p>
                               </td>
                             </tr>
                           ))}
