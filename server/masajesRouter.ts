@@ -40,6 +40,7 @@ import { calculateMassageDiscount } from "./massageDiscounts";
 import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne } from "drizzle-orm";
 import { hasMassageAdminAccess, hasMassageOperationsAccess, hasMassageReadAccess } from "@shared/permissions";
 import { chileLocalDateTimeToUtc } from "./massageNps";
+import { massageAreaAdminRouter } from "./massageAreaAdmin";
 
 const adminOrEditor = async (role: string) => {
   if (!hasMassageAdminAccess(role)) {
@@ -4133,6 +4134,7 @@ export const masajesRouter = router({
   clientes: clientesRouter,
   descuentos: discountsRouter,
   analytics: analyticsRouter,
+  areaAdmin: massageAreaAdminRouter,
   rrhh: rrhhRouter,
   public: masajesPublicRouter,
   config: configRouter,

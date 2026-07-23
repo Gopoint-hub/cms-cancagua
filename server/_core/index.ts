@@ -20,6 +20,7 @@ import { ensureMassageAvailabilitySchema } from "../ensureMassageAvailabilitySch
 import { ensureMassageTherapistUsersSchema } from "../ensureMassageTherapistUsersSchema";
 import { ensureMassageNpsSchema } from "../ensureMassageNpsSchema";
 import { ensureMassageBookingSchema } from "../ensureMassageBookingSchema";
+import { ensureMassageMonthlyClosureSchema } from "../ensureMassageMonthlyClosureSchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -46,6 +47,7 @@ async function startServer() {
   await ensureMassageAvailabilitySchema();
   await ensureMassageTherapistUsersSchema();
   await ensureMassageNpsSchema();
+  await ensureMassageMonthlyClosureSchema();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads

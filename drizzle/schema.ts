@@ -1242,6 +1242,66 @@ export const massageNpsResponses = mysqlTable("massage_nps_responses", {
 export type MassageNpsResponse = typeof massageNpsResponses.$inferSelect;
 export type InsertMassageNpsResponse = typeof massageNpsResponses.$inferInsert;
 
+// Cierres contables del área de masajes. Cada cierre conserva sus parámetros y
+// una fotografía del cálculo para que los períodos cerrados sean inmutables.
+export const massageMonthlyClosures = mysqlTable("massage_monthly_closures", {
+  id: int("id").autoincrement().primaryKey(),
+  closeMonth: varchar("close_month", { length: 7 }).notNull().unique(),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  status: mysqlEnum("status", ["draft", "closed"]).default("draft").notNull(),
+  supplyUnitCost: decimal("supply_unit_cost", { precision: 12, scale: 2 }).default("707").notNull(),
+  laundryUnitCost: decimal("laundry_unit_cost", { precision: 12, scale: 2 }).default("3103.80").notNull(),
+  regularTransportCost: decimal("regular_transport_cost", { precision: 12, scale: 2 }).default("398000").notNull(),
+  freelanceTripUnitCost: decimal("freelance_trip_unit_cost", { precision: 12, scale: 2 }).default("5000").notNull(),
+  freelanceTripCount: int("freelance_trip_count").default(0).notNull(),
+  electricityCost: decimal("electricity_cost", { precision: 12, scale: 2 }).default("123573").notNull(),
+  accountingCost: decimal("accounting_cost", { precision: 12, scale: 2 }).default("63333").notNull(),
+  tamaraBaseSalary: decimal("tamara_base_salary", { precision: 12, scale: 2 }).default("811261").notNull(),
+  barbaraBaseSalary: decimal("barbara_base_salary", { precision: 12, scale: 2 }),
+  danielaBaseSalary: decimal("daniela_base_salary", { precision: 12, scale: 2 }),
+  previredRate: decimal("previred_rate", { precision: 6, scale: 4 }).default("0.2000").notNull(),
+  freelanceCommissionRate: decimal("freelance_commission_rate", { precision: 6, scale: 4 }).default("0.5000").notNull(),
+  inhouseCommissionRate: decimal("inhouse_commission_rate", { precision: 6, scale: 4 }).default("0.2000").notNull(),
+  tamaraBonusRate: decimal("tamara_bonus_rate", { precision: 6, scale: 4 }).default("0.1000").notNull(),
+  notes: text("notes"),
+  snapshot: mediumtext("snapshot"),
+  createdByUserId: int("created_by_user_id").notNull(),
+  closedByUserId: int("closed_by_user_id"),
+  closedAt: timestamp("closed_at"),
+  reopenedByUserId: int("reopened_by_user_id"),
+  reopenedAt: timestamp("reopened_at"),
+  reopenReason: text("reopen_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageMonthlyClosure = typeof massageMonthlyClosures.$inferSelect;
+export type InsertMassageMonthlyClosure = typeof massageMonthlyClosures.$inferInsert;
+
+export const massageMonthlyClosureAdjustments = mysqlTable("massage_monthly_closure_adjustments", {
+  id: int("id").autoincrement().primaryKey(),
+  closureId: int("closure_id").notNull(),
+  category: mysqlEnum("category", ["courtesy", "refund", "extra_cost", "correction", "other"]).default("other").notNull(),
+  description: varchar("description", { length: 255 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  createdByUserId: int("created_by_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MassageMonthlyClosureAdjustment = typeof massageMonthlyClosureAdjustments.$inferSelect;
+
+export const massageMonthlyClosureAudit = mysqlTable("massage_monthly_closure_audit", {
+  id: int("id").autoincrement().primaryKey(),
+  closureId: int("closure_id").notNull(),
+  action: mysqlEnum("action", ["created", "updated", "closed", "reopened", "exported"]).notNull(),
+  detail: text("detail"),
+  userId: int("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MassageMonthlyClosureAuditEntry = typeof massageMonthlyClosureAudit.$inferSelect;
+
 export const massageSupplies = mysqlTable("massage_supplies", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 200 }).notNull(),

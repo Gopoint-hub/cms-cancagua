@@ -81,7 +81,9 @@ export async function convertBundledHtmlToEmail(html: string): Promise<string> {
     const page = await browser.newPage();
     await page.setViewport({ width: 600, height: 900, deviceScaleFactor: 1 });
 
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 45000 });
+    // Puppeteer still supports networkidle0 at runtime; its current Page.setContent
+    // type omits the value even though the lifecycle watcher accepts it.
+    await page.setContent(html, { waitUntil: 'networkidle0' as any, timeout: 45000 });
 
     // Wait for the bundle to finish unpacking and rendering
     await page.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 2000)));

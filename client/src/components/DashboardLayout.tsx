@@ -23,7 +23,7 @@ import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, LogOut, PanelLeft, Users, Calendar, Mail, BarChart3,
-  FileText, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
+  FileText, FileSpreadsheet, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
   Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen
@@ -39,6 +39,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { canAccessCmsPath, CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
+import { trpc } from "@/lib/trpc";
 
 // Definición de categorías y sus items de menú
 export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "masajes";
@@ -49,6 +50,8 @@ interface MenuItem {
   path: string;
   /** If set, only these roles can see this item. If not set, all roles can see it. */
   roles?: string[];
+  /** Restricted massage-area accounting close (Tamara and superadmins). */
+  areaAdminOnly?: boolean;
 }
 
 interface Category {
@@ -179,6 +182,7 @@ export const categories: Category[] = [
       { icon: Package, label: "Inventario", path: "/cms/masajes/inventario", roles: ["super_admin", "admin", "editor"] },
       { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes", roles: ["super_admin", "admin", "editor"] },
       { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics", roles: ["super_admin", "admin", "editor"] },
+      { icon: FileSpreadsheet, label: "Admin área", path: "/cms/masajes/admin", areaAdminOnly: true },
       { icon: Tag, label: "Códigos de descuento", path: "/cms/masajes/descuentos", roles: ["super_admin", "admin", "editor"] },
       { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh", roles: ["super_admin", "admin", "editor"] },
       { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion", roles: ["super_admin", "admin", "editor"] },
@@ -351,6 +355,11 @@ function DashboardLayoutContent({
   toggleCategory,
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
+  const areaAdminAccess = trpc.masajes.areaAdmin.access.useQuery(undefined, {
+    enabled: Boolean(user),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar, setOpenMobile } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -435,7 +444,10 @@ function DashboardLayoutContent({
                 .filter(cat => !cat.roles || cat.roles.includes(user?.role || ""))
                 .map((category) => {
                 // Filter items by role too
-                const visibleItems = category.items.filter(item => !item.roles || item.roles.includes(user?.role || ""));
+                const visibleItems = category.items.filter(item =>
+                  (!item.roles || item.roles.includes(user?.role || ""))
+                  && (!item.areaAdminOnly || areaAdminAccess.data?.allowed === true)
+                );
                 if (visibleItems.length === 0) return null;
                 const isExpanded = expandedCategories.has(category.id);
                 const hasActiveItem = visibleItems.some(item => item.path === location);

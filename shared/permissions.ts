@@ -55,6 +55,7 @@ export const MASSAGE_THERAPIST_ALLOWED_PATHS = new Set([
   "/cms",
   "/cms/masajes",
   "/cms/masajes/agenda",
+  "/cms/masajes/admin",
 ]);
 
 export function canAccessCmsPath(role: string | null | undefined, path: string): boolean {
