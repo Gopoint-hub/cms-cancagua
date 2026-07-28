@@ -12,6 +12,8 @@ import { sendWhatsApp } from "./_core/whapi";
 import { ENV } from "./_core/env";
 import { sendFreelanceApprovalRequest } from "./freelanceApproval";
 import { syncMassageSale } from "./massageSales";
+import { markCheckoutPaid, markCheckoutPaymentFailed } from "./massageCheckout";
+import { emitMassagePurchase } from "./googleAnalytics";
 
 console.log("[SERVER] getnetWebhook v3 cargado — freelance approval activo");
 
@@ -90,6 +92,12 @@ router.post("/", async (req: Request, res: Response) => {
     for (const booking of bookings) {
       await syncMassageSale(booking.id);
     }
+    await markCheckoutPaid(requestId).catch((error) =>
+      console.error("[Getnet Webhook] No se pudo marcar el checkout pagado:", error)
+    );
+    await emitMassagePurchase(requestId).catch((error) =>
+      console.error("[Getnet Webhook] No se pudo emitir purchase:", error)
+    );
   } else if (effectiveStatus === "REJECTED" || effectiveStatus === "FAILED") {
     await db
       .update(massageBookings)
@@ -101,6 +109,9 @@ router.post("/", async (req: Request, res: Response) => {
         cancelledAt: new Date(),
       })
       .where(inArray(massageBookings.id, bookings.map((booking) => booking.id)));
+    await markCheckoutPaymentFailed(requestId).catch((error) =>
+      console.error("[Getnet Webhook] No se pudo marcar la falla del checkout:", error)
+    );
   }
 
   return res.status(200).json({ ok: true });

@@ -13,6 +13,7 @@ import { SEOHead } from "@/components/SEOHead";
 import { useEffect } from "react";
 import { MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
 import MasajesDashboard from "./masajes/Dashboard";
+import RegularClassesDashboard from "./clases-regulares/Dashboard";
 
 /** Dashboard simplificado para vendedores (rol concierge) */
 function SellerDashboard() {
@@ -127,6 +128,9 @@ function AdminDashboard() {
     ],
     masajes: [
       { label: "Área de masajes", value: "Ver", icon: Store },
+    ],
+    regular_classes: [
+      { label: "Programa integrado", value: "Ver", icon: CalendarCheck },
     ],
     admin: [
       { label: "Usuarios", value: "Gestionar", icon: Users },
@@ -285,6 +289,10 @@ export default function CMSDashboard() {
 
   if (user?.role === MASSAGE_THERAPIST_ROLE) {
     return <MasajesDashboard />;
+  }
+
+  if (user?.role === "user" && user.regularClassesTeacher) {
+    return <RegularClassesDashboard />;
   }
 
   // Admin y superadmin ven el dashboard completo

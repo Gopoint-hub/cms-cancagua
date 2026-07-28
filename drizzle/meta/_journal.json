@@ -176,6 +176,20 @@
       "when": 1784851200000,
       "tag": "0028_restore_massage_agenda",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1785168000000,
+      "tag": "0029_massage_checkout_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1785171600000,
+      "tag": "0030_regular_classes",
+      "breakpoints": true
     }
   ]
 }

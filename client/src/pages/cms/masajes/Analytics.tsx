@@ -34,6 +34,8 @@ export default function MasajesAnalytics() {
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = trpc.masajes.analytics.summary.useQuery({ from, to });
+  const { data: checkoutFunnel, isLoading: loadingCheckoutFunnel } =
+    trpc.masajes.analytics.checkoutFunnel.useQuery({ from, to });
   const { data: history, isLoading: loadingHistory } = trpc.masajes.analytics.history.useQuery({ from, to, page, pageSize: 25 });
   const exportQuery = trpc.masajes.analytics.exportHistory.useQuery({ from, to }, { enabled: false });
 
@@ -206,6 +208,60 @@ export default function MasajesAnalytics() {
                 {data.period.revenueChangePercent.toFixed(1)}% vs. período anterior
               </Badge>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <BarChart3 className="h-4 w-4" /> Embudo de reserva online
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingCheckoutFunnel ? (
+                  <Skeleton className="h-28 w-full" />
+                ) : !checkoutFunnel || checkoutFunnel.stages.started === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    Aún no hay checkouts medidos en este período. La medición comienza desde la publicación de esta versión.
+                  </p>
+                ) : (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                      {[
+                        ["Iniciaron", checkoutFunnel.stages.started],
+                        ["Agendaron", checkoutFunnel.stages.scheduleSelected],
+                        ["Completaron datos", checkoutFunnel.stages.detailsCompleted],
+                        ["Fueron a Getnet", checkoutFunnel.stages.paymentStarted],
+                        ["Pagaron", checkoutFunnel.stages.paid],
+                        ["Abandonaron", checkoutFunnel.stages.abandoned],
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="rounded-lg border p-3">
+                          <p className="text-xs text-muted-foreground">{label}</p>
+                          <p className="mt-1 text-2xl font-bold">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 text-sm md:grid-cols-3">
+                      <div>
+                        <p className="text-muted-foreground">Conversión checkout → pago</p>
+                        <p className="text-xl font-semibold">{(checkoutFunnel.conversionRate * 100).toFixed(1)}%</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Aprobación en Getnet</p>
+                        <p className="text-xl font-semibold">{(checkoutFunnel.paymentApprovalRate * 100).toFixed(1)}%</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Ingresos aprobados del embudo</p>
+                        <p className="text-xl font-semibold">{money(checkoutFunnel.paidRevenue)}</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Abandonos: antes de agendar {checkoutFunnel.abandonedAt.beforeScheduling} · durante agenda {checkoutFunnel.abandonedAt.scheduling} ·
+                      después de elegir horario {checkoutFunnel.abandonedAt.afterSchedule} · después de completar datos {checkoutFunnel.abandonedAt.afterDetails} ·
+                      después de ir a Getnet {checkoutFunnel.abandonedAt.afterPaymentStart}.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* KPIs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

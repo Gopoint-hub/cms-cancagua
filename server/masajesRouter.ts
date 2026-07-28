@@ -25,6 +25,7 @@ import {
   discountCodes,
   discountCodeUsages,
   massageDiscountCodeTechniques,
+  massageCheckoutSessions,
 } from "../drizzle/schema";
 import {
   sendMassageBookingConfirmationEmail,
@@ -41,6 +42,13 @@ import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne, isNull } from "
 import { hasMassageAdminAccess, hasMassageOperationsAccess, hasMassageReadAccess } from "@shared/permissions";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { massageAreaAdminRouter } from "./massageAreaAdmin";
+import {
+  attachCheckoutPayment,
+  markCheckoutInitializationFailed,
+  markCheckoutPaid,
+  markCheckoutPaymentFailed,
+} from "./massageCheckout";
+import { emitMassagePurchase } from "./googleAnalytics";
 
 const adminOrEditor = async (role: string) => {
   if (!hasMassageAdminAccess(role)) {
@@ -2049,6 +2057,60 @@ async function getCombinedMassageSalesRows(
 }
 
 const analyticsRouter = router({
+  checkoutFunnel: protectedProcedure
+    .input(z.object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }))
+    .query(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) return null;
+      const from = chileLocalDateTimeToUtc(input.from, "00:00");
+      const nextDay = new Date(`${input.to}T12:00:00Z`);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      const toExclusive = chileLocalDateTimeToUtc(nextDay.toISOString().slice(0, 10), "00:00");
+      const sessions = await db.select().from(massageCheckoutSessions).where(and(
+        gte(massageCheckoutSessions.startedAt, from),
+        lt(massageCheckoutSessions.startedAt, toExclusive),
+      ));
+
+      const stages = {
+        started: sessions.length,
+        scheduling: sessions.filter((session) => session.schedulingStartedAt).length,
+        scheduleSelected: sessions.filter((session) => session.scheduleSelectedAt).length,
+        detailsCompleted: sessions.filter((session) => session.detailsCompletedAt).length,
+        paymentStarted: sessions.filter((session) => session.paymentStartedAt).length,
+        paid: sessions.filter((session) => session.status === "paid").length,
+        paymentFailed: sessions.filter((session) => session.status === "payment_failed").length,
+        abandoned: sessions.filter((session) => session.status === "abandoned").length,
+      };
+      const abandonedAt = {
+        beforeScheduling: 0,
+        scheduling: 0,
+        afterSchedule: 0,
+        afterDetails: 0,
+        afterPaymentStart: 0,
+      };
+      for (const session of sessions.filter((candidate) => candidate.status === "abandoned")) {
+        if (session.paymentStartedAt) abandonedAt.afterPaymentStart += 1;
+        else if (session.detailsCompletedAt) abandonedAt.afterDetails += 1;
+        else if (session.scheduleSelectedAt) abandonedAt.afterSchedule += 1;
+        else if (session.schedulingStartedAt) abandonedAt.scheduling += 1;
+        else abandonedAt.beforeScheduling += 1;
+      }
+      const paidRevenue = sessions
+        .filter((session) => session.status === "paid")
+        .reduce((sum, session) => sum + Number(session.finalTotal), 0);
+      return {
+        stages,
+        abandonedAt,
+        paidRevenue,
+        conversionRate: stages.started > 0 ? stages.paid / stages.started : 0,
+        paymentApprovalRate: stages.paymentStarted > 0 ? stages.paid / stages.paymentStarted : 0,
+      };
+    }),
+
   summary: protectedProcedure
     .input(z.object({
       from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -3499,6 +3561,7 @@ const masajesPublicRouter = router({
       clientEmail: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
       discountCode: z.string().trim().max(50).optional(),
+      checkoutId: z.string().trim().min(8).max(64).regex(/^[A-Za-z0-9-]+$/).optional(),
     }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -3681,6 +3744,16 @@ const masajesPublicRouter = router({
         await db.update(massageBookings)
           .set({ getnetRequestId: session.requestId })
           .where(inArray(massageBookings.id, bookingIds));
+        await attachCheckoutPayment({
+          checkoutId: input.checkoutId,
+          requestId: session.requestId,
+          bookingIds,
+          originalTotal,
+          discountTotal: discountResult?.discountTotal ?? 0,
+          finalTotal: total,
+        }).catch((trackingError) =>
+          console.error("[initCartPayment] No se pudo asociar el checkout analítico:", trackingError)
+        );
 
         if (input.subscribeNewsletter && input.clientEmail) {
           try {
@@ -3700,6 +3773,9 @@ const masajesPublicRouter = router({
         };
       } catch (error) {
         console.error("[initCartPayment] Getnet session error:", error);
+        await markCheckoutInitializationFailed(input.checkoutId).catch((trackingError) =>
+          console.error("[initCartPayment] No se pudo registrar la falla del checkout:", trackingError)
+        );
         await db.update(massageBookings)
           .set({
             status: "cancelled",
@@ -3762,7 +3838,29 @@ const masajesPublicRouter = router({
             for (const booking of existingBookings) {
               await syncMassageSale(booking.id);
             }
+            await markCheckoutPaid(resolvedRequestId).catch((trackingError) =>
+              console.error("[checkPaymentStatus] No se pudo marcar el checkout pagado:", trackingError)
+            );
+            await emitMassagePurchase(resolvedRequestId).catch((trackingError) =>
+              console.error("[checkPaymentStatus] No se pudo emitir purchase:", trackingError)
+            );
           }
+        }
+      } else if (result.status === "REJECTED" || result.status === "FAILED") {
+        const db = await getDb();
+        if (db) {
+          await db.update(massageBookings)
+            .set({
+              paymentStatus: "pending",
+              status: "cancelled",
+              cancellationCategory: "system",
+              cancellationReason: "Pago rechazado o fallido por Getnet.",
+              cancelledAt: new Date(),
+            })
+            .where(eq(massageBookings.getnetRequestId, resolvedRequestId));
+          await markCheckoutPaymentFailed(resolvedRequestId).catch((trackingError) =>
+            console.error("[checkPaymentStatus] No se pudo marcar la falla del checkout:", trackingError)
+          );
         }
       }
 

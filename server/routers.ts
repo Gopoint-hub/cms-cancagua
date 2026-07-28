@@ -13,6 +13,7 @@ import { analyticsRouter } from "./analyticsRouter";
 import { masajesRouter } from "./masajesRouter";
 import { clientesRouter } from "./clientesRouter";
 import { marketingRouter } from "./marketingRouter";
+import { regularClassesRouter } from "./regularClassesRouter";
 import { hasB2CAccess, hasMaintenanceAccess } from "@shared/permissions";
 import {
   CANCAGUA_EMAIL_REFINEMENT_RULES,
@@ -28,6 +29,8 @@ export const appRouter = router({
   analytics: analyticsRouter,
   // Módulo Masajes - Reservas, terapeutas, inventario y analítica del área de masajes
   masajes: masajesRouter,
+  // Módulo Clases Regulares - alumnos, asistencias, planes y liquidaciones
+  regularClasses: regularClassesRouter,
   clientes: clientesRouter,
   marketing: marketingRouter,
   auth: router({

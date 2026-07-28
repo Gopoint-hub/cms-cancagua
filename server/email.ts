@@ -1,7 +1,15 @@
 import { Resend } from 'resend';
 
-// Inicializar Resend con API key del entorno
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Inicialización diferida: importar el router no debe fallar en tests o entornos
+// donde el envío de correo está deshabilitado.
+let resend: Resend | null = null;
+function getResendClient() {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY no configurada");
+  }
+  if (!resend) resend = new Resend(process.env.RESEND_API_KEY);
+  return resend;
+}
 
 // Configuración del remitente base
 const BASE_EMAIL = 'info@cancagua.cl';
@@ -70,7 +78,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
     }
     const fromEmail = formatSender(senderName);
 
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await getResendClient().emails.send({
       from: fromEmail,
       to: Array.isArray(options.to) ? options.to : [options.to],
       subject: options.subject,
@@ -149,7 +157,7 @@ export async function sendBulkEmails(options: SendBulkEmailOptions): Promise<{
       let success = false;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const { data, error } = await resend.batch.send(batchEmails);
+          const { data, error } = await getResendClient().batch.send(batchEmails);
           
           if (error) {
             const errMsg = error.message || 'Error desconocido';
@@ -341,7 +349,7 @@ export async function sendQuoteEmail(options: SendQuoteEmailOptions): Promise<{ 
     const htmlContent = generateQuoteEmailHtml(options.clientName, options.quoteNumber, options.customMessage);
     const textContent = `Estimado/a ${options.clientName},\n\nAdjunto encontrará la cotización ${options.quoteNumber} de Cancagua Spa & Retreat Center.\n\n${options.customMessage || 'Quedamos atentos a sus consultas.'}\n\nSaludos cordiales,\nEquipo Cancagua Eventos\ncotizacion@cancagua.cl\n+56 9 1234 5678`;
 
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await getResendClient().emails.send({
       from: QUOTE_FROM_EMAIL,
       to: [options.to],
       cc: [QUOTE_CC_EMAIL],
@@ -588,7 +596,7 @@ ${data.mensaje}
 ---
 Este mensaje fue enviado desde el formulario de contacto de cancagua.cl`;
 
-    const { data: emailData, error } = await resend.emails.send({
+    const { data: emailData, error } = await getResendClient().emails.send({
       from: formatSender('Formulario Cancagua'),
       to: [data.toEmail || CONTACT_TO_EMAIL],
       subject: `📬 Nuevo mensaje de ${data.nombre} - ${data.origen || 'Formulario de Contacto'}`,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,12 @@ import { toast } from "sonner";
 import { CalendarDays, Clock, User, ShieldAlert, Check, ShoppingCart, Trash2, Plus } from "lucide-react";
 import { addMonths, endOfMonth, format, startOfDay, startOfMonth } from "date-fns";
 import { es } from "date-fns/locale";
+import {
+  getCheckoutId,
+  pushMassageEvent,
+  toAnalyticsItem,
+  updateCheckoutProgress,
+} from "@/lib/massageAnalytics";
 
 const getDurations = (t: any): number[] => {
   const durations = Array.isArray(t.durations)
@@ -98,6 +104,8 @@ const buildInternationalPhone = (countryCode: string, phone: string): string | u
 export default function ReservarMasaje() {
   const { id } = useParams<{ id: string }>();
   const initialSelections = useMemo(readCartSelections, []);
+  const checkoutId = useMemo(getCheckoutId, []);
+  const detailsTracked = useRef(false);
   const hasPresetCart = initialSelections.length > 0;
   const firstSelection = initialSelections[0];
   const routeTechniqueId = Number(id ?? firstSelection?.techniqueId);
@@ -164,9 +172,19 @@ export default function ReservarMasaje() {
 
   const initPaymentMut = trpc.masajes.public.initCartPayment.useMutation({
     onSuccess: (data) => {
+      pushMassageEvent("payment_redirect", undefined, {
+        checkout_id: checkoutId,
+        payment_type: "Getnet",
+      });
       window.location.href = data.processUrl;
     },
-    onError: (e) => toast.error(e.message ?? "Error al iniciar el pago. Intenta de nuevo."),
+    onError: (e) => {
+      pushMassageEvent("payment_start_failed", undefined, {
+        checkout_id: checkoutId,
+        error_type: "checkout_initialization",
+      });
+      toast.error(e.message ?? "Error al iniciar el pago. Intenta de nuevo.");
+    },
   });
   const validateDiscountMut = trpc.masajes.public.validateDiscount.useMutation({
     onSuccess: (data) => {
@@ -176,6 +194,12 @@ export default function ReservarMasaje() {
     },
     onError: (error) => { setAppliedDiscount(null); toast.error(error.message); },
   });
+
+  useEffect(() => {
+    if (!checkoutId) return;
+    pushMassageEvent("checkout_schedule_started", undefined, { checkout_id: checkoutId });
+    updateCheckoutProgress({ checkoutId, step: "scheduling" });
+  }, [checkoutId]);
 
   useEffect(() => {
     if (initialDiscountCode && cart.length > 0 && pendingSelections.length === 0 && !appliedDiscount && !validateDiscountMut.isPending) {
@@ -209,6 +233,21 @@ export default function ReservarMasaje() {
       return;
     }
     setCart((current) => [...current, ...newItems]);
+    const analyticsItems = newItems.map(toAnalyticsItem);
+    pushMassageEvent("schedule_selected", {
+      currency: "CLP",
+      value: newItems.reduce((sum, item) => sum + item.price, 0),
+      items: analyticsItems,
+    }, {
+      checkout_id: checkoutId,
+      booking_date: date,
+      booking_time: slot.time,
+    });
+    updateCheckoutProgress({
+      checkoutId,
+      step: "schedule_selected",
+      items: [...cart, ...newItems].map(toAnalyticsItem),
+    });
     setAppliedDiscount(null);
     if (hasPresetCart) {
       const nextPending = pendingSelections.slice(1);
@@ -236,6 +275,20 @@ export default function ReservarMasaje() {
     if (!disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
 
+    const value = appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0);
+    pushMassageEvent("add_payment_info", {
+      currency: "CLP",
+      value,
+      coupon: appliedDiscount?.code,
+      payment_type: "Getnet",
+      items: cart.map(toAnalyticsItem),
+    }, { checkout_id: checkoutId });
+    updateCheckoutProgress({
+      checkoutId,
+      step: "details_completed",
+      items: cart.map(toAnalyticsItem),
+    });
+
     initPaymentMut.mutate({
       items: cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({
         techniqueId, duration, bookingDate, startTime, notes,
@@ -245,8 +298,23 @@ export default function ReservarMasaje() {
       clientEmail: email.trim() || undefined,
       subscribeNewsletter: subscribeNewsletter || undefined,
       discountCode: appliedDiscount?.code,
+      checkoutId: checkoutId || undefined,
     });
   };
+
+  const allSelectionsScheduled = !hasPresetCart || pendingSelections.length === 0;
+  const allInfoFilled = cart.length > 0 && allSelectionsScheduled && Boolean(name.trim());
+
+  useEffect(() => {
+    if (!allInfoFilled || detailsTracked.current) return;
+    detailsTracked.current = true;
+    pushMassageEvent("checkout_details_completed", undefined, { checkout_id: checkoutId });
+    updateCheckoutProgress({
+      checkoutId,
+      step: "details_completed",
+      items: cart.map(toAnalyticsItem),
+    });
+  }, [allInfoFilled, cart, checkoutId]);
 
   if (isLoading) return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center">
@@ -265,8 +333,6 @@ export default function ReservarMasaje() {
   );
 
   const durs = getDurations(selectedTechnique);
-  const allSelectionsScheduled = !hasPresetCart || pendingSelections.length === 0;
-  const allInfoFilled = cart.length > 0 && allSelectionsScheduled && name.trim();
 
   return (
     <div className="min-h-screen bg-stone-50 pb-16">
@@ -422,7 +488,17 @@ export default function ReservarMasaje() {
                         {slots.map((availableSlot) => (
                           <button
                             key={availableSlot.time}
-                            onClick={() => { setSlot(availableSlot); setDisclaimerAccepted(false); }}
+                            onClick={() => {
+                              setSlot(availableSlot);
+                              setDisclaimerAccepted(false);
+                              pushMassageEvent("select_massage_slot", undefined, {
+                                checkout_id: checkoutId,
+                                booking_date: date,
+                                booking_time: availableSlot.time,
+                                technique_id: techniqueId,
+                                duration,
+                              });
+                            }}
                             className={`h-11 rounded-xl border-2 bg-white px-4 text-sm font-semibold transition-colors ${
                               slot?.time === availableSlot.time
                                 ? "border-teal-600 bg-teal-600 text-white"
@@ -466,7 +542,15 @@ export default function ReservarMasaje() {
                   <p className="text-muted-foreground capitalize">{format(new Date(item.bookingDate + "T12:00:00"), "d MMM", { locale: es })} · {item.startTime} hrs</p>
                   <p className="font-medium text-teal-700">${item.price.toLocaleString("es-CL")}</p>
                 </div>
-                <Button size="icon" variant="ghost" className="text-red-600" onClick={() => { setCart((items) => items.filter((_, itemIndex) => itemIndex !== index)); setAppliedDiscount(null); }}>
+                <Button size="icon" variant="ghost" className="text-red-600" onClick={() => {
+                  pushMassageEvent("remove_from_cart", {
+                    currency: "CLP",
+                    value: item.price,
+                    items: [toAnalyticsItem(item)],
+                  }, { checkout_id: checkoutId });
+                  setCart((items) => items.filter((_, itemIndex) => itemIndex !== index));
+                  setAppliedDiscount(null);
+                }}>
                   <Trash2 className="w-4 h-4" />
                 </Button>
               </div>

@@ -21,6 +21,8 @@ import { ensureMassageTherapistUsersSchema } from "../ensureMassageTherapistUser
 import { ensureMassageNpsSchema } from "../ensureMassageNpsSchema";
 import { ensureMassageBookingSchema } from "../ensureMassageBookingSchema";
 import { ensureMassageMonthlyClosureSchema } from "../ensureMassageMonthlyClosureSchema";
+import { ensureMassageCheckoutSchema } from "../ensureMassageCheckoutSchema";
+import { ensureRegularClassesSchema } from "../ensureRegularClassesSchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -48,6 +50,8 @@ async function startServer() {
   await ensureMassageTherapistUsersSchema();
   await ensureMassageNpsSchema();
   await ensureMassageMonthlyClosureSchema();
+  await ensureMassageCheckoutSchema();
+  await ensureRegularClassesSchema();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -131,6 +135,8 @@ startServer()
   .then(async () => {
     const { startMassageNpsScheduler } = await import("../massageNps");
     startMassageNpsScheduler();
+    const { startMassageCheckoutScheduler } = await import("../massageCheckout");
+    startMassageCheckoutScheduler();
     const { runSeedIfNeeded } = await import("../seed");
     try {
       await runSeedIfNeeded();

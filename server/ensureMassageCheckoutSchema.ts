@@ -1,0 +1,40 @@
+import { sql } from "drizzle-orm";
+import { getDb } from "./db";
+
+export async function ensureMassageCheckoutSchema(): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable while ensuring massage checkout schema");
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS massage_checkout_sessions (
+      checkout_id varchar(64) NOT NULL,
+      status enum('started','scheduling','details_completed','payment_started','paid','payment_failed','abandoned') NOT NULL DEFAULT 'started',
+      items text NOT NULL,
+      currency varchar(3) NOT NULL DEFAULT 'CLP',
+      original_total decimal(12,2) NOT NULL DEFAULT 0,
+      discount_total decimal(12,2) NOT NULL DEFAULT 0,
+      final_total decimal(12,2) NOT NULL DEFAULT 0,
+      coupon varchar(50) NULL,
+      ga_client_id varchar(100) NULL,
+      ga_session_id varchar(64) NULL,
+      getnet_request_id varchar(64) NULL,
+      booking_ids text NULL,
+      started_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_activity_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      scheduling_started_at timestamp NULL,
+      schedule_selected_at timestamp NULL,
+      details_completed_at timestamp NULL,
+      payment_started_at timestamp NULL,
+      paid_at timestamp NULL,
+      failed_at timestamp NULL,
+      abandoned_at timestamp NULL,
+      purchase_event_claimed_at timestamp NULL,
+      purchase_event_sent_at timestamp NULL,
+      created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (checkout_id),
+      UNIQUE KEY massage_checkout_getnet_request_unique (getnet_request_id),
+      KEY massage_checkout_status_activity_idx (status, last_activity_at)
+    )
+  `);
+}

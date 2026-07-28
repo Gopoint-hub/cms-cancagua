@@ -61,6 +61,16 @@ import MasajesAdminArea from "./pages/cms/masajes/AdminArea";
 import ReservarMasaje from "./pages/masajes/ReservarMasaje";
 import ConfirmacionPago from "./pages/masajes/ConfirmacionPago";
 import NpsMasaje from "./pages/masajes/NpsMasaje";
+// Módulo Clases Regulares
+import RegularClassesDashboard from "./pages/cms/clases-regulares/Dashboard";
+import RegularClassesAttendance from "./pages/cms/clases-regulares/Attendance";
+import RegularClassesStudents from "./pages/cms/clases-regulares/Students";
+import RegularClassesClasses from "./pages/cms/clases-regulares/Classes";
+import RegularClassesTeachers from "./pages/cms/clases-regulares/Teachers";
+import RegularClassesSettlements from "./pages/cms/clases-regulares/Settlements";
+import RegularClassesConfiguration from "./pages/cms/clases-regulares/Configuration";
+import RegularClassesCommunications from "./pages/cms/clases-regulares/Communications";
+import RegularClassesMySettlements from "./pages/cms/clases-regulares/MySettlements";
 
 function Router() {
   return (
@@ -125,6 +135,17 @@ function Router() {
       <Route path="/cms/masajes/admin" component={MasajesAdminArea} />
       <Route path="/cms/masajes/rrhh" component={MasajesRRHH} />
       <Route path="/cms/masajes/configuracion" component={MasajesConfiguracion} />
+
+      {/* Módulo Clases Regulares */}
+      <Route path="/cms/clases-regulares" component={RegularClassesDashboard} />
+      <Route path="/cms/clases-regulares/asistencia" component={RegularClassesAttendance} />
+      <Route path="/cms/clases-regulares/mis-liquidaciones" component={RegularClassesMySettlements} />
+      <Route path="/cms/clases-regulares/alumnos" component={RegularClassesStudents} />
+      <Route path="/cms/clases-regulares/clases" component={RegularClassesClasses} />
+      <Route path="/cms/clases-regulares/profesores" component={RegularClassesTeachers} />
+      <Route path="/cms/clases-regulares/liquidaciones" component={RegularClassesSettlements} />
+      <Route path="/cms/clases-regulares/comunicaciones" component={RegularClassesCommunications} />
+      <Route path="/cms/clases-regulares/configuracion" component={RegularClassesConfiguration} />
 
       {/* Reserva pública de masajes (sin auth) */}
       <Route path="/reservar/masajes" component={ReservarMasaje} />

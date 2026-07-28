@@ -29,6 +29,10 @@ export const ENV = {
   getnetSecretKey: process.env.GETNET_SECRET_KEY ?? "",
   getnetBaseUrl: process.env.GETNET_BASE_URL ?? "https://checkout.test.getnet.cl",
 
+  // GA4 Measurement Protocol (purchase confirmado desde el servidor)
+  ga4MeasurementId: process.env.GA4_MEASUREMENT_ID ?? "G-Z39NWW3H26",
+  ga4ApiSecret: process.env.GA4_API_SECRET ?? "",
+
   // Frontend URL (for payment return URLs)
   frontendUrl: process.env.FRONTEND_URL ?? "https://cancagua.cl",
 

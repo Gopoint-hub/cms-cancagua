@@ -22,11 +22,11 @@ import {
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import {
-  LayoutDashboard, LogOut, PanelLeft, Users, Calendar, Mail, BarChart3,
+  LayoutDashboard, LogOut, PanelLeft, Users, Calendar, CalendarDays, Mail, BarChart3,
   FileText, FileSpreadsheet, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -42,7 +42,7 @@ import { canAccessCmsPath, CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE } from "@
 import { trpc } from "@/lib/trpc";
 
 // Definición de categorías y sus items de menú
-export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "masajes";
+export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "masajes" | "regular_classes";
 
 interface MenuItem {
   icon: any;
@@ -52,6 +52,7 @@ interface MenuItem {
   roles?: string[];
   /** Restricted massage-area accounting close (Tamara and superadmins). */
   areaAdminOnly?: boolean;
+  regularClassesAccess?: "teacher" | "reception" | "admin";
 }
 
 interface Category {
@@ -63,6 +64,7 @@ interface Category {
   items: MenuItem[];
   /** If set, only these roles can see this category. If not set, all roles can see it. */
   roles?: string[];
+  requiresRegularClassesAccess?: boolean;
 }
 
 export const categories: Category[] = [
@@ -189,6 +191,26 @@ export const categories: Category[] = [
     ],
   },
   {
+    id: "regular_classes",
+    label: "Clases Regulares",
+    icon: Dumbbell,
+    description: "Programa, asistencia & comisiones",
+    color: "bg-sky-700",
+    roles: ["super_admin", "admin", "user", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE],
+    requiresRegularClassesAccess: true,
+    items: [
+      { icon: LayoutDashboard, label: "Dashboard", path: "/cms/clases-regulares" },
+      { icon: UserCheck, label: "Asistencia", path: "/cms/clases-regulares/asistencia", regularClassesAccess: "teacher" },
+      { icon: DollarSign, label: "Mi liquidación", path: "/cms/clases-regulares/mis-liquidaciones", regularClassesAccess: "teacher" },
+      { icon: UsersRound, label: "Alumnos y pagos", path: "/cms/clases-regulares/alumnos", regularClassesAccess: "reception" },
+      { icon: CalendarDays, label: "Clases y horarios", path: "/cms/clases-regulares/clases", regularClassesAccess: "admin" },
+      { icon: Users, label: "Profesores", path: "/cms/clases-regulares/profesores", regularClassesAccess: "admin" },
+      { icon: FileSpreadsheet, label: "Liquidaciones", path: "/cms/clases-regulares/liquidaciones", regularClassesAccess: "admin" },
+      { icon: Mail, label: "Beneficios y correos", path: "/cms/clases-regulares/comunicaciones", regularClassesAccess: "admin" },
+      { icon: Settings, label: "Configuración", path: "/cms/clases-regulares/configuracion", regularClassesAccess: "admin" },
+    ],
+  },
+  {
     id: "ayuda",
     label: "Ayuda",
     icon: HelpCircle,
@@ -304,7 +326,7 @@ export default function DashboardLayout({
     );
   }
 
-  if (!canAccessCmsPath(user.role, location)) {
+  if (!canAccessCmsPath(user.role, location, user.regularClassesTeacher)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/20 p-6">
         <div className="max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
@@ -356,6 +378,11 @@ function DashboardLayoutContent({
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
   const areaAdminAccess = trpc.masajes.areaAdmin.access.useQuery(undefined, {
+    enabled: Boolean(user),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const regularClassesAccess = trpc.regularClasses.access.useQuery(undefined, {
     enabled: Boolean(user),
     retry: false,
     refetchOnWindowFocus: false,
@@ -441,12 +468,21 @@ function DashboardLayoutContent({
             {/* Menú Acordeón - Categorías filtradas por rol */}
             <div className="px-2 py-1">
               {categories
-                .filter(cat => !cat.roles || cat.roles.includes(user?.role || ""))
+                .filter(cat =>
+                  (!cat.roles || cat.roles.includes(user?.role || ""))
+                  && (!cat.requiresRegularClassesAccess || regularClassesAccess.data?.allowed === true)
+                )
                 .map((category) => {
                 // Filter items by role too
                 const visibleItems = category.items.filter(item =>
                   (!item.roles || item.roles.includes(user?.role || ""))
                   && (!item.areaAdminOnly || areaAdminAccess.data?.allowed === true)
+                  && (
+                    !item.regularClassesAccess
+                    || (item.regularClassesAccess === "admin" && regularClassesAccess.data?.isAdmin)
+                    || (item.regularClassesAccess === "reception" && regularClassesAccess.data?.isReception)
+                    || (item.regularClassesAccess === "teacher" && (regularClassesAccess.data?.isTeacher || regularClassesAccess.data?.isAdmin))
+                  )
                 );
                 if (visibleItems.length === 0) return null;
                 const isExpanded = expandedCategories.has(category.id);

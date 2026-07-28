@@ -4,8 +4,62 @@ import { massageTechniques } from "../drizzle/schema";
 import { getDb } from "./db";
 import { serializePublicMassageTechnique } from "./masajesRouter";
 import { calculateMassageDiscount } from "./massageDiscounts";
+import { z } from "zod";
+import { saveCheckoutStart, updateCheckoutProgress } from "./massageCheckout";
 
 const router = Router();
+
+const checkoutIdSchema = z.string().trim().min(8).max(64).regex(/^[A-Za-z0-9-]+$/);
+const analyticsItemSchema = z.object({
+  item_id: z.string().trim().min(1).max(64),
+  item_name: z.string().trim().min(1).max(200),
+  item_category: z.literal("Masajes"),
+  item_variant: z.string().trim().min(1).max(50),
+  price: z.number().nonnegative().max(10_000_000),
+  quantity: z.number().int().min(1).max(4),
+});
+
+router.post("/checkout/start", async (req: Request, res: Response) => {
+  const parsed = z.object({
+    checkoutId: checkoutIdSchema,
+    items: z.array(analyticsItemSchema).min(1).max(40),
+    currency: z.literal("CLP").default("CLP"),
+    originalTotal: z.number().nonnegative().max(100_000_000),
+    discountTotal: z.number().nonnegative().max(100_000_000),
+    finalTotal: z.number().nonnegative().max(100_000_000),
+    coupon: z.string().trim().max(50).optional(),
+    gaClientId: z.string().trim().max(100).optional(),
+    gaSessionId: z.string().trim().max(64).regex(/^\d+$/).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Checkout inválido" });
+  try {
+    await saveCheckoutStart(parsed.data);
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[Massage Checkout] Error al iniciar seguimiento:", error);
+    return res.status(500).json({ error: "No se pudo registrar el checkout" });
+  }
+});
+
+router.post("/checkout/progress", async (req: Request, res: Response) => {
+  const parsed = z.object({
+    checkoutId: checkoutIdSchema,
+    step: z.enum(["scheduling", "schedule_selected", "details_completed"]),
+    items: z.array(analyticsItemSchema).min(1).max(40).optional(),
+    gaClientId: z.string().trim().max(100).optional(),
+    gaSessionId: z.string().trim().max(64).regex(/^\d+$/).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Progreso inválido" });
+  try {
+    await updateCheckoutProgress(parsed.data);
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[Massage Checkout] Error al actualizar seguimiento:", error);
+    return res.status(500).json({ error: "No se pudo registrar el progreso" });
+  }
+});
 
 router.get("/techniques", async (_req: Request, res: Response) => {
   try {

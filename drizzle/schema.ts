@@ -27,6 +27,8 @@ export const users = mysqlTable("users", {
   status: mysqlEnum("status", ["active", "pending", "inactive"]).default("pending").notNull(),
   /** Modules the user has access to (JSON array, null = all modules for admin roles) */
   allowedModules: text("allowedModules"),
+  /** Acceso acumulable como profesor/a de clases regulares. Puede coexistir con otros roles. */
+  regularClassesTeacher: int("regular_classes_teacher").default(0).notNull(),
   /** Invitation token for new users */
   invitationToken: varchar("invitationToken", { length: 255 }),
   invitationExpiresAt: timestamp("invitationExpiresAt"),
@@ -1154,6 +1156,46 @@ export const massageBookings = mysqlTable("massage_bookings", {
 export type MassageBooking = typeof massageBookings.$inferSelect;
 export type InsertMassageBooking = typeof massageBookings.$inferInsert;
 
+// Embudo anónimo de compra. No almacena nombre, email, teléfono ni notas.
+export const massageCheckoutSessions = mysqlTable("massage_checkout_sessions", {
+  checkoutId: varchar("checkout_id", { length: 64 }).primaryKey(),
+  status: mysqlEnum("status", [
+    "started",
+    "scheduling",
+    "details_completed",
+    "payment_started",
+    "paid",
+    "payment_failed",
+    "abandoned",
+  ]).default("started").notNull(),
+  items: text("items").notNull(),
+  currency: varchar("currency", { length: 3 }).default("CLP").notNull(),
+  originalTotal: decimal("original_total", { precision: 12, scale: 2 }).default("0").notNull(),
+  discountTotal: decimal("discount_total", { precision: 12, scale: 2 }).default("0").notNull(),
+  finalTotal: decimal("final_total", { precision: 12, scale: 2 }).default("0").notNull(),
+  coupon: varchar("coupon", { length: 50 }),
+  gaClientId: varchar("ga_client_id", { length: 100 }),
+  gaSessionId: varchar("ga_session_id", { length: 64 }),
+  getnetRequestId: varchar("getnet_request_id", { length: 64 }).unique(),
+  bookingIds: text("booking_ids"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  lastActivityAt: timestamp("last_activity_at").defaultNow().notNull(),
+  schedulingStartedAt: timestamp("scheduling_started_at"),
+  scheduleSelectedAt: timestamp("schedule_selected_at"),
+  detailsCompletedAt: timestamp("details_completed_at"),
+  paymentStartedAt: timestamp("payment_started_at"),
+  paidAt: timestamp("paid_at"),
+  failedAt: timestamp("failed_at"),
+  abandonedAt: timestamp("abandoned_at"),
+  purchaseEventClaimedAt: timestamp("purchase_event_claimed_at"),
+  purchaseEventSentAt: timestamp("purchase_event_sent_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageCheckoutSession = typeof massageCheckoutSessions.$inferSelect;
+export type InsertMassageCheckoutSession = typeof massageCheckoutSessions.$inferInsert;
+
 // Reservas ingresadas manualmente desde Skedu para programas que incluyen masaje.
 // Se mantienen separadas de massage_bookings para no mezclarlas con ventas Getnet.
 export const massageProgramBookings = mysqlTable("massage_program_bookings", {
@@ -1404,3 +1446,233 @@ export const massageHrLeaves = mysqlTable("massage_hr_leaves", {
 
 export type MassageHrLeave = typeof massageHrLeaves.$inferSelect;
 export type InsertMassageHrLeave = typeof massageHrLeaves.$inferInsert;
+
+// ============================================================
+// MÓDULO CLASES REGULARES
+// ============================================================
+
+export const regularClassTeachers = mysqlTable("regular_class_teachers", {
+  id: int("id").autoincrement().primaryKey(),
+  cmsUserId: int("cms_user_id"),
+  name: varchar("name", { length: 160 }).notNull(),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 40 }),
+  bio: text("bio"),
+  imageUrl: text("image_url"),
+  color: varchar("color", { length: 20 }).default("#648596").notNull(),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassTeacherAgreements = mysqlTable("regular_class_teacher_agreements", {
+  id: int("id").autoincrement().primaryKey(),
+  teacherId: int("teacher_id").notNull(),
+  teacherShareBps: int("teacher_share_bps").notNull(),
+  documentType: mysqlEnum("document_type", [
+    "pending",
+    "honorarium_receipt",
+    "exempt_invoice",
+    "taxable_invoice",
+    "none",
+  ]).default("pending").notNull(),
+  withholdingBps: int("withholding_bps").default(1525).notNull(),
+  vatBps: int("vat_bps").default(1900).notNull(),
+  validFrom: date("valid_from", { mode: "string" }).notNull(),
+  validTo: date("valid_to", { mode: "string" }),
+  notes: text("notes"),
+  createdByUserId: int("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const regularClassDisciplines = mysqlTable("regular_class_disciplines", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 180 }).notNull(),
+  shortDescription: varchar("short_description", { length: 300 }),
+  description: text("description"),
+  imageUrl: text("image_url"),
+  location: varchar("location", { length: 180 }),
+  capacity: int("capacity"),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassSchedules = mysqlTable("regular_class_schedules", {
+  id: int("id").autoincrement().primaryKey(),
+  disciplineId: int("discipline_id").notNull(),
+  teacherId: int("teacher_id").notNull(),
+  dayOfWeek: int("day_of_week").notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  validFrom: date("valid_from", { mode: "string" }).notNull(),
+  validTo: date("valid_to", { mode: "string" }),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassSessions = mysqlTable("regular_class_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  scheduleId: int("schedule_id"),
+  disciplineId: int("discipline_id").notNull(),
+  teacherId: int("teacher_id").notNull(),
+  sessionDate: date("session_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  status: mysqlEnum("status", ["scheduled", "completed", "cancelled"]).default("scheduled").notNull(),
+  notes: text("notes"),
+  closedAt: timestamp("closed_at"),
+  closedByUserId: int("closed_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassPlans = mysqlTable("regular_class_plans", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 30 }).notNull().unique(),
+  name: varchar("name", { length: 100 }).notNull(),
+  priceClp: int("price_clp").notNull(),
+  creditsPerPeriod: int("credits_per_period").notNull(),
+  benefits: text("benefits"),
+  displayOrder: int("display_order").default(0).notNull(),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassStudents = mysqlTable("regular_class_students", {
+  id: int("id").autoincrement().primaryKey(),
+  firstName: varchar("first_name", { length: 120 }).notNull(),
+  lastName: varchar("last_name", { length: 120 }),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 40 }),
+  status: mysqlEnum("status", ["prospect", "active", "inactive"]).default("prospect").notNull(),
+  source: mysqlEnum("source", ["teacher", "reception", "admin", "web"]).default("admin").notNull(),
+  communicationsConsent: int("communications_consent").default(0).notNull(),
+  notes: text("notes"),
+  createdByUserId: int("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassMemberships = mysqlTable("regular_class_memberships", {
+  id: int("id").autoincrement().primaryKey(),
+  studentId: int("student_id").notNull(),
+  planId: int("plan_id").notNull(),
+  periodStart: date("period_start", { mode: "string" }).notNull(),
+  periodEnd: date("period_end", { mode: "string" }).notNull(),
+  pricePaidClp: int("price_paid_clp").notNull(),
+  creditsTotal: int("credits_total").notNull(),
+  status: mysqlEnum("status", ["pending_payment", "active", "postponed", "completed", "cancelled"]).default("pending_payment").notNull(),
+  paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "refunded"]).default("pending").notNull(),
+  paymentMethod: varchar("payment_method", { length: 60 }),
+  paymentReference: varchar("payment_reference", { length: 160 }),
+  paidAt: timestamp("paid_at"),
+  carriedFromMembershipId: int("carried_from_membership_id"),
+  carriedToMembershipId: int("carried_to_membership_id"),
+  notes: text("notes"),
+  createdByUserId: int("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassAttendances = mysqlTable("regular_class_attendances", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("session_id").notNull(),
+  studentId: int("student_id").notNull(),
+  membershipId: int("membership_id"),
+  status: mysqlEnum("status", ["present", "pending_payment", "void"]).default("present").notNull(),
+  notes: text("notes"),
+  markedByUserId: int("marked_by_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassPaymentInvitations = mysqlTable("regular_class_payment_invitations", {
+  id: int("id").autoincrement().primaryKey(),
+  studentId: int("student_id").notNull(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  status: mysqlEnum("status", ["pending", "sent", "opened", "completed", "expired"]).default("pending").notNull(),
+  paymentUrl: text("payment_url"),
+  sentAt: timestamp("sent_at"),
+  openedAt: timestamp("opened_at"),
+  completedAt: timestamp("completed_at"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdByUserId: int("created_by_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const regularClassClosures = mysqlTable("regular_class_closures", {
+  id: int("id").autoincrement().primaryKey(),
+  periodStart: date("period_start", { mode: "string" }).notNull(),
+  periodEnd: date("period_end", { mode: "string" }).notNull(),
+  status: mysqlEnum("status", ["draft", "closed"]).default("draft").notNull(),
+  snapshot: mediumtext("snapshot"),
+  notes: text("notes"),
+  createdByUserId: int("created_by_user_id").notNull(),
+  closedByUserId: int("closed_by_user_id"),
+  closedAt: timestamp("closed_at"),
+  reopenedByUserId: int("reopened_by_user_id"),
+  reopenedAt: timestamp("reopened_at"),
+  reopenReason: text("reopen_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassAudit = mysqlTable("regular_class_audit", {
+  id: int("id").autoincrement().primaryKey(),
+  entityType: varchar("entity_type", { length: 60 }).notNull(),
+  entityId: int("entity_id").notNull(),
+  action: varchar("action", { length: 60 }).notNull(),
+  detail: text("detail"),
+  userId: int("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const regularClassSettings = mysqlTable("regular_class_settings", {
+  key: varchar("key", { length: 100 }).primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassBenefitEntitlements = mysqlTable("regular_class_benefit_entitlements", {
+  id: int("id").autoincrement().primaryKey(),
+  studentId: int("student_id").notNull(),
+  membershipId: int("membership_id").notNull(),
+  benefitCode: varchar("benefit_code", { length: 80 }).notNull(),
+  benefitName: varchar("benefit_name", { length: 220 }).notNull(),
+  eligibleAt: date("eligible_at", { mode: "string" }).notNull(),
+  status: mysqlEnum("status", ["available", "notified", "redeemed", "expired"]).default("available").notNull(),
+  notifiedAt: timestamp("notified_at"),
+  redeemedAt: timestamp("redeemed_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const regularClassCampaigns = mysqlTable("regular_class_campaigns", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 180 }).notNull(),
+  subject: varchar("subject", { length: 250 }).notNull(),
+  message: text("message").notNull(),
+  audience: mysqlEnum("audience", ["all_active", "2x_plus", "3x_plus", "4x_plus", "5x", "pending_payment"]).notNull(),
+  status: mysqlEnum("status", ["draft", "sending", "sent", "failed"]).default("draft").notNull(),
+  sentCount: int("sent_count").default(0).notNull(),
+  failedCount: int("failed_count").default(0).notNull(),
+  createdByUserId: int("created_by_user_id").notNull(),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const regularClassCampaignDeliveries = mysqlTable("regular_class_campaign_deliveries", {
+  id: int("id").autoincrement().primaryKey(),
+  campaignId: int("campaign_id").notNull(),
+  studentId: int("student_id").notNull(),
+  recipientEmail: varchar("recipient_email", { length: 320 }).notNull(),
+  status: mysqlEnum("status", ["sent", "failed", "skipped"]).notNull(),
+  providerId: varchar("provider_id", { length: 160 }),
+  error: text("error"),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

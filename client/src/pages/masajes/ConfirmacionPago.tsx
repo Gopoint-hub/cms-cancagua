@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { pushMassageEvent } from "@/lib/massageAnalytics";
 
 function getQueryParam(key: string): string {
   return new URLSearchParams(window.location.search).get(key) ?? "";
@@ -15,6 +16,7 @@ export default function ConfirmacionPago() {
   const ref = getQueryParam("ref");
 
   const [ready, setReady] = useState(!!requestId || !!ref);
+  const statusTracked = useRef("");
 
   useEffect(() => {
     if (!requestId && !ref) {
@@ -29,6 +31,23 @@ export default function ConfirmacionPago() {
     { requestId: requestId || undefined, ref: ref || undefined },
     { enabled: ready && (!!requestId || !!ref), retry: 3, retryDelay: 2000 }
   );
+
+  useEffect(() => {
+    if (!data?.status || statusTracked.current === data.status) return;
+    statusTracked.current = data.status;
+    if (data.status === "APPROVED") {
+      pushMassageEvent("payment_approved", undefined, {
+        transaction_id: requestId || ref,
+        value: data.amount,
+        currency: data.currency || "CLP",
+      });
+    } else if (data.status === "REJECTED" || data.status === "FAILED") {
+      pushMassageEvent("payment_failed", undefined, {
+        transaction_id: requestId || ref,
+        payment_status: data.status,
+      });
+    }
+  }, [data, ref, requestId]);
 
   if (!ready || isLoading) return <LoadingView />;
   if (isError || !data) return <PendingView onRetry={() => window.location.reload()} />;
