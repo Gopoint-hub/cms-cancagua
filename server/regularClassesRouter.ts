@@ -50,7 +50,6 @@ async function requireDb() {
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Base de datos no disponible" });
   return db;
 }
-
 function requireModuleAccess(user: { role: string; regularClassesTeacher?: number | null }) {
   if (!hasRegularClassesAccess(user.role, user.regularClassesTeacher)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "No tienes acceso a Clases Regulares" });
@@ -933,8 +932,10 @@ export const regularClassesRouter = router({
         status: regularClassSessions.status,
         disciplineId: regularClassSessions.disciplineId,
         disciplineName: regularClassDisciplines.name,
+        capacity: regularClassDisciplines.capacity,
         teacherId: regularClassSessions.teacherId,
         teacherName: regularClassTeachers.name,
+        teacherColor: regularClassTeachers.color,
       }).from(regularClassSessions)
         .innerJoin(regularClassDisciplines, eq(regularClassSessions.disciplineId, regularClassDisciplines.id))
         .innerJoin(regularClassTeachers, eq(regularClassSessions.teacherId, regularClassTeachers.id))
@@ -989,6 +990,7 @@ export const regularClassesRouter = router({
           id: regularClassMemberships.id,
           studentId: regularClassMemberships.studentId,
           creditsTotal: regularClassMemberships.creditsTotal,
+          planCode: regularClassPlans.code,
           planName: regularClassPlans.name,
           paymentStatus: regularClassMemberships.paymentStatus,
         }).from(regularClassMemberships)
