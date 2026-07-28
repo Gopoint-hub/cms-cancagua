@@ -31,14 +31,17 @@ import {
 import { trpc } from "@/lib/trpc";
 import { ArrowRight, Loader2, Mail, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
-import { clp, RegularClassesHeader, todayString } from "./shared";
+import {
+  clp,
+  currentMonthString,
+  monthLabel,
+  RegularClassesHeader,
+} from "./shared";
 
-function defaultPeriod() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 26, 12);
-  if (now.getDate() < 26) start.setMonth(start.getMonth() - 1);
-  const end = new Date(start.getFullYear(), start.getMonth() + 1, 25, 12);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+function nextMonth(value: string) {
+  const date = new Date(`${value.slice(0, 7)}-01T12:00:00`);
+  date.setMonth(date.getMonth() + 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export default function RegularClassesStudents() {
@@ -47,13 +50,12 @@ export default function RegularClassesStudents() {
   const [newOpen, setNewOpen] = useState(false);
   const [enrollStudent, setEnrollStudent] = useState<any | null>(null);
   const [carryStudent, setCarryStudent] = useState<any | null>(null);
-  const period = defaultPeriod();
   const [studentForm, setStudentForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   const [enrollForm, setEnrollForm] = useState({
-    planId: "", periodStart: period.start, periodEnd: period.end,
+    planId: "", month: currentMonthString(),
     paymentStatus: "paid" as "paid" | "pending", paymentMethod: "recepcion", paymentReference: "",
   });
-  const [carryForm, setCarryForm] = useState({ nextPeriodStart: "", nextPeriodEnd: "", reason: "" });
+  const [carryReason, setCarryReason] = useState("");
   const students = trpc.regularClasses.students.list.useQuery();
   const plans = trpc.regularClasses.plans.list.useQuery();
   const access = trpc.regularClasses.access.useQuery();
@@ -83,8 +85,9 @@ export default function RegularClassesStudents() {
   });
   const carry = trpc.regularClasses.students.carryForward.useMutation({
     onSuccess: () => {
-      toast.success("Plan trasladado al siguiente período");
+      toast.success("Plan trasladado al siguiente mes");
       setCarryStudent(null);
+      setCarryReason("");
       utils.regularClasses.students.list.invalidate();
     },
     onError: (error) => toast.error(error.message),
@@ -123,7 +126,7 @@ export default function RegularClassesStudents() {
                   <TableHead>Plan</TableHead>
                   <TableHead>Uso</TableHead>
                   <TableHead>Pago</TableHead>
-                  <TableHead>Período</TableHead>
+                  <TableHead>Mes</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -148,7 +151,7 @@ export default function RegularClassesStudents() {
                     </TableCell>
                     <TableCell className="text-xs">
                       {student.membership
-                        ? <>{student.membership.periodStart}<br />{student.membership.periodEnd}</>
+                        ? monthLabel(student.membership.periodStart)
                         : "—"}
                     </TableCell>
                     <TableCell>
@@ -210,9 +213,16 @@ export default function RegularClassesStudents() {
                 ))}</SelectContent>
               </Select>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2"><Label>Desde</Label><Input type="date" value={enrollForm.periodStart} onChange={(e) => setEnrollForm({ ...enrollForm, periodStart: e.target.value })} /></div>
-              <div className="space-y-2"><Label>Hasta</Label><Input type="date" value={enrollForm.periodEnd} onChange={(e) => setEnrollForm({ ...enrollForm, periodEnd: e.target.value })} /></div>
+            <div className="space-y-2">
+              <Label>Mes de inscripción</Label>
+              <Input
+                type="month"
+                value={enrollForm.month}
+                onChange={(e) => setEnrollForm({ ...enrollForm, month: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                El plan quedará vigente automáticamente desde el día 1 hasta el último día del mes.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Estado del pago</Label>
@@ -226,11 +236,10 @@ export default function RegularClassesStudents() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEnrollStudent(null)}>Cancelar</Button>
-            <Button disabled={enroll.isPending || !enrollForm.planId} onClick={() => enroll.mutate({
+            <Button disabled={enroll.isPending || !enrollForm.planId || !enrollForm.month} onClick={() => enroll.mutate({
               studentId: enrollStudent.id,
               planId: Number(enrollForm.planId),
-              periodStart: enrollForm.periodStart,
-              periodEnd: enrollForm.periodEnd,
+              month: enrollForm.month,
               paymentStatus: enrollForm.paymentStatus,
               paymentMethod: enrollForm.paymentMethod,
               paymentReference: enrollForm.paymentReference || undefined,
@@ -241,17 +250,23 @@ export default function RegularClassesStudents() {
 
       <Dialog open={Boolean(carryStudent)} onOpenChange={(open) => !open && setCarryStudent(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Pasar al siguiente período</DialogTitle><DialogDescription>Disponible sólo porque este plan no tiene asistencias.</DialogDescription></DialogHeader>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2"><Label>Nuevo inicio</Label><Input type="date" value={carryForm.nextPeriodStart} onChange={(e) => setCarryForm({ ...carryForm, nextPeriodStart: e.target.value })} /></div>
-            <div className="space-y-2"><Label>Nuevo término</Label><Input type="date" value={carryForm.nextPeriodEnd} onChange={(e) => setCarryForm({ ...carryForm, nextPeriodEnd: e.target.value })} /></div>
-            <div className="space-y-2 sm:col-span-2"><Label>Motivo obligatorio</Label><Input value={carryForm.reason} onChange={(e) => setCarryForm({ ...carryForm, reason: e.target.value })} /></div>
+          <DialogHeader>
+            <DialogTitle>Pasar al siguiente mes</DialogTitle>
+            <DialogDescription>
+              {carryStudent?.membership
+                ? `El plan se trasladará automáticamente a ${monthLabel(nextMonth(carryStudent.membership.periodStart))}.`
+                : "Disponible sólo para planes sin asistencias."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Motivo obligatorio</Label>
+            <Input value={carryReason} onChange={(e) => setCarryReason(e.target.value)} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCarryStudent(null)}>Cancelar</Button>
-            <Button disabled={carry.isPending || !carryForm.nextPeriodStart || !carryForm.nextPeriodEnd || carryForm.reason.trim().length < 5} onClick={() => carry.mutate({
+            <Button disabled={carry.isPending || carryReason.trim().length < 5} onClick={() => carry.mutate({
               membershipId: carryStudent.membership.id,
-              ...carryForm,
+              reason: carryReason.trim(),
             })}>Confirmar postergación</Button>
           </DialogFooter>
         </DialogContent>

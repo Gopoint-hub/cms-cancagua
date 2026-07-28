@@ -181,7 +181,7 @@ export async function ensureRegularClassesSchema(): Promise<void> {
     await db.execute(sql.raw(statement));
   }
   for (const [key, value] of [
-    ["period_start_day", "26"],
+    ["period_start_day", "1"],
     ["honorarium_withholding_bps", "1525"],
     ["vat_bps", "1900"],
     ["payment_base_url", "https://cancagua.cl/clases"],
@@ -190,6 +190,16 @@ export async function ensureRegularClassesSchema(): Promise<void> {
       `INSERT IGNORE INTO regular_class_settings (\`key\`, \`value\`) VALUES ('${key}', '${value}')`,
     ));
   }
+  await db.execute(sql.raw(
+    "UPDATE regular_class_settings SET `value` = '1' WHERE `key` = 'period_start_day'",
+  ));
+  await db.execute(sql.raw(`
+    UPDATE regular_class_memberships
+    SET period_end = LAST_DAY(period_start),
+        period_start = DATE_FORMAT(period_start, '%Y-%m-01')
+    WHERE DAY(period_start) <> 1
+       OR period_end <> LAST_DAY(period_start)
+  `));
 
   const existingTeachers = await db.select().from(regularClassTeachers);
   for (const item of INITIAL_TEACHERS) {

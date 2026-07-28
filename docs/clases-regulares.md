@@ -44,11 +44,12 @@ La comisión contiene los impuestos:
 La capacidad `users.regular_classes_teacher` es acumulable. Un usuario puede conservar
 su rol `massage_therapist` y, al mismo tiempo, operar como profesor de clases.
 
-## Períodos y postergación
+## Meses y postergación
 
-El inicio predeterminado es el día 26 y puede cambiarse para períodos futuros. Una
-mensualidad pagada puede pasar al período siguiente sólo si tiene cero asistencias. La
-acción exige motivo y queda en auditoría.
+Cada inscripción corresponde siempre a un mes calendario completo, desde el día 1
+hasta el último día del mes. El usuario selecciona únicamente el mes; el CMS calcula
+las fechas automáticamente. Una mensualidad pagada puede pasar al mes siguiente sólo
+si tiene cero asistencias. La acción exige motivo y queda en auditoría.
 
 ## Migración y compatibilidad de despliegue
 

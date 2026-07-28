@@ -12,29 +12,26 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
-import { clp, RegularClassesHeader } from "./shared";
-
-function defaultPeriod() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 26, 12);
-  if (now.getDate() < 26) start.setMonth(start.getMonth() - 1);
-  const end = new Date(start.getFullYear(), start.getMonth() + 1, 25, 12);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
-}
+import {
+  clp,
+  currentMonthString,
+  RegularClassesHeader,
+} from "./shared";
 
 export default function RegularClassesMySettlements() {
-  const initial = defaultPeriod();
-  const [periodStart, setPeriodStart] = useState(initial.start);
-  const [periodEnd, setPeriodEnd] = useState(initial.end);
-  const settlement = trpc.regularClasses.settlements.mine.useQuery({ periodStart, periodEnd });
+  const [month, setMonth] = useState(currentMonthString());
+  const settlement = trpc.regularClasses.settlements.mine.useQuery({ month });
   return (
     <DashboardLayout>
       <div className="space-y-5 p-4 sm:p-6">
         <RegularClassesHeader title="Mi liquidación" description="Cálculo informativo según las asistencias efectivamente marcadas." />
         <Card>
-          <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
-            <div className="space-y-2"><Label>Inicio</Label><Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} /></div>
-            <div className="space-y-2"><Label>Término</Label><Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} /></div>
+          <CardContent className="p-5">
+            <div className="max-w-sm space-y-2">
+              <Label>Mes</Label>
+              <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Desde el día 1 hasta el último día del mes.</p>
+            </div>
           </CardContent>
         </Card>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

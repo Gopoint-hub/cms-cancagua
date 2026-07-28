@@ -16,33 +16,28 @@ import {
 import { trpc } from "@/lib/trpc";
 import { Download, Lock, RefreshCcw, Unlock } from "lucide-react";
 import { toast } from "sonner";
-import { clp, RegularClassesHeader } from "./shared";
-
-function defaultPeriod() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 26, 12);
-  if (now.getDate() < 26) start.setMonth(start.getMonth() - 1);
-  const end = new Date(start.getFullYear(), start.getMonth() + 1, 25, 12);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
-}
+import {
+  clp,
+  currentMonthString,
+  monthLabel,
+  RegularClassesHeader,
+} from "./shared";
 
 export default function RegularClassesSettlements() {
-  const initial = defaultPeriod();
   const utils = trpc.useUtils();
-  const [periodStart, setPeriodStart] = useState(initial.start);
-  const [periodEnd, setPeriodEnd] = useState(initial.end);
-  const preview = trpc.regularClasses.settlements.preview.useQuery({ periodStart, periodEnd });
+  const [month, setMonth] = useState(currentMonthString());
+  const preview = trpc.regularClasses.settlements.preview.useQuery({ month });
   const close = trpc.regularClasses.settlements.close.useMutation({
     onSuccess: () => {
-      toast.success("Período cerrado y cálculo congelado");
-      utils.regularClasses.settlements.preview.invalidate({ periodStart, periodEnd });
+      toast.success("Mes cerrado y cálculo congelado");
+      utils.regularClasses.settlements.preview.invalidate({ month });
     },
     onError: (error) => toast.error(error.message),
   });
   const reopen = trpc.regularClasses.settlements.reopen.useMutation({
     onSuccess: () => {
-      toast.success("Período reabierto");
-      utils.regularClasses.settlements.preview.invalidate({ periodStart, periodEnd });
+      toast.success("Mes reabierto");
+      utils.regularClasses.settlements.preview.invalidate({ month });
     },
     onError: (error) => toast.error(error.message),
   });
@@ -65,13 +60,14 @@ export default function RegularClassesSettlements() {
     }))), "Profesores");
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(calculation.membershipUsage.map((row: any) => ({
       Alumno: row.studentName,
+      Mes: monthLabel(row.month),
       Plan: row.planName,
       Pagado: row.paidClp,
       "Clases incluidas": row.creditsTotal,
       Asistencias: row.creditsUsed,
       "No utilizadas": row.creditsUnused,
     }))), "Alumnos");
-    XLSX.writeFile(workbook, `clases-regulares-${periodStart}-${periodEnd}.xlsx`);
+    XLSX.writeFile(workbook, `clases-regulares-${month}.xlsx`);
   };
 
   return (
@@ -89,9 +85,12 @@ export default function RegularClassesSettlements() {
         />
 
         <Card>
-          <CardContent className="grid gap-4 p-5 sm:grid-cols-3">
-            <div className="space-y-2"><Label>Inicio</Label><Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} disabled={closed} /></div>
-            <div className="space-y-2"><Label>Término</Label><Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} disabled={closed} /></div>
+          <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Mes</Label>
+              <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} disabled={closed} />
+              <p className="text-xs text-muted-foreground">Incluye desde el día 1 hasta el último día del mes.</p>
+            </div>
             <div className="flex items-end">
               <Badge variant={closed ? "default" : "outline"} className="h-10 px-4 text-sm">
                 {closed ? <><Lock className="mr-2 h-4 w-4" /> Cerrado</> : "Borrador"}
@@ -141,12 +140,12 @@ export default function RegularClassesSettlements() {
           <CardContent className="overflow-x-auto">
             <Table>
               <TableHeader><TableRow>
-                <TableHead>Alumno</TableHead><TableHead>Plan</TableHead><TableHead>Pagado</TableHead>
+                <TableHead>Alumno</TableHead><TableHead>Mes</TableHead><TableHead>Plan</TableHead><TableHead>Pagado</TableHead>
                 <TableHead>Incluidas</TableHead><TableHead>Asistidas</TableHead><TableHead>No utilizadas</TableHead>
               </TableRow></TableHeader>
               <TableBody>{calculation?.membershipUsage.map((row: any) => (
                 <TableRow key={row.membershipId}>
-                  <TableCell>{row.studentName}</TableCell><TableCell>{row.planName}</TableCell>
+                  <TableCell>{row.studentName}</TableCell><TableCell>{monthLabel(row.month)}</TableCell><TableCell>{row.planName}</TableCell>
                   <TableCell>{clp(row.paidClp)}</TableCell><TableCell>{row.creditsTotal}</TableCell>
                   <TableCell>{row.creditsUsed}</TableCell><TableCell>{row.creditsUnused}</TableCell>
                 </TableRow>
@@ -159,14 +158,14 @@ export default function RegularClassesSettlements() {
           {closed ? (
             <Button variant="outline" onClick={() => {
               const reason = window.prompt("Motivo obligatorio para reabrir:");
-              if (reason?.trim()) reopen.mutate({ periodStart, periodEnd, reason: reason.trim() });
+              if (reason?.trim()) reopen.mutate({ month, reason: reason.trim() });
             }}><Unlock className="mr-2 h-4 w-4" /> Reabrir</Button>
           ) : (
             <Button onClick={() => {
-              if (window.confirm("¿Cerrar este período? El cálculo quedará congelado.")) {
-                close.mutate({ periodStart, periodEnd });
+              if (window.confirm(`¿Cerrar ${monthLabel(month)}? El cálculo quedará congelado.`)) {
+                close.mutate({ month });
               }
-            }}><Lock className="mr-2 h-4 w-4" /> Cerrar período</Button>
+            }}><Lock className="mr-2 h-4 w-4" /> Cerrar mes</Button>
           )}
         </div>
       </div>

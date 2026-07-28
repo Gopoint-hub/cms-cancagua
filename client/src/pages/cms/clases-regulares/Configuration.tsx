@@ -15,7 +15,6 @@ export default function RegularClassesConfiguration() {
   const plans = trpc.regularClasses.plans.list.useQuery();
   const settings = trpc.regularClasses.settings.get.useQuery();
   const [planForms, setPlanForms] = useState<Record<number, { name: string; priceClp: string; credits: string; benefits: string; active: boolean }>>({});
-  const [periodStartDay, setPeriodStartDay] = useState("26");
   const [paymentBaseUrl, setPaymentBaseUrl] = useState("https://cancagua.cl/clases");
   useEffect(() => {
     if (plans.data) {
@@ -30,7 +29,6 @@ export default function RegularClassesConfiguration() {
   }, [plans.data]);
   useEffect(() => {
     if (settings.data) {
-      setPeriodStartDay(String(settings.data.periodStartDay));
       setPaymentBaseUrl(settings.data.paymentBaseUrl);
     }
   }, [settings.data]);
@@ -54,18 +52,17 @@ export default function RegularClassesConfiguration() {
       <div className="space-y-5 p-4 sm:p-6">
         <RegularClassesHeader title="Planes y configuración" description="Todos los valores monetarios se registran en pesos chilenos." />
         <Card>
-          <CardHeader><CardTitle className="text-base">Período e invitación de pago</CardTitle></CardHeader>
-          <CardContent className="grid gap-4 lg:grid-cols-[180px_1fr_auto] lg:items-end">
+          <CardHeader><CardTitle className="text-base">Mensualidad e invitación de pago</CardTitle></CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
             <div className="space-y-2">
-              <Label>Día de inicio del período</Label>
-              <Input type="number" min="1" max="28" value={periodStartDay} onChange={(e) => setPeriodStartDay(e.target.value)} />
-            </div>
-            <div className="space-y-2">
+              <p className="rounded-lg bg-muted p-3 text-sm">
+                Todos los planes corresponden a un mes calendario: desde el día 1 hasta el último día del mes.
+              </p>
               <Label>URL base del enlace de pago</Label>
               <Input type="url" value={paymentBaseUrl} onChange={(e) => setPaymentBaseUrl(e.target.value)} />
               <p className="text-xs text-muted-foreground">El CMS agregará un token de inscripción. La web pública se conectará en una etapa posterior.</p>
             </div>
-            <Button onClick={() => updateSettings.mutate({ periodStartDay: Number(periodStartDay), paymentBaseUrl })}>
+            <Button onClick={() => updateSettings.mutate({ paymentBaseUrl })}>
               <Save className="mr-2 h-4 w-4" /> Guardar
             </Button>
           </CardContent>

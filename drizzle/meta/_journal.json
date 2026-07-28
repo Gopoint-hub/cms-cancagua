@@ -190,6 +190,13 @@
       "when": 1785171600000,
       "tag": "0030_regular_classes",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1785269138000,
+      "tag": "0031_regular_classes_calendar_months",
+      "breakpoints": true
     }
   ]
 }

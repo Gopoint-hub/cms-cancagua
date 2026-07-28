@@ -312,7 +312,7 @@ function SessionAttendanceCard({
             esta clase
           </Button>
           <Button
-            className="w-full bg-stone-900 uppercase tracking-[0.18em] hover:bg-stone-800"
+            className="w-full bg-stone-900 !text-white uppercase tracking-[0.18em] hover:bg-stone-800 hover:!text-white"
             onClick={confirmAttendance}
             disabled={mark.isPending || roster.isLoading}
           >
@@ -601,7 +601,9 @@ export default function RegularClassesAttendance() {
                       size="sm"
                       variant={view === mode ? "default" : "outline"}
                       className={
-                        view === mode ? "bg-stone-900 hover:bg-stone-800" : ""
+                        view === mode
+                          ? "bg-stone-900 !text-white hover:bg-stone-800 hover:!text-white"
+                          : ""
                       }
                       onClick={() => setView(mode)}
                     >
@@ -658,7 +660,7 @@ export default function RegularClassesAttendance() {
                   <Button
                     size="sm"
                     variant={teacherFilter == null ? "default" : "outline"}
-                    className={`rounded-full ${teacherFilter == null ? "bg-stone-900 hover:bg-stone-800" : ""}`}
+                    className={`rounded-full ${teacherFilter == null ? "bg-stone-900 !text-white hover:bg-stone-800 hover:!text-white" : ""}`}
                     onClick={() => setTeacherFilter(null)}
                   >
                     Todos
@@ -670,7 +672,7 @@ export default function RegularClassesAttendance() {
                       variant={
                         teacherFilter === teacher.id ? "default" : "outline"
                       }
-                      className="rounded-full"
+                      className={`rounded-full ${teacherFilter === teacher.id ? "!text-white hover:!text-white" : ""}`}
                       style={
                         teacherFilter === teacher.id
                           ? { backgroundColor: teacher.color }

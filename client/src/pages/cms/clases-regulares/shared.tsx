@@ -13,6 +13,18 @@ export const todayString = () => {
   return `${year}-${month}-${day}`;
 };
 
+export const currentMonthString = () => todayString().slice(0, 7);
+
+export const monthLabel = (value: string | null | undefined) => {
+  if (!value) return "—";
+  const month = value.slice(0, 7);
+  const label = new Intl.DateTimeFormat("es-CL", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${month}-01T12:00:00`));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
+
 export function RegularClassesHeader({
   title,
   description,

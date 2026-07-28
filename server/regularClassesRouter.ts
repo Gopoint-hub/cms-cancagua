@@ -34,8 +34,13 @@ import {
   type CommissionInput,
   type RegularClassDocumentType,
 } from "./regularClassesCalculations";
+import {
+  calendarMonthRange,
+  nextCalendarMonth,
+} from "./regularClassesPeriod";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
 const documentTypeSchema = z.enum([
   "pending",
@@ -182,18 +187,16 @@ async function getPeriodSettings() {
   const rows = await db.select().from(regularClassSettings);
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
   return {
-    periodStartDay: Number(values.period_start_day ?? 26),
     withholdingBps: Number(values.honorarium_withholding_bps ?? 1525),
     vatBps: Number(values.vat_bps ?? 1900),
     paymentBaseUrl: values.payment_base_url ?? "https://cancagua.cl/clases",
   };
 }
 
-function currentPeriod(startDay: number, reference = new Date()) {
-  const start = new Date(reference.getFullYear(), reference.getMonth(), startDay, 12);
-  if (reference.getDate() < startDay) start.setMonth(start.getMonth() - 1);
-  const end = new Date(start.getFullYear(), start.getMonth() + 1, startDay - 1, 12);
-  return { start: dateString(start), end: dateString(end) };
+function currentPeriod(reference = new Date()) {
+  return calendarMonthRange(
+    `${reference.getFullYear()}-${String(reference.getMonth() + 1).padStart(2, "0")}`,
+  );
 }
 
 function previousDate(value: string) {
@@ -390,6 +393,7 @@ async function settlementPreview(periodStart: string, periodEnd: string) {
       studentId: membership.studentId,
       studentName: `${membership.studentFirstName} ${membership.studentLastName ?? ""}`.trim(),
       planName: membership.planName,
+      month: membership.periodStart.slice(0, 7),
       paidClp: membership.pricePaidClp,
       creditsTotal: membership.creditsTotal,
       creditsUsed: used,
@@ -433,8 +437,7 @@ export const regularClassesRouter = router({
   dashboard: protectedProcedure.query(async ({ ctx }) => {
     requireModuleAccess(ctx.user);
     const db = await requireDb();
-    const settings = await getPeriodSettings();
-    const period = currentPeriod(settings.periodStartDay);
+    const period = currentPeriod();
     await ensureSessions(period.start, period.end);
     const [students, paidMemberships, sessions, attendances] = await Promise.all([
       db.select({ count: sql<number>`count(*)` }).from(regularClassStudents)
@@ -802,8 +805,7 @@ export const regularClassesRouter = router({
     enroll: protectedProcedure.input(z.object({
       studentId: z.number().int().positive(),
       planId: z.number().int().positive(),
-      periodStart: dateSchema,
-      periodEnd: dateSchema,
+      month: monthSchema,
       pricePaidClp: z.number().int().nonnegative().optional(),
       paymentStatus: z.enum(["pending", "paid"]).default("paid"),
       paymentMethod: z.string().trim().max(60).optional(),
@@ -814,11 +816,12 @@ export const regularClassesRouter = router({
       const [plan] = await db.select().from(regularClassPlans)
         .where(eq(regularClassPlans.id, input.planId)).limit(1);
       if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Plan no encontrado" });
+      const period = calendarMonthRange(input.month);
       const [created] = await db.insert(regularClassMemberships).values({
         studentId: input.studentId,
         planId: input.planId,
-        periodStart: input.periodStart,
-        periodEnd: input.periodEnd,
+        periodStart: period.start,
+        periodEnd: period.end,
         pricePaidClp: input.pricePaidClp ?? plan.priceClp,
         creditsTotal: plan.creditsPerPeriod,
         status: input.paymentStatus === "paid" ? "active" : "pending_payment",
@@ -848,8 +851,6 @@ export const regularClassesRouter = router({
     }),
     carryForward: protectedProcedure.input(z.object({
       membershipId: z.number().int().positive(),
-      nextPeriodStart: dateSchema,
-      nextPeriodEnd: dateSchema,
       reason: z.string().trim().min(5).max(1000),
     })).mutation(async ({ ctx, input }) => {
       requireAdmin(ctx.user);
@@ -868,11 +869,13 @@ export const regularClassesRouter = router({
       if (Number(count) > 0) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Sólo se puede postergar un período sin asistencias" });
       }
+      const nextMonth = nextCalendarMonth(membership.periodStart);
+      const nextPeriod = calendarMonthRange(nextMonth);
       const [created] = await db.insert(regularClassMemberships).values({
         studentId: membership.studentId,
         planId: membership.planId,
-        periodStart: input.nextPeriodStart,
-        periodEnd: input.nextPeriodEnd,
+        periodStart: nextPeriod.start,
+        periodEnd: nextPeriod.end,
         pricePaidClp: membership.pricePaidClp,
         creditsTotal: membership.creditsTotal,
         status: "active",
@@ -887,10 +890,11 @@ export const regularClassesRouter = router({
       await db.update(regularClassMemberships).set({
         status: "postponed",
         carriedToMembershipId: created.id,
-        notes: `Postergado al ${input.nextPeriodStart}: ${input.reason}`,
+        notes: `Postergado a ${nextPeriod.start}: ${input.reason}`,
       }).where(eq(regularClassMemberships.id, membership.id));
       await writeAudit("membership", membership.id, "carried_forward", ctx.user.id, {
         nextMembershipId: created.id,
+        nextMonth,
         reason: input.reason,
       });
       return { success: true, nextMembershipId: created.id };
@@ -1101,19 +1105,19 @@ export const regularClassesRouter = router({
 
   settlements: router({
     mine: protectedProcedure.input(z.object({
-      periodStart: dateSchema,
-      periodEnd: dateSchema,
+      month: monthSchema,
     })).query(async ({ ctx, input }) => {
       const teacher = await getTeacherForUser(ctx.user.id);
       if (!teacher) throw new TRPCError({ code: "FORBIDDEN", message: "No hay un perfil de profesor vinculado" });
       const db = await requireDb();
+      const period = calendarMonthRange(input.month);
       const [closure] = await db.select().from(regularClassClosures).where(and(
-        eq(regularClassClosures.periodStart, input.periodStart),
-        eq(regularClassClosures.periodEnd, input.periodEnd),
+        eq(regularClassClosures.periodStart, period.start),
+        eq(regularClassClosures.periodEnd, period.end),
       )).limit(1);
       const calculation: Awaited<ReturnType<typeof settlementPreview>> = closure?.status === "closed" && closure.snapshot
         ? JSON.parse(closure.snapshot)
-        : await settlementPreview(input.periodStart, input.periodEnd);
+        : await settlementPreview(period.start, period.end);
       const lines = calculation.lines.filter((line) => line.teacherId === teacher.id);
       return {
         period: calculation.period,
@@ -1127,31 +1131,31 @@ export const regularClassesRouter = router({
       };
     }),
     preview: protectedProcedure.input(z.object({
-      periodStart: dateSchema,
-      periodEnd: dateSchema,
+      month: monthSchema,
     })).query(async ({ ctx, input }) => {
       requireAdmin(ctx.user);
       const db = await requireDb();
+      const period = calendarMonthRange(input.month);
       const [closure] = await db.select().from(regularClassClosures).where(and(
-        eq(regularClassClosures.periodStart, input.periodStart),
-        eq(regularClassClosures.periodEnd, input.periodEnd),
+        eq(regularClassClosures.periodStart, period.start),
+        eq(regularClassClosures.periodEnd, period.end),
       )).limit(1);
       const calculation = closure?.status === "closed" && closure.snapshot
         ? JSON.parse(closure.snapshot)
-        : await settlementPreview(input.periodStart, input.periodEnd);
+        : await settlementPreview(period.start, period.end);
       return { closure: closure ?? null, calculation };
     }),
     close: protectedProcedure.input(z.object({
-      periodStart: dateSchema,
-      periodEnd: dateSchema,
+      month: monthSchema,
       notes: z.string().trim().max(2000).optional(),
     })).mutation(async ({ ctx, input }) => {
       requireAdmin(ctx.user);
       const db = await requireDb();
-      const calculation = await settlementPreview(input.periodStart, input.periodEnd);
+      const period = calendarMonthRange(input.month);
+      const calculation = await settlementPreview(period.start, period.end);
       await db.insert(regularClassClosures).values({
-        periodStart: input.periodStart,
-        periodEnd: input.periodEnd,
+        periodStart: period.start,
+        periodEnd: period.end,
         status: "closed",
         snapshot: JSON.stringify(calculation),
         notes: input.notes,
@@ -1168,22 +1172,22 @@ export const regularClassesRouter = router({
         },
       });
       const [closure] = await db.select().from(regularClassClosures).where(and(
-        eq(regularClassClosures.periodStart, input.periodStart),
-        eq(regularClassClosures.periodEnd, input.periodEnd),
+        eq(regularClassClosures.periodStart, period.start),
+        eq(regularClassClosures.periodEnd, period.end),
       )).limit(1);
       await writeAudit("closure", closure.id, "closed", ctx.user.id);
       return { success: true, calculation };
     }),
     reopen: protectedProcedure.input(z.object({
-      periodStart: dateSchema,
-      periodEnd: dateSchema,
+      month: monthSchema,
       reason: z.string().trim().min(5).max(1000),
     })).mutation(async ({ ctx, input }) => {
       requireAdmin(ctx.user);
       const db = await requireDb();
+      const period = calendarMonthRange(input.month);
       const [closure] = await db.select().from(regularClassClosures).where(and(
-        eq(regularClassClosures.periodStart, input.periodStart),
-        eq(regularClassClosures.periodEnd, input.periodEnd),
+        eq(regularClassClosures.periodStart, period.start),
+        eq(regularClassClosures.periodEnd, period.end),
       )).limit(1);
       if (!closure) throw new TRPCError({ code: "NOT_FOUND" });
       await db.update(regularClassClosures).set({
@@ -1363,17 +1367,14 @@ export const regularClassesRouter = router({
       return getPeriodSettings();
     }),
     update: protectedProcedure.input(z.object({
-      periodStartDay: z.number().int().min(1).max(28),
       paymentBaseUrl: z.string().url(),
     })).mutation(async ({ ctx, input }) => {
       requireAdmin(ctx.user);
       const db = await requireDb();
-      for (const [key, value] of [
-        ["period_start_day", String(input.periodStartDay)],
-        ["payment_base_url", input.paymentBaseUrl],
-      ] as const) {
-        await db.insert(regularClassSettings).values({ key, value }).onDuplicateKeyUpdate({ set: { value } });
-      }
+      await db.insert(regularClassSettings).values({
+        key: "payment_base_url",
+        value: input.paymentBaseUrl,
+      }).onDuplicateKeyUpdate({ set: { value: input.paymentBaseUrl } });
       await writeAudit("settings", 0, "updated", ctx.user.id, input);
       return { success: true };
     }),
