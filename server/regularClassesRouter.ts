@@ -153,7 +153,26 @@ async function ensureSessions(from: string, to: string) {
   }
 
   if (rows.length) {
-    await db.insert(regularClassSessions).values(rows).onDuplicateKeyUpdate({
+    // La pantalla de asistencia consulta un rango móvil. Evitamos reescribir en
+    // cada apertura las sesiones que ya fueron creadas por el dashboard o por
+    // una consulta anterior, porque ese upsert innecesario puede competir con
+    // otras solicitudes y dejar la lectura esperando.
+    const existing = await db.select({
+      scheduleId: regularClassSessions.scheduleId,
+      sessionDate: regularClassSessions.sessionDate,
+    }).from(regularClassSessions).where(and(
+      gte(regularClassSessions.sessionDate, from),
+      lte(regularClassSessions.sessionDate, to),
+    ));
+    const existingKeys = new Set(existing
+      .filter((row) => row.scheduleId != null)
+      .map((row) => `${row.scheduleId}:${row.sessionDate}`));
+    const missingRows = rows.filter((row) =>
+      row.scheduleId != null
+      && !existingKeys.has(`${row.scheduleId}:${row.sessionDate}`));
+
+    if (!missingRows.length) return;
+    await db.insert(regularClassSessions).values(missingRows).onDuplicateKeyUpdate({
       set: { updatedAt: new Date() },
     });
   }
@@ -906,7 +925,7 @@ export const regularClassesRouter = router({
           gte(regularClassSessions.sessionDate, input.from),
           lte(regularClassSessions.sessionDate, input.to),
         );
-      return db.select({
+      const sessionRows = await db.select({
         id: regularClassSessions.id,
         sessionDate: regularClassSessions.sessionDate,
         startTime: regularClassSessions.startTime,
@@ -916,17 +935,31 @@ export const regularClassesRouter = router({
         disciplineName: regularClassDisciplines.name,
         teacherId: regularClassSessions.teacherId,
         teacherName: regularClassTeachers.name,
-        attendanceCount: sql<number>`count(${regularClassAttendances.id})`,
       }).from(regularClassSessions)
         .innerJoin(regularClassDisciplines, eq(regularClassSessions.disciplineId, regularClassDisciplines.id))
         .innerJoin(regularClassTeachers, eq(regularClassSessions.teacherId, regularClassTeachers.id))
-        .leftJoin(regularClassAttendances, and(
-          eq(regularClassAttendances.sessionId, regularClassSessions.id),
-          eq(regularClassAttendances.status, "present"),
-        ))
         .where(condition)
-        .groupBy(regularClassSessions.id)
         .orderBy(asc(regularClassSessions.sessionDate), asc(regularClassSessions.startTime));
+      const sessionIds = sessionRows.map((session) => session.id);
+      const attendanceCounts = sessionIds.length
+        ? await db.select({
+          sessionId: regularClassAttendances.sessionId,
+          count: sql<number>`count(*)`,
+        }).from(regularClassAttendances)
+          .where(and(
+            inArray(regularClassAttendances.sessionId, sessionIds),
+            eq(regularClassAttendances.status, "present"),
+          ))
+          .groupBy(regularClassAttendances.sessionId)
+        : [];
+      const countBySession = new Map(attendanceCounts.map((row) => [
+        row.sessionId,
+        Number(row.count),
+      ]));
+      return sessionRows.map((session) => ({
+        ...session,
+        attendanceCount: countBySession.get(session.id) ?? 0,
+      }));
     }),
     roster: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() }))
       .query(async ({ ctx, input }) => {

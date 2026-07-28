@@ -37,7 +37,7 @@ export default function RegularClassesAttendance() {
   const sessions = trpc.regularClasses.attendance.sessions.useQuery({
     from: addDays(today, -3),
     to: addDays(today, 7),
-  });
+  }, { retry: 1 });
   const selectedId = selectedSessionId
     ?? sessions.data?.find((session) => session.sessionDate === today)?.id
     ?? sessions.data?.[0]?.id
@@ -100,6 +100,25 @@ export default function RegularClassesAttendance() {
             <CardHeader><CardTitle className="text-base">Clases</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {sessions.isLoading && <Loader2 className="mx-auto h-5 w-5 animate-spin" />}
+              {sessions.isError && (
+                <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  <p>No pudimos cargar las clases: {sessions.error.message}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => sessions.refetch()}
+                    disabled={sessions.isFetching}
+                  >
+                    {sessions.isFetching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Reintentar
+                  </Button>
+                </div>
+              )}
+              {sessions.isSuccess && sessions.data.length === 0 && (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No hay clases programadas entre {addDays(today, -3)} y {addDays(today, 7)}.
+                </p>
+              )}
               {sessions.data?.map((session) => (
                 <button
                   key={session.id}
@@ -143,6 +162,23 @@ export default function RegularClassesAttendance() {
             <CardContent>
               <ScrollArea className="h-[58vh] pr-3">
                 <div className="space-y-2">
+                  {roster.isLoading && (
+                    <Loader2 className="mx-auto my-10 h-5 w-5 animate-spin" />
+                  )}
+                  {roster.isError && (
+                    <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                      <p>No pudimos cargar los alumnos: {roster.error.message}</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => roster.refetch()}
+                        disabled={roster.isFetching}
+                      >
+                        {roster.isFetching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Reintentar
+                      </Button>
+                    </div>
+                  )}
                   {filtered.map((student) => {
                     const checked = student.attendance?.status === "present"
                       || student.attendance?.status === "pending_payment";
@@ -181,7 +217,12 @@ export default function RegularClassesAttendance() {
                       </button>
                     );
                   })}
-                  {!roster.isLoading && filtered.length === 0 && (
+                  {!selectedId && !sessions.isLoading && !sessions.isError && (
+                    <p className="py-10 text-center text-sm text-muted-foreground">
+                      Selecciona una clase para ver los alumnos.
+                    </p>
+                  )}
+                  {selectedId && roster.isSuccess && filtered.length === 0 && (
                     <p className="py-10 text-center text-sm text-muted-foreground">No se encontraron alumnos.</p>
                   )}
                 </div>
