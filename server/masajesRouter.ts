@@ -112,6 +112,18 @@ const massageClientsAccess = async (
   }
 };
 
+const massageSalesAccess = async (
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+) => {
+  if (!hasCmsPermission(user, "module.massages")
+      || !hasCmsPermission(user, "massages.view_sales")) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permiso para ver las ventas de masajes",
+    });
+  }
+};
+
 export const MASSAGE_CANCELLATION_CATEGORIES = [
   "client_cancelled",
   "business_issue",
@@ -1391,9 +1403,11 @@ const agendaRouter = router({
         startTime: row.startTime,
         endTime: row.endTime,
         status: row.status,
-        paymentStatus: null,
-        amountPaid: null,
-        manualPaymentMethod: null,
+        paymentStatus: row.status === "cancelled" ? null : "paid" as const,
+        amountPaid: row.status === "cancelled"
+          ? null
+          : String(getSkeduMassageUnitPrice(row.duration) * getSkeduMassageQuantity(row.modality)),
+        manualPaymentMethod: row.paymentMethod,
         notes: row.notes,
         cancellationCategory: row.cancellationCategory,
         cancellationReason: row.cancellationReason,
@@ -2149,7 +2163,7 @@ const analyticsRouter = router({
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     }))
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageSalesAccess(ctx.user);
       const db = await getDb();
       if (!db) return null;
       const from = chileLocalDateTimeToUtc(input.from, "00:00");
@@ -2203,7 +2217,7 @@ const analyticsRouter = router({
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     }))
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageSalesAccess(ctx.user);
       const db = await getDb();
       if (!db) return null;
 
@@ -2570,7 +2584,7 @@ const analyticsRouter = router({
       pageSize: z.literal(25).default(25),
     }))
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageSalesAccess(ctx.user);
       const db = await getDb();
       if (!db) return { records: [], total: 0, page: input.page, pageSize: 25, totalPages: 0 };
       const allRecords = await getCombinedMassageSalesRows(db, {
@@ -2587,7 +2601,7 @@ const analyticsRouter = router({
   exportHistory: protectedProcedure
     .input(z.object({ from: z.string(), to: z.string() }))
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageSalesAccess(ctx.user);
       const db = await getDb();
       if (!db) return [];
       return getCombinedMassageSalesRows(db, { ...input, limit: 100_000, offset: 0 });

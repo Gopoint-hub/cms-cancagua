@@ -14,6 +14,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { hasCmsPermission } from "@shared/permissions";
 import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
 import MassageCancellationDialog, { type MassageCancellationCategory } from "./MassageCancellationDialog";
+import { calculatePaidMassageBookingRevenue } from "@shared/massageRevenue";
 
 const STOCK_PAGE_SIZE = 5;
 
@@ -59,9 +60,7 @@ export default function MasajesDashboard() {
   });
 
   const confirmed = bookings?.filter(b => b.status === "confirmed" || b.status === "pending") ?? [];
-  const todayRevenue = bookings
-    ?.filter(b => b.paymentStatus === "paid" && b.status === "completed")
-    .reduce((sum, b) => sum + Number(b.amountPaid ?? 0), 0) ?? 0;
+  const todayRevenue = calculatePaidMassageBookingRevenue(bookings ?? []);
 
   return (
     <DashboardLayout>
@@ -124,7 +123,7 @@ export default function MasajesDashboard() {
                   <span className="text-3xl font-bold text-green-600">
                     $ {todayRevenue.toLocaleString("es-CL")}
                   </span>
-                  <p className="text-xs text-muted-foreground mt-1">Masajes completados hoy</p>
+                  <p className="text-xs text-muted-foreground mt-1">Reservas pagadas para hoy</p>
                 </>
               )}
             </CardContent>

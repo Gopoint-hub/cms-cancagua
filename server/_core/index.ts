@@ -25,6 +25,7 @@ import { ensureMassageCheckoutSchema } from "../ensureMassageCheckoutSchema";
 import { ensureRegularClassesSchema } from "../ensureRegularClassesSchema";
 import { ensureUserPermissionsSchema } from "../ensureUserPermissionsSchema";
 import { ensureMassageAssignmentSchema } from "../ensureMassageAssignmentSchema";
+import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -51,6 +52,7 @@ async function startServer() {
   await ensureMassageBookingSchema();
   await ensureMassageAssignmentSchema();
   await ensureMassageDiscountSchema();
+  await ensureMassageSalesBackfill();
   await ensureMassageAvailabilitySchema();
   await ensureMassageTherapistUsersSchema();
   await ensureMassageNpsSchema();
