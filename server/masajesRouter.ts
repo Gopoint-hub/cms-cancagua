@@ -60,6 +60,10 @@ import {
   stopTherapistAssignmentForBooking,
 } from "./massageTherapistAssignment";
 import { MANUAL_MASSAGE_PAYMENT_METHODS } from "@shared/massagePayments";
+import {
+  buildMassageClientDirectory,
+  type MassageClientBookingRecord,
+} from "./massageClients";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 
@@ -92,6 +96,18 @@ const massageAssignment = async (
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "No tienes permiso para asignar terapeutas",
+    });
+  }
+};
+
+const massageClientsAccess = async (
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+) => {
+  if (!hasCmsPermission(user, "module.massages")
+      || !hasCmsPermission(user, "massages.view_clients")) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permiso para ver los clientes de masajes",
     });
   }
 };
@@ -1766,54 +1782,129 @@ const inventarioRouter = router({
 });
 
 // ─── CLIENTES ─────────────────────────────────────────────────
+async function loadMassageClientDirectory(db: MassageDb) {
+  const [standardBookings, programBookings, therapistRows] = await Promise.all([
+    db.select({
+      id: massageBookings.id,
+      clientName: massageBookings.clientName,
+      clientEmail: massageBookings.clientEmail,
+      clientPhone: massageBookings.clientPhone,
+      clientOrigin: massageBookings.clientOrigin,
+      bookingDate: massageBookings.bookingDate,
+      startTime: massageBookings.startTime,
+      duration: massageBookings.duration,
+      techniqueName: massageTechniques.name,
+      therapistName: massageTherapists.name,
+      status: massageBookings.status,
+      paymentStatus: massageBookings.paymentStatus,
+      amountPaid: massageBookings.amountPaid,
+      crossSellServices: massageBookings.crossSellServices,
+      cancellationCategory: massageBookings.cancellationCategory,
+      cancellationReason: massageBookings.cancellationReason,
+      cancelledAt: massageBookings.cancelledAt,
+    })
+      .from(massageBookings)
+      .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
+      .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id)),
+    db.select().from(massageProgramBookings),
+    db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists),
+  ]);
+  const therapistNames = new Map(therapistRows.map((therapist) => [therapist.id, therapist.name]));
+
+  const records: MassageClientBookingRecord[] = standardBookings.map((booking) => ({
+    id: `massage:${booking.id}`,
+    clientName: booking.clientName,
+    clientEmail: booking.clientEmail,
+    clientPhone: booking.clientPhone,
+    clientOrigin: booking.clientOrigin,
+    bookingDate: serializeDateOnly(booking.bookingDate) ?? "",
+    startTime: booking.startTime,
+    duration: booking.duration,
+    serviceName: booking.techniqueName,
+    therapistName: booking.therapistName,
+    status: booking.status,
+    amountPaid: booking.paymentStatus === "paid" ? Number(booking.amountPaid ?? 0) : 0,
+    crossSellServices: booking.crossSellServices,
+    cancellationCategory: booking.cancellationCategory,
+    cancellationReason: booking.cancellationReason,
+    cancelledAt: booking.cancelledAt,
+    source: "massage",
+  }));
+
+  for (const booking of programBookings) {
+    const bookingDate = serializeDateOnly(booking.bookingDate) ?? "";
+    const amountPaid = booking.status === "cancelled"
+      ? 0
+      : getSkeduMassageUnitPrice(booking.duration);
+    const common = {
+      bookingDate,
+      startTime: booking.startTime,
+      duration: booking.duration,
+      serviceName: `Programa ${getSkeduProgramLabel(booking.program)}`,
+      status: booking.status,
+      amountPaid,
+      crossSellServices: null,
+      cancellationCategory: booking.cancellationCategory,
+      cancellationReason: booking.cancellationReason,
+      cancelledAt: booking.cancelledAt,
+      source: "skedu_program" as const,
+    };
+    records.push({
+      ...common,
+      id: `skedu_program:${booking.id}:1`,
+      clientName: booking.clientName,
+      clientEmail: booking.clientEmail,
+      clientPhone: booking.clientPhone,
+      clientOrigin: "Programa Skedu",
+      therapistName: booking.therapistId
+        ? therapistNames.get(booking.therapistId) ?? null
+        : null,
+    });
+    if (booking.modality === "double" && booking.secondClientName) {
+      records.push({
+        ...common,
+        id: `skedu_program:${booking.id}:2`,
+        clientName: booking.secondClientName,
+        clientEmail: null,
+        clientPhone: null,
+        clientOrigin: "Programa Skedu",
+        therapistName: booking.secondTherapistId
+          ? therapistNames.get(booking.secondTherapistId) ?? null
+          : null,
+      });
+    }
+  }
+
+  return buildMassageClientDirectory(records);
+}
+
 const clientesRouter = router({
   getAll: protectedProcedure
     .input(z.object({ search: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0) }).optional())
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageClientsAccess(ctx.user);
       const db = await getDb();
       if (!db) return [];
-      // Agrupar por email para deduplicar (mismo email = mismo cliente aunque cambie el nombre)
-      // El nombre que se muestra es el más reciente (MAX por orden alfabético descendente)
-      const rows = await db.select({
-        clientName: sql<string>`MAX(${massageBookings.clientName})`,
-        clientEmail: massageBookings.clientEmail,
-        clientPhone: sql<string>`MAX(${massageBookings.clientPhone})`,
-        clientOrigin: sql<string>`MAX(${massageBookings.clientOrigin})`,
-        totalBookings: sql<number>`COUNT(*)`,
-        lastBookingDate: sql<string>`MAX(${massageBookings.bookingDate})`,
-        totalSpent: sql<string>`SUM(${massageBookings.amountPaid})`,
-      })
-      .from(massageBookings)
-      .where(sql`${massageBookings.status} != 'cancelled'`)
-      .groupBy(sql`COALESCE(${massageBookings.clientEmail}, ${massageBookings.clientName})`)
-      .orderBy(desc(sql`MAX(${massageBookings.bookingDate})`))
-      .limit(input?.limit ?? 50).offset(input?.offset ?? 0);
-      return rows.map(row => serializeDateFields(row, ["lastBookingDate"]));
+      const search = input?.search?.trim().toLowerCase();
+      const clients = await loadMassageClientDirectory(db);
+      return clients
+        .filter((client) => !search || [
+          client.clientName,
+          client.clientEmail,
+          client.clientPhone,
+        ].some((value) => value?.toLowerCase().includes(search)))
+        .slice(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 50))
+        .map(({ history: _history, ...client }) => client);
     }),
 
   getHistory: protectedProcedure
-    .input(z.object({ clientEmail: z.string() }))
+    .input(z.object({ clientKey: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      await adminOrEditor(ctx.user.role);
+      await massageClientsAccess(ctx.user);
       const db = await getDb();
       if (!db) return [];
-      const rows = await db.select({
-        id: massageBookings.id, bookingDate: massageBookings.bookingDate,
-        startTime: massageBookings.startTime, duration: massageBookings.duration,
-        techniqueName: massageTechniques.name, therapistName: massageTherapists.name,
-        status: massageBookings.status, amountPaid: massageBookings.amountPaid,
-        crossSellServices: massageBookings.crossSellServices,
-        cancellationCategory: massageBookings.cancellationCategory,
-        cancellationReason: massageBookings.cancellationReason,
-        cancelledAt: massageBookings.cancelledAt,
-      })
-      .from(massageBookings)
-      .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-      .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
-      .where(eq(massageBookings.clientEmail, input.clientEmail))
-      .orderBy(desc(massageBookings.bookingDate));
-      return rows.map(row => serializeDateFields(row, ["bookingDate"]));
+      const clients = await loadMassageClientDirectory(db);
+      return clients.find((client) => client.clientKey === input.clientKey)?.history ?? [];
     }),
 });
 

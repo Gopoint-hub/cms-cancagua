@@ -23,12 +23,12 @@ const STATUS_VARIANTS: Record<string, any> = {
 
 export default function MasajesClientes() {
   const [search, setSearch] = useState("");
-  const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
+  const [selectedClientKey, setSelectedClientKey] = useState<string | null>(null);
 
-  const { data: clients, isLoading } = trpc.masajes.clientes.getAll.useQuery({ limit: 100, offset: 0 });
+  const { data: clients, isLoading } = trpc.masajes.clientes.getAll.useQuery({ limit: 1000, offset: 0 });
   const { data: history, isLoading: loadingHistory } = trpc.masajes.clientes.getHistory.useQuery(
-    { clientEmail: selectedEmail ?? "" },
-    { enabled: !!selectedEmail }
+    { clientKey: selectedClientKey ?? "" },
+    { enabled: !!selectedClientKey }
   );
 
   const filtered = clients?.filter(c => {
@@ -41,14 +41,16 @@ export default function MasajesClientes() {
     );
   }) ?? [];
 
-  const selectedClient = clients?.find(c => c.clientEmail === selectedEmail);
+  const selectedClient = clients?.find(c => c.clientKey === selectedClientKey);
 
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-wide">Clientes</h1>
-          <p className="text-muted-foreground text-sm mt-1">Base de clientes del área de masajes</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            Base de clientes del área de masajes · {clients?.length ?? 0} registrados
+          </p>
         </div>
 
         <div className="relative max-w-sm">
@@ -69,11 +71,11 @@ export default function MasajesClientes() {
           </CardContent></Card>
         ) : (
           <div className="space-y-3">
-            {filtered.map((c, i) => (
+            {filtered.map((c) => (
               <Card
-                key={`${c.clientEmail}-${i}`}
+                key={c.clientKey}
                 className="cursor-pointer hover:border-primary/50 transition-colors"
-                onClick={() => c.clientEmail && setSelectedEmail(c.clientEmail)}
+                onClick={() => setSelectedClientKey(c.clientKey)}
               >
                 <CardContent className="p-4">
                   <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between sm:gap-4">
@@ -105,7 +107,7 @@ export default function MasajesClientes() {
       </div>
 
       {/* Modal historial */}
-      <Dialog open={!!selectedEmail} onOpenChange={open => !open && setSelectedEmail(null)}>
+      <Dialog open={!!selectedClientKey} onOpenChange={open => !open && setSelectedClientKey(null)}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Historial de {selectedClient?.clientName}</DialogTitle>
@@ -131,6 +133,9 @@ export default function MasajesClientes() {
                       <p className="text-muted-foreground">
                         {h.techniqueName ?? "—"} · {h.duration} min
                         {h.therapistName && ` · ${h.therapistName}`}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {h.source === "skedu_program" ? "Programa Skedu" : "Reserva de masaje"}
                       </p>
                       {h.crossSellServices && (
                         <p className="text-xs text-muted-foreground mt-0.5">Cross-sell: {h.crossSellServices}</p>
