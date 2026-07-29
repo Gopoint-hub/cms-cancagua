@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { MailPlus, Pencil, Plus, UserCheck } from "lucide-react";
+import { Image, MailPlus, Pencil, Plus, Trash2, Upload, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { RegularClassesHeader } from "./shared";
 
@@ -44,6 +44,7 @@ export default function RegularClassesTeachers() {
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState(emptyForm);
   const teachers = trpc.regularClasses.teachers.list.useQuery();
+  const uploadImage = trpc.regularClasses.teachers.uploadImage.useMutation();
   const save = trpc.regularClasses.teachers.save.useMutation({
     onSuccess: () => {
       toast.success("Profesor guardado");
@@ -90,9 +91,17 @@ export default function RegularClassesTeachers() {
             <Card key={teacher.id}>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full text-lg font-semibold text-white" style={{ background: teacher.color }}>
-                    {teacher.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}
-                  </div>
+                  {teacher.imageUrl ? (
+                    <img
+                      src={teacher.imageUrl}
+                      alt={teacher.name}
+                      className="h-12 w-12 rounded-full border object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full text-lg font-semibold text-white" style={{ background: teacher.color }}>
+                      {teacher.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <CardTitle className="truncate text-lg">{teacher.name}</CardTitle>
                     <p className="truncate text-sm text-muted-foreground">{teacher.email || "Correo pendiente"}</p>
@@ -143,7 +152,79 @@ export default function RegularClassesTeachers() {
               <div className="space-y-2"><Label>Teléfono</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
             </div>
             <div className="space-y-2"><Label>Biografía</Label><Textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></div>
-            <div className="space-y-2"><Label>URL fotografía</Label><Input value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} /></div>
+            <div className="space-y-3">
+              <Label className="flex items-center gap-2"><Image className="h-4 w-4" /> Fotografía</Label>
+              <div className="flex items-center gap-4 rounded-lg border p-3">
+                {form.imageUrl ? (
+                  <img src={form.imageUrl} alt="Vista previa" className="h-20 w-20 rounded-full border object-cover" />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                    <Image className="h-7 w-7" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1 space-y-2">
+                  <label className="inline-flex cursor-pointer items-center rounded-md border bg-background px-3 py-2 text-sm font-medium shadow-sm hover:bg-accent">
+                    <Upload className="mr-2 h-4 w-4" />
+                    {uploadImage.isPending ? "Subiendo..." : "Elegir fotografía"}
+                    <input
+                      className="sr-only"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={uploadImage.isPending}
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        event.currentTarget.value = "";
+                        if (!file) return;
+                        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+                          toast.error("Usa una fotografía JPG, PNG o WebP");
+                          return;
+                        }
+                        if (file.size > 5 * 1024 * 1024) {
+                          toast.error("La fotografía no puede superar 5 MB");
+                          return;
+                        }
+                        try {
+                          const imageData = await new Promise<string>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(String(reader.result));
+                            reader.onerror = () => reject(reader.error);
+                            reader.readAsDataURL(file);
+                          });
+                          const result = await uploadImage.mutateAsync({
+                            imageData,
+                            mimeType: file.type as "image/jpeg" | "image/png" | "image/webp",
+                          });
+                          setForm((current) => ({ ...current, imageUrl: result.url }));
+                          toast.success("Fotografía cargada");
+                        } catch (error) {
+                          toast.error(error instanceof Error ? error.message : "No se pudo cargar la fotografía");
+                        }
+                      }}
+                    />
+                  </label>
+                  <p className="text-xs text-muted-foreground">JPG, PNG o WebP · máximo 5 MB</p>
+                  {form.imageUrl && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-destructive hover:text-destructive"
+                      onClick={() => setForm((current) => ({ ...current, imageUrl: "" }))}
+                    >
+                      <Trash2 className="mr-2 h-3.5 w-3.5" /> Quitar fotografía
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">O pega una URL de imagen</Label>
+                <Input
+                  value={form.imageUrl}
+                  onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+                  placeholder="https://..."
+                />
+              </div>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2"><Label>Porcentaje profesor</Label><Input type="number" min="0" max="100" step="0.01" value={form.teacherShare} onChange={(e) => setForm({ ...form, teacherShare: e.target.value })} /></div>
               <div className="space-y-2"><Label>Color</Label><Input type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></div>
@@ -164,7 +245,7 @@ export default function RegularClassesTeachers() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
-            <Button disabled={save.isPending || !form.name.trim()} onClick={() => save.mutate({
+            <Button disabled={save.isPending || uploadImage.isPending || !form.name.trim()} onClick={() => save.mutate({
               id: editing?.id,
               name: form.name,
               email: form.email || undefined,

@@ -38,6 +38,7 @@ import {
   calendarMonthRange,
   nextCalendarMonth,
 } from "./regularClassesPeriod";
+import { decodeCmsImageDataUrl } from "./imageUpload";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -603,6 +604,25 @@ export const regularClassesRouter = router({
       }
       await writeAudit("teacher", teacherId!, id ? "updated" : "created", ctx.user.id, input);
       return { success: true, id: teacherId! };
+    }),
+    uploadImage: protectedProcedure.input(z.object({
+      imageData: z.string().max(7_500_000),
+      mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+    })).mutation(async ({ ctx, input }) => {
+      requireAdmin(ctx.user);
+      let decoded: ReturnType<typeof decodeCmsImageDataUrl>;
+      try {
+        decoded = decodeCmsImageDataUrl(input);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "No se pudo leer la imagen",
+        });
+      }
+      const { storagePut } = await import("./storage");
+      const fileKey = `regular-classes/teachers/${Date.now()}-${randomUUID().slice(0, 8)}.${decoded.extension}`;
+      const { url } = await storagePut(fileKey, decoded.buffer, input.mimeType);
+      return { url };
     }),
     linkOrInviteUser: protectedProcedure.input(z.object({
       teacherId: z.number().int().positive(),
