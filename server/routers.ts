@@ -16,6 +16,7 @@ import { marketingRouter } from "./marketingRouter";
 import { regularClassesRouter } from "./regularClassesRouter";
 import { hasB2CAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS } from "@shared/permissions";
+import { canRedeemGiftCard } from "./giftCardRedemption";
 import {
   CANCAGUA_EMAIL_REFINEMENT_RULES,
   getCancaguaEmailDesignSystem,
@@ -3264,10 +3265,17 @@ Devuelve un JSON con este formato:
         orderType: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
-          throw new TRPCError({ code: "FORBIDDEN" });
+        if (!canRedeemGiftCard(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
         }
-        const result = await db.redeemGiftCard(input.code, input.amount, ctx.user?.name ?? undefined);
+        try {
+          return await db.redeemGiftCard(input.code, input.amount, ctx.user?.name ?? undefined);
+        } catch (error: any) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error.message || "No se pudo canjear la Gift Card",
+          });
+        }
       }),
 
     getTransactions: protectedProcedure
@@ -3680,6 +3688,9 @@ Devuelve un JSON con este formato:
     redeemService: protectedProcedure
       .input(z.object({ code: z.string().min(1).max(20) }))
       .mutation(async ({ ctx, input }) => {
+        if (!canRedeemGiftCard(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+        }
         try {
           await db.redeemServiceGiftCard(input.code, ctx.user.name || ctx.user.email || undefined);
           return { success: true };

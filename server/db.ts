@@ -2,6 +2,7 @@ import { eq, gte, lte, and, desc, sql, asc, like, or, isNull, inArray } from "dr
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, analyticsCache } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { validateGiftCardRedemption } from "./giftCardRedemption";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1884,40 +1885,51 @@ export async function deleteTranslation(id: number) {
 // Gift Card Transactions
 export async function redeemGiftCard(code: string, amount: number, usedBy?: string) {
   const db = await getDb();
-  if (!db) return { success: false, error: "Database not available" };
+  if (!db) throw new Error("Base de datos no disponible");
   const { giftCards, giftCardTransactions } = await import("../drizzle/schema");
 
-  const card = await db.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
-  if (card.length === 0) {
-    return { success: false, error: "Gift card not found" };
-  }
+  return await db.transaction(async (tx) => {
+    const [giftCard] = await tx.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
+    if (!giftCard) throw new Error("Gift Card no encontrada");
 
-  const giftCard = card[0];
-  if (giftCard.status !== 'active') {
-    return { success: false, error: "Gift card is not active" };
-  }
+    validateGiftCardRedemption({
+      status: giftCard.status,
+      purchaseStatus: giftCard.purchaseStatus,
+      balance: giftCard.balance,
+      amount,
+      expiresAt: giftCard.expiresAt,
+    });
 
-  if (giftCard.balance < amount) {
-    return { success: false, error: "Insufficient balance" };
-  }
+    const newBalance = giftCard.balance - amount;
+    const fullyRedeemed = newBalance === 0;
+    const updateResult: any = await tx.update(giftCards)
+      .set({
+        balance: newBalance,
+        status: fullyRedeemed ? "redeemed" : "active",
+        redeemedAt: fullyRedeemed ? new Date() : null,
+      })
+      .where(and(
+        eq(giftCards.id, giftCard.id),
+        eq(giftCards.status, "active"),
+        eq(giftCards.purchaseStatus, "completed"),
+        eq(giftCards.balance, giftCard.balance),
+      ));
+    const affectedRows = Number(updateResult?.[0]?.affectedRows ?? updateResult?.affectedRows ?? 0);
+    if (affectedRows !== 1) {
+      throw new Error("La Gift Card cambió mientras se procesaba el canje. Intenta nuevamente");
+    }
 
-  const newBalance = giftCard.balance - amount;
-  const newStatus = newBalance === 0 ? 'redeemed' : 'active';
+    await tx.insert(giftCardTransactions).values({
+      giftCardId: giftCard.id,
+      transactionType: "redemption",
+      amount: -amount,
+      balanceBefore: giftCard.balance,
+      balanceAfter: newBalance,
+      notes: usedBy ? `Canjeado por ${usedBy}` : "Canje de Gift Card",
+    });
 
-  await db.update(giftCards)
-    .set({ balance: newBalance, status: newStatus as any })
-    .where(eq(giftCards.id, giftCard.id));
-
-  await db.insert(giftCardTransactions).values({
-    giftCardId: giftCard.id,
-    transactionType: 'redemption',
-    amount: -amount,
-    balanceBefore: giftCard.balance,
-    balanceAfter: newBalance,
-    notes: usedBy ? `Canjeado por ${usedBy}` : 'Canje de Gift Card',
+    return { success: true, newBalance, status: fullyRedeemed ? "redeemed" as const : "active" as const };
   });
-
-  return { success: true, newBalance };
 }
 
 export async function createGiftCardTransaction(transaction: any) {
@@ -1939,7 +1951,17 @@ export async function redeemServiceGiftCard(code: string, usedBy?: string) {
     if (giftCard.status !== "active") throw new Error("La Gift Card no está activa");
     if (giftCard.expiresAt && giftCard.expiresAt < new Date()) throw new Error("La Gift Card está vencida");
 
-    await tx.update(giftCards).set({ status: "redeemed", redeemedAt: new Date() }).where(eq(giftCards.id, giftCard.id));
+    const updateResult: any = await tx.update(giftCards)
+      .set({ status: "redeemed", redeemedAt: new Date() })
+      .where(and(
+        eq(giftCards.id, giftCard.id),
+        eq(giftCards.status, "active"),
+        eq(giftCards.amount, 0),
+      ));
+    const affectedRows = Number(updateResult?.[0]?.affectedRows ?? updateResult?.affectedRows ?? 0);
+    if (affectedRows !== 1) {
+      throw new Error("La Gift Card cambió mientras se procesaba el canje. Intenta nuevamente");
+    }
     await tx.insert(giftCardTransactions).values({
       giftCardId: giftCard.id,
       transactionType: "redemption",
