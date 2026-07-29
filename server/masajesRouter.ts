@@ -55,6 +55,13 @@ import {
   markCheckoutPaymentFailed,
 } from "./massageCheckout";
 import { emitMassagePurchase } from "./googleAnalytics";
+import {
+  startTherapistAssignmentForBooking,
+  stopTherapistAssignmentForBooking,
+} from "./massageTherapistAssignment";
+import { MANUAL_MASSAGE_PAYMENT_METHODS } from "@shared/massagePayments";
+
+const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 
 const adminOrEditor = async (role: string) => {
   if (!hasMassageAdminAccess(role)) {
@@ -106,8 +113,12 @@ export const MASSAGE_AGENDA_STATUSES = [
   "cancelled",
   "no_show",
 ] as const;
-export const SKEDU_AGENDA_STATUSES = ["confirmed", "completed", "cancelled", "no_show"] as const;
-export const MANUAL_ASSIGNMENT_REJECTION_STATUSES = ["admin_rejected", "therapist_rejected"] as const;
+export const SKEDU_AGENDA_STATUSES = ["pending", "confirmed", "completed", "cancelled", "no_show"] as const;
+export const MANUAL_ASSIGNMENT_REJECTION_STATUSES = [
+  "admin_rejected",
+  "therapist_rejected",
+  "assignment_exhausted",
+] as const;
 
 const cancellationCategorySchema = z.enum(MASSAGE_CANCELLATION_CATEGORIES);
 const cancellationReasonSchema = z.string().trim().min(5, "Escribe el motivo de la cancelación").max(1000);
@@ -161,7 +172,7 @@ export function validateSkeduTherapistSelection(
 }
 
 export function expandSkeduProgramResourceBlocks(programs: Array<{
-  therapistId: number;
+  therapistId: number | null;
   secondTherapistId: number | null;
   roomId: number;
   startTime: string;
@@ -1091,12 +1102,11 @@ const agendaRouter = router({
       clientEmail: z.string().email().optional().or(z.literal("")),
       bookingDate: z.string(),
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
-      therapistId: z.number(),
-      secondTherapistId: z.number().optional(),
       roomId: z.number(),
       externalReference: z.string().max(100).optional(),
+      paymentMethod: manualMassagePaymentMethodSchema,
+      paymentReference: z.string().max(100).optional(),
       notes: z.string().optional(),
-      notifyTherapists: z.boolean().default(true),
     }))
     .mutation(async ({ ctx, input }) => {
       await massageOperations(ctx.user.role);
@@ -1107,10 +1117,9 @@ const agendaRouter = router({
       if (!program || !isSkeduProgramDurationAllowed(input.program, input.duration)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Duración no disponible para este programa" });
       }
-      if (input.modality === "double" && (!input.secondClientName?.trim() || !input.secondTherapistId)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Un masaje doble requiere dos clientes y dos terapeutas" });
+      if (input.modality === "double" && !input.secondClientName?.trim()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Un masaje doble requiere dos clientes" });
       }
-      validateSkeduTherapistSelection(input.modality, input.therapistId, input.secondTherapistId);
 
       if (input.externalReference?.trim()) {
         const [duplicate] = await db.select({ id: massageProgramBookings.id })
@@ -1136,9 +1145,10 @@ const agendaRouter = router({
       });
       const availableTherapistIds = new Set(resources.availableTherapists.map((therapist) => therapist.id));
       const availableRoomIds = new Set(resources.availableRooms.map((room) => room.id));
-      if (!availableTherapistIds.has(input.therapistId) ||
-          (input.modality === "double" && !availableTherapistIds.has(input.secondTherapistId!))) {
-        throw new TRPCError({ code: "CONFLICT", message: "Uno de los terapeutas ya no está disponible en ese horario" });
+      const selectedTherapists = resources.availableTherapists.slice(0, input.modality === "double" ? 2 : 1);
+      if (selectedTherapists.length < (input.modality === "double" ? 2 : 1)
+          || selectedTherapists.some((therapist) => !availableTherapistIds.has(therapist.id))) {
+        throw new TRPCError({ code: "CONFLICT", message: "No hay suficientes terapeutas disponibles en ese horario" });
       }
       if (!availableRoomIds.has(input.roomId)) {
         throw new TRPCError({ code: "CONFLICT", message: "La sala ya no está disponible en ese horario" });
@@ -1155,52 +1165,18 @@ const agendaRouter = router({
         bookingDate: input.bookingDate as any,
         startTime: input.startTime,
         endTime: resources.endTime,
-        therapistId: input.therapistId,
-        secondTherapistId: input.modality === "double" ? input.secondTherapistId! : null,
+        therapistId: selectedTherapists[0].id,
+        secondTherapistId: input.modality === "double" ? selectedTherapists[1].id : null,
         roomId: input.roomId,
         externalReference: input.externalReference?.trim() || null,
+        paymentMethod: input.paymentMethod,
+        paymentReference: input.paymentReference?.trim() || null,
         notes: input.notes?.trim() || null,
-        status: "confirmed",
+        status: "pending",
         createdByUserId: ctx.user.id,
       }).$returningId();
 
-      if (input.notifyTherapists) {
-        const selectedTherapists = resources.availableTherapists.filter((therapist) =>
-          therapist.id === input.therapistId || therapist.id === input.secondTherapistId
-        );
-        const notificationTasks: Promise<unknown>[] = [];
-        const clientNames = input.secondClientName
-          ? `${input.clientName} / ${input.secondClientName}`
-          : input.clientName;
-        const humanDate = new Intl.DateTimeFormat("es-CL", {
-          weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
-        }).format(new Date(input.bookingDate + "T12:00:00"));
-        for (const therapist of selectedTherapists) {
-          if (therapist.email) {
-            notificationTasks.push(sendMassageTherapistNotificationEmail({
-              to: therapist.email,
-              therapistName: therapist.name ?? "Terapeuta",
-              clientName: clientNames,
-              clientPhone: input.clientPhone,
-              techniqueName: `Programa ${program.label}`,
-              bookingDate: input.bookingDate,
-              startTime: input.startTime,
-              endTime: resources.endTime,
-              duration: input.duration,
-              notes: input.notes,
-            }).catch((error) => console.error("[SkeduProgram] Email terapeuta:", error)));
-          }
-          if (therapist.phone) {
-            notificationTasks.push(sendWhatsApp(
-              therapist.phone,
-              `📅 *Masaje de programa asignado* — Cancagua Spa\n\nHola ${therapist.name ?? ""}! Se registró desde Skedu:\n\n*${program.label}* · ${input.duration} min · ${input.modality === "double" ? "Doble" : "Simple"}\n👤 ${input.clientName}${input.secondClientName ? ` y ${input.secondClientName}` : ""}\n📅 ${humanDate}\n🕐 ${input.startTime} – ${resources.endTime} hrs`
-            ).then((result) => {
-              if (!result.success) console.error("[SkeduProgram] WhatsApp terapeuta:", result.error);
-            }).catch((error) => console.error("[SkeduProgram] WhatsApp terapeuta:", error)));
-          }
-        }
-        await Promise.all(notificationTasks);
-      }
+      await startTherapistAssignmentForBooking("skedu_program", inserted.id);
 
       return { success: true, id: inserted.id };
     }),
@@ -1243,7 +1219,7 @@ const agendaRouter = router({
       const selectableTherapistIds = new Set(resources.availableTherapists.map((therapist) => therapist.id));
       // Los terapeutas actuales siguen siendo seleccionables aunque después se
       // hayan desactivado; conservarlos no agrega un nuevo bloqueo a la agenda.
-      selectableTherapistIds.add(booking.therapistId);
+      if (booking.therapistId) selectableTherapistIds.add(booking.therapistId);
       if (booking.secondTherapistId) selectableTherapistIds.add(booking.secondTherapistId);
 
       if (!selectableTherapistIds.has(input.therapistId)
@@ -1258,9 +1234,11 @@ const agendaRouter = router({
         .set({
           therapistId: input.therapistId,
           secondTherapistId: booking.modality === "double" ? input.secondTherapistId! : null,
+          status: "pending",
         })
         .where(eq(massageProgramBookings.id, input.id));
 
+      await startTherapistAssignmentForBooking("skedu_program", input.id, { force: true });
       return { success: true };
     }),
 
@@ -1289,6 +1267,7 @@ const agendaRouter = router({
           } : {}),
         })
         .where(eq(massageProgramBookings.id, input.id));
+      await stopTherapistAssignmentForBooking("skedu_program", input.id);
       return { success: true };
     }),
 
@@ -1338,7 +1317,9 @@ const agendaRouter = router({
         duration: massageBookings.duration, bookingDate: massageBookings.bookingDate,
         startTime: massageBookings.startTime, endTime: massageBookings.endTime,
         status: massageBookings.status, paymentStatus: massageBookings.paymentStatus,
-        amountPaid: massageBookings.amountPaid, notes: massageBookings.notes,
+        amountPaid: massageBookings.amountPaid,
+        manualPaymentMethod: massageBookings.manualPaymentMethod,
+        notes: massageBookings.notes,
         crossSellServices: massageBookings.crossSellServices, rescheduleCount: massageBookings.rescheduleCount,
         cancellationCategory: massageBookings.cancellationCategory,
         cancellationReason: massageBookings.cancellationReason,
@@ -1384,7 +1365,7 @@ const agendaRouter = router({
         techniqueId: null,
         techniqueName: `Programa ${SKEDU_MASSAGE_PROGRAMS.find((program) => program.value === row.program)?.label ?? row.program}`,
         therapistId: row.therapistId,
-        therapistName: therapistNames.get(row.therapistId) ?? null,
+        therapistName: row.therapistId ? therapistNames.get(row.therapistId) ?? null : null,
         secondTherapistId: row.secondTherapistId,
         secondTherapistName: row.secondTherapistId ? therapistNames.get(row.secondTherapistId) ?? null : null,
         roomId: row.roomId,
@@ -1396,6 +1377,7 @@ const agendaRouter = router({
         status: row.status,
         paymentStatus: null,
         amountPaid: null,
+        manualPaymentMethod: null,
         notes: row.notes,
         cancellationCategory: row.cancellationCategory,
         cancellationReason: row.cancellationReason,
@@ -1417,6 +1399,7 @@ const agendaRouter = router({
         ...booking,
         paymentStatus: null,
         amountPaid: null,
+        manualPaymentMethod: null,
       }));
     }),
 
@@ -1514,8 +1497,7 @@ const agendaRouter = router({
       await db.update(massageBookings)
         .set({ freelanceApprovalStatus: null, therapistConfirmationToken: null, status: "pending" })
         .where(eq(massageBookings.id, input.bookingId));
-      const { sendFreelanceApprovalRequest } = await import("./freelanceApproval");
-      await sendFreelanceApprovalRequest(input.bookingId);
+      await startTherapistAssignmentForBooking("massage", input.bookingId, { force: true });
       return { success: true };
     }),
 
@@ -1550,6 +1532,7 @@ const agendaRouter = router({
       techniqueId: z.number(), therapistId: z.number().optional(), roomId: z.number(),
       duration: z.number(), bookingDate: z.string(), startTime: z.string(), endTime: z.string(),
       paymentStatus: z.enum(["pending", "paid"]).default("pending"), amountPaid: z.string().optional(),
+      manualPaymentMethod: manualMassagePaymentMethodSchema.optional(),
       discountCode: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -1559,7 +1542,10 @@ const agendaRouter = router({
       const [inserted] = await db.insert(massageBookings)
         .values({ ...input, bookingDate: input.bookingDate as any, bookingSource: "cms" })
         .$returningId();
-      if (input.paymentStatus === "paid") await syncMassageSale(inserted.id);
+      if (input.paymentStatus === "paid") {
+        await syncMassageSale(inserted.id);
+        await startTherapistAssignmentForBooking("massage", inserted.id);
+      }
       return { success: true };
     }),
 
@@ -1586,6 +1572,9 @@ const agendaRouter = router({
           cancelledByUserId: ctx.user.id,
         } : {}),
       }).where(eq(massageBookings.id, input.id));
+      if (input.status !== "pending") {
+        await stopTherapistAssignmentForBooking("massage", input.id);
+      }
       return { success: true };
     }),
 
@@ -1595,6 +1584,7 @@ const agendaRouter = router({
       bookingDate: z.string().optional(), startTime: z.string().optional(), endTime: z.string().optional(),
       status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]).optional(),
       paymentStatus: z.enum(["pending", "paid", "refunded"]).optional(),
+      manualPaymentMethod: manualMassagePaymentMethodSchema.optional(),
       amountPaid: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
       cancellationCategory: cancellationCategorySchema.optional(),
       cancellationReason: cancellationReasonSchema.optional(),
@@ -1629,6 +1619,9 @@ const agendaRouter = router({
           } : {}),
         })
         .where(eq(massageBookings.id, id));
+      if (input.status && input.status !== "pending") {
+        await stopTherapistAssignmentForBooking("massage", id);
+      }
 
       // Mantiene fecha de servicio, monto y reembolsos sincronizados en el
       // libro histórico. Si aún no está pagada, la función no crea nada.
@@ -1667,36 +1660,7 @@ const agendaRouter = router({
               });
             }
 
-            const therapistType = booking.therapistType;
-            const humanDate = new Intl.DateTimeFormat("es-CL", {
-              weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago",
-            }).format(new Date(dateStr + "T12:00:00"));
-
-            if (therapistType === "freelance") {
-              // Freelance: requiere aprobación de admin antes de notificar
-              const { sendFreelanceApprovalRequest } = await import("./freelanceApproval");
-              await sendFreelanceApprovalRequest(id).catch((e) =>
-                console.error("[Notification] Error aprobación freelance:", e)
-              );
-            } else if (therapistType === "inhouse") {
-              // Email al terapeuta
-              if (booking.therapistEmail) {
-                await sendMassageTherapistNotificationEmail({
-                  to: booking.therapistEmail, therapistName: booking.therapistName ?? "Terapeuta",
-                  clientName: booking.clientName, clientPhone: booking.clientPhone,
-                  techniqueName: booking.techniqueName ?? "Masaje",
-                  bookingDate: dateStr, startTime: booking.startTime, endTime: booking.endTime,
-                  duration: booking.duration, notes: booking.notes,
-                });
-              }
-              // WhatsApp al terapeuta
-              if (booking.therapistPhone) {
-                await sendWhatsApp(
-                  booking.therapistPhone,
-                  `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${booking.therapistName ?? ""}! Tienes una reserva de pago confirmado:\n\n*${booking.techniqueName ?? "Masaje"}* · ${booking.duration} min\n👤 ${booking.clientName}${booking.clientPhone ? `\n📞 ${booking.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${booking.startTime} – ${booking.endTime} hrs`
-                );
-              }
-            }
+            await startTherapistAssignmentForBooking("massage", id);
           } catch (e) {
             console.error("[Notification] Error sending confirmations:", e);
           }
@@ -2068,8 +2032,8 @@ async function getCombinedMassageSalesRows(
       discountCode: null,
       discountType: null,
       discountValue: null,
-      paymentMethod: "skedu_program" as const,
-      paymentReference: booking.externalReference,
+      paymentMethod: booking.paymentMethod,
+      paymentReference: booking.paymentReference ?? booking.externalReference,
       saleStatus: booking.status === "cancelled" ? "cancelled" as const : "paid" as const,
       bookingStatus: booking.status,
       therapistName: client.therapistId ? therapistNames.get(client.therapistId) ?? null : null,
@@ -2231,6 +2195,7 @@ const analyticsRouter = router({
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           program: massageProgramBookings.program,
+          paymentMethod: massageProgramBookings.paymentMethod,
           therapistId: massageProgramBookings.therapistId,
           secondTherapistId: massageProgramBookings.secondTherapistId,
         }).from(massageProgramBookings).where(and(
@@ -2300,12 +2265,17 @@ const analyticsRouter = router({
       const revenueChangePercent = previousRevenue > 0
         ? ((revenue - previousRevenue) / previousRevenue) * 100
         : revenue > 0 ? 100 : 0;
+      const programOnlineRevenue = programPeriod
+        .filter((booking) => booking.status !== "cancelled" && booking.paymentMethod === "getnet_link")
+        .reduce((sum, booking) =>
+          sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0);
       const onlineRevenue = paidSales
-        .filter((sale) => sale.paymentMethod === "getnet")
-        .reduce((sum, sale) => sum + Number(sale.amount), 0);
+        .filter((sale) => sale.paymentMethod === "getnet" || sale.paymentMethod === "getnet_link")
+        .reduce((sum, sale) => sum + Number(sale.amount), 0) + programOnlineRevenue;
       const otherRevenue = paidSales
-        .filter((sale) => sale.paymentMethod !== "getnet")
-        .reduce((sum, sale) => sum + Number(sale.amount), 0) + programRevenue;
+        .filter((sale) => sale.paymentMethod !== "getnet" && sale.paymentMethod !== "getnet_link")
+        .reduce((sum, sale) => sum + Number(sale.amount), 0)
+        + programRevenue - programOnlineRevenue;
       const paidProgramMassages = programPeriod
         .filter((booking) => booking.status !== "cancelled")
         .reduce((sum, booking) => sum + getSkeduMassageQuantity(booking.modality), 0);
@@ -2487,7 +2457,9 @@ const analyticsRouter = router({
           ...(booking.modality === "double" && booking.secondTherapistId ? [booking.secondTherapistId] : []),
         ];
         for (const therapistId of therapistIds) {
-          const therapistName = therapistNameById.get(therapistId) ?? "Sin asignar";
+          const therapistName = therapistId
+            ? therapistNameById.get(therapistId) ?? "Sin asignar"
+            : "Sin asignar";
           const current = therapistMap.get(therapistName) ?? { therapistName, count: 0, revenue: 0 };
           current.count += 1;
           current.revenue += getSkeduMassageUnitPrice(booking.duration);

@@ -14,6 +14,7 @@ import {
 import { protectedProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { hasCmsPermission } from "@shared/permissions";
+import type { MassagePaymentMethod } from "@shared/massagePayments";
 
 const CHILE_TIME_ZONE = "America/Santiago";
 const VAT_FACTOR = 1.19;
@@ -184,7 +185,7 @@ type MassageCloseDetail = {
   netRevenue: number;
   originalAmount: number;
   discountAmount: number;
-  paymentMethod: "getnet" | "cms_manual" | "skedu_program";
+  paymentMethod: MassagePaymentMethod;
   paymentStatus: string;
   commission: number;
   commissionBasis: "gross" | "net" | "none";
@@ -288,6 +289,7 @@ async function calculateMassageClose(
       originalAmount: massageBookings.originalAmount,
       discountAmount: massageBookings.discountAmount,
       getnetRequestId: massageBookings.getnetRequestId,
+      manualPaymentMethod: massageBookings.manualPaymentMethod,
       therapistId: massageBookings.therapistId,
       therapistName: massageTherapists.name,
       therapistType: massageTherapists.type,
@@ -312,6 +314,7 @@ async function calculateMassageClose(
       status: massageProgramBookings.status,
       therapistId: massageProgramBookings.therapistId,
       secondTherapistId: massageProgramBookings.secondTherapistId,
+      paymentMethod: massageProgramBookings.paymentMethod,
     }).from(massageProgramBookings)
       .where(and(
         gte(massageProgramBookings.bookingDate, period.start as any),
@@ -387,7 +390,7 @@ async function calculateMassageClose(
       netRevenue,
       originalAmount,
       discountAmount,
-      paymentMethod: row.getnetRequestId ? "getnet" : "cms_manual",
+      paymentMethod: row.getnetRequestId ? "getnet" : row.manualPaymentMethod ?? "cms_manual",
       paymentStatus: row.paymentStatus,
       commission,
       commissionBasis,
@@ -459,7 +462,7 @@ async function calculateMassageClose(
         netRevenue,
         originalAmount: unitPrice,
         discountAmount: 0,
-        paymentMethod: "skedu_program",
+        paymentMethod: row.paymentMethod,
         paymentStatus: "paid",
         commission,
         commissionBasis,

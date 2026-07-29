@@ -53,7 +53,7 @@ export default function SkeduTherapistAssignmentDialog({
 
   useEffect(() => {
     if (!open || !booking) return;
-    setTherapistId(String(booking.therapistId));
+    setTherapistId(booking.therapistId ? String(booking.therapistId) : "");
     setSecondTherapistId(booking.secondTherapistId ? String(booking.secondTherapistId) : "");
   }, [open, booking]);
 

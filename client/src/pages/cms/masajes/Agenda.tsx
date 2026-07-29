@@ -27,6 +27,11 @@ import MassageCancellationDialog, {
 } from "./MassageCancellationDialog";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { hasCmsPermission } from "@shared/permissions";
+import {
+  MANUAL_MASSAGE_PAYMENT_METHODS,
+  MASSAGE_PAYMENT_METHOD_LABELS,
+  type ManualMassagePaymentMethod,
+} from "@shared/massagePayments";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendiente", confirmed: "Confirmada", completed: "Completada",
@@ -45,6 +50,7 @@ type BookingForm = {
   techniqueId: string; therapistId: string; roomId: string;
   duration: number; bookingDate: string; startTime: string; endTime: string;
   paymentStatus: "pending" | "paid"; amountPaid: string;
+  manualPaymentMethod: ManualMassagePaymentMethod;
   discountCode: string; notes: string;
 };
 
@@ -52,7 +58,8 @@ const emptyForm = (date: string): BookingForm => ({
   clientName: "", clientEmail: "", clientPhone: "", clientOrigin: "",
   techniqueId: "", therapistId: "", roomId: "",
   duration: 50, bookingDate: date, startTime: "10:00", endTime: "10:50",
-  paymentStatus: "pending", amountPaid: "", discountCode: "", notes: "",
+  paymentStatus: "pending", amountPaid: "", manualPaymentMethod: "getnet_link",
+  discountCode: "", notes: "",
 });
 
 function calcEndTime(start: string, duration: number): string {
@@ -436,6 +443,7 @@ export default function MasajesAgenda() {
       roomId: String(b.roomId), duration: b.duration, bookingDate: b.bookingDate,
       startTime: b.startTime, endTime: b.endTime,
       paymentStatus: b.paymentStatus as any, amountPaid: b.amountPaid ?? "",
+      manualPaymentMethod: b.manualPaymentMethod ?? "getnet_link",
       discountCode: "", notes: b.notes ?? "",
     });
     setOpen(true);
@@ -455,6 +463,7 @@ export default function MasajesAgenda() {
       startTime: form.startTime,
       endTime: form.endTime,
       paymentStatus: form.paymentStatus,
+      manualPaymentMethod: form.paymentStatus === "paid" ? form.manualPaymentMethod : undefined,
       amountPaid: form.amountPaid || undefined,
       discountCode: form.discountCode || undefined,
       notes: form.notes || undefined,
@@ -722,6 +731,27 @@ export default function MasajesAgenda() {
                 </SelectContent>
               </Select>
             </div>
+            {form.paymentStatus === "paid" && (
+              <div>
+                <Label>Medio de pago</Label>
+                <Select
+                  value={form.manualPaymentMethod}
+                  onValueChange={(value) => setForm((current) => ({
+                    ...current,
+                    manualPaymentMethod: value as ManualMassagePaymentMethod,
+                  }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {MANUAL_MASSAGE_PAYMENT_METHODS.map((method) => (
+                      <SelectItem key={method} value={method}>
+                        {MASSAGE_PAYMENT_METHOD_LABELS[method]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <Label>Monto pagado</Label>
               <Input value={form.amountPaid} onChange={e => setForm(f => ({ ...f, amountPaid: e.target.value }))} placeholder="0" />

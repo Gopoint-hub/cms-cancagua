@@ -13,6 +13,7 @@ import {
   listAutomaticMassageSlots,
   MASSAGE_AGENDA_STATUSES,
   MANUAL_ASSIGNMENT_REJECTION_STATUSES,
+  SKEDU_AGENDA_STATUSES,
   normalizeDecimalInput,
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
@@ -34,10 +35,21 @@ describe("massage agenda visibility", () => {
     ]);
   });
 
+  it("keeps pending Skedu bookings visible while therapists are confirming", () => {
+    expect(SKEDU_AGENDA_STATUSES).toEqual([
+      "pending",
+      "confirmed",
+      "completed",
+      "cancelled",
+      "no_show",
+    ]);
+  });
+
   it("limits manual-assignment cleanup to explicitly rejected assignments", () => {
     expect(MANUAL_ASSIGNMENT_REJECTION_STATUSES).toEqual([
       "admin_rejected",
       "therapist_rejected",
+      "assignment_exhausted",
     ]);
   });
 });

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { getMassagePaymentMethodLabel } from "@shared/massagePayments";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -82,9 +83,7 @@ export default function MasajesAnalytics() {
         "Valor configurado": sale.discountValue ?? "",
         "Monto descontado": Number(sale.discountAmount),
         "Valor realmente pagado": Number(sale.amount),
-        "Medio de pago": sale.paymentMethod === "getnet"
-          ? "Getnet"
-          : sale.paymentMethod === "skedu_program" ? "Programa Skedu" : "CMS manual",
+        "Medio de pago": getMassagePaymentMethodLabel(sale.paymentMethod),
         "Referencia": sale.paymentReference ?? "",
         "Estado venta": sale.saleStatus === "refunded"
           ? "Reembolsada"
@@ -350,7 +349,7 @@ export default function MasajesAnalytics() {
                 <CardContent className="space-y-5">
                   {[
                     { label: "Pagos online (Getnet)", value: data.period.onlineRevenue, color: "bg-indigo-500" },
-                    { label: "Otros pagos (CMS manual + Skedu)", value: data.period.otherRevenue, color: "bg-emerald-500" },
+                    { label: "Otros medios de pago", value: data.period.otherRevenue, color: "bg-emerald-500" },
                   ].map((payment) => {
                     const percentage = totalRevenue > 0 ? (payment.value / totalRevenue) * 100 : 0;
                     return (
@@ -627,9 +626,7 @@ export default function MasajesAnalytics() {
                                   {sale.saleStatus === "paid" ? "Pagada" : sale.saleStatus === "cancelled" ? "Anulada" : "Reembolsada"}
                                 </Badge>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                  {sale.paymentMethod === "getnet"
-                                    ? "Getnet"
-                                    : sale.paymentMethod === "skedu_program" ? "Programa Skedu" : "CMS manual"}
+                                  {getMassagePaymentMethodLabel(sale.paymentMethod)}
                                 </p>
                               </td>
                             </tr>

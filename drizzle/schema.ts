@@ -1129,6 +1129,14 @@ export const massageBookings = mysqlTable("massage_bookings", {
   status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
   paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "refunded"]).default("pending").notNull(),
   getnetRequestId: varchar("getnet_request_id", { length: 64 }),
+  manualPaymentMethod: mysqlEnum("manual_payment_method", [
+    "getnet_link",
+    "getnet_pos",
+    "bank_transfer",
+    "cash",
+    "gift_card",
+    "transbank",
+  ]),
   bookingSource: mysqlEnum("booking_source", ["web", "cms"]).default("cms").notNull(),
   // Flujo de aprobación para terapeutas freelance
   freelanceApprovalStatus: varchar("freelance_approval_status", { length: 30 }),
@@ -1212,16 +1220,26 @@ export const massageProgramBookings = mysqlTable("massage_program_bookings", {
   bookingDate: date("booking_date").notNull(),
   startTime: varchar("start_time", { length: 5 }).notNull(),
   endTime: varchar("end_time", { length: 5 }).notNull(),
-  therapistId: int("therapist_id").notNull(),
+  therapistId: int("therapist_id"),
   secondTherapistId: int("second_therapist_id"),
   roomId: int("room_id").notNull(),
   externalReference: varchar("external_reference", { length: 100 }),
+  paymentMethod: mysqlEnum("payment_method", [
+    "getnet_link",
+    "getnet_pos",
+    "bank_transfer",
+    "cash",
+    "gift_card",
+    "transbank",
+    "skedu_program",
+  ]).default("skedu_program").notNull(),
+  paymentReference: varchar("payment_reference", { length: 100 }),
   cancellationCategory: varchar("cancellation_category", { length: 50 }),
   cancellationReason: text("cancellation_reason"),
   cancelledAt: timestamp("cancelled_at"),
   cancelledByUserId: int("cancelled_by_user_id"),
   notes: text("notes"),
-  status: mysqlEnum("status", ["confirmed", "completed", "cancelled", "no_show"]).default("confirmed").notNull(),
+  status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
   createdByUserId: int("created_by_user_id").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
@@ -1229,6 +1247,25 @@ export const massageProgramBookings = mysqlTable("massage_program_bookings", {
 
 export type MassageProgramBooking = typeof massageProgramBookings.$inferSelect;
 export type InsertMassageProgramBooking = typeof massageProgramBookings.$inferInsert;
+
+// Solicitudes de confirmación enviadas a terapeutas. Cada intento expira
+// individualmente y conserva el historial de rotación de la reserva.
+export const massageTherapistAssignmentRequests = mysqlTable("massage_therapist_assignment_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingType: mysqlEnum("booking_type", ["massage", "skedu_program"]).notNull(),
+  bookingId: int("booking_id").notNull(),
+  slotIndex: int("slot_index").default(1).notNull(),
+  therapistId: int("therapist_id").notNull(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  status: mysqlEnum("status", ["pending", "confirmed", "rejected", "expired", "superseded"]).default("pending").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  respondedAt: timestamp("responded_at"),
+  attemptNumber: int("attempt_number").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MassageTherapistAssignmentRequest = typeof massageTherapistAssignmentRequests.$inferSelect;
 
 // Libro histórico de ingresos: un registro único por reserva pagada.
 // Conserva los datos de la venta aunque la reserva cambie posteriormente.
@@ -1249,7 +1286,16 @@ export const massageSales = mysqlTable("massage_sales", {
   discountCode: varchar("discount_code", { length: 50 }),
   discountType: mysqlEnum("discount_type", ["fixed", "percentage"]),
   discountValue: int("discount_value"),
-  paymentMethod: mysqlEnum("payment_method", ["getnet", "cms_manual"]).notNull(),
+  paymentMethod: mysqlEnum("payment_method", [
+    "getnet",
+    "cms_manual",
+    "getnet_link",
+    "getnet_pos",
+    "bank_transfer",
+    "cash",
+    "gift_card",
+    "transbank",
+  ]).notNull(),
   paymentReference: varchar("payment_reference", { length: 100 }),
   status: mysqlEnum("status", ["paid", "refunded"]).default("paid").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

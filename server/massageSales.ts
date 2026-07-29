@@ -26,6 +26,7 @@ export async function syncMassageSale(bookingId: number): Promise<void> {
     discountCodeId: massageBookings.discountCodeId,
     discountCode: massageBookings.discountCode,
     getnetRequestId: massageBookings.getnetRequestId,
+    manualPaymentMethod: massageBookings.manualPaymentMethod,
     techniqueName: massageTechniques.name,
     discountType: discountCodes.discountType,
     discountValue: discountCodes.discountValue,
@@ -53,7 +54,9 @@ export async function syncMassageSale(bookingId: number): Promise<void> {
     discountCode: booking.discountCode,
     discountType: booking.discountType,
     discountValue: booking.discountValue,
-    paymentMethod: booking.getnetRequestId ? "getnet" as const : "cms_manual" as const,
+    paymentMethod: booking.getnetRequestId
+      ? "getnet" as const
+      : booking.manualPaymentMethod ?? "cms_manual" as const,
     paymentReference: booking.getnetRequestId,
     status: booking.paymentStatus === "refunded" ? "refunded" as const : "paid" as const,
   };

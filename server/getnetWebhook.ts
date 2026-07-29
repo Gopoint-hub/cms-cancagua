@@ -5,7 +5,6 @@ import { massageBookings, massageTechniques, massageTherapists } from "../drizzl
 import { validateGetnetWebhookSignature, getGetnetSessionInfo } from "./getnet";
 import {
   sendMassageBookingConfirmationEmail,
-  sendMassageTherapistNotificationEmail,
   sendMassageInternalBookingNotificationEmail,
 } from "./_core/email";
 import { sendWhatsApp } from "./_core/whapi";
@@ -148,8 +147,6 @@ export async function sendBookingConfirmations(bookingId: number) {
   // ── Query 2: tipo de terapeuta (query separada para evitar ambigüedad de JOIN) ─
   let therapistType: "inhouse" | "freelance" | null = null;
   let therapistName = "Terapeuta";
-  let therapistEmail: string | null = null;
-  let therapistPhone: string | null = null;
 
   if (bookingData.therapistId) {
     const [th] = await db
@@ -166,8 +163,6 @@ export async function sendBookingConfirmations(bookingId: number) {
     if (th) {
       therapistType = th.type;
       therapistName = th.name;
-      therapistEmail = th.email ?? null;
-      therapistPhone = th.phone ?? null;
     }
   }
 
@@ -234,49 +229,9 @@ export async function sendBookingConfirmations(bookingId: number) {
     ).catch((e) => console.error("[Confirmaciones] WhatsApp cliente:", e));
   }
 
-  // ── Notificación al terapeuta según tipo ─────────────────────────────────────
-  if (therapistType === "freelance") {
-    // Freelance: queda "pending" hasta que el terapeuta confirme via WA
-    console.log(`[sendBookingConfirmations] booking=${bookingId} → FREELANCE: enviando confirmación al terapeuta (booking queda pending)`);
-    await sendFreelanceApprovalRequest(bookingId);
-  } else if (therapistType === "inhouse") {
-    // Inhouse: no necesita confirmación, se confirma de inmediato
-    console.log(`[sendBookingConfirmations] booking=${bookingId} → INHOUSE: confirmando de inmediato`);
-    await db.update(massageBookings)
-      .set({ status: "confirmed" })
-      .where(eq(massageBookings.id, bookingId));
-
-    if (therapistEmail) {
-      await sendMassageTherapistNotificationEmail({
-        to: therapistEmail,
-        therapistName,
-        clientName: bookingData.clientName,
-        clientPhone: bookingData.clientPhone,
-        techniqueName,
-        bookingDate: dateStr,
-        startTime: bookingData.startTime,
-        endTime: bookingData.endTime ?? "",
-        duration: bookingData.duration,
-        notes: bookingData.notes,
-      }).catch((e) => console.error("[Confirmaciones] Email terapeuta:", e));
-    }
-    if (therapistPhone) {
-      const result = await sendWhatsApp(
-        therapistPhone,
-        `📅 *Nueva reserva confirmada* — Cancagua Spa\n\nHola ${therapistName}! Tienes una reserva de pago confirmado:\n\n*${techniqueName}* · ${bookingData.duration} min\n👤 Cliente: ${bookingData.clientName}${bookingData.clientPhone ? `\n📞 ${bookingData.clientPhone}` : ""}\n📅 ${humanDate}\n🕐 ${bookingData.startTime} – ${bookingData.endTime} hrs`
-      );
-      if (!result.success) {
-        console.error("[Confirmaciones] WhatsApp terapeuta falló:", result.error);
-      } else {
-        console.log(`[Confirmaciones] WhatsApp terapeuta enviado booking=${bookingId}`);
-      }
-    } else {
-      console.warn(`[Confirmaciones] booking=${bookingId} terapeuta inhouse sin teléfono registrado`);
-    }
-  } else {
-    // Sin terapeuta asignado: queda pending, aparece en dashboard como asignación pendiente
-    console.warn(`[sendBookingConfirmations] booking=${bookingId} sin terapeuta → queda pending`);
-  }
+  // Todos los terapeutas —inhouse o freelance— confirman mediante un enlace
+  // de 30 minutos. Si rechazan o no responden, el motor rota automáticamente.
+  await sendFreelanceApprovalRequest(bookingId);
 }
 
 export default router;

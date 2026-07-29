@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import { getMassagePaymentMethodLabel } from "@shared/massagePayments";
 
 type AdjustmentCategory = "courtesy" | "refund" | "extra_cost" | "correction" | "other";
 type Adjustment = {
@@ -98,6 +99,20 @@ export default function MasajesAdminArea() {
   const calculation = preview.data?.calculation;
   const closure = preview.data?.closure;
   const isClosed = closure?.status === "closed";
+  const paymentSummary = useMemo(() => {
+    const summary = new Map<string, { method: string; massages: number; revenue: number }>();
+    for (const row of calculation?.details ?? []) {
+      const current = summary.get(row.paymentMethod) ?? {
+        method: row.paymentMethod,
+        massages: 0,
+        revenue: 0,
+      };
+      current.massages += 1;
+      current.revenue += Number(row.grossRevenue ?? 0);
+      summary.set(row.paymentMethod, current);
+    }
+    return Array.from(summary.values()).sort((left, right) => right.revenue - left.revenue);
+  }, [calculation?.details]);
 
   useEffect(() => {
     if (!calculation) return;
@@ -218,7 +233,7 @@ export default function MasajesAdminArea() {
         Descuento: row.discountAmount,
         "Ingreso bruto": row.grossRevenue,
         "Ingreso neto": row.netRevenue,
-        "Medio de pago": row.paymentMethod,
+        "Medio de pago": getMassagePaymentMethodLabel(row.paymentMethod),
         "Estado pago": row.paymentStatus,
         Comisión: row.commission,
         "Base comisión": row.commissionBasis,
@@ -491,6 +506,36 @@ export default function MasajesAdminArea() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Ingresos por medio de pago</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Medio de pago</TableHead>
+                        <TableHead className="text-right">Masajes</TableHead>
+                        <TableHead className="text-right">Ingresos</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paymentSummary.map((row) => (
+                        <TableRow key={row.method}>
+                          <TableCell className="font-medium">
+                            {getMassagePaymentMethodLabel(row.method)}
+                          </TableCell>
+                          <TableCell className="text-right">{row.massages}</TableCell>
+                          <TableCell className="text-right font-semibold">{money(row.revenue)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
 
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(380px,0.85fr)]">
               <Card>
