@@ -2,7 +2,7 @@ import { eq, gte, lte, and, desc, sql, asc, like, or, isNull, inArray } from "dr
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, analyticsCache } from "../drizzle/schema";
 import { ENV } from './_core/env';
-import { validateGiftCardRedemption } from "./giftCardRedemption";
+import { validateGiftCardRedemption, validateServiceGiftCardRedemption } from "./giftCardRedemption";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1947,15 +1947,19 @@ export async function redeemServiceGiftCard(code: string, usedBy?: string) {
   return await db.transaction(async (tx) => {
     const [giftCard] = await tx.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
     if (!giftCard) throw new Error("Gift Card no encontrada");
-    if (giftCard.amount !== 0) throw new Error("Esta Gift Card se canjea por monto");
-    if (giftCard.status !== "active") throw new Error("La Gift Card no está activa");
-    if (giftCard.expiresAt && giftCard.expiresAt < new Date()) throw new Error("La Gift Card está vencida");
+    validateServiceGiftCardRedemption({
+      status: giftCard.status,
+      purchaseStatus: giftCard.purchaseStatus,
+      amount: giftCard.amount,
+      expiresAt: giftCard.expiresAt,
+    });
 
     const updateResult: any = await tx.update(giftCards)
       .set({ status: "redeemed", redeemedAt: new Date() })
       .where(and(
         eq(giftCards.id, giftCard.id),
         eq(giftCards.status, "active"),
+        eq(giftCards.purchaseStatus, "completed"),
         eq(giftCards.amount, 0),
       ));
     const affectedRows = Number(updateResult?.[0]?.affectedRows ?? updateResult?.affectedRows ?? 0);

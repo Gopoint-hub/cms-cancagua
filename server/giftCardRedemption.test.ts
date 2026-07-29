@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canRedeemGiftCard, validateGiftCardRedemption } from "./giftCardRedemption";
+import { canRedeemGiftCard, validateGiftCardRedemption, validateServiceGiftCardRedemption } from "./giftCardRedemption";
 
 describe("permisos de canje de Gift Cards", () => {
   it("permite canjear al personal Cancagua que tiene acceso al módulo de ventas", () => {
@@ -15,6 +15,26 @@ describe("permisos de canje de Gift Cards", () => {
   it("no permite canjear a roles sin acceso operativo", () => {
     expect(canRedeemGiftCard("massage_therapist")).toBe(false);
     expect(canRedeemGiftCard("user")).toBe(false);
+  });
+});
+
+describe("validación de Gift Cards por servicio", () => {
+  it("solo permite utilizar servicios cuya compra esté completada", () => {
+    expect(() => validateServiceGiftCardRedemption({
+      status: "active",
+      purchaseStatus: "pending",
+      amount: 0,
+      expiresAt: null,
+    })).toThrow("La Gift Card no tiene una compra completada");
+  });
+
+  it("acepta una Gift Card por servicio activa, completada y vigente", () => {
+    expect(() => validateServiceGiftCardRedemption({
+      status: "active",
+      purchaseStatus: "completed",
+      amount: 0,
+      expiresAt: new Date(Date.now() + 86400000),
+    })).not.toThrow();
   });
 });
 
