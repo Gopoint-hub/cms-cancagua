@@ -27,6 +27,8 @@ export const users = mysqlTable("users", {
   status: mysqlEnum("status", ["active", "pending", "inactive"]).default("pending").notNull(),
   /** Modules the user has access to (JSON array, null = all modules for admin roles) */
   allowedModules: text("allowedModules"),
+  /** Permisos granulares explícitos (JSON array). null conserva los permisos predeterminados del rol. */
+  permissions: text("permissions"),
   /** Acceso acumulable como profesor/a de clases regulares. Puede coexistir con otros roles. */
   regularClassesTeacher: int("regular_classes_teacher").default(0).notNull(),
   /** Invitation token for new users */

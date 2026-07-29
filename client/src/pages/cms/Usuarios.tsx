@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -61,6 +62,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  CMS_PERMISSION_GROUPS,
+  getDefaultCmsPermissions,
+  getEffectiveCmsPermissions,
+  type CmsPermissionKey,
+} from "@shared/permissions";
 
 type UserRole = "super_admin" | "admin" | "user" | "seller" | "cancagua_staff" | "massage_therapist";
 type UserStatus = "active" | "pending" | "inactive";
@@ -73,6 +80,8 @@ export default function CMSUsuarios() {
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
+  const [selectedPermissions, setSelectedPermissions] = useState<CmsPermissionKey[]>([]);
 
   // Form state for invite
   const [inviteEmail, setInviteEmail] = useState("");
@@ -138,6 +147,17 @@ export default function CMSUsuarios() {
     },
     onError: (error) => {
       toast.error(error.message || "Error al eliminar usuario");
+    },
+  });
+
+  const updatePermissionsMutation = trpc.users.updatePermissions.useMutation({
+    onSuccess: () => {
+      toast.success("Permisos actualizados");
+      utils.users.list.invalidate();
+      setIsPermissionsDialogOpen(false);
+    },
+    onError: (error) => {
+      toast.error(error.message || "Error al actualizar permisos");
     },
   });
 
@@ -298,6 +318,28 @@ export default function CMSUsuarios() {
     deleteUserMutation.mutate({ userId: selectedUser.id });
   };
 
+  const openPermissions = (targetUser: any) => {
+    setSelectedUser(targetUser);
+    setSelectedPermissions(getEffectiveCmsPermissions(targetUser));
+    setIsPermissionsDialogOpen(true);
+  };
+
+  const togglePermission = (permission: CmsPermissionKey, enabled: boolean) => {
+    setSelectedPermissions((current) =>
+      enabled
+        ? Array.from(new Set([...current, permission]))
+        : current.filter((item) => item !== permission),
+    );
+  };
+
+  const savePermissions = () => {
+    if (!selectedUser) return;
+    updatePermissionsMutation.mutate({
+      userId: selectedUser.id,
+      permissions: selectedPermissions,
+    });
+  };
+
   const filteredUsers = (users || []).filter(
     (u) =>
       u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -411,6 +453,13 @@ export default function CMSUsuarios() {
                                     <UserCog className="h-4 w-4 mr-2" />
                                     Cambiar Rol
                                   </DropdownMenuItem>
+
+                                  {user.role === "super_admin" && u.role !== "super_admin" && (
+                                    <DropdownMenuItem onClick={() => openPermissions(u)}>
+                                      <UserCog className="h-4 w-4 mr-2" />
+                                      Editar permisos
+                                    </DropdownMenuItem>
+                                  )}
                                   
                                   {u.status === "pending" && (
                                     <DropdownMenuItem
@@ -666,6 +715,84 @@ export default function CMSUsuarios() {
                   </>
                 )}
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog: Permisos granulares — exclusivo para super_admin */}
+        <Dialog open={isPermissionsDialogOpen} onOpenChange={setIsPermissionsDialogOpen}>
+          <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <UserCog className="h-5 w-5 text-purple-700" />
+                Funciones y accesos
+              </DialogTitle>
+              <DialogDescription>
+                Activa únicamente lo que podrá ver o hacer{" "}
+                <strong>{selectedUser?.name || selectedUser?.email}</strong>.
+                Los cambios se aplican en su siguiente navegación.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-6 py-2">
+              {CMS_PERMISSION_GROUPS.map((group) => (
+                <section key={group.id} className="rounded-xl border bg-background p-4">
+                  <div className="mb-3">
+                    <h3 className="font-semibold">{group.label}</h3>
+                    <p className="text-xs text-muted-foreground">{group.description}</p>
+                  </div>
+                  <div className="divide-y">
+                    {group.permissions.map((permission) => {
+                      const checked = selectedPermissions.includes(permission.key);
+                      return (
+                        <label
+                          key={permission.key}
+                          className="flex cursor-pointer items-center justify-between gap-4 py-3"
+                        >
+                          <span className="text-sm leading-snug">{permission.label}</span>
+                          <Switch
+                            checked={checked}
+                            onCheckedChange={(enabled) => togglePermission(permission.key, enabled)}
+                            aria-label={permission.label}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+
+            <DialogFooter className="gap-2 sm:justify-between">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setSelectedPermissions(
+                  getDefaultCmsPermissions(
+                    selectedUser?.role,
+                    selectedUser?.regularClassesTeacher,
+                  ),
+                )}
+              >
+                Restaurar permisos del rol
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setIsPermissionsDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={savePermissions}
+                  disabled={updatePermissionsMutation.isPending}
+                  className="bg-purple-700 hover:bg-purple-800"
+                >
+                  {updatePermissionsMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="mr-2 h-4 w-4" />
+                  )}
+                  Guardar permisos
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>

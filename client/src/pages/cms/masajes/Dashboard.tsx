@@ -11,7 +11,7 @@ import { AlertTriangle, CalendarCheck, CalendarPlus, Users, Clock, TrendingUp, U
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
+import { hasCmsPermission } from "@shared/permissions";
 import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
 import MassageCancellationDialog, { type MassageCancellationCategory } from "./MassageCancellationDialog";
 
@@ -19,7 +19,10 @@ const STOCK_PAGE_SIZE = 5;
 
 export default function MasajesDashboard() {
   const { user } = useAuth();
-  const isTherapistReadOnly = user?.role === MASSAGE_THERAPIST_ROLE;
+  const canManageAgenda = hasCmsPermission(user ?? {}, "massages.manage_agenda");
+  const canAssignTherapists = hasCmsPermission(user ?? {}, "massages.assign_therapists");
+  const canManageInventory = hasCmsPermission(user ?? {}, "massages.manage_inventory");
+  const canViewSales = hasCmsPermission(user ?? {}, "massages.view_sales");
   const utils = trpc.useUtils();
   const today = format(new Date(), "yyyy-MM-dd");
   const [stockPage, setStockPage] = useState(0);
@@ -28,12 +31,15 @@ export default function MasajesDashboard() {
   const { data: bookings, isLoading: loadingBookings } = trpc.masajes.agenda.getByDateRange.useQuery(
     { from: today, to: today }
   );
-  const { data: lowStock, isLoading: loadingStock } = trpc.masajes.inventario.getLowStock.useQuery();
+  const { data: lowStock, isLoading: loadingStock } = trpc.masajes.inventario.getLowStock.useQuery(
+    undefined,
+    { enabled: canManageInventory },
+  );
   const { data: activeTherapistCount, isLoading: loadingTherapists } = trpc.masajes.terapeutas.getActiveCount.useQuery();
 
   const { data: pendingAssignment, isLoading: loadingPending } = trpc.masajes.agenda.getPendingManualAssignment.useQuery(
     undefined,
-    { enabled: !isTherapistReadOnly },
+    { enabled: canManageAgenda },
   );
   const notifyMut = trpc.masajes.agenda.notifyFreelanceTherapist.useMutation({
     onSuccess: () => {
@@ -67,8 +73,10 @@ export default function MasajesDashboard() {
               {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
             </p>
           </div>
-          {isTherapistReadOnly ? (
-            <Badge variant="outline">Solo lectura</Badge>
+          {!canManageAgenda ? (
+            canAssignTherapists
+              ? <Badge variant="outline" className="border-teal-500 text-teal-700">Puede asignar terapeutas</Badge>
+              : <Badge variant="outline">Solo lectura</Badge>
           ) : (
             <Button onClick={() => setSkeduDialogOpen(true)}>
               <CalendarPlus className="w-4 h-4 mr-2" /> Agregar programa Skedu
@@ -104,7 +112,7 @@ export default function MasajesDashboard() {
             </CardContent>
           </Card>
 
-          <Card>
+          {canViewSales && <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <TrendingUp className="w-4 h-4" /> Ventas del día
@@ -120,7 +128,7 @@ export default function MasajesDashboard() {
                 </>
               )}
             </CardContent>
-          </Card>
+          </Card>}
 
           <Card>
             <CardHeader className="pb-2">
@@ -139,7 +147,7 @@ export default function MasajesDashboard() {
         </div>
 
         {/* Asignación manual pendiente — siempre visible */}
-        {!isTherapistReadOnly && <Card className="border-amber-300 bg-amber-50">
+        {canManageAgenda && <Card className="border-amber-300 bg-amber-50">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex flex-wrap items-center gap-2 text-amber-800">
               <UserX className="w-5 h-5" />
@@ -262,7 +270,7 @@ export default function MasajesDashboard() {
           </Card>
 
           {/* Alertas de stock */}
-          <Card>
+          {canManageInventory && <Card>
             <CardHeader>
               <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
                 <span className="flex items-center gap-1">
@@ -272,11 +280,9 @@ export default function MasajesDashboard() {
                     <Badge variant="destructive" className="text-xs ml-1">{lowStock!.length}</Badge>
                   )}
                 </span>
-                {!isTherapistReadOnly && (
-                  <Link href="/cms/masajes/inventario">
-                    <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver inventario →</span>
-                  </Link>
-                )}
+                <Link href="/cms/masajes/inventario">
+                  <span className="text-sm font-normal text-primary cursor-pointer hover:underline">Ver inventario →</span>
+                </Link>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -318,23 +324,20 @@ export default function MasajesDashboard() {
                 );
               })()}
             </CardContent>
-          </Card>
+          </Card>}
         </div>
 
         {/* Links rápidos */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {[
-            { href: "/cms/masajes/agenda", label: "Agenda" },
-            { href: "/cms/masajes/terapeutas", label: "Terapeutas" },
-            { href: "/cms/masajes/tecnicas", label: "Técnicas" },
-            { href: "/cms/masajes/inventario", label: "Inventario" },
-            { href: "/cms/masajes/clientes", label: "Clientes" },
-            { href: "/cms/masajes/analytics", label: "Ventas" },
-            { href: "/cms/masajes/rrhh", label: "RRHH" },
-          ].filter(link =>
-            (user?.role !== CANCAGUA_STAFF_ROLE && !isTherapistReadOnly)
-            || link.href === "/cms/masajes/agenda"
-          ).map(link => (
+            { href: "/cms/masajes/agenda", label: "Agenda", permission: "module.massages" as const },
+            { href: "/cms/masajes/terapeutas", label: "Terapeutas", permission: "massages.manage_therapists" as const },
+            { href: "/cms/masajes/tecnicas", label: "Técnicas", permission: "massages.manage_catalog" as const },
+            { href: "/cms/masajes/inventario", label: "Inventario", permission: "massages.manage_inventory" as const },
+            { href: "/cms/masajes/clientes", label: "Clientes", permission: "massages.view_clients" as const },
+            { href: "/cms/masajes/analytics", label: "Ventas", permission: "massages.view_sales" as const },
+            { href: "/cms/masajes/rrhh", label: "RRHH", permission: "massages.view_hr" as const },
+          ].filter(link => hasCmsPermission(user ?? {}, link.permission)).map(link => (
             <Link key={link.href} href={link.href}>
               <Card className="cursor-pointer hover:border-primary transition-colors">
                 <CardContent className="p-4 text-center">
@@ -345,7 +348,7 @@ export default function MasajesDashboard() {
           ))}
         </div>
       </div>
-      {!isTherapistReadOnly && (
+      {canManageAgenda && (
         <>
           <SkeduProgramBookingDialog
             open={skeduDialogOpen}

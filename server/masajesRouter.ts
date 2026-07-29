@@ -26,6 +26,7 @@ import {
   discountCodeUsages,
   massageDiscountCodeTechniques,
   massageCheckoutSessions,
+  type User,
 } from "../drizzle/schema";
 import {
   sendMassageBookingConfirmationEmail,
@@ -39,7 +40,12 @@ import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
 import { calculateMassageDiscount } from "./massageDiscounts";
 import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne, isNull } from "drizzle-orm";
-import { hasMassageAdminAccess, hasMassageOperationsAccess, hasMassageReadAccess } from "@shared/permissions";
+import {
+  hasCmsPermission,
+  hasMassageAdminAccess,
+  hasMassageOperationsAccess,
+  hasMassageReadAccess,
+} from "@shared/permissions";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { massageAreaAdminRouter } from "./massageAreaAdmin";
 import {
@@ -62,9 +68,24 @@ const massageOperations = async (role: string) => {
   }
 };
 
-const massageRead = async (role: string) => {
-  if (!hasMassageReadAccess(role)) {
+const massageRead = async (user: string | Pick<User, "role" | "permissions" | "regularClassesTeacher">) => {
+  const allowed = typeof user === "string"
+    ? hasMassageReadAccess(user)
+    : hasCmsPermission(user, "module.massages");
+  if (!allowed) {
     throw new TRPCError({ code: "FORBIDDEN" });
+  }
+};
+
+const massageAssignment = async (
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+) => {
+  if (!hasCmsPermission(user, "module.massages")
+      || !hasCmsPermission(user, "massages.assign_therapists")) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permiso para asignar terapeutas",
+    });
   }
 };
 
@@ -672,7 +693,11 @@ async function syncRecurringMassageAvailability(
 // ─── TERAPEUTAS ───────────────────────────────────────────────
 const terapeutasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    await massageOperations(ctx.user.role);
+    if (hasCmsPermission(ctx.user, "massages.assign_therapists")) {
+      await massageRead(ctx.user);
+    } else {
+      await massageOperations(ctx.user.role);
+    }
     const db = await getDb();
     if (!db) return [];
     const therapists = await db.select().from(massageTherapists)
@@ -1039,7 +1064,7 @@ const agendaRouter = router({
       excludeBookingId: z.number().int().positive().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAssignment(ctx.user);
       const db = await getDb();
       if (!db) return { therapists: [], rooms: [], endTime: "" };
       const { excludeBookingId, ...availabilityInput } = input;
@@ -1187,7 +1212,7 @@ const agendaRouter = router({
       secondTherapistId: z.number().int().positive().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAssignment(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -1270,7 +1295,7 @@ const agendaRouter = router({
   getByDateRange: protectedProcedure
     .input(z.object({ from: z.string(), to: z.string() }))
     .query(async ({ ctx, input }) => {
-      await massageRead(ctx.user.role);
+      await massageRead(ctx.user);
       const db = await getDb();
       if (!db) return [];
 
@@ -1384,9 +1409,15 @@ const agendaRouter = router({
         externalReference: row.externalReference,
       }));
 
-      return [...standardBookings, ...skeduBookings].sort((a, b) =>
+      const bookings = [...standardBookings, ...skeduBookings].sort((a, b) =>
         String(a.bookingDate).localeCompare(String(b.bookingDate)) || a.startTime.localeCompare(b.startTime)
       );
+      if (hasCmsPermission(ctx.user, "massages.view_sales")) return bookings;
+      return bookings.map((booking) => ({
+        ...booking,
+        paymentStatus: null,
+        amountPaid: null,
+      }));
     }),
 
   getPendingManualAssignment: protectedProcedure.query(async ({ ctx }) => {

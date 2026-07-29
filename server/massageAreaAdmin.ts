@@ -13,6 +13,7 @@ import {
 } from "../drizzle/schema";
 import { protectedProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { hasCmsPermission } from "@shared/permissions";
 
 const CHILE_TIME_ZONE = "America/Santiago";
 const VAT_FACTOR = 1.19;
@@ -102,8 +103,11 @@ export function isMassageConsideredCompleted(
   return bookingDate < current.date || (bookingDate === current.date && endTime <= current.time);
 }
 
-async function hasAreaAdminAccess(db: MassageDb, user: { id: number; role: string }) {
-  if (user.role === "super_admin") return true;
+async function hasAreaAdminAccess(
+  db: MassageDb,
+  user: { id: number; role: string; permissions?: string | null },
+) {
+  if (hasCmsPermission(user, "massages.area_admin")) return true;
   const [therapist] = await db.select({
     name: massageTherapists.name,
     isManager: massageTherapists.isManager,
@@ -113,11 +117,14 @@ async function hasAreaAdminAccess(db: MassageDb, user: { id: number; role: strin
   return !!therapist && isTamara(therapist.name) && therapist.isManager === 1;
 }
 
-async function assertAreaAdmin(db: MassageDb, user: { id: number; role: string }) {
+async function assertAreaAdmin(
+  db: MassageDb,
+  user: { id: number; role: string; permissions?: string | null },
+) {
   if (!await hasAreaAdminAccess(db, user)) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "Este cierre está disponible solamente para Tamara Muñoz y superadministradores.",
+      message: "No tienes permiso para acceder a la administración del área de masajes.",
     });
   }
 }

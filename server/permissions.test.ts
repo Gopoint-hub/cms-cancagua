@@ -5,6 +5,8 @@ import {
   CANCAGUA_STAFF_ROLE,
   MASSAGE_THERAPIST_ROLE,
   canAccessCmsPath,
+  getEffectiveCmsPermissions,
+  hasCmsPermission,
   hasB2CAccess,
   hasMaintenanceAccess,
   hasMassageAdminAccess,
@@ -37,7 +39,7 @@ function createStaffContext(): TrpcContext {
   };
 }
 
-function createMassageTherapistContext(): TrpcContext {
+function createMassageTherapistContext(permissions?: string): TrpcContext {
   const context = createStaffContext();
   return {
     ...context,
@@ -47,6 +49,7 @@ function createMassageTherapistContext(): TrpcContext {
       email: "terapeuta@example.com",
       name: "Terapeuta",
       role: MASSAGE_THERAPIST_ROLE,
+      permissions: permissions ?? null,
     },
   };
 }
@@ -150,5 +153,57 @@ describe("Terapeuta de Masajes permissions", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(caller.masajes.agenda.updateStatus({ id: 1, status: "completed" }))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("allows an explicitly authorized therapist to assign massages without exposing sales", async () => {
+    const permissions = JSON.stringify([
+      "module.massages",
+      "massages.assign_therapists",
+    ]);
+    const context = createMassageTherapistContext(permissions);
+    const caller = appRouter.createCaller(context);
+
+    expect(hasCmsPermission(context.user!, "massages.assign_therapists")).toBe(true);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/masajes/agenda",
+      0,
+      permissions,
+    )).toBe(true);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/masajes/analytics",
+      0,
+      permissions,
+    )).toBe(false);
+
+    await expect(caller.masajes.agenda.getSkeduProgramResources({
+      bookingDate: "2026-07-29",
+      startTime: "12:00",
+      duration: 30,
+      modality: "simple",
+    })).resolves.toEqual(expect.objectContaining({
+      therapists: expect.any(Array),
+      rooms: expect.any(Array),
+    }));
+
+    await expect(caller.masajes.agenda.updateStatus({ id: 1, status: "completed" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("treats an explicit empty permission list as removal of legacy role access", () => {
+    expect(getEffectiveCmsPermissions({
+      role: "admin",
+      permissions: "[]",
+    })).toEqual([]);
+    expect(canAccessCmsPath("admin", "/cms/analytics", 0, "[]")).toBe(false);
+  });
+
+  it("keeps granular permission changes exclusive to super administrators", async () => {
+    const caller = appRouter.createCaller(createStaffContext());
+    await expect(caller.users.updatePermissions({
+      userId: 2,
+      permissions: ["module.massages"],
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

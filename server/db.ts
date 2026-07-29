@@ -301,6 +301,21 @@ export async function updateUserModules(userId: number, allowedModules: string[]
   }
 }
 
+export async function updateUserPermissions(userId: number, permissions: string[] | null) {
+  const db = await getDb();
+  if (!db) return false;
+
+  try {
+    await db.update(users).set({
+      permissions: permissions == null ? null : JSON.stringify(permissions),
+    }).where(eq(users.id, userId));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to update user permissions:", error);
+    return false;
+  }
+}
+
 export async function deleteUser(userId: number) {
   const db = await getDb();
   if (!db) {

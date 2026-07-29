@@ -23,6 +23,7 @@ import { ensureMassageBookingSchema } from "../ensureMassageBookingSchema";
 import { ensureMassageMonthlyClosureSchema } from "../ensureMassageMonthlyClosureSchema";
 import { ensureMassageCheckoutSchema } from "../ensureMassageCheckoutSchema";
 import { ensureRegularClassesSchema } from "../ensureRegularClassesSchema";
+import { ensureUserPermissionsSchema } from "../ensureUserPermissionsSchema";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -44,6 +45,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  await ensureUserPermissionsSchema();
   await ensureMassageBookingSchema();
   await ensureMassageDiscountSchema();
   await ensureMassageAvailabilitySchema();

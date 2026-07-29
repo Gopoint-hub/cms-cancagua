@@ -26,7 +26,7 @@ import MassageCancellationDialog, {
   type MassageCancellationCategory,
 } from "./MassageCancellationDialog";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
+import { hasCmsPermission } from "@shared/permissions";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendiente", confirmed: "Confirmada", completed: "Completada",
@@ -62,12 +62,14 @@ function calcEndTime(start: string, duration: number): string {
 }
 
 // ─── Tarjeta individual de reserva ────────────────────────────────────────────
-function BookingCard({ b, onEdit, onStatus, onCancel, readOnly }: {
+function BookingCard({ b, onEdit, onStatus, onCancel, canManageAgenda, canAssignTherapists, canViewSales }: {
   b: any;
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
-  readOnly: boolean;
+  canManageAgenda: boolean;
+  canAssignTherapists: boolean;
+  canViewSales: boolean;
 }) {
   return (
     <Card className={b.status === "cancelled" ? "border-red-200 bg-red-50/20" : ""}>
@@ -95,7 +97,7 @@ function BookingCard({ b, onEdit, onStatus, onCancel, readOnly }: {
               {b.secondTherapistName && ` + ${b.secondTherapistName}`}
             </p>
             {b.externalReference && <p className="text-xs text-muted-foreground mt-1">Ref. Skedu: {b.externalReference}</p>}
-            {b.amountPaid && (
+            {canViewSales && b.amountPaid && (
               <p className="text-sm text-green-600 mt-1">$ {Number(b.amountPaid).toLocaleString("es-CL")}</p>
             )}
             {b.status === "cancelled" && b.cancellationReason && (
@@ -105,19 +107,19 @@ function BookingCard({ b, onEdit, onStatus, onCancel, readOnly }: {
               </div>
             )}
           </div>
-          {!readOnly && <div className="flex gap-2 flex-wrap shrink-0">
-            {b.status === "pending" && (
+          {(canManageAgenda || canAssignTherapists) && <div className="flex gap-2 flex-wrap shrink-0">
+            {canManageAgenda && b.status === "pending" && (
               <Button size="sm" variant="outline" onClick={() => onStatus(b.id, "confirmed", b.bookingKind)}>Confirmar</Button>
             )}
             {b.bookingKind === "skedu_program" ? (
               <>
-                {b.status !== "cancelled" && (
+                {canAssignTherapists && b.status !== "cancelled" && (
                   <Button size="sm" variant="outline" onClick={() => onEdit(b)} title="Editar terapeutas asignados">
                     <Edit className="mr-1.5 h-4 w-4" />
                     Terapeutas
                   </Button>
                 )}
-                {b.status === "confirmed" && (
+                {canManageAgenda && b.status === "confirmed" && (
                   <Button size="sm" variant="ghost" className="text-red-600" onClick={() => onCancel(b)}>
                     Cancelar
                   </Button>
@@ -125,12 +127,12 @@ function BookingCard({ b, onEdit, onStatus, onCancel, readOnly }: {
               </>
             ) : (
               <>
-                {b.status !== "cancelled" && (
+                {canManageAgenda && b.status !== "cancelled" && (
                   <Button size="sm" variant="ghost" onClick={() => onEdit(b)}>
                     <Edit className="w-4 h-4" />
                   </Button>
                 )}
-                {(b.status === "pending" || b.status === "confirmed") && (
+                {canManageAgenda && (b.status === "pending" || b.status === "confirmed") && (
                   <Button size="sm" variant="ghost" className="text-red-600" onClick={() => onCancel(b)}>
                     Cancelar
                   </Button>
@@ -145,13 +147,15 @@ function BookingCard({ b, onEdit, onStatus, onCancel, readOnly }: {
 }
 
 // ─── Vista Día ─────────────────────────────────────────────────────────────────
-function DayView({ bookings, isLoading, onEdit, onStatus, onCancel, readOnly }: {
+function DayView({ bookings, isLoading, onEdit, onStatus, onCancel, canManageAgenda, canAssignTherapists, canViewSales }: {
   bookings: any[] | undefined;
   isLoading: boolean;
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
-  readOnly: boolean;
+  canManageAgenda: boolean;
+  canAssignTherapists: boolean;
+  canViewSales: boolean;
 }) {
   if (isLoading) return <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full" />)}</div>;
   if (!bookings || bookings.length === 0) {
@@ -160,14 +164,23 @@ function DayView({ bookings, isLoading, onEdit, onStatus, onCancel, readOnly }: 
   return (
     <div className="space-y-3">
       {bookings.map(b => (
-        <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} onCancel={onCancel} readOnly={readOnly} />
+        <BookingCard
+          key={`${b.bookingKind}-${b.id}`}
+          b={b}
+          onEdit={onEdit}
+          onStatus={onStatus}
+          onCancel={onCancel}
+          canManageAgenda={canManageAgenda}
+          canAssignTherapists={canAssignTherapists}
+          canViewSales={canViewSales}
+        />
       ))}
     </div>
   );
 }
 
 // ─── Vista Semana ──────────────────────────────────────────────────────────────
-function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus, onCancel, readOnly }: {
+function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus, onCancel, canManageAgenda, canAssignTherapists, canViewSales }: {
   bookings: any[] | undefined;
   isLoading: boolean;
   weekStart: Date;
@@ -175,7 +188,9 @@ function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
-  readOnly: boolean;
+  canManageAgenda: boolean;
+  canAssignTherapists: boolean;
+  canViewSales: boolean;
 }) {
   const days = eachDayOfInterval({ start: weekStart, end: endOfWeek(weekStart, { locale: es }) });
 
@@ -205,7 +220,16 @@ function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus
             ) : (
               <div className="space-y-2 pl-1">
                 {dayBookings.map(b => (
-                  <BookingCard key={`${b.bookingKind}-${b.id}`} b={b} onEdit={onEdit} onStatus={onStatus} onCancel={onCancel} readOnly={readOnly} />
+                  <BookingCard
+                    key={`${b.bookingKind}-${b.id}`}
+                    b={b}
+                    onEdit={onEdit}
+                    onStatus={onStatus}
+                    onCancel={onCancel}
+                    canManageAgenda={canManageAgenda}
+                    canAssignTherapists={canAssignTherapists}
+                    canViewSales={canViewSales}
+                  />
                 ))}
               </div>
             )}
@@ -217,11 +241,12 @@ function WeekView({ bookings, isLoading, weekStart, onDayClick, onEdit, onStatus
 }
 
 // ─── Vista Mes ─────────────────────────────────────────────────────────────────
-function MonthView({ bookings, isLoading, monthDate, onDayClick }: {
+function MonthView({ bookings, isLoading, monthDate, onDayClick, canViewSales }: {
   bookings: any[] | undefined;
   isLoading: boolean;
   monthDate: Date;
   onDayClick: (date: string) => void;
+  canViewSales: boolean;
 }) {
   if (isLoading) return <div className="grid grid-cols-7 gap-1">{Array(35).fill(0).map((_, i) => <Skeleton key={i} className="h-16" />)}</div>;
 
@@ -266,7 +291,7 @@ function MonthView({ bookings, isLoading, monthDate, onDayClick }: {
                   <div className={`text-xs font-semibold ${count > 0 ? "text-teal-700" : ""}`}>
                     {count} reserva{count !== 1 ? "s" : ""}
                   </div>
-                  {revenue > 0 && (
+                  {canViewSales && revenue > 0 && (
                     <div className="text-[10px] text-green-600">
                       ${revenue.toLocaleString("es-CL")}
                     </div>
@@ -284,7 +309,9 @@ function MonthView({ bookings, isLoading, monthDate, onDayClick }: {
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function MasajesAgenda() {
   const { user } = useAuth();
-  const isTherapistReadOnly = user?.role === MASSAGE_THERAPIST_ROLE;
+  const canManageAgenda = hasCmsPermission(user ?? {}, "massages.manage_agenda");
+  const canAssignTherapists = hasCmsPermission(user ?? {}, "massages.assign_therapists");
+  const canViewSales = hasCmsPermission(user ?? {}, "massages.view_sales");
   const search = useSearch();
   const initialDate = (() => {
     const p = new URLSearchParams(search);
@@ -318,19 +345,19 @@ export default function MasajesAgenda() {
   );
   const { data: techniques } = trpc.masajes.tecnicas.getAll.useQuery(
     undefined,
-    { enabled: !isTherapistReadOnly },
+    { enabled: canManageAgenda },
   );
   const { data: therapists } = trpc.masajes.terapeutas.getAll.useQuery(
     undefined,
-    { enabled: !isTherapistReadOnly },
+    { enabled: canManageAgenda },
   );
   const { data: rooms } = trpc.masajes.salas.getAll.useQuery(
     undefined,
-    { enabled: !isTherapistReadOnly },
+    { enabled: canManageAgenda },
   );
   const { data: slots } = trpc.masajes.agenda.getAvailableSlots.useQuery(
     { date: selectedDate, duration: form.duration },
-    { enabled: open && !isTherapistReadOnly }
+    { enabled: open && canManageAgenda }
   );
 
   const createMut = trpc.masajes.agenda.create.useMutation({
@@ -398,9 +425,10 @@ export default function MasajesAgenda() {
 
   const openEdit = (b: any) => {
     if (b.bookingKind === "skedu_program") {
-      setEditingSkeduBooking(b);
+      if (canAssignTherapists) setEditingSkeduBooking(b);
       return;
     }
+    if (!canManageAgenda) return;
     setEditingId(b.id);
     setForm({
       clientName: b.clientName, clientEmail: b.clientEmail ?? "", clientPhone: b.clientPhone ?? "",
@@ -491,13 +519,17 @@ export default function MasajesAgenda() {
             <h1 className="text-2xl font-semibold tracking-wide">Agenda</h1>
             <p className="text-muted-foreground text-sm mt-1">Reservas de masajes</p>
           </div>
-          {isTherapistReadOnly ? (
+          {!canManageAgenda && !canAssignTherapists ? (
             <Badge variant="outline">Solo lectura</Badge>
-          ) : (
+          ) : canManageAgenda ? (
             <div className="flex w-full gap-2 flex-wrap sm:w-auto">
               <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setSkeduOpen(true)}>Agregar programa Skedu</Button>
               <Button className="flex-1 sm:flex-none" onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva reserva</Button>
             </div>
+          ) : (
+            <Badge variant="outline" className="border-teal-500 text-teal-700">
+              Puede asignar terapeutas
+            </Badge>
           )}
         </div>
 
@@ -558,7 +590,9 @@ export default function MasajesAgenda() {
             onEdit={openEdit}
             onStatus={handleStatus}
             onCancel={setCancellationTarget}
-            readOnly={isTherapistReadOnly}
+            canManageAgenda={canManageAgenda}
+            canAssignTherapists={canAssignTherapists}
+            canViewSales={canViewSales}
           />
         )}
         {view === "week" && (
@@ -570,7 +604,9 @@ export default function MasajesAgenda() {
             onEdit={openEdit}
             onStatus={handleStatus}
             onCancel={setCancellationTarget}
-            readOnly={isTherapistReadOnly}
+            canManageAgenda={canManageAgenda}
+            canAssignTherapists={canAssignTherapists}
+            canViewSales={canViewSales}
           />
         )}
         {view === "month" && (
@@ -579,12 +615,13 @@ export default function MasajesAgenda() {
             isLoading={isLoading}
             monthDate={parsedDate}
             onDayClick={handleDayClick}
+            canViewSales={canViewSales}
           />
         )}
       </div>
 
       {/* Modal reserva */}
-      {!isTherapistReadOnly && <Dialog open={open} onOpenChange={setOpen}>
+      {canManageAgenda && <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? "Editar reserva" : "Nueva reserva"}</DialogTitle>
@@ -717,30 +754,32 @@ export default function MasajesAgenda() {
           </DialogFooter>
         </DialogContent>
       </Dialog>}
-      {!isTherapistReadOnly && (
-        <>
-          <SkeduProgramBookingDialog
-            open={skeduOpen}
-            onOpenChange={setSkeduOpen}
-            initialDate={selectedDate}
-            onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
-          />
-          <SkeduTherapistAssignmentDialog
-            open={!!editingSkeduBooking}
-            onOpenChange={(next) => { if (!next) setEditingSkeduBooking(null); }}
-            booking={editingSkeduBooking}
-            onUpdated={() => utils.masajes.agenda.getByDateRange.invalidate()}
-          />
-          <MassageCancellationDialog
-            open={!!cancellationTarget}
-            onOpenChange={(next) => { if (!next) setCancellationTarget(null); }}
-            bookingLabel={cancellationTarget
-              ? `${cancellationTarget.clientName} · ${cancellationTarget.techniqueName}`
-              : undefined}
-            isPending={statusMut.isPending || programStatusMut.isPending}
-            onConfirm={handleCancellation}
-          />
-        </>
+      {canManageAgenda && (
+        <SkeduProgramBookingDialog
+          open={skeduOpen}
+          onOpenChange={setSkeduOpen}
+          initialDate={selectedDate}
+          onCreated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+        />
+      )}
+      {canAssignTherapists && (
+        <SkeduTherapistAssignmentDialog
+          open={!!editingSkeduBooking}
+          onOpenChange={(next) => { if (!next) setEditingSkeduBooking(null); }}
+          booking={editingSkeduBooking}
+          onUpdated={() => utils.masajes.agenda.getByDateRange.invalidate()}
+        />
+      )}
+      {canManageAgenda && (
+        <MassageCancellationDialog
+          open={!!cancellationTarget}
+          onOpenChange={(next) => { if (!next) setCancellationTarget(null); }}
+          bookingLabel={cancellationTarget
+            ? `${cancellationTarget.clientName} · ${cancellationTarget.techniqueName}`
+            : undefined}
+          isPending={statusMut.isPending || programStatusMut.isPending}
+          onConfirm={handleCancellation}
+        />
       )}
     </DashboardLayout>
   );

@@ -15,6 +15,7 @@ import { clientesRouter } from "./clientesRouter";
 import { marketingRouter } from "./marketingRouter";
 import { regularClassesRouter } from "./regularClassesRouter";
 import { hasB2CAccess, hasMaintenanceAccess } from "@shared/permissions";
+import { ALL_CMS_PERMISSIONS } from "@shared/permissions";
 import {
   CANCAGUA_EMAIL_REFINEMENT_RULES,
   getCancaguaEmailDesignSystem,
@@ -896,6 +897,41 @@ export const appRouter = router({
 
         const success = await db.updateUserModules(input.userId, input.allowedModules);
         return { success };
+      }),
+
+    // Permisos granulares: este panel y esta mutación son exclusivos de super_admin.
+    updatePermissions: protectedProcedure
+      .input(z.object({
+        userId: z.number(),
+        permissions: z.array(z.enum(ALL_CMS_PERMISSIONS as [string, ...string[]])),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Solo los súper administradores pueden modificar permisos",
+          });
+        }
+
+        const targetUser = await db.getUserById(input.userId);
+        if (!targetUser) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Usuario no encontrado" });
+        }
+        if (targetUser.role === "super_admin") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Los súper administradores siempre conservan acceso total",
+          });
+        }
+
+        const success = await db.updateUserPermissions(input.userId, input.permissions);
+        if (!success) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "No se pudieron guardar los permisos",
+          });
+        }
+        return { success: true };
       }),
 
     // Actualizar estado de usuario

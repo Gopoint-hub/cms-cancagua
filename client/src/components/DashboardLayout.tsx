@@ -38,7 +38,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { canAccessCmsPath, CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
+import {
+  canAccessCmsPath,
+  CANCAGUA_STAFF_ROLE,
+  CmsPermissionKey,
+  hasCmsPermission,
+  MASSAGE_THERAPIST_ROLE,
+  parseCmsPermissions,
+} from "@shared/permissions";
 import { trpc } from "@/lib/trpc";
 
 // Definición de categorías y sus items de menú
@@ -53,6 +60,7 @@ interface MenuItem {
   /** Restricted massage-area accounting close (Tamara and superadmins). */
   areaAdminOnly?: boolean;
   regularClassesAccess?: "teacher" | "reception" | "admin";
+  permission?: CmsPermissionKey;
 }
 
 interface Category {
@@ -65,6 +73,7 @@ interface Category {
   /** If set, only these roles can see this category. If not set, all roles can see it. */
   roles?: string[];
   requiresRegularClassesAccess?: boolean;
+  permission: CmsPermissionKey;
 }
 
 export const categories: Category[] = [
@@ -74,6 +83,7 @@ export const categories: Category[] = [
     icon: Store,
     description: "Clientes & Servicios",
     color: "bg-emerald-500",
+    permission: "module.b2c",
     roles: ["super_admin", "admin", CANCAGUA_STAFF_ROLE],
     items: [
       { icon: Package, label: "Servicios", path: "/cms/servicios" },
@@ -90,6 +100,7 @@ export const categories: Category[] = [
     icon: Briefcase,
     description: "Eventos Corporativos",
     color: "bg-blue-500",
+    permission: "module.b2b",
     roles: ["super_admin", "admin"],
     items: [
       { icon: FileText, label: "Cotizaciones", path: "/cms/cotizaciones" },
@@ -103,6 +114,7 @@ export const categories: Category[] = [
     icon: ShoppingCart,
     description: "Canales de Venta",
     color: "bg-teal-500",
+    permission: "module.sales",
     roles: ["super_admin", "admin", "editor", "seller", "concierge", "user", CANCAGUA_STAFF_ROLE],
     items: [
       { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales" },
@@ -118,6 +130,7 @@ export const categories: Category[] = [
     icon: Megaphone,
     description: "Newsletters & Campañas",
     color: "bg-purple-500",
+    permission: "module.marketing",
     roles: ["super_admin", "admin"],
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/cms/marketing" },
@@ -138,6 +151,7 @@ export const categories: Category[] = [
     icon: TrendingUp,
     description: "Analytics & Reportes",
     color: "bg-amber-500",
+    permission: "module.metrics",
     roles: ["super_admin", "admin"],
     items: [
       { icon: BarChart3, label: "Analytics", path: "/cms/analytics" },
@@ -149,6 +163,7 @@ export const categories: Category[] = [
     icon: HardHat,
     description: "Mantención & Operaciones",
     color: "bg-orange-500",
+    permission: "module.operations",
     roles: ["super_admin", "admin", CANCAGUA_STAFF_ROLE],
     items: [
       { icon: Wrench, label: "Reportes Mantención", path: "/cms/reportes-mantencion" },
@@ -160,6 +175,7 @@ export const categories: Category[] = [
     icon: Shield,
     description: "Usuarios & Configuración",
     color: "bg-slate-500",
+    permission: "module.admin",
     roles: ["super_admin", "admin"],
     items: [
       { icon: Users, label: "Usuarios", path: "/cms/usuarios" },
@@ -175,19 +191,20 @@ export const categories: Category[] = [
     icon: Sparkles,
     description: "Área de Masajes & Spa",
     color: "bg-rose-500",
+    permission: "module.massages",
     roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE],
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/cms/masajes", roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE] },
       { icon: CalendarCheck, label: "Agenda", path: "/cms/masajes/agenda", roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE] },
-      { icon: Users, label: "Terapeutas", path: "/cms/masajes/terapeutas", roles: ["super_admin", "admin", "editor"] },
-      { icon: Sparkles, label: "Técnicas", path: "/cms/masajes/tecnicas", roles: ["super_admin", "admin", "editor"] },
-      { icon: Package, label: "Inventario", path: "/cms/masajes/inventario", roles: ["super_admin", "admin", "editor"] },
-      { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes", roles: ["super_admin", "admin", "editor"] },
-      { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics", roles: ["super_admin", "admin", "editor"] },
-      { icon: FileSpreadsheet, label: "Admin área", path: "/cms/masajes/admin", areaAdminOnly: true },
-      { icon: Tag, label: "Códigos de descuento", path: "/cms/masajes/descuentos", roles: ["super_admin", "admin", "editor"] },
-      { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh", roles: ["super_admin", "admin", "editor"] },
-      { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion", roles: ["super_admin", "admin", "editor"] },
+      { icon: Users, label: "Terapeutas", path: "/cms/masajes/terapeutas", roles: ["super_admin", "admin", "editor"], permission: "massages.manage_therapists" },
+      { icon: Sparkles, label: "Técnicas", path: "/cms/masajes/tecnicas", roles: ["super_admin", "admin", "editor"], permission: "massages.manage_catalog" },
+      { icon: Package, label: "Inventario", path: "/cms/masajes/inventario", roles: ["super_admin", "admin", "editor"], permission: "massages.manage_inventory" },
+      { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes", roles: ["super_admin", "admin", "editor"], permission: "massages.view_clients" },
+      { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics", roles: ["super_admin", "admin", "editor"], permission: "massages.view_sales" },
+      { icon: FileSpreadsheet, label: "Admin área", path: "/cms/masajes/admin", areaAdminOnly: true, permission: "massages.area_admin" },
+      { icon: Tag, label: "Códigos de descuento", path: "/cms/masajes/descuentos", roles: ["super_admin", "admin", "editor"], permission: "massages.manage_discounts" },
+      { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh", roles: ["super_admin", "admin", "editor"], permission: "massages.view_hr" },
+      { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion", roles: ["super_admin", "admin", "editor"], permission: "massages.manage_settings" },
     ],
   },
   {
@@ -196,18 +213,19 @@ export const categories: Category[] = [
     icon: Dumbbell,
     description: "Programa, asistencia & comisiones",
     color: "bg-sky-700",
+    permission: "module.regular_classes",
     roles: ["super_admin", "admin", "user", CANCAGUA_STAFF_ROLE, MASSAGE_THERAPIST_ROLE],
     requiresRegularClassesAccess: true,
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/cms/clases-regulares" },
-      { icon: UserCheck, label: "Asistencia", path: "/cms/clases-regulares/asistencia", regularClassesAccess: "teacher" },
-      { icon: DollarSign, label: "Mi liquidación", path: "/cms/clases-regulares/mis-liquidaciones", regularClassesAccess: "teacher" },
-      { icon: UsersRound, label: "Alumnos y pagos", path: "/cms/clases-regulares/alumnos", regularClassesAccess: "reception" },
-      { icon: CalendarDays, label: "Clases y horarios", path: "/cms/clases-regulares/clases", regularClassesAccess: "admin" },
-      { icon: Users, label: "Profesores", path: "/cms/clases-regulares/profesores", regularClassesAccess: "admin" },
-      { icon: FileSpreadsheet, label: "Liquidaciones", path: "/cms/clases-regulares/liquidaciones", regularClassesAccess: "admin" },
-      { icon: Mail, label: "Beneficios y correos", path: "/cms/clases-regulares/comunicaciones", regularClassesAccess: "admin" },
-      { icon: Settings, label: "Configuración", path: "/cms/clases-regulares/configuracion", regularClassesAccess: "admin" },
+      { icon: UserCheck, label: "Asistencia", path: "/cms/clases-regulares/asistencia", regularClassesAccess: "teacher", permission: "regular_classes.attendance" },
+      { icon: DollarSign, label: "Mi liquidación", path: "/cms/clases-regulares/mis-liquidaciones", regularClassesAccess: "teacher", permission: "regular_classes.my_settlements" },
+      { icon: UsersRound, label: "Alumnos y pagos", path: "/cms/clases-regulares/alumnos", regularClassesAccess: "reception", permission: "regular_classes.students" },
+      { icon: CalendarDays, label: "Clases y horarios", path: "/cms/clases-regulares/clases", regularClassesAccess: "admin", permission: "regular_classes.manage" },
+      { icon: Users, label: "Profesores", path: "/cms/clases-regulares/profesores", regularClassesAccess: "admin", permission: "regular_classes.manage" },
+      { icon: FileSpreadsheet, label: "Liquidaciones", path: "/cms/clases-regulares/liquidaciones", regularClassesAccess: "admin", permission: "regular_classes.settlements" },
+      { icon: Mail, label: "Beneficios y correos", path: "/cms/clases-regulares/comunicaciones", regularClassesAccess: "admin", permission: "regular_classes.communications" },
+      { icon: Settings, label: "Configuración", path: "/cms/clases-regulares/configuracion", regularClassesAccess: "admin", permission: "regular_classes.manage" },
     ],
   },
   {
@@ -216,6 +234,7 @@ export const categories: Category[] = [
     icon: HelpCircle,
     description: "Documentación & Guías",
     color: "bg-cyan-500",
+    permission: "module.help",
     roles: ["super_admin", "admin"],
     items: [
       { icon: Mail, label: "Newsletters", path: "/cms/ayuda/newsletters" },
@@ -326,7 +345,7 @@ export default function DashboardLayout({
     );
   }
 
-  if (!canAccessCmsPath(user.role, location, user.regularClassesTeacher)) {
+  if (!canAccessCmsPath(user.role, location, user.regularClassesTeacher, user.permissions)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/20 p-6">
         <div className="max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
@@ -377,6 +396,7 @@ function DashboardLayoutContent({
   toggleCategory,
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
+  const hasExplicitPermissions = parseCmsPermissions(user?.permissions) !== null;
   const areaAdminAccess = trpc.masajes.areaAdmin.access.useQuery(undefined, {
     enabled: Boolean(user),
     retry: false,
@@ -469,16 +489,19 @@ function DashboardLayoutContent({
             <div className="px-2 py-1">
               {categories
                 .filter(cat =>
-                  (!cat.roles || cat.roles.includes(user?.role || ""))
-                  && (!cat.requiresRegularClassesAccess || regularClassesAccess.data?.allowed === true)
+                  hasCmsPermission(user ?? {}, cat.permission)
+                  && (hasExplicitPermissions || !cat.roles || cat.roles.includes(user?.role || ""))
+                  && (!cat.requiresRegularClassesAccess || hasExplicitPermissions || regularClassesAccess.data?.allowed === true)
                 )
                 .map((category) => {
                 // Filter items by role too
                 const visibleItems = category.items.filter(item =>
-                  (!item.roles || item.roles.includes(user?.role || ""))
-                  && (!item.areaAdminOnly || areaAdminAccess.data?.allowed === true)
+                  (!item.permission || hasCmsPermission(user ?? {}, item.permission))
+                  && (hasExplicitPermissions || !item.roles || item.roles.includes(user?.role || ""))
+                  && (!item.areaAdminOnly || hasExplicitPermissions || areaAdminAccess.data?.allowed === true)
                   && (
                     !item.regularClassesAccess
+                    || hasExplicitPermissions
                     || (item.regularClassesAccess === "admin" && regularClassesAccess.data?.isAdmin)
                     || (item.regularClassesAccess === "reception" && regularClassesAccess.data?.isReception)
                     || (item.regularClassesAccess === "teacher" && (regularClassesAccess.data?.isTeacher || regularClassesAccess.data?.isAdmin))

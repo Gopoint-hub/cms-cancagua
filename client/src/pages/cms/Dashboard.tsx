@@ -11,7 +11,11 @@ import {
 import { useLocation } from "wouter";
 import { SEOHead } from "@/components/SEOHead";
 import { useEffect } from "react";
-import { MASSAGE_THERAPIST_ROLE } from "@shared/permissions";
+import {
+  hasCmsPermission,
+  MASSAGE_THERAPIST_ROLE,
+  parseCmsPermissions,
+} from "@shared/permissions";
 import MasajesDashboard from "./masajes/Dashboard";
 import RegularClassesDashboard from "./clases-regulares/Dashboard";
 
@@ -86,6 +90,7 @@ function AdminDashboard() {
   const [, setLocation] = useLocation();
   const userRole = user?.role || "";
   const isFullAdmin = userRole === "super_admin" || userRole === "admin";
+  const hasExplicitPermissions = parseCmsPermissions(user?.permissions) !== null;
 
   // Obtener estadísticas rápidas
   const { data: bookingsData } = trpc.bookings.list.useQuery();
@@ -100,7 +105,10 @@ function AdminDashboard() {
 
   const handleCategoryClick = (categoryId: CategoryId) => {
     const category = categories.find(c => c.id === categoryId);
-    const firstVisibleItem = category?.items.find(item => !item.roles || item.roles.includes(userRole));
+    const firstVisibleItem = category?.items.find(item =>
+      (!item.permission || hasCmsPermission(user ?? {}, item.permission))
+      && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole)),
+    );
     if (firstVisibleItem) {
       setLocation(firstVisibleItem.path);
     }
@@ -142,7 +150,8 @@ function AdminDashboard() {
 
   // Filter categories by role
   const visibleCategories = categories.filter(
-    cat => !cat.roles || cat.roles.includes(userRole)
+    cat => hasCmsPermission(user ?? {}, cat.permission)
+      && (hasExplicitPermissions || !cat.roles || cat.roles.includes(userRole)),
   );
 
   return (
@@ -162,7 +171,8 @@ function AdminDashboard() {
           {visibleCategories.map((category) => {
             // Also filter items by role
             const visibleItems = category.items.filter(
-              item => !item.roles || item.roles.includes(userRole)
+              item => (!item.permission || hasCmsPermission(user ?? {}, item.permission))
+                && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole)),
             );
             return (
               <Card 
