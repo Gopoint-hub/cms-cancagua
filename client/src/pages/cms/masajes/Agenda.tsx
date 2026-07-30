@@ -32,11 +32,11 @@ import {
   MASSAGE_PAYMENT_METHOD_LABELS,
   type ManualMassagePaymentMethod,
 } from "@shared/massagePayments";
+import {
+  getMassageBookingStatusLabel,
+  getMassagePaymentStatusLabel,
+} from "@shared/massageBookingLabels";
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Pendiente", confirmed: "Confirmada", completed: "Completada",
-  cancelled: "Cancelada", no_show: "No llegó",
-};
 const STATUS_VARIANTS: Record<string, any> = {
   pending: "secondary", confirmed: "default", completed: "outline",
   cancelled: "destructive", no_show: "destructive",
@@ -87,14 +87,21 @@ function BookingCard({ b, onEdit, onStatus, onCancel, canManageAgenda, canAssign
               <span className="font-semibold text-lg">{b.startTime}</span>
               <span className="text-muted-foreground">–</span>
               <span className="text-muted-foreground">{b.endTime}</span>
-              <Badge variant={STATUS_VARIANTS[b.status]}>{STATUS_LABELS[b.status]}</Badge>
+              <Badge variant={STATUS_VARIANTS[b.status]}>{getMassageBookingStatusLabel(b.status)}</Badge>
               {b.bookingKind === "skedu_program" && (
                 <Badge variant="outline" className="border-violet-400 text-violet-700 bg-violet-50">
                   Skedu · {b.modality === "double" ? "Doble" : "Simple"}
                 </Badge>
               )}
-              {b.paymentStatus === "paid" && (
-                <Badge variant="outline" className="text-green-600 border-green-600">Pagado</Badge>
+              {b.paymentStatus && (
+                <Badge
+                  variant="outline"
+                  className={b.paymentStatus === "paid"
+                    ? "text-green-600 border-green-600"
+                    : "text-amber-700 border-amber-500 bg-amber-50"}
+                >
+                  {getMassagePaymentStatusLabel(b.paymentStatus)}
+                </Badge>
               )}
             </div>
             <p className="font-medium mt-1">{b.clientName}</p>
