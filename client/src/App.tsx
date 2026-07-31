@@ -31,6 +31,7 @@ import CMSMarketingROI from "./pages/cms/MarketingROI";
 import CMSTraducciones from "./pages/cms/Traducciones";
 import CMSReportesMantencion from "./pages/cms/ReportesMantencion";
 import CMSMantencionTurnos from "./pages/cms/MantencionTurnos";
+import CMSMantencionDashboard from "./pages/cms/MantencionDashboard";
 import CMSConciergeVenta from "./pages/cms/concierge/HerramientaVenta";
 import CMSConciergeServicios from "./pages/cms/concierge/ServiciosDisponibles";
 import CMSConciergeVendedores from "./pages/cms/concierge/Vendedores";
@@ -114,6 +115,7 @@ function Router() {
       <Route path="/cms/traducciones" component={CMSTraducciones} />
       <Route path="/cms/reportes-mantencion" component={CMSReportesMantencion} />
       <Route path="/cms/mantencion-turnos" component={CMSMantencionTurnos} />
+      <Route path="/cms/mantencion-dashboard" component={CMSMantencionDashboard} />
       {/* Marketing modules */}
       <Route path="/cms/envio-personal" component={CMSEnvioPersonal} />
       <Route path="/cms/calendario-marketing" component={CMSCalendarioMarketing} />

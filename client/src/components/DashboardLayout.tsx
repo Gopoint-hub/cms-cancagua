@@ -168,6 +168,7 @@ export const categories: Category[] = [
     items: [
       { icon: Wrench, label: "Reportes Mantención", path: "/cms/reportes-mantencion" },
       { icon: ClipboardList, label: "Ficha Diaria Mantención", path: "/cms/mantencion-turnos" },
+      { icon: LayoutDashboard, label: "Dashboard Mantención", path: "/cms/mantencion-dashboard" },
     ],
   },
   {
