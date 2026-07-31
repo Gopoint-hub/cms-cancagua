@@ -1724,3 +1724,115 @@ export const regularClassCampaignDeliveries = mysqlTable("regular_class_campaign
   sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/**
+ * Ficha diaria de mantención.
+ *
+ * Dominio separado del de averías (maintenance_reports): esto es el checklist
+ * que el equipo llena en cada turno —tareas por hora, rondas de temperatura,
+ * ciclos de hot tubs y saunas, calidad del agua y traspaso al turno siguiente—,
+ * no una orden de trabajo.
+ */
+export const maintenanceShiftReports = mysqlTable("maintenance_shift_reports", {
+  id: int("id").autoincrement().primaryKey(),
+  reportDate: date("report_date").notNull(),
+  shift: mysqlEnum("shift", ["apertura", "cierre"]).notNull(),
+  status: mysqlEnum("status", ["draft", "submitted"]).default("draft").notNull(),
+  staffName: varchar("staff_name", { length: 200 }),
+  weatherSummary: varchar("weather_summary", { length: 255 }),
+  // Referencia del filtrado: la temperatura de MAÑANA temprano, no la máxima de hoy.
+  tomorrowEarlyTemp: decimal("tomorrow_early_temp", { precision: 4, scale: 1 }),
+  filteringStart: varchar("filtering_start", { length: 5 }),
+  filteringEnd: varchar("filtering_end", { length: 5 }),
+  filteringRule: varchar("filtering_rule", { length: 255 }),
+  pendingNotes: text("pending_notes"),
+  handoverNotes: text("handover_notes"),
+  submittedAt: timestamp("submitted_at"),
+  createdById: int("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MaintenanceShiftReport = typeof maintenanceShiftReports.$inferSelect;
+export type InsertMaintenanceShiftReport = typeof maintenanceShiftReports.$inferInsert;
+
+/**
+ * Una fila por tarea del checklist.
+ *
+ * `taskKey` incluye turno y hora, no solo el texto: "Avanzar con tareas extras"
+ * existe en los dos turnos y con una llave por texto marcar una marcaba la otra.
+ */
+export const maintenanceShiftTasks = mysqlTable("maintenance_shift_tasks", {
+  id: int("id").autoincrement().primaryKey(),
+  reportId: int("report_id").references(() => maintenanceShiftReports.id, { onDelete: "cascade" }).notNull(),
+  taskKey: varchar("task_key", { length: 191 }).notNull(),
+  scheduledTime: varchar("scheduled_time", { length: 5 }),
+  label: varchar("label", { length: 500 }).notNull(),
+  // "Otras labores" es una bolsa sin horario: no se traspasa al turno siguiente.
+  isPool: int("is_pool").default(0).notNull(),
+  done: int("done").default(0).notNull(),
+  doneAt: varchar("done_at", { length: 5 }),
+  responsible: varchar("responsible", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MaintenanceShiftTask = typeof maintenanceShiftTasks.$inferSelect;
+export type InsertMaintenanceShiftTask = typeof maintenanceShiftTasks.$inferInsert;
+
+/** Rondas de temperatura: 2 biopiscinas y 6 hot tubs, a primera hora y cada 2 horas. */
+export const maintenanceShiftTemperatures = mysqlTable("maintenance_shift_temperatures", {
+  id: int("id").autoincrement().primaryKey(),
+  reportId: int("report_id").references(() => maintenanceShiftReports.id, { onDelete: "cascade" }).notNull(),
+  venue: varchar("venue", { length: 60 }).notNull(),
+  roundTime: varchar("round_time", { length: 5 }).notNull(),
+  temperature: decimal("temperature", { precision: 4, scale: 1 }),
+  inRange: int("in_range").default(1).notNull(),
+  note: varchar("note", { length: 255 }),
+  responsible: varchar("responsible", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MaintenanceShiftTemperature = typeof maintenanceShiftTemperatures.$inferSelect;
+export type InsertMaintenanceShiftTemperature = typeof maintenanceShiftTemperatures.$inferInsert;
+
+/** Calidad del agua por recinto, con las medidas que gatilla. */
+export const maintenanceShiftWaterQuality = mysqlTable("maintenance_shift_water_quality", {
+  id: int("id").autoincrement().primaryKey(),
+  reportId: int("report_id").references(() => maintenanceShiftReports.id, { onDelete: "cascade" }).notNull(),
+  venue: varchar("venue", { length: 60 }).notNull(),
+  transparency: int("transparency"),
+  suspendedParticles: mysqlEnum("suspended_particles", ["ausente", "pocas", "muchas"]),
+  settledParticles: mysqlEnum("settled_particles", ["ausente", "pocas", "muchas"]),
+  observation: text("observation"),
+  actions: text("actions"),
+  recordedAt: varchar("recorded_at", { length: 5 }),
+  responsible: varchar("responsible", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MaintenanceShiftWaterQuality = typeof maintenanceShiftWaterQuality.$inferSelect;
+export type InsertMaintenanceShiftWaterQuality = typeof maintenanceShiftWaterQuality.$inferInsert;
+
+/**
+ * Un paso del ciclo de un hot tub o de un sauna reservado.
+ * `bookingRef` es el UUID de la cita en Skedu, cuando la hay.
+ */
+export const maintenanceShiftCycles = mysqlTable("maintenance_shift_cycles", {
+  id: int("id").autoincrement().primaryKey(),
+  reportId: int("report_id").references(() => maintenanceShiftReports.id, { onDelete: "cascade" }).notNull(),
+  cycleType: mysqlEnum("cycle_type", ["hot_tub", "sauna"]).notNull(),
+  venue: varchar("venue", { length: 60 }).notNull(),
+  bookingRef: varchar("booking_ref", { length: 80 }),
+  step: mysqlEnum("step", ["llenado", "entrega", "vaciado", "higienizado", "encendido"]).notNull(),
+  plannedTime: varchar("planned_time", { length: 5 }),
+  actualTime: varchar("actual_time", { length: 5 }),
+  temperature: decimal("temperature", { precision: 4, scale: 1 }),
+  done: int("done").default(0).notNull(),
+  responsible: varchar("responsible", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MaintenanceShiftCycle = typeof maintenanceShiftCycles.$inferSelect;
+export type InsertMaintenanceShiftCycle = typeof maintenanceShiftCycles.$inferInsert;

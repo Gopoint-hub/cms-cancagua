@@ -201,6 +201,7 @@ export const CANCAGUA_STAFF_ALLOWED_PATHS = new Set([
   "/cms/mensajes",
   "/cms/clientes",
   "/cms/reportes-mantencion",
+  "/cms/mantencion-turnos",
   "/cms/masajes",
   "/cms/masajes/agenda",
 ]);
@@ -254,6 +255,7 @@ const EXACT_PATH_PERMISSIONS = new Map<string, CmsPermissionKey>([
   ["/cms/codigos-descuento", "module.marketing"],
   ["/cms/analytics", "module.metrics"],
   ["/cms/reportes-mantencion", "module.operations"],
+  ["/cms/mantencion-turnos", "module.operations"],
   ["/cms/usuarios", "module.admin"],
   ["/cms/cerebro", "module.admin"],
   ["/cms/traducciones", "module.admin"],
