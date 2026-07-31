@@ -425,6 +425,34 @@ const studentInput = z.object({
 export const regularClassesRouter = router({
   public: router({
     catalog: publicProcedure.query(async () => loadPublicRegularClassesCatalog()),
+    invitation: publicProcedure.input(z.object({
+      token: z.string().trim().regex(/^[a-f0-9]{32}$/i),
+    })).query(async ({ input }) => {
+      const db = await requireDb();
+      const [invitation] = await db.select().from(regularClassPaymentInvitations)
+        .where(eq(regularClassPaymentInvitations.token, input.token)).limit(1);
+      if (!invitation || invitation.status === "completed" || invitation.status === "expired") return null;
+      if (invitation.expiresAt.getTime() <= Date.now()) {
+        await db.update(regularClassPaymentInvitations).set({ status: "expired" })
+          .where(eq(regularClassPaymentInvitations.id, invitation.id));
+        return null;
+      }
+      const [student] = await db.select({
+        firstName: regularClassStudents.firstName,
+        lastName: regularClassStudents.lastName,
+        email: regularClassStudents.email,
+        phone: regularClassStudents.phone,
+      }).from(regularClassStudents)
+        .where(eq(regularClassStudents.id, invitation.studentId)).limit(1);
+      if (!student) return null;
+      if (invitation.status === "pending" || invitation.status === "sent") {
+        await db.update(regularClassPaymentInvitations).set({
+          status: "opened",
+          openedAt: invitation.openedAt ?? new Date(),
+        }).where(eq(regularClassPaymentInvitations.id, invitation.id));
+      }
+      return student;
+    }),
   }),
   access: protectedProcedure.query(async ({ ctx }) => {
     const teacher = await getTeacherForUser(ctx.user.id);
