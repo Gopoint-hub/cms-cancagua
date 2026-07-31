@@ -25,6 +25,7 @@ jobs:
       WEBPAY_ENVIRONMENT: production
       CLOUDINARY_URL: cloudinary://ci:ci@example.invalid
       JWT_SECRET: ci-only-not-a-production-secret
+      RESEND_API_KEY: re_ci_only_not_a_real_key
 
     steps:
       - name: Checkout
