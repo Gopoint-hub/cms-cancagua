@@ -101,6 +101,16 @@ const buildInternationalPhone = (countryCode: string, phone: string): string | u
   return `+${countryCode}${digits}`;
 };
 
+const splitInvitationPhone = (value: string): { countryCode: string; phone: string } => {
+  const normalized = value.trim().replace(/^00/, "+");
+  if (!normalized.startsWith("+")) return { countryCode: "56", phone: normalized };
+  const digits = normalized.replace(/\D/g, "");
+  const countryCode = [...countryCodes]
+    .sort((a, b) => b.value.length - a.value.length)
+    .find((country) => digits.startsWith(country.value))?.value ?? "56";
+  return { countryCode, phone: digits.slice(countryCode.length) };
+};
+
 export default function ReservarMasaje() {
   const { id } = useParams<{ id: string }>();
   const initialSelections = useMemo(readCartSelections, []);
@@ -108,6 +118,10 @@ export default function ReservarMasaje() {
     if (typeof window === "undefined") return undefined;
     const value = Number(new URLSearchParams(window.location.search).get("plan"));
     return Number.isInteger(value) && value > 0 ? value : undefined;
+  }, []);
+  const invitationToken = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("inscripcion")?.trim() ?? "";
   }, []);
   const checkoutId = useMemo(getCheckoutId, []);
   const detailsTracked = useRef(false);
@@ -145,6 +159,10 @@ export default function ReservarMasaje() {
     undefined,
     { enabled: Boolean(initialClassPlanId) },
   );
+  const { data: invitation } = trpc.regularClasses.public.invitation.useQuery(
+    { token: invitationToken },
+    { enabled: /^[a-f0-9]{32}$/i.test(invitationToken), retry: false },
+  );
   const classPlan = regularClassesCatalog?.plans.find((plan) => plan.id === initialClassPlanId);
   const technique = catalog?.find((item) => item.id === techniqueId);
 
@@ -179,6 +197,18 @@ export default function ReservarMasaje() {
       setSlot(null);
     }
   }, [slot, slots]);
+
+  useEffect(() => {
+    if (!invitation) return;
+    const fullName = [invitation.firstName, invitation.lastName].filter(Boolean).join(" ");
+    if (fullName) setName((current) => current || fullName);
+    if (invitation.email) setEmail((current) => current || invitation.email || "");
+    if (invitation.phone) {
+      const parsedPhone = splitInvitationPhone(invitation.phone);
+      setCountryCode(parsedPhone.countryCode);
+      setPhone((current) => current || parsedPhone.phone);
+    }
+  }, [invitation]);
 
   const initPaymentMut = trpc.masajes.public.initCartPayment.useMutation({
     onSuccess: (data) => {

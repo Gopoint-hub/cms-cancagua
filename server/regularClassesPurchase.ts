@@ -1,6 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import {
   regularClassMemberships,
+  regularClassPaymentInvitations,
   regularClassPlans,
   regularClassStudents,
 } from "../drizzle/schema";
@@ -26,6 +27,7 @@ export async function confirmRegularClassPayment(requestId: string) {
     creditsTotal: regularClassMemberships.creditsTotal,
     periodStart: regularClassMemberships.periodStart,
     periodEnd: regularClassMemberships.periodEnd,
+    studentId: regularClassMemberships.studentId,
     studentName: regularClassStudents.firstName,
     studentEmail: regularClassStudents.email,
     planName: regularClassPlans.name,
@@ -41,6 +43,13 @@ export async function confirmRegularClassPayment(requestId: string) {
     status: "active",
     paidAt: new Date(),
   }).where(inArray(regularClassMemberships.id, unpaid.map((membership) => membership.id)));
+  await db.update(regularClassPaymentInvitations).set({
+    status: "completed",
+    completedAt: new Date(),
+  }).where(inArray(
+    regularClassPaymentInvitations.studentId,
+    Array.from(new Set(unpaid.map((membership) => membership.studentId))),
+  ));
 
   await Promise.all(unpaid.map(async (membership) => {
     if (!membership.studentEmail) return;
