@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { hasMaintenanceAccess } from "@shared/permissions";
 import {
+  HOT_TUB_VENUES,
   OTHER_DUTIES,
   WATER_VENUES,
   checklistFor,
@@ -35,6 +36,9 @@ import {
   Thermometer,
   Droplets,
   ArrowRightLeft,
+  Filter,
+  Flame,
+  Plus,
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 
@@ -66,6 +70,33 @@ function temperatureRounds(shift: ShiftName): string[] {
     : ["14:00", "16:00", "18:00", "20:00", "22:00"];
 }
 
+type CycleType = "hot_tub" | "sauna";
+type CycleStep = "llenado" | "entrega" | "vaciado" | "higienizado" | "encendido";
+
+const CYCLE_STEP_LABELS: Record<CycleStep, string> = {
+  llenado: "Llenado",
+  entrega: "Entrega al cliente",
+  vaciado: "Vaciado",
+  higienizado: "Higienizado",
+  encendido: "Encendido",
+};
+
+/** El hot tub se llena, se entrega, se vacía y se higieniza. */
+const HOT_TUB_STEPS: CycleStep[] = ["llenado", "entrega", "vaciado", "higienizado"];
+/** El sauna solo se enciende y se entrega. */
+const SAUNA_STEPS: CycleStep[] = ["encendido", "entrega"];
+
+/** Recintos que llevan ciclo: los 6 hot tubs y el sauna. */
+const CYCLE_VENUES: { key: string; name: string; type: CycleType; steps: CycleStep[] }[] = [
+  ...HOT_TUB_VENUES.map((venue) => ({
+    key: venue.key,
+    name: venue.name,
+    type: "hot_tub" as CycleType,
+    steps: HOT_TUB_STEPS,
+  })),
+  { key: "sauna", name: "Sauna", type: "sauna", steps: SAUNA_STEPS },
+];
+
 export default function MantencionTurnos() {
   const { user } = useAuth();
   const [reportDate, setReportDate] = useState(todayIso());
@@ -73,6 +104,8 @@ export default function MantencionTurnos() {
   const [staffName, setStaffName] = useState("");
   const [pendingNotes, setPendingNotes] = useState("");
   const [handoverNotes, setHandoverNotes] = useState("");
+  /** Hora planificada del próximo paso que se agrega, por recinto. */
+  const [newStepTime, setNewStepTime] = useState<Record<string, string>>({});
 
   const monday = isMondayIso(reportDate);
   // El lunes es día de mantención mayor: solo hay cierre.
@@ -98,9 +131,36 @@ export default function MantencionTurnos() {
     toast.error(error.message);
   };
 
+  const filteringQuery = trpc.maintenanceShift.filteringPlan.useQuery(
+    { reportDate, shift: effectiveShift },
+    { enabled: Boolean(user) && hasMaintenanceAccess(user?.role) },
+  );
+
+  const onSavedWithFiltering = () => {
+    void reportQuery.refetch();
+    // La transparencia del agua y la temperatura de mañana cambian la ventana
+    // de filtrado: hay que recalcularla o la ficha muestra una sugerencia vieja.
+    void filteringQuery.refetch();
+  };
+
   const saveTask = trpc.maintenanceShift.saveTask.useMutation({ onSuccess: onSaved, onError });
   const saveTemperature = trpc.maintenanceShift.saveTemperature.useMutation({ onSuccess: onSaved, onError });
-  const saveWaterQuality = trpc.maintenanceShift.saveWaterQuality.useMutation({ onSuccess: onSaved, onError });
+  const saveWaterQuality = trpc.maintenanceShift.saveWaterQuality.useMutation({
+    onSuccess: onSavedWithFiltering,
+    onError,
+  });
+  const updateReport = trpc.maintenanceShift.updateReport.useMutation({
+    onSuccess: onSavedWithFiltering,
+    onError,
+  });
+  const createCycleStep = trpc.maintenanceShift.createCycleStep.useMutation({
+    onSuccess: onSaved,
+    onError,
+  });
+  const updateCycleStep = trpc.maintenanceShift.updateCycleStep.useMutation({
+    onSuccess: onSaved,
+    onError,
+  });
   const submitShift = trpc.maintenanceShift.submit.useMutation({
     onSuccess: () => {
       toast.success("Turno cerrado y traspasado");
@@ -142,6 +202,17 @@ export default function MantencionTurnos() {
         suspended: row.suspendedParticles,
         settled: row.settledParticles,
       });
+    }
+    return map;
+  }, [report]);
+
+  /** Los pasos del ciclo agrupados por recinto, en orden de hora. */
+  const cyclesByVenue = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof report>["cycles"]>();
+    for (const step of report?.cycles ?? []) {
+      const current = map.get(step.venue) ?? [];
+      current.push(step);
+      map.set(step.venue, current);
     }
     return map;
   }, [report]);
@@ -286,6 +357,8 @@ export default function MantencionTurnos() {
               <TabsTrigger value="checklist">Checklist</TabsTrigger>
               <TabsTrigger value="temperaturas">Temperaturas</TabsTrigger>
               <TabsTrigger value="agua">Calidad del agua</TabsTrigger>
+              <TabsTrigger value="ciclos">Ciclos</TabsTrigger>
+              <TabsTrigger value="filtrado">Filtrado</TabsTrigger>
               <TabsTrigger value="cierre">Cierre</TabsTrigger>
             </TabsList>
 
@@ -523,6 +596,271 @@ export default function MantencionTurnos() {
                   </Card>
                 );
               })}
+            </TabsContent>
+
+            <TabsContent value="ciclos" className="space-y-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Flame className="w-4 h-4" /> Ciclos de hot tubs y sauna
+                  </CardTitle>
+                  <CardDescription>
+                    Un ciclo por cada reserva. Se agrega el paso con la hora a la que
+                    toca y se marca cuando queda hecho.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+
+              {CYCLE_VENUES.map((venue) => {
+                const steps = cyclesByVenue.get(venue.key) ?? [];
+                return (
+                  <Card key={venue.key}>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">{venue.name}</CardTitle>
+                      <CardDescription>
+                        {steps.length === 0
+                          ? "Sin ciclos registrados hoy."
+                          : `${steps.filter((step) => step.done === 1).length} de ${steps.length} pasos hechos.`}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {steps.length > 0 && (
+                        <div className="space-y-3">
+                          {steps.map((step) => (
+                            <div
+                              key={step.id}
+                              className="flex flex-wrap items-center gap-3 border-t pt-3 first:border-t-0 first:pt-0"
+                            >
+                              <Checkbox
+                                id={`ciclo-${step.id}`}
+                                checked={step.done === 1}
+                                disabled={isClosed || !reportId}
+                                onCheckedChange={(checked) => {
+                                  if (!reportId) return;
+                                  updateCycleStep.mutate({
+                                    id: step.id,
+                                    reportId,
+                                    done: checked === true,
+                                    actualTime: checked === true ? hhmm() : undefined,
+                                    responsible: staffName || undefined,
+                                  });
+                                }}
+                              />
+                              <Label
+                                htmlFor={`ciclo-${step.id}`}
+                                className="font-normal min-w-32"
+                              >
+                                {CYCLE_STEP_LABELS[step.step as CycleStep] ?? step.step}
+                                {step.plannedTime && (
+                                  <span className="block text-xs text-muted-foreground">
+                                    Planificado {step.plannedTime}
+                                  </span>
+                                )}
+                              </Label>
+                              <Input
+                                className="w-24"
+                                placeholder="°C"
+                                inputMode="decimal"
+                                defaultValue={step.temperature ?? ""}
+                                disabled={isClosed || !reportId}
+                                onBlur={(event) => {
+                                  const next = event.target.value.trim();
+                                  if (!reportId || next === (step.temperature ?? "")) return;
+                                  updateCycleStep.mutate({
+                                    id: step.id,
+                                    reportId,
+                                    temperature: next || undefined,
+                                  });
+                                }}
+                              />
+                              {step.done === 1 && step.actualTime && (
+                                <span className="text-xs text-emerald-700">
+                                  Hecho a las {step.actualTime}
+                                  {step.responsible ? ` · ${step.responsible}` : ""}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-end gap-2 border-t pt-4">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Hora del paso</Label>
+                          <Input
+                            className="w-28"
+                            type="time"
+                            value={newStepTime[venue.key] ?? ""}
+                            disabled={isClosed || !reportId}
+                            onChange={(event) =>
+                              setNewStepTime((current) => ({
+                                ...current,
+                                [venue.key]: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        {venue.steps.map((step) => (
+                          <Button
+                            key={step}
+                            size="sm"
+                            variant="outline"
+                            disabled={isClosed || !reportId || createCycleStep.isPending}
+                            onClick={() => {
+                              if (!reportId) return;
+                              createCycleStep.mutate({
+                                reportId,
+                                cycleType: venue.type,
+                                venue: venue.key,
+                                step,
+                                plannedTime: newStepTime[venue.key] || undefined,
+                              });
+                            }}
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            {CYCLE_STEP_LABELS[step]}
+                          </Button>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </TabsContent>
+
+            <TabsContent value="filtrado" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Filter className="w-4 h-4" /> Filtrado de hoy
+                  </CardTitle>
+                  <CardDescription>
+                    Se calcula con la transparencia de las biopiscinas, la salida del
+                    último cliente de bios y la temperatura de mañana temprano.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {filteringQuery.isLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Calculando…
+                    </div>
+                  ) : filteringQuery.data ? (
+                    <>
+                      <div
+                        className={
+                          filteringQuery.data.plan.advanced
+                            ? "rounded-lg border border-orange-400 bg-orange-50 dark:bg-orange-950/20 p-4"
+                            : "rounded-lg border bg-muted/40 p-4"
+                        }
+                      >
+                        <p className="text-lg font-semibold">
+                          Dejar el filtrado de {filteringQuery.data.plan.start} a{" "}
+                          {filteringQuery.data.plan.end}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {filteringQuery.data.plan.hours} horas
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {filteringQuery.data.plan.startReason}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {filteringQuery.data.plan.endReason}
+                        </p>
+                        {filteringQuery.data.plan.advanced && (
+                          <p className="text-sm mt-3 font-medium">
+                            Acordarse: ir a poner el filtrado a las{" "}
+                            {filteringQuery.data.plan.start}, cuando se vayan los
+                            últimos clientes de biopiscinas.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-3 text-sm">
+                        <div>
+                          <p className="text-muted-foreground text-xs">
+                            Transparencia peor medida
+                          </p>
+                          <p>
+                            {filteringQuery.data.transparency == null
+                              ? "Sin medir"
+                              : `${filteringQuery.data.transparency}%`}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">
+                            Última salida de bios
+                          </p>
+                          <p>
+                            {filteringQuery.data.lastBioExit ?? "Sin reservas"}
+                            {filteringQuery.data.bookingCount > 0 &&
+                              ` · ${filteringQuery.data.bookingCount} reserva(s)`}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="temp-manana" className="text-xs">
+                            Mañana a las 08:00 (°C)
+                          </Label>
+                          <Input
+                            id="temp-manana"
+                            className="w-24"
+                            inputMode="decimal"
+                            defaultValue={report?.tomorrowEarlyTemp ?? ""}
+                            disabled={isClosed || !reportId}
+                            onBlur={(event) => {
+                              const next = event.target.value.trim();
+                              if (!reportId || next === (report?.tomorrowEarlyTemp ?? "")) return;
+                              updateReport.mutate({
+                                id: reportId,
+                                tomorrowEarlyTemp: next || undefined,
+                              });
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {filteringQuery.data.skeduError && (
+                        <p className="text-sm text-orange-700 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                          No se pudieron leer las reservas de Skedu, así que la ventana
+                          sale del horario base sin mirar la salida de los clientes.
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-3 border-t pt-4">
+                        <Button
+                          disabled={isClosed || !reportId || updateReport.isPending}
+                          onClick={() => {
+                            if (!reportId || !filteringQuery.data) return;
+                            const { plan } = filteringQuery.data;
+                            updateReport.mutate({
+                              id: reportId,
+                              filteringStart: plan.start,
+                              filteringEnd: plan.end,
+                              filteringRule: plan.summary,
+                            });
+                          }}
+                        >
+                          {updateReport.isPending ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4 mr-2" />
+                          )}
+                          Dejar esta ventana en la ficha
+                        </Button>
+                        {report?.filteringStart && report?.filteringEnd && (
+                          <span className="text-sm text-muted-foreground">
+                            Guardado: {report.filteringStart}–{report.filteringEnd}
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No se pudo calcular el filtrado.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
 
             <TabsContent value="cierre">

@@ -86,6 +86,20 @@ export const WATER_VENUES: WaterVenue[] = [
 ];
 
 /**
+ * Recintos que cuentan como biopiscina.
+ *
+ * La regla de filtrado mira solo estos: es el agua de las bios la que decide
+ * cuántas horas se filtra, no la de los hot tubs, que se vacían entre reservas.
+ */
+export const BIO_VENUE_KEYS: string[] = WATER_VENUES
+  .filter((venue) => venue.key.startsWith("biopiscina"))
+  .map((venue) => venue.key);
+
+/** Los hot tubs, que sí llevan ciclo de llenado y vaciado por reserva. */
+export const HOT_TUB_VENUES: WaterVenue[] = WATER_VENUES
+  .filter((venue) => venue.key.startsWith("hot_tub"));
+
+/**
  * Bloques horarios por turno. `lunes` es el día de mantención mayor: ese día
  * solo hay cierre y su lista es propia.
  */

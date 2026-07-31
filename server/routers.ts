@@ -21,6 +21,9 @@ import {
   CANCAGUA_EMAIL_REFINEMENT_RULES,
   getCancaguaEmailDesignSystem,
 } from "./brand/cancaguaDesignSystem";
+import { calculateFiltering } from "@shared/maintenanceFiltering";
+import { BIO_VENUE_KEYS } from "@shared/maintenanceShiftCatalog";
+import { getLastBioExit } from "./maintenanceShiftContext";
 
 /**
  * Un turno cerrado no se sigue editando: el reporte ya se envió y con él el
@@ -4504,6 +4507,52 @@ Example output: {"key1": "Hello world"}`;
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getShiftHandover(input.reportDate, input.shift);
+      }),
+
+    /**
+     * Sugerencia de filtrado del día.
+     *
+     * Cruza las tres entradas de la regla de Lu: la peor transparencia medida
+     * en las biopiscinas, la salida del último cliente de bios según Skedu, y
+     * la temperatura de mañana a primera hora que se haya anotado en la ficha.
+     * El cálculo es la función pura de `shared/maintenanceFiltering.ts`.
+     *
+     * Es una sugerencia, no una orden: el turno puede guardar otra ventana.
+     */
+    filteringPlan: protectedProcedure
+      .input(z.object({
+        reportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida"),
+        shift: z.enum(["apertura", "cierre"]),
+      }))
+      .query(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        const report = await db.getShiftReportDetail(input.reportDate, input.shift);
+
+        // La peor de las biopiscinas manda: si una salió turbia, se filtra por ella.
+        const readings = (report?.waterQuality ?? [])
+          .filter((row) => BIO_VENUE_KEYS.includes(row.venue))
+          .map((row) => row.transparency)
+          .filter((value): value is number => typeof value === "number");
+        const transparency = readings.length > 0 ? Math.min(...readings) : null;
+
+        const tomorrowEarlyTemp =
+          report?.tomorrowEarlyTemp != null ? Number(report.tomorrowEarlyTemp) : null;
+
+        const { lastBioExit, bookingCount, error } = await getLastBioExit(input.reportDate);
+
+        return {
+          plan: calculateFiltering({ transparency, lastBioExit, tomorrowEarlyTemp }),
+          transparency,
+          tomorrowEarlyTemp,
+          lastBioExit,
+          bookingCount,
+          // Si Skedu no respondió hay que decirlo: la ventana sale del horario
+          // base y el turno tiene que saber que no se miraron las reservas.
+          skeduError: error ?? null,
+        };
       }),
 
     /** Listado para el panel. */
