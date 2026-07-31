@@ -826,6 +826,63 @@ export const regularClassesRouter = router({
       }
       return { success: true, id: created.id, invitationSent };
     }),
+    remove: protectedProcedure.input(z.object({ studentId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        requireAdmin(ctx.user);
+        const db = await requireDb();
+        const [student] = await db.select().from(regularClassStudents)
+          .where(eq(regularClassStudents.id, input.studentId)).limit(1);
+        if (!student) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Alumno no encontrado" });
+        }
+
+        const [membershipSummary] = await db.select({
+          count: sql<number>`count(*)`,
+          paidCount: sql<number>`sum(case when ${regularClassMemberships.paymentStatus} = 'paid' then 1 else 0 end)`,
+          paidTotalClp: sql<number>`coalesce(sum(case when ${regularClassMemberships.paymentStatus} = 'paid' then ${regularClassMemberships.pricePaidClp} else 0 end), 0)`,
+        }).from(regularClassMemberships)
+          .where(eq(regularClassMemberships.studentId, input.studentId));
+        const [attendanceSummary] = await db.select({ count: sql<number>`count(*)` })
+          .from(regularClassAttendances)
+          .where(eq(regularClassAttendances.studentId, input.studentId));
+
+        await db.transaction(async (tx) => {
+          await tx.insert(regularClassAudit).values({
+            entityType: "student",
+            entityId: input.studentId,
+            action: "deleted",
+            userId: ctx.user.id,
+            detail: JSON.stringify({
+              student: {
+                firstName: student.firstName,
+                lastName: student.lastName,
+                email: student.email,
+                phone: student.phone,
+                status: student.status,
+                source: student.source,
+              },
+              memberships: Number(membershipSummary?.count ?? 0),
+              paidMemberships: Number(membershipSummary?.paidCount ?? 0),
+              paidTotalClp: Number(membershipSummary?.paidTotalClp ?? 0),
+              attendances: Number(attendanceSummary?.count ?? 0),
+            }),
+          });
+          await tx.delete(regularClassBenefitEntitlements)
+            .where(eq(regularClassBenefitEntitlements.studentId, input.studentId));
+          await tx.delete(regularClassCampaignDeliveries)
+            .where(eq(regularClassCampaignDeliveries.studentId, input.studentId));
+          await tx.delete(regularClassAttendances)
+            .where(eq(regularClassAttendances.studentId, input.studentId));
+          await tx.delete(regularClassPaymentInvitations)
+            .where(eq(regularClassPaymentInvitations.studentId, input.studentId));
+          await tx.delete(regularClassMemberships)
+            .where(eq(regularClassMemberships.studentId, input.studentId));
+          await tx.delete(regularClassStudents)
+            .where(eq(regularClassStudents.id, input.studentId));
+        });
+
+        return { success: true };
+      }),
     enroll: protectedProcedure.input(z.object({
       studentId: z.number().int().positive(),
       planId: z.number().int().positive(),
