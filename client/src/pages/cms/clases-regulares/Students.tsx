@@ -29,7 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
-import { ArrowRight, Loader2, Mail, Plus, Search } from "lucide-react";
+import { ArrowRight, Loader2, Mail, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   clp,
@@ -50,6 +50,7 @@ export default function RegularClassesStudents() {
   const [newOpen, setNewOpen] = useState(false);
   const [enrollStudent, setEnrollStudent] = useState<any | null>(null);
   const [carryStudent, setCarryStudent] = useState<any | null>(null);
+  const [deleteStudent, setDeleteStudent] = useState<any | null>(null);
   const [studentForm, setStudentForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   const [enrollForm, setEnrollForm] = useState({
     planId: "", month: currentMonthString(),
@@ -89,6 +90,15 @@ export default function RegularClassesStudents() {
       setCarryStudent(null);
       setCarryReason("");
       utils.regularClasses.students.list.invalidate();
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const remove = trpc.regularClasses.students.remove.useMutation({
+    onSuccess: () => {
+      toast.success("Alumno eliminado");
+      setDeleteStudent(null);
+      utils.regularClasses.students.list.invalidate();
+      utils.regularClasses.dashboard.invalidate();
     },
     onError: (error) => toast.error(error.message),
   });
@@ -155,7 +165,7 @@ export default function RegularClassesStudents() {
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      <div className="flex justify-end gap-1">
+                      <div className="flex flex-wrap justify-end gap-1">
                         <Button size="sm" variant="outline" onClick={() => invite.mutate({ studentId: student.id })}>
                           <Mail className="h-4 w-4" />
                         </Button>
@@ -165,6 +175,17 @@ export default function RegularClassesStudents() {
                         {access.data?.isAdmin && student.membership?.paymentStatus === "paid" && student.membership.creditsUsed === 0 && (
                           <Button size="sm" variant="outline" onClick={() => setCarryStudent(student)}>
                             <ArrowRight className="mr-1 h-4 w-4" /> Postergar
+                          </Button>
+                        )}
+                        {access.data?.isAdmin && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => setDeleteStudent(student)}
+                            title="Eliminar alumno"
+                          >
+                            <Trash2 className="mr-1 h-4 w-4" /> Eliminar
                           </Button>
                         )}
                       </div>
@@ -268,6 +289,28 @@ export default function RegularClassesStudents() {
               membershipId: carryStudent.membership.id,
               reason: carryReason.trim(),
             })}>Confirmar postergación</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteStudent)} onOpenChange={(open) => !open && setDeleteStudent(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Eliminar a {deleteStudent?.firstName} {deleteStudent?.lastName}?</DialogTitle>
+            <DialogDescription>
+              Se eliminarán también todos sus planes, pagos, asistencias, invitaciones y beneficios registrados. Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteStudent(null)}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate({ studentId: deleteStudent.id })}
+            >
+              {remove.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Eliminar definitivamente
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
