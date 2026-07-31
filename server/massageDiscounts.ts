@@ -2,7 +2,10 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   discountCodeUsages,
   discountCodes,
+  massageBookings,
   massageDiscountCodeTechniques,
+  regularClassMemberships,
+  regularClassStudents,
 } from "../drizzle/schema";
 
 export type MassageDiscountLine = {
@@ -22,6 +25,12 @@ export type MassageDiscountResult = {
   lineDiscounts: number[];
 };
 
+export type WellnessDiscountLine = {
+  service: "masajes" | "clases";
+  originalAmount: number;
+  techniqueId?: number;
+};
+
 export function calculateMassageDiscountAmounts(
   lines: MassageDiscountLine[],
   allowedIds: Set<number>,
@@ -30,6 +39,16 @@ export function calculateMassageDiscountAmounts(
   maxDiscount?: number | null,
 ) {
   const eligible = lines.map((line) => allowedIds.size === 0 || allowedIds.has(line.techniqueId));
+  return calculateWellnessDiscountAmounts(lines, eligible, discountType, discountValue, maxDiscount);
+}
+
+export function calculateWellnessDiscountAmounts(
+  lines: Array<{ originalAmount: number }>,
+  eligible: boolean[],
+  discountType: "fixed" | "percentage",
+  discountValue: number,
+  maxDiscount?: number | null,
+) {
   const eligibleSubtotal = lines.reduce((sum, line, index) => sum + (eligible[index] ? line.originalAmount : 0), 0);
   const originalTotal = lines.reduce((sum, line) => sum + line.originalAmount, 0);
   let discountTotal = discountType === "percentage"
@@ -57,8 +76,21 @@ export async function calculateMassageDiscount(
   rawCode: string,
   lines: MassageDiscountLine[],
 ): Promise<MassageDiscountResult> {
+  return calculateWellnessCartDiscount(db, rawCode, lines.map((line) => ({
+    service: "masajes",
+    techniqueId: line.techniqueId,
+    originalAmount: line.originalAmount,
+  })));
+}
+
+export async function calculateWellnessCartDiscount(
+  db: any,
+  rawCode: string,
+  lines: WellnessDiscountLine[],
+): Promise<MassageDiscountResult> {
   const code = normalizeCode(rawCode);
   if (!code) throw new Error("Ingresa un código de descuento.");
+  if (lines.length === 0) throw new Error("Agrega al menos un producto para aplicar el código.");
 
   const [discount] = await db.select().from(discountCodes)
     .where(eq(discountCodes.code, code)).limit(1);
@@ -69,9 +101,8 @@ export async function calculateMassageDiscount(
     try { return JSON.parse(discount.applicableServices ?? "[]"); }
     catch { return []; }
   })();
-  if (!Array.isArray(applicable) || !applicable.includes("masajes")) {
-    throw new Error("Este código no aplica a servicios de masajes.");
-  }
+  const applicableServices = Array.isArray(applicable) ? applicable : [];
+  const appliesToAll = applicableServices.length === 0 || applicableServices.includes("all");
 
   const now = new Date();
   if (discount.startsAt && new Date(discount.startsAt) > now) {
@@ -88,11 +119,19 @@ export async function calculateMassageDiscount(
     .from(massageDiscountCodeTechniques)
     .where(eq(massageDiscountCodeTechniques.discountCodeId, discount.id));
   const allowedIds = new Set<number>(mappings.map((row: any) => row.techniqueId));
-  const amounts = calculateMassageDiscountAmounts(
-    lines, allowedIds, discount.discountType, discount.discountValue, discount.maxDiscount,
+  const eligible = lines.map((line) => {
+    const serviceAllowed = appliesToAll || applicableServices.includes(line.service);
+    if (!serviceAllowed) return false;
+    return line.service !== "masajes" || allowedIds.size === 0 || (line.techniqueId != null && allowedIds.has(line.techniqueId));
+  });
+  const { eligibleSubtotal, originalTotal, discountTotal, finalTotal, lineDiscounts } = calculateWellnessDiscountAmounts(
+    lines,
+    eligible,
+    discount.discountType,
+    discount.discountValue,
+    discount.maxDiscount,
   );
-  const { eligibleSubtotal, originalTotal, discountTotal, finalTotal, lineDiscounts } = amounts;
-  if (eligibleSubtotal <= 0) throw new Error("El código no aplica a los masajes seleccionados.");
+  if (eligibleSubtotal <= 0) throw new Error("Este código no aplica a los productos seleccionados.");
   if (eligibleSubtotal < discount.minPurchase) throw new Error(
     `La compra mínima para este código es $${discount.minPurchase.toLocaleString("es-CL")}.`,
   );
@@ -126,15 +165,23 @@ export async function recordMassageDiscountUsage(
     .where(and(
       eq(discountCodeUsages.discountCodeId, params.discountCodeId),
       eq(discountCodeUsages.orderId, params.requestId),
-      eq(discountCodeUsages.orderType, "massage_cart"),
+      eq(discountCodeUsages.orderType, "wellness_cart"),
     )).limit(1);
-  if (existing) return;
+  if (existing) {
+    await db.update(discountCodeUsages).set({
+      userEmail: params.email ?? null,
+      originalAmount: params.originalAmount,
+      discountAmount: params.discountAmount,
+      finalAmount: params.finalAmount,
+    }).where(eq(discountCodeUsages.id, existing.id));
+    return;
+  }
 
   await db.insert(discountCodeUsages).values({
     discountCodeId: params.discountCodeId,
     userEmail: params.email ?? null,
     orderId: params.requestId,
-    orderType: "massage_cart",
+    orderType: "wellness_cart",
     originalAmount: params.originalAmount,
     discountAmount: params.discountAmount,
     finalAmount: params.finalAmount,
@@ -142,4 +189,33 @@ export async function recordMassageDiscountUsage(
   await db.update(discountCodes)
     .set({ currentUses: sql`${discountCodes.currentUses} + 1` })
     .where(eq(discountCodes.id, params.discountCodeId));
+}
+
+export async function recordPaidWellnessDiscountUsage(db: any, requestId: string) {
+  const [massageTotals] = await db.select({
+    originalAmount: sql<string>`COALESCE(SUM(${massageBookings.originalAmount}), 0)`,
+    discountAmount: sql<string>`COALESCE(SUM(${massageBookings.discountAmount}), 0)`,
+    finalAmount: sql<string>`COALESCE(SUM(${massageBookings.amountPaid}), 0)`,
+    discountCodeId: sql<number | null>`MAX(${massageBookings.discountCodeId})`,
+    email: sql<string | null>`MAX(${massageBookings.clientEmail})`,
+  }).from(massageBookings).where(eq(massageBookings.getnetRequestId, requestId));
+  const [classTotals] = await db.select({
+    originalAmount: sql<string>`COALESCE(SUM(${regularClassMemberships.originalAmountClp}), 0)`,
+    discountAmount: sql<string>`COALESCE(SUM(${regularClassMemberships.discountAmountClp}), 0)`,
+    finalAmount: sql<string>`COALESCE(SUM(${regularClassMemberships.pricePaidClp}), 0)`,
+    discountCodeId: sql<number | null>`MAX(${regularClassMemberships.discountCodeId})`,
+    email: sql<string | null>`MAX(${regularClassStudents.email})`,
+  }).from(regularClassMemberships)
+    .leftJoin(regularClassStudents, eq(regularClassMemberships.studentId, regularClassStudents.id))
+    .where(eq(regularClassMemberships.paymentReference, requestId));
+  const discountCodeId = Number(massageTotals?.discountCodeId ?? classTotals?.discountCodeId ?? 0);
+  if (!discountCodeId) return;
+  await recordMassageDiscountUsage(db, {
+    discountCodeId,
+    requestId,
+    email: massageTotals?.email ?? classTotals?.email,
+    originalAmount: Number(massageTotals?.originalAmount ?? 0) + Number(classTotals?.originalAmount ?? 0),
+    discountAmount: Number(massageTotals?.discountAmount ?? 0) + Number(classTotals?.discountAmount ?? 0),
+    finalAmount: Number(massageTotals?.finalAmount ?? 0) + Number(classTotals?.finalAmount ?? 0),
+  });
 }

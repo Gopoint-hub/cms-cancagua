@@ -1,9 +1,9 @@
 import { Router, Request, Response } from "express";
 import { asc, eq } from "drizzle-orm";
-import { massageTechniques } from "../drizzle/schema";
+import { massageTechniques, regularClassPlans } from "../drizzle/schema";
 import { getDb } from "./db";
 import { serializePublicMassageTechnique } from "./masajesRouter";
-import { calculateMassageDiscount } from "./massageDiscounts";
+import { calculateWellnessCartDiscount, type WellnessDiscountLine } from "./massageDiscounts";
 import { z } from "zod";
 import { saveCheckoutStart, updateCheckoutProgress } from "./massageCheckout";
 
@@ -86,12 +86,13 @@ router.post("/discount/validate", async (req: Request, res: Response) => {
   try {
     const code = typeof req.body?.code === "string" ? req.body.code : "";
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
-    if (!code || items.length === 0 || items.length > 40) {
-      return res.status(400).json({ error: "Ingresa un código y agrega al menos un masaje." });
+    const classPlanId = Number(req.body?.classPlanId);
+    if (!code || (items.length === 0 && !(Number.isInteger(classPlanId) && classPlanId > 0)) || items.length > 40) {
+      return res.status(400).json({ error: "Ingresa un código y agrega al menos un producto." });
     }
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "DB no disponible" });
-    const lines: Array<{ techniqueId: number; originalAmount: number }> = [];
+    const lines: WellnessDiscountLine[] = [];
     for (const raw of items) {
       const techniqueId = Number(raw.techniqueId);
       const duration = Number(raw.duration);
@@ -104,9 +105,15 @@ router.post("/discount/validate", async (req: Request, res: Response) => {
       const prices = [technique.price50min, technique.price80min, technique.price110min];
       const price = index >= 0 && prices[index] ? Number(prices[index]) : 0;
       if (!price) return res.status(400).json({ error: `Precio no configurado para ${technique.name}.` });
-      for (let count = 0; count < quantity; count += 1) lines.push({ techniqueId, originalAmount: price });
+      for (let count = 0; count < quantity; count += 1) lines.push({ service: "masajes", techniqueId, originalAmount: price });
     }
-    const result = await calculateMassageDiscount(db, code, lines);
+    if (Number.isInteger(classPlanId) && classPlanId > 0) {
+      const [plan] = await db.select().from(regularClassPlans)
+        .where(eq(regularClassPlans.id, classPlanId)).limit(1);
+      if (!plan || plan.active !== 1) return res.status(400).json({ error: "El plan de clases ya no está disponible." });
+      lines.push({ service: "clases", originalAmount: plan.priceClp });
+    }
+    const result = await calculateWellnessCartDiscount(db, code, lines);
     res.setHeader("Cache-Control", "no-store");
     return res.json(result);
   } catch (error) {

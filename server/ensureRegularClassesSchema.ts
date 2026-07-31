@@ -69,6 +69,8 @@ const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS regular_class_memberships (
     id int AUTO_INCREMENT PRIMARY KEY, student_id int NOT NULL, plan_id int NOT NULL,
     period_start date NOT NULL, period_end date NOT NULL, price_paid_clp int NOT NULL,
+    original_amount_clp int NOT NULL, discount_amount_clp int NOT NULL DEFAULT 0,
+    discount_code_id int NULL, discount_code varchar(50) NULL,
     credits_total int NOT NULL,
     status enum('pending_payment','active','postponed','completed','cancelled') NOT NULL DEFAULT 'pending_payment',
     payment_status enum('pending','paid','refunded') NOT NULL DEFAULT 'pending',
@@ -180,6 +182,23 @@ export async function ensureRegularClassesSchema(): Promise<void> {
   for (const statement of CREATE_STATEMENTS) {
     await db.execute(sql.raw(statement));
   }
+  for (const statement of [
+    "ALTER TABLE regular_class_memberships ADD COLUMN original_amount_clp int NULL",
+    "ALTER TABLE regular_class_memberships ADD COLUMN discount_amount_clp int NOT NULL DEFAULT 0",
+    "ALTER TABLE regular_class_memberships ADD COLUMN discount_code_id int NULL",
+    "ALTER TABLE regular_class_memberships ADD COLUMN discount_code varchar(50) NULL",
+  ]) {
+    try {
+      await db.execute(sql.raw(statement));
+    } catch (error: any) {
+      if (error?.cause?.code !== "ER_DUP_FIELDNAME" && error?.code !== "ER_DUP_FIELDNAME") throw error;
+    }
+  }
+  await db.execute(sql.raw(`
+    UPDATE regular_class_memberships
+    SET original_amount_clp = price_paid_clp
+    WHERE original_amount_clp IS NULL
+  `));
   for (const [key, value] of [
     ["period_start_day", "1"],
     ["honorarium_withholding_bps", "1525"],

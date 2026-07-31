@@ -14,6 +14,7 @@ import { syncMassageSale } from "./massageSales";
 import { markCheckoutPaid, markCheckoutPaymentFailed } from "./massageCheckout";
 import { emitMassagePurchase } from "./googleAnalytics";
 import { cancelRegularClassPayment, confirmRegularClassPayment } from "./regularClassesPurchase";
+import { recordPaidWellnessDiscountUsage } from "./massageDiscounts";
 
 console.log("[SERVER] getnetWebhook v3 cargado — freelance approval activo");
 
@@ -98,6 +99,7 @@ router.post("/", async (req: Request, res: Response) => {
       await syncMassageSale(booking.id);
     }
     await confirmRegularClassPayment(requestId);
+    await recordPaidWellnessDiscountUsage(db, requestId);
     await markCheckoutPaid(requestId).catch((error) =>
       console.error("[Getnet Webhook] No se pudo marcar el checkout pagado:", error)
     );
