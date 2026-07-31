@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateMassageDiscountAmounts } from "./massageDiscounts";
+import { calculateMassageDiscountAmounts, calculateWellnessDiscountAmounts } from "./massageDiscounts";
 
 describe("calculateMassageDiscountAmounts", () => {
   const lines = [
@@ -24,5 +24,26 @@ describe("calculateMassageDiscountAmounts", () => {
     const result = calculateMassageDiscountAmounts(lines, new Set([2]), "fixed", 70_000);
     expect(result.discountTotal).toBe(40_000);
     expect(result.finalTotal).toBe(80_000);
+  });
+});
+
+describe("calculateWellnessDiscountAmounts", () => {
+  const mixedCart = [
+    { originalAmount: 60_000 },
+    { originalAmount: 45_000 },
+  ];
+
+  it("aplica un código de clases sólo al plan dentro de un carrito mixto", () => {
+    const result = calculateWellnessDiscountAmounts(mixedCart, [false, true], "percentage", 20);
+    expect(result.discountTotal).toBe(9_000);
+    expect(result.lineDiscounts).toEqual([0, 9_000]);
+    expect(result.finalTotal).toBe(96_000);
+  });
+
+  it("distribuye un código general entre el masaje y el plan", () => {
+    const result = calculateWellnessDiscountAmounts(mixedCart, [true, true], "fixed", 21_000);
+    expect(result.discountTotal).toBe(21_000);
+    expect(result.lineDiscounts.reduce((sum, amount) => sum + amount, 0)).toBe(21_000);
+    expect(result.finalTotal).toBe(84_000);
   });
 });

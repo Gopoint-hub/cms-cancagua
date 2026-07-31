@@ -41,7 +41,7 @@ import {
 import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
-import { calculateMassageDiscount } from "./massageDiscounts";
+import { calculateWellnessCartDiscount, recordPaidWellnessDiscountUsage, type WellnessDiscountLine } from "./massageDiscounts";
 import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne, isNull } from "drizzle-orm";
 import {
   hasCmsPermission,
@@ -3185,12 +3185,17 @@ const masajesPublicRouter = router({
         techniqueId: z.number().int().positive(),
         duration: z.number().int().positive(),
         quantity: z.number().int().min(1).max(4).default(1),
-      })).min(1).max(40),
+      })).max(40),
+      classPlanId: z.number().int().positive().optional(),
+    }).superRefine((value, ctx) => {
+      if (value.items.length === 0 && !value.classPlanId) {
+        ctx.addIssue({ code: "custom", message: "Agrega al menos un producto." });
+      }
     }))
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const lines: Array<{ techniqueId: number; originalAmount: number }> = [];
+      const lines: WellnessDiscountLine[] = [];
       for (const item of input.items) {
         const [technique] = await db.select().from(massageTechniques)
           .where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1))).limit(1);
@@ -3201,11 +3206,17 @@ const masajesPublicRouter = router({
         const price = index >= 0 && configuredPrices[index] ? Number(configuredPrices[index]) : 0;
         if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}.` });
         for (let quantity = 0; quantity < item.quantity; quantity += 1) {
-          lines.push({ techniqueId: item.techniqueId, originalAmount: price });
+          lines.push({ service: "masajes", techniqueId: item.techniqueId, originalAmount: price });
         }
       }
+      if (input.classPlanId) {
+        const [plan] = await db.select().from(regularClassPlans)
+          .where(and(eq(regularClassPlans.id, input.classPlanId), eq(regularClassPlans.active, 1))).limit(1);
+        if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "El plan de clases ya no está disponible." });
+        lines.push({ service: "clases", originalAmount: plan.priceClp });
+      }
       try {
-        return await calculateMassageDiscount(db, input.code, lines);
+        return await calculateWellnessCartDiscount(db, input.code, lines);
       } catch (error) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3793,13 +3804,16 @@ const masajesPublicRouter = router({
         });
       }
 
-      let discountResult: Awaited<ReturnType<typeof calculateMassageDiscount>> | null = null;
+      let discountResult: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
       if (input.discountCode) {
         try {
-          discountResult = await calculateMassageDiscount(
+          discountResult = await calculateWellnessCartDiscount(
             db,
             input.discountCode,
-            prepared.map((item) => ({ techniqueId: item.item.techniqueId, originalAmount: item.price })),
+            [
+              ...prepared.map((item) => ({ service: "masajes" as const, techniqueId: item.item.techniqueId, originalAmount: item.price })),
+              ...(classPlan ? [{ service: "clases" as const, originalAmount: classPlan.priceClp }] : []),
+            ],
           );
         } catch (error) {
           throw new TRPCError({
@@ -3861,6 +3875,7 @@ const masajesPublicRouter = router({
       let membershipId: number | undefined;
       try {
         if (classPlan) {
+        const classDiscount = discountResult?.lineDiscounts[prepared.length] ?? 0;
         const email = input.clientEmail!.trim().toLowerCase();
         const phone = input.clientPhone?.trim() || undefined;
         const nameParts = input.clientName.trim().split(/\s+/);
@@ -3903,7 +3918,11 @@ const masajesPublicRouter = router({
           planId: classPlan.id,
           periodStart: period.start,
           periodEnd: period.end,
-          pricePaidClp: classPlan.priceClp,
+          pricePaidClp: classPlan.priceClp - classDiscount,
+          originalAmountClp: classPlan.priceClp,
+          discountAmountClp: classDiscount,
+          discountCodeId: discountResult?.discountCodeId,
+          discountCode: discountResult?.code,
           creditsTotal: classPlan.creditsPerPeriod,
           status: "pending_payment",
           paymentStatus: "pending",
@@ -3929,9 +3948,12 @@ const masajesPublicRouter = router({
       }
 
       const massageOriginalTotal = prepared.reduce((sum, item) => sum + item.price, 0);
-      const massageTotal = discountResult?.finalTotal ?? massageOriginalTotal;
+      const massageTotal = prepared.reduce((sum, item, index) => sum + item.price - (discountResult?.lineDiscounts[index] ?? 0), 0);
+      const classTotal = classPlan
+        ? classPlan.priceClp - (discountResult?.lineDiscounts[prepared.length] ?? 0)
+        : 0;
       const originalTotal = massageOriginalTotal + (classPlan?.priceClp ?? 0);
-      const total = massageTotal + (classPlan?.priceClp ?? 0);
+      const total = massageTotal + classTotal;
       try {
         const session = await createGetnetSession({
           bookingId: bookingIds[0],
@@ -4080,6 +4102,7 @@ const masajesPublicRouter = router({
             );
           }
           if (existingMemberships.length > 0) await confirmRegularClassPayment(resolvedRequestId);
+          await recordPaidWellnessDiscountUsage(db, resolvedRequestId);
         }
       } else if (result.status === "REJECTED" || result.status === "FAILED") {
         const db = await getDb();

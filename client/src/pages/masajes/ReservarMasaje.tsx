@@ -212,18 +212,20 @@ export default function ReservarMasaje() {
   }, [checkoutId]);
 
   useEffect(() => {
-    if (initialDiscountCode && cart.length > 0 && pendingSelections.length === 0 && !appliedDiscount && !validateDiscountMut.isPending) {
+    if (initialDiscountCode && (cart.length > 0 || classPlan) && pendingSelections.length === 0 && !appliedDiscount && !validateDiscountMut.isPending) {
       validateDiscountMut.mutate({
         code: initialDiscountCode,
         items: cart.map(({ techniqueId, duration }) => ({ techniqueId, duration, quantity: 1 })),
+        classPlanId: classPlan?.id,
       });
     }
-  }, [cart.length, pendingSelections.length]);
+  }, [cart.length, pendingSelections.length, classPlan?.id]);
 
   const validateDiscount = () => {
     validateDiscountMut.mutate({
       code: discountCode,
       items: cart.map(({ techniqueId, duration }) => ({ techniqueId, duration, quantity: 1 })),
+      classPlanId: classPlan?.id,
     });
   };
 
@@ -286,8 +288,8 @@ export default function ReservarMasaje() {
     if (cart.length > 0 && !disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
 
-    const massageValue = appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0);
-    const value = massageValue + (classPlan?.priceClp ?? 0);
+    const value = appliedDiscount?.finalTotal
+      ?? cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0);
     pushMassageEvent("add_payment_info", {
       currency: "CLP",
       value,
@@ -689,8 +691,8 @@ export default function ReservarMasaje() {
                 <span className="font-medium text-teal-900">{cart.length + (classPlan ? 1 : 0)} producto{cart.length + (classPlan ? 1 : 0) === 1 ? "" : "s"}</span>
               </div>
               {classPlan && <div className="flex justify-between pt-2"><span className="text-teal-700">{classPlan.name}</span><span className="font-medium text-teal-900">${classPlan.priceClp.toLocaleString("es-CL")}</span></div>}
-              {cart.length > 0 && <div className="pt-2 space-y-2">
-                <Label htmlFor="massage-discount-code" className="text-teal-800">¿Tienes un código de descuento?</Label>
+              {(cart.length > 0 || classPlan) && <div className="pt-2 space-y-2">
+                <Label htmlFor="massage-discount-code" className="text-teal-800">Aplicar código de descuento</Label>
                 <div className="flex gap-2">
                   <Input id="massage-discount-code" value={discountCode} onChange={(event) => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); }} placeholder="Ingresa tu código" className="bg-white" />
                   <Button type="button" variant="outline" onClick={validateDiscount} disabled={!discountCode.trim() || validateDiscountMut.isPending}>
@@ -703,7 +705,7 @@ export default function ReservarMasaje() {
                 <span className={appliedDiscount ? "line-through text-teal-700" : "font-medium text-teal-900"}>${(cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span>
               </div>
               {appliedDiscount && <div className="flex justify-between text-green-700"><span>Descuento {appliedDiscount.code}</span><span>−${appliedDiscount.discountTotal.toLocaleString("es-CL")}</span></div>}
-              <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${((appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0)) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span></div>
+              <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${(appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span></div>
             </div>
 
             <Button
