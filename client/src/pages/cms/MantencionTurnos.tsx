@@ -250,7 +250,8 @@ export default function MantencionTurnos() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <ArrowRightLeft className="w-4 h-4" />
-                Viene del turno anterior ({handoverQuery.data.fromShift}, {handoverQuery.data.fromDate})
+                Viene del turno anterior ({handoverQuery.data.fromShift},{" "}
+                {handoverQuery.data.fromDate.toLocaleDateString("es-CL")})
               </CardTitle>
               <CardDescription>
                 Lo que quedó pendiente y las notas que dejaron.
