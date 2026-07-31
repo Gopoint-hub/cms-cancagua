@@ -2894,6 +2894,22 @@ export async function getShiftReportDetail(reportDate: string, shift: ShiftName)
   return { ...report, tasks, temperatures, waterQuality, cycles };
 }
 
+/**
+ * Los dos turnos del día con todo lo que cuelga de ellos, para el dashboard.
+ *
+ * Devuelve solo los que existen: un día recién empezado tiene apertura y todavía
+ * no cierre, y a mitad de temporada puede no haberse llenado ninguno.
+ */
+export async function getShiftDayDetail(reportDate: string) {
+  const [apertura, cierre] = await Promise.all([
+    getShiftReportDetail(reportDate, "apertura"),
+    getShiftReportDetail(reportDate, "cierre"),
+  ]);
+  return [apertura, cierre].filter(
+    (report): report is NonNullable<typeof report> => Boolean(report),
+  );
+}
+
 /** Crea el reporte del turno si no existe, y devuelve el vigente. */
 export async function ensureShiftReport(input: {
   reportDate: string;

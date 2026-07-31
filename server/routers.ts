@@ -23,7 +23,8 @@ import {
 } from "./brand/cancaguaDesignSystem";
 import { calculateFiltering } from "@shared/maintenanceFiltering";
 import { BIO_VENUE_KEYS } from "@shared/maintenanceShiftCatalog";
-import { getLastBioExit } from "./maintenanceShiftContext";
+import { summarizeShiftDay } from "@shared/maintenanceShiftDashboard";
+import { chileNowMinutes, chileToday, getLastBioExit } from "./maintenanceShiftContext";
 
 /**
  * Un turno cerrado no se sigue editando: el reporte ya se envió y con él el
@@ -4553,6 +4554,50 @@ Example output: {"key1": "Hello world"}`;
           // base y el turno tiene que saber que no se miraron las reservas.
           skeduError: error ?? null,
         };
+      }),
+
+    /**
+     * Resumen del día para el dashboard de administración.
+     *
+     * Solo lectura: junta los dos turnos y devuelve el resumen ya calculado por
+     * `summarizeShiftDay`, con las alertas ordenadas por gravedad. La página no
+     * recalcula nada.
+     *
+     * Sin fecha, muestra hoy en hora de Chile: el servidor corre en UTC y
+     * después de las 21:00 locales pediría el día equivocado.
+     */
+    dashboard: protectedProcedure
+      .input(z.object({
+        reportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida").optional(),
+      }).optional())
+      .query(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        const reportDate = input?.reportDate ?? chileToday();
+        const shifts = await db.getShiftDayDetail(reportDate);
+
+        return summarizeShiftDay({
+          reportDate,
+          nowMinutes: chileNowMinutes(reportDate),
+          shifts: shifts.map((report) => ({
+            id: report.id,
+            shift: report.shift,
+            status: report.status,
+            staffName: report.staffName,
+            weatherSummary: report.weatherSummary,
+            filteringStart: report.filteringStart,
+            filteringEnd: report.filteringEnd,
+            filteringRule: report.filteringRule,
+            pendingNotes: report.pendingNotes,
+            handoverNotes: report.handoverNotes,
+            tasks: report.tasks,
+            temperatures: report.temperatures,
+            waterQuality: report.waterQuality,
+            cycles: report.cycles,
+          })),
+        });
       }),
 
     /** Listado para el panel. */

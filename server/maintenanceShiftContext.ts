@@ -14,6 +14,31 @@ import { getSkeduEvents } from "./skedu";
 
 const CHILE_TIME_ZONE = "America/Santiago";
 
+/**
+ * Hoy en Chile (YYYY-MM-DD).
+ *
+ * El servidor de Render corre en UTC: después de las 21:00 de Chile ya es el día
+ * siguiente allá, y el dashboard mostraría un día vacío.
+ */
+export function chileToday(): string {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: CHILE_TIME_ZONE });
+}
+
+/**
+ * Minutos transcurridos del día en Chile, para saber qué horarios ya vencieron.
+ *
+ * Devuelve `null` cuando la fecha consultada ya pasó —todo horario cuenta como
+ * vencido— y `0` cuando es futura, donde nada venció todavía.
+ */
+export function chileNowMinutes(reportDate: string): number | null {
+  const today = chileToday();
+  if (reportDate < today) return null;
+  if (reportDate > today) return 0;
+
+  const [hours, minutes] = TIME_FORMATTER.format(new Date()).split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
 /** Una reserva se considera de biopiscinas si lo dice su servicio o su variante. */
 function isBioBooking(booking: any): boolean {
   const name = `${booking?.Service?.Name ?? ""} ${booking?.Variant?.Name ?? ""}`;
