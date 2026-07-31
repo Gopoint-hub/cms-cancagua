@@ -439,7 +439,9 @@ export function summarizeShiftDay(input: SummarizeInput): DaySummary {
     }
   }
 
-  for (const group of groups.values()) {
+  // Array.from y no el spread del iterador: el tsconfig del repo no fija
+  // `target`, así que iterar un Map directo no compila (TS2802).
+  for (const group of Array.from(groups.values())) {
     group.steps.sort((a, b) => {
       if (!a.plannedTime) return 1;
       if (!b.plannedTime) return -1;
@@ -478,7 +480,7 @@ export function summarizeShiftDay(input: SummarizeInput): DaySummary {
     alerts,
     temperatures,
     water,
-    cycles: [...groups.values()],
+    cycles: Array.from(groups.values()),
     filtering,
   };
 }
