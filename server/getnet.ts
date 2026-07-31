@@ -34,7 +34,8 @@ function buildAuth() {
 }
 
 export interface GetnetSessionParams {
-  bookingId: number;
+  bookingId?: number;
+  reference?: string;
   description: string;
   amountCLP: number;
   clientName: string;
@@ -52,7 +53,7 @@ export async function createGetnetSession(
 ): Promise<GetnetSessionResult> {
   requireGetnetConfig();
   const { bookingId, description, amountCLP, clientName, clientEmail, clientPhone } = params;
-  const reference = `masaje-${bookingId}`;
+  const reference = params.reference ?? (bookingId ? `masaje-${bookingId}` : "compra-cancagua");
 
   const body: Record<string, unknown> = {
     auth: buildAuth(),

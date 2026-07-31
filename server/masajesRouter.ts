@@ -26,6 +26,9 @@ import {
   discountCodeUsages,
   massageDiscountCodeTechniques,
   massageCheckoutSessions,
+  regularClassMemberships,
+  regularClassPlans,
+  regularClassStudents,
   type User,
 } from "../drizzle/schema";
 import {
@@ -64,6 +67,8 @@ import {
   buildMassageClientDirectory,
   type MassageClientBookingRecord,
 } from "./massageClients";
+import { calendarMonthRange } from "./regularClassesPeriod";
+import { cancelRegularClassPayment, confirmRegularClassPayment } from "./regularClassesPurchase";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 
@@ -3663,13 +3668,21 @@ const masajesPublicRouter = router({
         bookingDate: z.string(),
         startTime: z.string().regex(/^\d{2}:\d{2}$/),
         notes: z.string().optional(),
-      })).min(1).max(40),
+      })).max(40),
+      classPlanId: z.number().int().positive().optional(),
       clientName: z.string().min(2),
       clientPhone: z.string().optional(),
       clientEmail: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
       discountCode: z.string().trim().max(50).optional(),
       checkoutId: z.string().trim().min(8).max(64).regex(/^[A-Za-z0-9-]+$/).optional(),
+    }).superRefine((value, ctx) => {
+      if (value.items.length === 0 && !value.classPlanId) {
+        ctx.addIssue({ code: "custom", message: "Agrega un plan o un masaje." });
+      }
+      if (value.classPlanId && !value.clientEmail?.trim()) {
+        ctx.addIssue({ code: "custom", path: ["clientEmail"], message: "El email es obligatorio para comprar un plan." });
+      }
     }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -3677,6 +3690,13 @@ const masajesPublicRouter = router({
 
       validatePublicMassageLeadTime(input.items);
       validateMassageCartCapacity(input.items);
+
+      const classPlan = input.classPlanId ? (await db.select().from(regularClassPlans)
+        .where(and(eq(regularClassPlans.id, input.classPlanId), eq(regularClassPlans.active, 1)))
+        .limit(1))[0] : null;
+      if (input.classPlanId && !classPlan) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "El plan seleccionado ya no está disponible." });
+      }
 
       const blockingByDate = new Map<string, Awaited<ReturnType<typeof loadBlockingMassageBookings>>>();
       const roomsByDate = new Map<string, Array<{ id: number; capacity: number; allowCoupleBooking: number }>>();
@@ -3838,30 +3858,113 @@ const masajesPublicRouter = router({
         });
       }
 
-      const originalTotal = prepared.reduce((sum, item) => sum + item.price, 0);
-      const total = discountResult?.finalTotal ?? originalTotal;
+      let membershipId: number | undefined;
+      try {
+        if (classPlan) {
+        const email = input.clientEmail!.trim().toLowerCase();
+        const phone = input.clientPhone?.trim() || undefined;
+        const nameParts = input.clientName.trim().split(/\s+/);
+        const firstName = nameParts.shift() || input.clientName.trim();
+        const lastName = nameParts.join(" ") || null;
+        const duplicateConditions = [eq(regularClassStudents.email, email)];
+        if (phone) duplicateConditions.push(eq(regularClassStudents.phone, phone));
+        let [student] = await db.select().from(regularClassStudents)
+          .where(or(...duplicateConditions)).limit(1);
+        if (!student) {
+          const [createdStudent] = await db.insert(regularClassStudents).values({
+            firstName,
+            lastName,
+            email,
+            phone,
+            status: "prospect",
+            source: "web",
+            communicationsConsent: input.subscribeNewsletter ? 1 : 0,
+          }).$returningId();
+          [student] = await db.select().from(regularClassStudents)
+            .where(eq(regularClassStudents.id, createdStudent.id)).limit(1);
+        } else {
+          await db.update(regularClassStudents).set({
+            firstName,
+            lastName,
+            email,
+            phone: phone ?? student.phone,
+            communicationsConsent: input.subscribeNewsletter ? 1 : student.communicationsConsent,
+          }).where(eq(regularClassStudents.id, student.id));
+        }
+        const chileDateParts = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/Santiago",
+          year: "numeric",
+          month: "2-digit",
+        }).formatToParts(new Date());
+        const chileMonth = `${chileDateParts.find((part) => part.type === "year")?.value}-${chileDateParts.find((part) => part.type === "month")?.value}`;
+        const period = calendarMonthRange(chileMonth);
+        const [createdMembership] = await db.insert(regularClassMemberships).values({
+          studentId: student.id,
+          planId: classPlan.id,
+          periodStart: period.start,
+          periodEnd: period.end,
+          pricePaidClp: classPlan.priceClp,
+          creditsTotal: classPlan.creditsPerPeriod,
+          status: "pending_payment",
+          paymentStatus: "pending",
+          paymentMethod: "getnet_web",
+          paymentReference: input.checkoutId,
+        }).$returningId();
+          membershipId = createdMembership.id;
+        }
+      } catch (error) {
+        console.error("[initCartPayment] Membership insert failed:", error);
+        if (bookingIds.length > 0) {
+          await db.update(massageBookings).set({
+            status: "cancelled",
+            cancellationCategory: "system",
+            cancellationReason: "No se pudo crear el plan asociado a la compra.",
+            cancelledAt: new Date(),
+          }).where(inArray(massageBookings.id, bookingIds));
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "No pudimos crear el plan para iniciar el pago. Intenta nuevamente.",
+        });
+      }
+
+      const massageOriginalTotal = prepared.reduce((sum, item) => sum + item.price, 0);
+      const massageTotal = discountResult?.finalTotal ?? massageOriginalTotal;
+      const originalTotal = massageOriginalTotal + (classPlan?.priceClp ?? 0);
+      const total = massageTotal + (classPlan?.priceClp ?? 0);
       try {
         const session = await createGetnetSession({
           bookingId: bookingIds[0],
-          description: `${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(0, 80),
+          reference: bookingIds[0] ? undefined : `clases-${membershipId}`,
+          description: classPlan && prepared.length > 0
+            ? `Plan de clases y ${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(0, 80)
+            : classPlan
+              ? `${classPlan.name} Clases Regulares Cancagua`.slice(0, 80)
+              : `${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(0, 80),
           amountCLP: total,
           clientName: input.clientName,
           clientEmail: input.clientEmail,
           clientPhone: input.clientPhone,
         });
-        await db.update(massageBookings)
-          .set({ getnetRequestId: session.requestId })
-          .where(inArray(massageBookings.id, bookingIds));
-        await attachCheckoutPayment({
-          checkoutId: input.checkoutId,
-          requestId: session.requestId,
-          bookingIds,
-          originalTotal,
-          discountTotal: discountResult?.discountTotal ?? 0,
-          finalTotal: total,
-        }).catch((trackingError) =>
-          console.error("[initCartPayment] No se pudo asociar el checkout analítico:", trackingError)
-        );
+        if (bookingIds.length > 0) {
+          await db.update(massageBookings)
+            .set({ getnetRequestId: session.requestId })
+            .where(inArray(massageBookings.id, bookingIds));
+          await attachCheckoutPayment({
+            checkoutId: input.checkoutId,
+            requestId: session.requestId,
+            bookingIds,
+            originalTotal,
+            discountTotal: discountResult?.discountTotal ?? 0,
+            finalTotal: total,
+          }).catch((trackingError) =>
+            console.error("[initCartPayment] No se pudo asociar el checkout analítico:", trackingError)
+          );
+        }
+        if (membershipId) {
+          await db.update(regularClassMemberships).set({ paymentReference: session.requestId })
+            .where(eq(regularClassMemberships.id, membershipId));
+        }
 
         if (input.subscribeNewsletter && input.clientEmail) {
           try {
@@ -3875,6 +3978,7 @@ const masajesPublicRouter = router({
         return {
           processUrl: session.processUrl,
           bookingIds,
+          membershipId,
           total,
           originalTotal,
           discountTotal: discountResult?.discountTotal ?? 0,
@@ -3884,15 +3988,21 @@ const masajesPublicRouter = router({
         await markCheckoutInitializationFailed(input.checkoutId).catch((trackingError) =>
           console.error("[initCartPayment] No se pudo registrar la falla del checkout:", trackingError)
         );
-        await db.update(massageBookings)
-          .set({
-            status: "cancelled",
-            paymentStatus: "pending",
-            cancellationCategory: "system",
-            cancellationReason: "No se pudo iniciar la sesión de pago del carrito.",
-            cancelledAt: new Date(),
-          })
-          .where(inArray(massageBookings.id, bookingIds));
+        if (bookingIds.length > 0) {
+          await db.update(massageBookings)
+            .set({
+              status: "cancelled",
+              paymentStatus: "pending",
+              cancellationCategory: "system",
+              cancellationReason: "No se pudo iniciar la sesión de pago del carrito.",
+              cancelledAt: new Date(),
+            })
+            .where(inArray(massageBookings.id, bookingIds));
+        }
+        if (membershipId) {
+          await db.update(regularClassMemberships).set({ status: "cancelled" })
+            .where(eq(regularClassMemberships.id, membershipId));
+        }
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo iniciar el pago. Intenta más tarde." });
       }
     }),
@@ -3915,6 +4025,17 @@ const masajesPublicRouter = router({
             resolvedRequestId = booking?.getnetRequestId ?? undefined;
           }
         }
+        const classMatch = input.ref.match(/^clases-(\d+)$/);
+        if (!resolvedRequestId && classMatch) {
+          const db = await getDb();
+          if (db) {
+            const [membership] = await db.select({ paymentReference: regularClassMemberships.paymentReference })
+              .from(regularClassMemberships)
+              .where(eq(regularClassMemberships.id, parseInt(classMatch[1])))
+              .limit(1);
+            resolvedRequestId = membership?.paymentReference ?? undefined;
+          }
+        }
       }
 
       if (!resolvedRequestId) throw new TRPCError({ code: "BAD_REQUEST", message: "requestId requerido" });
@@ -3928,6 +4049,11 @@ const masajesPublicRouter = router({
             .select({ id: massageBookings.id, paymentStatus: massageBookings.paymentStatus })
             .from(massageBookings)
             .where(eq(massageBookings.getnetRequestId, resolvedRequestId));
+          const existingMemberships = await db.select({
+            id: regularClassMemberships.id,
+            paymentStatus: regularClassMemberships.paymentStatus,
+          }).from(regularClassMemberships)
+            .where(eq(regularClassMemberships.paymentReference, resolvedRequestId));
           if (existingBookings.length > 0) {
             const unpaidBookings = existingBookings.filter((booking) => booking.paymentStatus !== "paid");
             if (unpaidBookings.length > 0) {
@@ -3953,6 +4079,7 @@ const masajesPublicRouter = router({
               console.error("[checkPaymentStatus] No se pudo emitir purchase:", trackingError)
             );
           }
+          if (existingMemberships.length > 0) await confirmRegularClassPayment(resolvedRequestId);
         }
       } else if (result.status === "REJECTED" || result.status === "FAILED") {
         const db = await getDb();
@@ -3966,13 +4093,24 @@ const masajesPublicRouter = router({
               cancelledAt: new Date(),
             })
             .where(eq(massageBookings.getnetRequestId, resolvedRequestId));
+          await cancelRegularClassPayment(resolvedRequestId);
           await markCheckoutPaymentFailed(resolvedRequestId).catch((trackingError) =>
             console.error("[checkPaymentStatus] No se pudo marcar la falla del checkout:", trackingError)
           );
         }
       }
 
-      return { status: result.status, amount: result.amount, currency: result.currency };
+      const resultDb = await getDb();
+      const [classPurchase] = resultDb ? await resultDb.select({ id: regularClassMemberships.id })
+        .from(regularClassMemberships)
+        .where(eq(regularClassMemberships.paymentReference, resolvedRequestId))
+        .limit(1) : [];
+      return {
+        status: result.status,
+        amount: result.amount,
+        currency: result.currency,
+        includesClassPlan: Boolean(classPurchase),
+      };
     }),
 });
 

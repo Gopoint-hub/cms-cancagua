@@ -104,6 +104,11 @@ const buildInternationalPhone = (countryCode: string, phone: string): string | u
 export default function ReservarMasaje() {
   const { id } = useParams<{ id: string }>();
   const initialSelections = useMemo(readCartSelections, []);
+  const initialClassPlanId = useMemo(() => {
+    if (typeof window === "undefined") return undefined;
+    const value = Number(new URLSearchParams(window.location.search).get("plan"));
+    return Number.isInteger(value) && value > 0 ? value : undefined;
+  }, []);
   const checkoutId = useMemo(getCheckoutId, []);
   const detailsTracked = useRef(false);
   const hasPresetCart = initialSelections.length > 0;
@@ -136,6 +141,11 @@ export default function ReservarMasaje() {
   }>>([]);
 
   const { data: catalog, isLoading } = trpc.masajes.public.getCatalog.useQuery();
+  const { data: regularClassesCatalog, isLoading: isLoadingClasses } = trpc.regularClasses.public.catalog.useQuery(
+    undefined,
+    { enabled: Boolean(initialClassPlanId) },
+  );
+  const classPlan = regularClassesCatalog?.plans.find((plan) => plan.id === initialClassPlanId);
   const technique = catalog?.find((item) => item.id === techniqueId);
 
   const { data: fallbackTechnique } = trpc.masajes.public.getTechnique.useQuery(
@@ -198,7 +208,7 @@ export default function ReservarMasaje() {
   useEffect(() => {
     if (!checkoutId) return;
     pushMassageEvent("checkout_schedule_started", undefined, { checkout_id: checkoutId });
-    updateCheckoutProgress({ checkoutId, step: "scheduling" });
+    if (initialSelections.length > 0) updateCheckoutProgress({ checkoutId, step: "scheduling" });
   }, [checkoutId]);
 
   useEffect(() => {
@@ -268,14 +278,16 @@ export default function ReservarMasaje() {
   };
 
   const handleSubmit = () => {
-    if (cart.length === 0 || !name.trim()) {
-      toast.error("Agrega al menos un masaje y completa tus datos");
+    if ((cart.length === 0 && !classPlan) || !name.trim()) {
+      toast.error("Agrega un servicio y completa tus datos");
       return;
     }
-    if (!disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
+    if (classPlan && !email.trim()) { toast.error("El email es obligatorio para activar tu plan"); return; }
+    if (cart.length > 0 && !disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
 
-    const value = appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0);
+    const massageValue = appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0);
+    const value = massageValue + (classPlan?.priceClp ?? 0);
     pushMassageEvent("add_payment_info", {
       currency: "CLP",
       value,
@@ -293,6 +305,7 @@ export default function ReservarMasaje() {
       items: cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({
         techniqueId, duration, bookingDate, startTime, notes,
       })),
+      classPlanId: classPlan?.id,
       clientName: name.trim(),
       clientPhone: buildInternationalPhone(countryCode, phone),
       clientEmail: email.trim() || undefined,
@@ -303,20 +316,22 @@ export default function ReservarMasaje() {
   };
 
   const allSelectionsScheduled = !hasPresetCart || pendingSelections.length === 0;
-  const allInfoFilled = cart.length > 0 && allSelectionsScheduled && Boolean(name.trim());
+  const allInfoFilled = (cart.length > 0 || Boolean(classPlan)) && allSelectionsScheduled && Boolean(name.trim());
 
   useEffect(() => {
     if (!allInfoFilled || detailsTracked.current) return;
     detailsTracked.current = true;
     pushMassageEvent("checkout_details_completed", undefined, { checkout_id: checkoutId });
-    updateCheckoutProgress({
-      checkoutId,
-      step: "details_completed",
-      items: cart.map(toAnalyticsItem),
-    });
+    if (cart.length > 0) {
+      updateCheckoutProgress({
+        checkoutId,
+        step: "details_completed",
+        items: cart.map(toAnalyticsItem),
+      });
+    }
   }, [allInfoFilled, cart, checkoutId]);
 
-  if (isLoading) return (
+  if (isLoading || (initialClassPlanId && isLoadingClasses)) return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center">
       <div className="w-full max-w-md p-6 space-y-4">
         <Skeleton className="h-8 w-48 mx-auto" />
@@ -326,22 +341,35 @@ export default function ReservarMasaje() {
     </div>
   );
 
-  if (!selectedTechnique) return (
+  if (!selectedTechnique && !classPlan) return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center">
       <p className="text-lg font-medium text-muted-foreground">Este servicio no está disponible.</p>
     </div>
   );
 
-  const durs = getDurations(selectedTechnique);
+  const durs = selectedTechnique ? getDurations(selectedTechnique) : [];
 
   return (
     <div className="min-h-screen bg-stone-50 pb-16">
       <div className="bg-white border-b px-4 py-4 text-center">
         <p className="text-xs text-muted-foreground tracking-widest uppercase">Cancagua Spa</p>
-        <h1 className="text-xl font-semibold mt-0.5">Agendar masaje</h1>
+        <h1 className="text-xl font-semibold mt-0.5">Completar compra</h1>
       </div>
 
       <div className="max-w-5xl mx-auto p-4 space-y-3 mt-2">
+
+        {classPlan && (
+          <div className="mx-auto max-w-2xl rounded-2xl border border-teal-200 bg-teal-50 p-5">
+            <p className="text-xs font-medium uppercase tracking-wider text-teal-700">Plan de clases seleccionado</p>
+            <div className="mt-2 flex items-start justify-between gap-4">
+              <div>
+                <p className="font-semibold text-stone-900">{classPlan.name}</p>
+                <p className="mt-1 text-sm text-stone-600">{classPlan.creditsPerPeriod} clase{classPlan.creditsPerPeriod === 1 ? "" : "s"} durante el mes</p>
+              </div>
+              <p className="font-semibold text-teal-800">${classPlan.priceClp.toLocaleString("es-CL")}</p>
+            </div>
+          </div>
+        )}
 
         {hasPresetCart ? (
           <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-3">
@@ -353,12 +381,12 @@ export default function ReservarMasaje() {
             </div>
             {pendingSelections.length > 0 && (
               <div className="rounded-xl bg-teal-50 p-4">
-                <p className="font-semibold text-stone-900">{selectedTechnique.name}</p>
+                <p className="font-semibold text-stone-900">{selectedTechnique?.name ?? "Masaje seleccionado"}</p>
                 <p className="mt-1 text-sm text-stone-600">{duration} min · {quantity} masaje{quantity === 1 ? "" : "s"} en el mismo horario</p>
               </div>
             )}
           </div>
-        ) : (
+        ) : selectedTechnique ? (
           <>
             <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-1.5">
               <p className="text-sm font-medium">Elige el masaje</p>
@@ -401,7 +429,7 @@ export default function ReservarMasaje() {
               </div>
             </div>
           </>
-        )}
+        ) : null}
 
         {/* 2. Fecha y horario */}
         {duration && (
@@ -560,7 +588,7 @@ export default function ReservarMasaje() {
         )}
 
         {/* 4. Datos cliente */}
-        {cart.length > 0 && allSelectionsScheduled && (
+        {(cart.length > 0 || classPlan) && allSelectionsScheduled && (
           <div className="max-w-2xl mx-auto bg-white rounded-2xl border p-5 space-y-3">
             <p className="text-sm font-medium flex items-center gap-1.5"><User className="w-4 h-4" />4. Tus datos</p>
             <div className="space-y-3">
@@ -593,7 +621,7 @@ export default function ReservarMasaje() {
                   </div>
                 </div>
                 <div className="sm:col-span-2">
-                  <Label className="text-xs text-muted-foreground">Email</Label>
+                  <Label className="text-xs text-muted-foreground">Email {classPlan ? "*" : ""}</Label>
                   <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" className="mt-1 rounded-xl" />
                 </div>
               </div>
@@ -607,7 +635,7 @@ export default function ReservarMasaje() {
         )}
 
         {/* 5. Exención de responsabilidad */}
-        {allInfoFilled && !disclaimerAccepted && (
+        {allInfoFilled && cart.length > 0 && !disclaimerAccepted && (
           <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-amber-200 p-5 space-y-4">
             <p className="text-sm font-medium flex items-center gap-1.5 text-amber-700">
               <ShieldAlert className="w-4 h-4" />Exención de responsabilidad
@@ -622,7 +650,7 @@ export default function ReservarMasaje() {
         )}
 
         {/* 6. Checkboxes + resumen + pago */}
-        {allInfoFilled && disclaimerAccepted && (
+        {allInfoFilled && (disclaimerAccepted || cart.length === 0) && (
           <div className="max-w-2xl mx-auto space-y-3">
             <div className="bg-white rounded-2xl border p-5 space-y-3">
               <label className="flex items-start gap-3 cursor-pointer">
@@ -658,9 +686,10 @@ export default function ReservarMasaje() {
             <div className="bg-teal-50 rounded-2xl p-4 text-sm space-y-1.5 border border-teal-100">
               <div className="flex justify-between border-b border-teal-200 pb-2">
                 <span className="text-teal-700">Servicios</span>
-                <span className="font-medium text-teal-900">{cart.length} masaje{cart.length === 1 ? "" : "s"}</span>
+                <span className="font-medium text-teal-900">{cart.length + (classPlan ? 1 : 0)} producto{cart.length + (classPlan ? 1 : 0) === 1 ? "" : "s"}</span>
               </div>
-              <div className="pt-2 space-y-2">
+              {classPlan && <div className="flex justify-between pt-2"><span className="text-teal-700">{classPlan.name}</span><span className="font-medium text-teal-900">${classPlan.priceClp.toLocaleString("es-CL")}</span></div>}
+              {cart.length > 0 && <div className="pt-2 space-y-2">
                 <Label htmlFor="massage-discount-code" className="text-teal-800">¿Tienes un código de descuento?</Label>
                 <div className="flex gap-2">
                   <Input id="massage-discount-code" value={discountCode} onChange={(event) => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); }} placeholder="Ingresa tu código" className="bg-white" />
@@ -668,13 +697,13 @@ export default function ReservarMasaje() {
                     {validateDiscountMut.isPending ? "Validando…" : "Aplicar"}
                   </Button>
                 </div>
-              </div>
+              </div>}
               <div className="flex justify-between pt-1">
                 <span className="text-teal-700">Subtotal</span>
-                <span className={appliedDiscount ? "line-through text-teal-700" : "font-medium text-teal-900"}>${cart.reduce((sum, item) => sum + item.price, 0).toLocaleString("es-CL")}</span>
+                <span className={appliedDiscount ? "line-through text-teal-700" : "font-medium text-teal-900"}>${(cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span>
               </div>
               {appliedDiscount && <div className="flex justify-between text-green-700"><span>Descuento {appliedDiscount.code}</span><span>−${appliedDiscount.discountTotal.toLocaleString("es-CL")}</span></div>}
-              <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${(appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0)).toLocaleString("es-CL")}</span></div>
+              <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${((appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0)) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span></div>
             </div>
 
             <Button

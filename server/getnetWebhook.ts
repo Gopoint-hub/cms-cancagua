@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
-import { massageBookings, massageTechniques, massageTherapists } from "../drizzle/schema";
+import { massageBookings, massageTechniques, massageTherapists, regularClassMemberships } from "../drizzle/schema";
 import { validateGetnetWebhookSignature, getGetnetSessionInfo } from "./getnet";
 import {
   sendMassageBookingConfirmationEmail,
@@ -13,6 +13,7 @@ import { sendFreelanceApprovalRequest } from "./freelanceApproval";
 import { syncMassageSale } from "./massageSales";
 import { markCheckoutPaid, markCheckoutPaymentFailed } from "./massageCheckout";
 import { emitMassagePurchase } from "./googleAnalytics";
+import { cancelRegularClassPayment, confirmRegularClassPayment } from "./regularClassesPurchase";
 
 console.log("[SERVER] getnetWebhook v3 cargado — freelance approval activo");
 
@@ -47,8 +48,13 @@ router.post("/", async (req: Request, res: Response) => {
     .from(massageBookings)
     .where(eq(massageBookings.getnetRequestId, requestId));
 
-  if (bookings.length === 0) {
-    console.warn("[Getnet Webhook] No se encontró booking para requestId:", requestId);
+  const memberships = await db
+    .select({ id: regularClassMemberships.id, paymentStatus: regularClassMemberships.paymentStatus })
+    .from(regularClassMemberships)
+    .where(eq(regularClassMemberships.paymentReference, requestId));
+
+  if (bookings.length === 0 && memberships.length === 0) {
+    console.warn("[Getnet Webhook] No se encontró compra para requestId:", requestId);
     return res.status(200).json({ ok: true });
   }
 
@@ -91,6 +97,7 @@ router.post("/", async (req: Request, res: Response) => {
     for (const booking of bookings) {
       await syncMassageSale(booking.id);
     }
+    await confirmRegularClassPayment(requestId);
     await markCheckoutPaid(requestId).catch((error) =>
       console.error("[Getnet Webhook] No se pudo marcar el checkout pagado:", error)
     );
@@ -98,16 +105,19 @@ router.post("/", async (req: Request, res: Response) => {
       console.error("[Getnet Webhook] No se pudo emitir purchase:", error)
     );
   } else if (effectiveStatus === "REJECTED" || effectiveStatus === "FAILED") {
-    await db
-      .update(massageBookings)
-      .set({
-        paymentStatus: "pending",
-        status: "cancelled",
-        cancellationCategory: "system",
-        cancellationReason: "Pago rechazado o fallido por Getnet.",
-        cancelledAt: new Date(),
-      })
-      .where(inArray(massageBookings.id, bookings.map((booking) => booking.id)));
+    if (bookings.length > 0) {
+      await db
+        .update(massageBookings)
+        .set({
+          paymentStatus: "pending",
+          status: "cancelled",
+          cancellationCategory: "system",
+          cancellationReason: "Pago rechazado o fallido por Getnet.",
+          cancelledAt: new Date(),
+        })
+        .where(inArray(massageBookings.id, bookings.map((booking) => booking.id)));
+    }
+    if (memberships.length > 0) await cancelRegularClassPayment(requestId);
     await markCheckoutPaymentFailed(requestId).catch((error) =>
       console.error("[Getnet Webhook] No se pudo marcar la falla del checkout:", error)
     );

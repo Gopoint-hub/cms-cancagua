@@ -13,6 +13,7 @@ import unsubscribeRouter from "../unsubscribeRoute";
 import freelanceApprovalRouter from "../freelanceApproval";
 import cerebroRouter from "../cerebroRoute";
 import publicMasajesCatalog from "../publicMasajesCatalog";
+import publicRegularClassesCatalog from "../publicRegularClassesCatalog";
 import { checkWhatsAppHealth } from "./whapi";
 import { checkGitHubBlogHealth } from "../githubBlogHealth";
 import { ensureMassageDiscountSchema } from "../ensureMassageDiscountSchema";
@@ -108,6 +109,7 @@ async function startServer() {
   app.use("/api/masajes", freelanceApprovalRouter);
   // Catálogo público consumido por cancagua.cl
   app.use("/api/public/masajes", publicMasajesCatalog);
+  app.use("/api/public/clases", publicRegularClassesCatalog);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
   // Cerebro: grafo de conocimiento del proyecto (solo admins)

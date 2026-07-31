@@ -52,7 +52,7 @@ export default function ConfirmacionPago() {
   if (!ready || isLoading) return <LoadingView />;
   if (isError || !data) return <PendingView onRetry={() => window.location.reload()} />;
 
-  if (data.status === "APPROVED") return <ApprovedView amount={data.amount} />;
+  if (data.status === "APPROVED") return <ApprovedView amount={data.amount} includesClassPlan={data.includesClassPlan} />;
   if (data.status === "REJECTED" || data.status === "FAILED") return <RejectedView />;
   return <PendingView onRetry={() => window.location.reload()} />;
 }
@@ -66,7 +66,7 @@ function LoadingView() {
   );
 }
 
-function ApprovedView({ amount }: { amount?: number }) {
+function ApprovedView({ amount, includesClassPlan }: { amount?: number; includesClassPlan?: boolean }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-8 bg-stone-50 px-4">
       <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-10 max-w-md w-full text-center flex flex-col items-center gap-6">
@@ -77,7 +77,7 @@ function ApprovedView({ amount }: { amount?: number }) {
         </div>
         <div>
           <h1 className="text-2xl font-semibold text-stone-800 mb-2">¡Pago exitoso!</h1>
-          <p className="text-stone-600">Tu compra fue procesada y tus reservas están confirmadas.</p>
+          <p className="text-stone-600">Tu compra fue procesada y tus servicios están confirmados.</p>
           {amount && (
             <p className="text-stone-500 text-sm mt-1">
               Monto pagado:{" "}
@@ -89,15 +89,15 @@ function ApprovedView({ amount }: { amount?: number }) {
         </div>
         <div className="bg-green-50 rounded-xl p-4 w-full text-left">
           <p className="text-green-800 text-sm">
-            Te llegará un <strong>email y WhatsApp</strong> con los detalles de tus reservas.
+            Te llegará un <strong>email</strong> con los detalles de tu compra. Si reservaste un masaje, también recibirás su confirmación por WhatsApp.
             ¡Te esperamos en Cancagua Spa!
           </p>
         </div>
         <button
-          onClick={() => window.location.assign("https://cancagua.cl/servicios/masajes")}
+          onClick={() => window.location.assign(includesClassPlan ? "https://cancagua.cl/clases" : "https://cancagua.cl/servicios/masajes")}
           className="w-full py-3 px-6 bg-stone-800 text-white rounded-xl text-sm font-medium hover:bg-stone-700 transition-colors"
         >
-          Volver al inicio
+          Volver a Cancagua
         </button>
       </div>
     </div>

@@ -26,7 +26,7 @@ import {
   hasRegularClassesAdminAccess,
   hasRegularClassesReceptionAccess,
 } from "@shared/permissions";
-import { protectedProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
   calculateCommissionLine,
@@ -39,6 +39,7 @@ import {
   nextCalendarMonth,
 } from "./regularClassesPeriod";
 import { decodeCmsImageDataUrl } from "./imageUpload";
+import { loadPublicRegularClassesCatalog } from "./publicRegularClassesCatalog";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -422,6 +423,9 @@ const studentInput = z.object({
 });
 
 export const regularClassesRouter = router({
+  public: router({
+    catalog: publicProcedure.query(async () => loadPublicRegularClassesCatalog()),
+  }),
   access: protectedProcedure.query(async ({ ctx }) => {
     const teacher = await getTeacherForUser(ctx.user.id);
     const allowed = hasRegularClassesAccess(ctx.user.role, ctx.user.regularClassesTeacher)
