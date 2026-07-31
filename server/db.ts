@@ -2838,3 +2838,392 @@ export async function getPersonalEmailLogs(limit = 50) {
   const { personalEmailLogs } = await import("../drizzle/schema");
   return await db.select().from(personalEmailLogs).orderBy(desc(personalEmailLogs.sentAt)).limit(limit);
 }
+
+// ============================================================================
+// Ficha diaria de mantención (turnos)
+//
+// Dominio separado del de averías: aquí vive el checklist del turno. Un reporte
+// por (fecha, turno); las tareas, temperaturas, calidad de agua y ciclos cuelgan
+// de él.
+// ============================================================================
+
+export type ShiftName = "apertura" | "cierre";
+
+export async function getShiftReportRow(reportDate: string, shift: ShiftName) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftReports } = await import("../drizzle/schema");
+  const rows = await db.select().from(maintenanceShiftReports)
+    .where(and(
+      eq(maintenanceShiftReports.reportDate, reportDate as any),
+      eq(maintenanceShiftReports.shift, shift),
+    ))
+    .limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+/** Devuelve el reporte del turno con todo lo que cuelga de él. */
+export async function getShiftReportDetail(reportDate: string, shift: ShiftName) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const report = await getShiftReportRow(reportDate, shift);
+  if (!report) return undefined;
+
+  const {
+    maintenanceShiftTasks,
+    maintenanceShiftTemperatures,
+    maintenanceShiftWaterQuality,
+    maintenanceShiftCycles,
+  } = await import("../drizzle/schema");
+
+  const [tasks, temperatures, waterQuality, cycles] = await Promise.all([
+    db.select().from(maintenanceShiftTasks)
+      .where(eq(maintenanceShiftTasks.reportId, report.id))
+      .orderBy(asc(maintenanceShiftTasks.scheduledTime), asc(maintenanceShiftTasks.id)),
+    db.select().from(maintenanceShiftTemperatures)
+      .where(eq(maintenanceShiftTemperatures.reportId, report.id))
+      .orderBy(asc(maintenanceShiftTemperatures.roundTime), asc(maintenanceShiftTemperatures.venue)),
+    db.select().from(maintenanceShiftWaterQuality)
+      .where(eq(maintenanceShiftWaterQuality.reportId, report.id))
+      .orderBy(asc(maintenanceShiftWaterQuality.venue)),
+    db.select().from(maintenanceShiftCycles)
+      .where(eq(maintenanceShiftCycles.reportId, report.id))
+      .orderBy(asc(maintenanceShiftCycles.plannedTime), asc(maintenanceShiftCycles.id)),
+  ]);
+
+  return { ...report, tasks, temperatures, waterQuality, cycles };
+}
+
+/** Crea el reporte del turno si no existe, y devuelve el vigente. */
+export async function ensureShiftReport(input: {
+  reportDate: string;
+  shift: ShiftName;
+  staffName?: string;
+  createdById?: number;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const existing = await getShiftReportRow(input.reportDate, input.shift);
+  if (existing) return existing;
+
+  const { maintenanceShiftReports } = await import("../drizzle/schema");
+  await db.insert(maintenanceShiftReports).values({
+    reportDate: input.reportDate as any,
+    shift: input.shift,
+    staffName: input.staffName,
+    createdById: input.createdById,
+  });
+  return await getShiftReportRow(input.reportDate, input.shift);
+}
+
+export async function updateShiftReport(id: number, data: {
+  staffName?: string;
+  weatherSummary?: string;
+  tomorrowEarlyTemp?: string;
+  filteringStart?: string;
+  filteringEnd?: string;
+  filteringRule?: string;
+  pendingNotes?: string;
+  handoverNotes?: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftReports } = await import("../drizzle/schema");
+  const changes = Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined),
+  );
+  // Sin campos que cambiar no hay UPDATE que hacer: drizzle rechaza un SET vacío.
+  if (Object.keys(changes).length > 0) {
+    await db.update(maintenanceShiftReports).set(changes)
+      .where(eq(maintenanceShiftReports.id, id));
+  }
+  const rows = await db.select().from(maintenanceShiftReports)
+    .where(eq(maintenanceShiftReports.id, id)).limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+/**
+ * Marca o desmarca una tarea. La llave (report_id, task_key) es única, así que
+ * el mismo llamado sirve para crear y para actualizar.
+ */
+export async function saveShiftTask(input: {
+  reportId: number;
+  taskKey: string;
+  label: string;
+  scheduledTime?: string;
+  isPool?: boolean;
+  done: boolean;
+  doneAt?: string;
+  responsible?: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftTasks } = await import("../drizzle/schema");
+
+  const values = {
+    reportId: input.reportId,
+    taskKey: input.taskKey,
+    label: input.label,
+    scheduledTime: input.scheduledTime,
+    isPool: input.isPool ? 1 : 0,
+    done: input.done ? 1 : 0,
+    doneAt: input.done ? input.doneAt : null,
+    responsible: input.responsible,
+  };
+
+  await db.insert(maintenanceShiftTasks).values(values).onDuplicateKeyUpdate({
+    set: {
+      label: values.label,
+      scheduledTime: values.scheduledTime,
+      isPool: values.isPool,
+      done: values.done,
+      doneAt: values.doneAt,
+      responsible: values.responsible,
+    },
+  });
+
+  const rows = await db.select().from(maintenanceShiftTasks)
+    .where(and(
+      eq(maintenanceShiftTasks.reportId, input.reportId),
+      eq(maintenanceShiftTasks.taskKey, input.taskKey),
+    ))
+    .limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+export async function saveShiftTemperature(input: {
+  reportId: number;
+  venue: string;
+  roundTime: string;
+  temperature?: string;
+  inRange?: boolean;
+  note?: string;
+  responsible?: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftTemperatures } = await import("../drizzle/schema");
+
+  const values = {
+    reportId: input.reportId,
+    venue: input.venue,
+    roundTime: input.roundTime,
+    temperature: input.temperature,
+    inRange: input.inRange === false ? 0 : 1,
+    note: input.note,
+    responsible: input.responsible,
+  };
+
+  await db.insert(maintenanceShiftTemperatures).values(values).onDuplicateKeyUpdate({
+    set: {
+      temperature: values.temperature,
+      inRange: values.inRange,
+      note: values.note,
+      responsible: values.responsible,
+    },
+  });
+
+  const rows = await db.select().from(maintenanceShiftTemperatures)
+    .where(and(
+      eq(maintenanceShiftTemperatures.reportId, input.reportId),
+      eq(maintenanceShiftTemperatures.venue, input.venue),
+      eq(maintenanceShiftTemperatures.roundTime, input.roundTime),
+    ))
+    .limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+export async function saveShiftWaterQuality(input: {
+  reportId: number;
+  venue: string;
+  transparency?: number;
+  suspendedParticles?: "ausente" | "pocas" | "muchas";
+  settledParticles?: "ausente" | "pocas" | "muchas";
+  observation?: string;
+  actions?: string;
+  recordedAt?: string;
+  responsible?: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftWaterQuality } = await import("../drizzle/schema");
+
+  const values = {
+    reportId: input.reportId,
+    venue: input.venue,
+    transparency: input.transparency,
+    suspendedParticles: input.suspendedParticles,
+    settledParticles: input.settledParticles,
+    observation: input.observation,
+    actions: input.actions,
+    recordedAt: input.recordedAt,
+    responsible: input.responsible,
+  };
+
+  await db.insert(maintenanceShiftWaterQuality).values(values).onDuplicateKeyUpdate({
+    set: {
+      transparency: values.transparency,
+      suspendedParticles: values.suspendedParticles,
+      settledParticles: values.settledParticles,
+      observation: values.observation,
+      actions: values.actions,
+      recordedAt: values.recordedAt,
+      responsible: values.responsible,
+    },
+  });
+
+  const rows = await db.select().from(maintenanceShiftWaterQuality)
+    .where(and(
+      eq(maintenanceShiftWaterQuality.reportId, input.reportId),
+      eq(maintenanceShiftWaterQuality.venue, input.venue),
+    ))
+    .limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+export async function createShiftCycleStep(input: {
+  reportId: number;
+  cycleType: "hot_tub" | "sauna";
+  venue: string;
+  bookingRef?: string;
+  step: "llenado" | "entrega" | "vaciado" | "higienizado" | "encendido";
+  plannedTime?: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftCycles } = await import("../drizzle/schema");
+  await db.insert(maintenanceShiftCycles).values({
+    reportId: input.reportId,
+    cycleType: input.cycleType,
+    venue: input.venue,
+    bookingRef: input.bookingRef,
+    step: input.step,
+    plannedTime: input.plannedTime,
+  });
+  const rows = await db.select().from(maintenanceShiftCycles)
+    .where(eq(maintenanceShiftCycles.reportId, input.reportId))
+    .orderBy(desc(maintenanceShiftCycles.id))
+    .limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+export async function updateShiftCycleStep(id: number, data: {
+  actualTime?: string;
+  temperature?: string;
+  done?: boolean;
+  responsible?: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftCycles } = await import("../drizzle/schema");
+  const changes: Record<string, unknown> = {};
+  if (data.actualTime !== undefined) changes.actualTime = data.actualTime;
+  if (data.temperature !== undefined) changes.temperature = data.temperature;
+  if (data.done !== undefined) changes.done = data.done ? 1 : 0;
+  if (data.responsible !== undefined) changes.responsible = data.responsible;
+  if (Object.keys(changes).length > 0) {
+    await db.update(maintenanceShiftCycles).set(changes)
+      .where(eq(maintenanceShiftCycles.id, id));
+  }
+  const rows = await db.select().from(maintenanceShiftCycles)
+    .where(eq(maintenanceShiftCycles.id, id)).limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+/** Cierra el turno. Deja el reporte en solo lectura para el equipo. */
+export async function submitShiftReport(id: number, data: {
+  pendingNotes?: string;
+  handoverNotes?: string;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftReports } = await import("../drizzle/schema");
+  const changes: Record<string, unknown> = {
+    status: "submitted",
+    submittedAt: new Date(),
+  };
+  if (data.pendingNotes !== undefined) changes.pendingNotes = data.pendingNotes;
+  if (data.handoverNotes !== undefined) changes.handoverNotes = data.handoverNotes;
+  await db.update(maintenanceShiftReports).set(changes)
+    .where(eq(maintenanceShiftReports.id, id));
+  const rows = await db.select().from(maintenanceShiftReports)
+    .where(eq(maintenanceShiftReports.id, id)).limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
+/**
+ * Lo que dejó el turno anterior, para el recuadro de traspaso.
+ *
+ * "Otras labores" (is_pool) queda fuera a propósito: es una bolsa sin horario y
+ * si contara como pendiente arrastraría las mismas tareas todos los días.
+ */
+export async function getShiftHandover(reportDate: string, shift: ShiftName) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftTasks } = await import("../drizzle/schema");
+
+  const previous = shift === "cierre"
+    ? { date: reportDate, shift: "apertura" as ShiftName }
+    : { date: previousDay(reportDate), shift: "cierre" as ShiftName };
+
+  const report = await getShiftReportRow(previous.date, previous.shift);
+  if (!report) return undefined;
+
+  const pendingTasks = await db.select().from(maintenanceShiftTasks)
+    .where(and(
+      eq(maintenanceShiftTasks.reportId, report.id),
+      eq(maintenanceShiftTasks.done, 0),
+      eq(maintenanceShiftTasks.isPool, 0),
+    ))
+    .orderBy(asc(maintenanceShiftTasks.scheduledTime));
+
+  return {
+    fromDate: report.reportDate,
+    fromShift: report.shift,
+    pendingNotes: report.pendingNotes,
+    handoverNotes: report.handoverNotes,
+    pendingTasks,
+  };
+}
+
+function previousDay(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Listado para el panel de Lu, del más reciente al más antiguo. */
+export async function listShiftReports(input: { from?: string; to?: string; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const { maintenanceShiftReports, users } = await import("../drizzle/schema");
+
+  const filters = [] as any[];
+  if (input.from) filters.push(gte(maintenanceShiftReports.reportDate, input.from as any));
+  if (input.to) filters.push(lte(maintenanceShiftReports.reportDate, input.to as any));
+
+  const base = db.select({
+    report: maintenanceShiftReports,
+    createdByName: users.name,
+  })
+    .from(maintenanceShiftReports)
+    .leftJoin(users, eq(maintenanceShiftReports.createdById, users.id));
+
+  const filtered = filters.length > 0 ? base.where(and(...filters)) : base;
+
+  const rows = await filtered
+    .orderBy(desc(maintenanceShiftReports.reportDate), desc(maintenanceShiftReports.id))
+    .limit(input.limit ?? 60);
+
+  return rows.map((r) => ({ ...r.report, createdByName: r.createdByName }));
+}
+
+export async function getShiftReportById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { maintenanceShiftReports } = await import("../drizzle/schema");
+  const rows = await db.select().from(maintenanceShiftReports)
+    .where(eq(maintenanceShiftReports.id, id)).limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}

@@ -23,6 +23,7 @@ import { ensureMassageNpsSchema } from "../ensureMassageNpsSchema";
 import { ensureMassageBookingSchema } from "../ensureMassageBookingSchema";
 import { ensureMassageMonthlyClosureSchema } from "../ensureMassageMonthlyClosureSchema";
 import { ensureMassageCheckoutSchema } from "../ensureMassageCheckoutSchema";
+import { ensureMaintenanceShiftSchema } from "../ensureMaintenanceShiftSchema";
 import { ensureRegularClassesSchema } from "../ensureRegularClassesSchema";
 import { ensureUserPermissionsSchema } from "../ensureUserPermissionsSchema";
 import { ensureMassageAssignmentSchema } from "../ensureMassageAssignmentSchema";
@@ -60,6 +61,7 @@ async function startServer() {
   await ensureMassageMonthlyClosureSchema();
   await ensureMassageCheckoutSchema();
   await ensureRegularClassesSchema();
+  await ensureMaintenanceShiftSchema();
   startTherapistAssignmentExpiryWorker();
   const app = express();
   const server = createServer(app);

@@ -21,6 +21,27 @@ import {
   CANCAGUA_EMAIL_REFINEMENT_RULES,
   getCancaguaEmailDesignSystem,
 } from "./brand/cancaguaDesignSystem";
+import { calculateFiltering } from "@shared/maintenanceFiltering";
+import { BIO_VENUE_KEYS } from "@shared/maintenanceShiftCatalog";
+import { getLastBioExit } from "./maintenanceShiftContext";
+
+/**
+ * Un turno cerrado no se sigue editando: el reporte ya se envió y con él el
+ * traspaso al turno siguiente. Sin esto, cualquier mutación podría cambiar por
+ * detrás un reporte ya entregado.
+ */
+async function assertShiftReportEditable(reportId: number): Promise<void> {
+  const report = await db.getShiftReportById(reportId);
+  if (!report) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Reporte de turno no encontrado" });
+  }
+  if (report.status === "submitted") {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "El turno ya fue cerrado y no admite cambios",
+    });
+  }
+}
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -4440,6 +4461,244 @@ Example output: {"key1": "Hello world"}`;
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getMaintenanceReportHistory(input.reportId);
+      }),
+  }),
+
+  /**
+   * Ficha diaria de mantención.
+   *
+   * Dominio separado del router `maintenance`, que es de averías y órdenes de
+   * trabajo. Aquí vive el checklist del turno: tareas por hora, rondas de
+   * temperatura, ciclos de hot tubs y saunas, calidad del agua y traspaso.
+   * Reutiliza `hasMaintenanceAccess`, según lo acordado con GoPoint.
+   */
+  maintenanceShift: router({
+    /** Reporte del turno con todo lo que cuelga de él. Lo crea si no existe. */
+    get: protectedProcedure
+      .input(z.object({
+        reportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida"),
+        shift: z.enum(["apertura", "cierre"]),
+        create: z.boolean().optional(),
+        staffName: z.string().max(200).optional(),
+      }))
+      .query(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        if (input.create) {
+          await db.ensureShiftReport({
+            reportDate: input.reportDate,
+            shift: input.shift,
+            staffName: input.staffName,
+            createdById: ctx.user.id,
+          });
+        }
+        return await db.getShiftReportDetail(input.reportDate, input.shift);
+      }),
+
+    /** Lo que dejó pendiente el turno anterior. */
+    handover: protectedProcedure
+      .input(z.object({
+        reportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida"),
+        shift: z.enum(["apertura", "cierre"]),
+      }))
+      .query(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        return await db.getShiftHandover(input.reportDate, input.shift);
+      }),
+
+    /**
+     * Sugerencia de filtrado del día.
+     *
+     * Cruza las tres entradas de la regla de Lu: la peor transparencia medida
+     * en las biopiscinas, la salida del último cliente de bios según Skedu, y
+     * la temperatura de mañana a primera hora que se haya anotado en la ficha.
+     * El cálculo es la función pura de `shared/maintenanceFiltering.ts`.
+     *
+     * Es una sugerencia, no una orden: el turno puede guardar otra ventana.
+     */
+    filteringPlan: protectedProcedure
+      .input(z.object({
+        reportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida"),
+        shift: z.enum(["apertura", "cierre"]),
+      }))
+      .query(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        const report = await db.getShiftReportDetail(input.reportDate, input.shift);
+
+        // La peor de las biopiscinas manda: si una salió turbia, se filtra por ella.
+        const readings = (report?.waterQuality ?? [])
+          .filter((row) => BIO_VENUE_KEYS.includes(row.venue))
+          .map((row) => row.transparency)
+          .filter((value): value is number => typeof value === "number");
+        const transparency = readings.length > 0 ? Math.min(...readings) : null;
+
+        const tomorrowEarlyTemp =
+          report?.tomorrowEarlyTemp != null ? Number(report.tomorrowEarlyTemp) : null;
+
+        const { lastBioExit, bookingCount, error } = await getLastBioExit(input.reportDate);
+
+        return {
+          plan: calculateFiltering({ transparency, lastBioExit, tomorrowEarlyTemp }),
+          transparency,
+          tomorrowEarlyTemp,
+          lastBioExit,
+          bookingCount,
+          // Si Skedu no respondió hay que decirlo: la ventana sale del horario
+          // base y el turno tiene que saber que no se miraron las reservas.
+          skeduError: error ?? null,
+        };
+      }),
+
+    /** Listado para el panel. */
+    list: protectedProcedure
+      .input(z.object({
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        limit: z.number().min(1).max(200).optional(),
+      }).optional())
+      .query(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        return await db.listShiftReports(input ?? {});
+      }),
+
+    /** Datos de cabecera: turno, clima y filtrado. */
+    updateReport: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        staffName: z.string().max(200).optional(),
+        weatherSummary: z.string().max(255).optional(),
+        tomorrowEarlyTemp: z.string().optional(),
+        filteringStart: z.string().max(5).optional(),
+        filteringEnd: z.string().max(5).optional(),
+        filteringRule: z.string().max(255).optional(),
+        pendingNotes: z.string().optional(),
+        handoverNotes: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        const { id, ...data } = input;
+        await assertShiftReportEditable(id);
+        return await db.updateShiftReport(id, data);
+      }),
+
+    /** Marca o desmarca una tarea del checklist. */
+    saveTask: protectedProcedure
+      .input(z.object({
+        reportId: z.number(),
+        taskKey: z.string().min(1).max(191),
+        label: z.string().min(1).max(500),
+        scheduledTime: z.string().max(5).optional(),
+        isPool: z.boolean().optional(),
+        done: z.boolean(),
+        doneAt: z.string().max(5).optional(),
+        responsible: z.string().max(120).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        await assertShiftReportEditable(input.reportId);
+        return await db.saveShiftTask(input);
+      }),
+
+    saveTemperature: protectedProcedure
+      .input(z.object({
+        reportId: z.number(),
+        venue: z.string().min(1).max(60),
+        roundTime: z.string().min(1).max(5),
+        temperature: z.string().optional(),
+        inRange: z.boolean().optional(),
+        note: z.string().max(255).optional(),
+        responsible: z.string().max(120).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        await assertShiftReportEditable(input.reportId);
+        return await db.saveShiftTemperature(input);
+      }),
+
+    saveWaterQuality: protectedProcedure
+      .input(z.object({
+        reportId: z.number(),
+        venue: z.string().min(1).max(60),
+        transparency: z.number().min(0).max(100).optional(),
+        suspendedParticles: z.enum(["ausente", "pocas", "muchas"]).optional(),
+        settledParticles: z.enum(["ausente", "pocas", "muchas"]).optional(),
+        observation: z.string().optional(),
+        actions: z.string().optional(),
+        recordedAt: z.string().max(5).optional(),
+        responsible: z.string().max(120).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        await assertShiftReportEditable(input.reportId);
+        return await db.saveShiftWaterQuality(input);
+      }),
+
+    /** Crea un paso del ciclo de un hot tub o sauna. */
+    createCycleStep: protectedProcedure
+      .input(z.object({
+        reportId: z.number(),
+        cycleType: z.enum(["hot_tub", "sauna"]),
+        venue: z.string().min(1).max(60),
+        bookingRef: z.string().max(80).optional(),
+        step: z.enum(["llenado", "entrega", "vaciado", "higienizado", "encendido"]),
+        plannedTime: z.string().max(5).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        await assertShiftReportEditable(input.reportId);
+        return await db.createShiftCycleStep(input);
+      }),
+
+    updateCycleStep: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        reportId: z.number(),
+        actualTime: z.string().max(5).optional(),
+        temperature: z.string().optional(),
+        done: z.boolean().optional(),
+        responsible: z.string().max(120).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        await assertShiftReportEditable(input.reportId);
+        const { id, reportId: _reportId, ...data } = input;
+        return await db.updateShiftCycleStep(id, data);
+      }),
+
+    /** Cierra el turno y deja el traspaso para el siguiente. */
+    submit: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        pendingNotes: z.string().optional(),
+        handoverNotes: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasMaintenanceAccess(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        await assertShiftReportEditable(input.id);
+        const { id, ...data } = input;
+        return await db.submitShiftReport(id, data);
       }),
   }),
 });

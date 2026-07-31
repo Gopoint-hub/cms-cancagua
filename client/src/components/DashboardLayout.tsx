@@ -26,7 +26,7 @@ import {
   FileText, FileSpreadsheet, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell, ClipboardList
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -167,6 +167,7 @@ export const categories: Category[] = [
     roles: ["super_admin", "admin", CANCAGUA_STAFF_ROLE],
     items: [
       { icon: Wrench, label: "Reportes Mantención", path: "/cms/reportes-mantencion" },
+      { icon: ClipboardList, label: "Ficha Diaria Mantención", path: "/cms/mantencion-turnos" },
     ],
   },
   {

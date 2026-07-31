@@ -28,6 +28,7 @@ import CMSMetricas from "./Metricas";
 import CMSAdmin from "./Admin";
 import CMSTraducciones from "./Traducciones";
 import CMSReportesMantencion from "./ReportesMantencion";
+import CMSMantencionTurnos from "./MantencionTurnos";
 import CMSIntegraciones from "./Integraciones";
 import CMSGiftCardsSales from "./GiftCardsSales";
 import CMSLogin from "./Login";
@@ -79,6 +80,7 @@ export default function CMSPage() {
       <Route path="/cms/gift-cards-sales" component={CMSGiftCardsSales} />
       <Route path="/cms/traducciones" component={CMSTraducciones} />
       <Route path="/cms/reportes-mantencion" component={CMSReportesMantencion} />
+      <Route path="/cms/mantencion-turnos" component={CMSMantencionTurnos} />
     </Router>
   );
 }
