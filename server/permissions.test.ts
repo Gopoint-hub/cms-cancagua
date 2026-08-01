@@ -191,6 +191,40 @@ describe("Terapeuta de Masajes permissions", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("allows explicitly authorized reception users to manage the agenda without other modules", async () => {
+    const permissions = JSON.stringify([
+      "module.massages",
+      "massages.manage_agenda",
+      "massages.assign_therapists",
+    ]);
+    const context = createMassageTherapistContext(permissions);
+    const caller = appRouter.createCaller(context);
+
+    await expect(caller.masajes.agenda.getSkeduPrograms()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: "reconecta" }),
+      ]),
+    );
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/masajes/agenda",
+      0,
+      permissions,
+    )).toBe(true);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/reservas",
+      0,
+      permissions,
+    )).toBe(false);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/masajes/analytics",
+      0,
+      permissions,
+    )).toBe(false);
+  });
+
   it("treats an explicit empty permission list as removal of legacy role access", () => {
     expect(getEffectiveCmsPermissions({
       role: "admin",

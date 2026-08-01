@@ -105,6 +105,15 @@ const massageAssignment = async (
   }
 };
 
+const massageAgenda = async (
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+) => {
+  if (!hasCmsPermission(user, "module.massages")
+      || !hasCmsPermission(user, "massages.manage_agenda")) {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+};
+
 const massageClientsAccess = async (
   user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
 ) => {
@@ -412,7 +421,11 @@ export const serializePublicMassageTechnique = (t: typeof massageTechniques.$inf
 // ─── TÉCNICAS ────────────────────────────────────────────────
 const tecnicasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    await massageOperations(ctx.user.role);
+    if (hasCmsPermission(ctx.user, "massages.manage_agenda")) {
+      await massageAgenda(ctx.user);
+    } else {
+      await massageOperations(ctx.user.role);
+    }
     const db = await getDb();
     if (!db) return [];
     return db.select().from(massageTechniques).orderBy(asc(massageTechniques.name));
@@ -986,7 +999,11 @@ const terapeutasRouter = router({
 // ─── SALAS ────────────────────────────────────────────────────
 const salasRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    await massageOperations(ctx.user.role);
+    if (hasCmsPermission(ctx.user, "massages.manage_agenda")) {
+      await massageAgenda(ctx.user);
+    } else {
+      await massageOperations(ctx.user.role);
+    }
     const db = await getDb();
     if (!db) return [];
     return db.select().from(massageRooms).orderBy(asc(massageRooms.id));
@@ -1095,7 +1112,7 @@ async function getSkeduProgramResourceAvailability(params: {
 // ─── AGENDA / RESERVAS ────────────────────────────────────────
 const agendaRouter = router({
   getSkeduPrograms: protectedProcedure.query(async ({ ctx }) => {
-    await massageOperations(ctx.user.role);
+    await massageAgenda(ctx.user);
     return SKEDU_MASSAGE_PROGRAMS;
   }),
 
@@ -1142,7 +1159,7 @@ const agendaRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -1283,7 +1300,7 @@ const agendaRouter = router({
       cancellationReason: cancellationReasonSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
@@ -1439,7 +1456,7 @@ const agendaRouter = router({
     }),
 
   getPendingManualAssignment: protectedProcedure.query(async ({ ctx }) => {
-    await massageOperations(ctx.user.role);
+    await massageAgenda(ctx.user);
     const db = await getDb();
     if (!db) return [];
 
@@ -1480,7 +1497,7 @@ const agendaRouter = router({
       cancellationReason: cancellationReasonSchema,
     }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -1525,7 +1542,7 @@ const agendaRouter = router({
   notifyFreelanceTherapist: protectedProcedure
     .input(z.object({ bookingId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       // Resetea estado de aprobación Y vuelve a pending para que el flujo sea correcto
@@ -1539,7 +1556,7 @@ const agendaRouter = router({
   getAvailableSlots: protectedProcedure
     .input(z.object({ date: z.string(), duration: z.number(), techniqueId: z.number().optional() }))
     .query(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) return [];
       const existingBookings = await loadBlockingMassageBookings(db, input.date);
@@ -1571,7 +1588,7 @@ const agendaRouter = router({
       discountCode: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const [inserted] = await db.insert(massageBookings)
@@ -1592,7 +1609,7 @@ const agendaRouter = router({
       cancellationReason: cancellationReasonSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
@@ -1625,7 +1642,7 @@ const agendaRouter = router({
       cancellationReason: cancellationReasonSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await massageOperations(ctx.user.role);
+      await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
