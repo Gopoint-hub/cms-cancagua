@@ -26,7 +26,7 @@ import MassageCancellationDialog, {
   type MassageCancellationCategory,
 } from "./MassageCancellationDialog";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { hasCmsPermission } from "@shared/permissions";
+import { hasCmsPermission, hasMassagePaymentAccess } from "@shared/permissions";
 import {
   MANUAL_MASSAGE_PAYMENT_METHODS,
   MASSAGE_PAYMENT_METHOD_LABELS,
@@ -326,6 +326,7 @@ export default function MasajesAgenda() {
   const canManageAgenda = hasCmsPermission(user ?? {}, "massages.manage_agenda");
   const canAssignTherapists = hasCmsPermission(user ?? {}, "massages.assign_therapists");
   const canViewSales = hasCmsPermission(user ?? {}, "massages.view_sales");
+  const canManagePayments = hasMassagePaymentAccess(user ?? {});
   const search = useSearch();
   const initialDate = (() => {
     const p = new URLSearchParams(search);
@@ -449,7 +450,8 @@ export default function MasajesAgenda() {
       clientOrigin: "", techniqueId: String(b.techniqueId), therapistId: b.therapistId ? String(b.therapistId) : "",
       roomId: String(b.roomId), duration: b.duration, bookingDate: b.bookingDate,
       startTime: b.startTime, endTime: b.endTime,
-      paymentStatus: b.paymentStatus as any, amountPaid: b.amountPaid ?? "",
+      paymentStatus: b.paymentStatus === "paid" ? "paid" : "pending",
+      amountPaid: b.amountPaid ?? "",
       manualPaymentMethod: b.manualPaymentMethod ?? "getnet_link",
       discountCode: "", notes: b.notes ?? "",
     });
@@ -469,9 +471,11 @@ export default function MasajesAgenda() {
       bookingDate: form.bookingDate,
       startTime: form.startTime,
       endTime: form.endTime,
-      paymentStatus: form.paymentStatus,
-      manualPaymentMethod: form.paymentStatus === "paid" ? form.manualPaymentMethod : undefined,
-      amountPaid: form.amountPaid || undefined,
+      ...(canManagePayments ? {
+        paymentStatus: form.paymentStatus,
+        manualPaymentMethod: form.paymentStatus === "paid" ? form.manualPaymentMethod : undefined,
+        amountPaid: form.amountPaid || undefined,
+      } : {}),
       discountCode: form.discountCode || undefined,
       notes: form.notes || undefined,
     };
@@ -728,7 +732,7 @@ export default function MasajesAgenda() {
                 <Input value={form.startTime} onChange={e => setStart(e.target.value)} placeholder="10:00" />
               )}
             </div>
-            <div>
+            {canManagePayments && <div>
               <Label>Estado de pago</Label>
               <Select value={form.paymentStatus} onValueChange={v => setForm(f => ({ ...f, paymentStatus: v as any }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -737,8 +741,8 @@ export default function MasajesAgenda() {
                   <SelectItem value="paid">Pagado</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            {form.paymentStatus === "paid" && (
+            </div>}
+            {canManagePayments && form.paymentStatus === "paid" && (
               <div>
                 <Label>Medio de pago</Label>
                 <Select
@@ -759,10 +763,10 @@ export default function MasajesAgenda() {
                 </Select>
               </div>
             )}
-            <div>
+            {canManagePayments && <div>
               <Label>Monto pagado</Label>
               <Input value={form.amountPaid} onChange={e => setForm(f => ({ ...f, amountPaid: e.target.value }))} placeholder="0" />
-            </div>
+            </div>}
             <div>
               <Label>Código descuento</Label>
               <Input value={form.discountCode} onChange={e => setForm(f => ({ ...f, discountCode: e.target.value }))} />

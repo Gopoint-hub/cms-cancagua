@@ -47,6 +47,7 @@ import {
   hasCmsPermission,
   hasMassageAdminAccess,
   hasMassageOperationsAccess,
+  hasMassagePaymentAccess,
   hasMassageReadAccess,
 } from "@shared/permissions";
 import { chileLocalDateTimeToUtc } from "./massageNps";
@@ -1446,7 +1447,7 @@ const agendaRouter = router({
       const bookings = [...standardBookings, ...skeduBookings].sort((a, b) =>
         String(a.bookingDate).localeCompare(String(b.bookingDate)) || a.startTime.localeCompare(b.startTime)
       );
-      if (hasCmsPermission(ctx.user, "massages.view_sales")) return bookings;
+      if (hasMassagePaymentAccess(ctx.user)) return bookings;
       return bookings.map((booking) => ({
         ...booking,
         paymentStatus: null,
@@ -1589,6 +1590,10 @@ const agendaRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
+      if ((input.paymentStatus === "paid" || input.amountPaid || input.manualPaymentMethod)
+          && !hasMassagePaymentAccess(ctx.user)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+      }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const [inserted] = await db.insert(massageBookings)
@@ -1643,6 +1648,12 @@ const agendaRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
+      const changesPayment = input.paymentStatus !== undefined
+        || input.amountPaid !== undefined
+        || input.manualPaymentMethod !== undefined;
+      if (changesPayment && !hasMassagePaymentAccess(ctx.user)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+      }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 

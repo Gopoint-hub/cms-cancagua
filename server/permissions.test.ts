@@ -11,6 +11,7 @@ import {
   hasMaintenanceAccess,
   hasMassageAdminAccess,
   hasMassageOperationsAccess,
+  hasMassagePaymentAccess,
   hasMassageReadAccess,
 } from "../shared/permissions";
 
@@ -225,6 +226,8 @@ describe("Terapeuta de Masajes permissions", () => {
       0,
       permissions,
     )).toBe(false);
+    await expect(caller.masajes.agenda.update({ id: 1, paymentStatus: "paid" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("allows reception to open only Gift Cards without exposing other sales channels", () => {
@@ -253,6 +256,40 @@ describe("Terapeuta de Masajes permissions", () => {
       0,
       permissions,
     )).toBe(false);
+  });
+
+  it("allows reception to manage agenda payments without opening massage analytics", () => {
+    const permissions = JSON.stringify([
+      "module.massages",
+      "massages.manage_agenda",
+      "massages.assign_therapists",
+      "massages.manage_payments",
+    ]);
+
+    const user = { role: MASSAGE_THERAPIST_ROLE, permissions };
+    expect(hasMassagePaymentAccess(user)).toBe(true);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/masajes/agenda",
+      0,
+      permissions,
+    )).toBe(true);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/masajes/analytics",
+      0,
+      permissions,
+    )).toBe(false);
+  });
+
+  it("keeps payment details hidden from agenda-only users", () => {
+    expect(hasMassagePaymentAccess({
+      role: MASSAGE_THERAPIST_ROLE,
+      permissions: JSON.stringify([
+        "module.massages",
+        "massages.manage_agenda",
+      ]),
+    })).toBe(false);
   });
 
   it("keeps Gift Cards available to existing users of the Sales module", () => {

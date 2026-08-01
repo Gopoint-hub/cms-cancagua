@@ -28,6 +28,7 @@ export const CMS_PERMISSION_GROUPS = [
     permissions: [
       { key: "massages.manage_agenda", label: "Crear y editar reservas" },
       { key: "massages.assign_therapists", label: "Asignar o cambiar terapeutas" },
+      { key: "massages.manage_payments", label: "Ver y actualizar pagos en la agenda" },
       { key: "massages.manage_therapists", label: "Gestionar terapeutas y disponibilidad" },
       { key: "massages.manage_catalog", label: "Gestionar técnicas y catálogo" },
       { key: "massages.manage_inventory", label: "Gestionar inventario" },
@@ -104,6 +105,7 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, CmsPermissionKey[]> = {
     "module.massages",
     "massages.manage_agenda",
     "massages.assign_therapists",
+    "massages.manage_payments",
     "massages.manage_therapists",
     "massages.manage_catalog",
     "massages.manage_inventory",
@@ -183,6 +185,11 @@ export function hasAnyCmsPermission(
  */
 export function hasGiftCardAccess(user: PermissionUser): boolean {
   return hasAnyCmsPermission(user, ["module.gift_cards", "module.sales"]);
+}
+
+/** Permite operar pagos en agenda sin abrir Ventas ni Analítica de Masajes. */
+export function hasMassagePaymentAccess(user: PermissionUser): boolean {
+  return hasAnyCmsPermission(user, ["massages.manage_payments", "massages.view_sales"]);
 }
 
 export const isAdminRole = (role?: string | null) => ADMIN_ROLES.has(role as CmsUserRole);
