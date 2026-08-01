@@ -1,7 +1,7 @@
-import { hasB2CAccess } from "@shared/permissions";
+import { hasGiftCardAccess, type PermissionUser } from "@shared/permissions";
 
-export function canRedeemGiftCard(role?: string | null): boolean {
-  return hasB2CAccess(role);
+export function canRedeemGiftCard(user: PermissionUser): boolean {
+  return hasGiftCardAccess(user);
 }
 
 export function validateServiceGiftCardRedemption(input: {

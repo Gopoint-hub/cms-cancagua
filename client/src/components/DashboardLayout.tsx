@@ -42,6 +42,7 @@ import {
   canAccessCmsPath,
   CANCAGUA_STAFF_ROLE,
   CmsPermissionKey,
+  hasAnyCmsPermission,
   hasCmsPermission,
   MASSAGE_THERAPIST_ROLE,
   parseCmsPermissions,
@@ -61,6 +62,7 @@ interface MenuItem {
   areaAdminOnly?: boolean;
   regularClassesAccess?: "teacher" | "reception" | "admin";
   permission?: CmsPermissionKey;
+  permissionsAny?: CmsPermissionKey[];
 }
 
 interface Category {
@@ -74,6 +76,7 @@ interface Category {
   roles?: string[];
   requiresRegularClassesAccess?: boolean;
   permission: CmsPermissionKey;
+  permissionsAny?: CmsPermissionKey[];
 }
 
 export const categories: Category[] = [
@@ -115,13 +118,14 @@ export const categories: Category[] = [
     description: "Canales de Venta",
     color: "bg-teal-500",
     permission: "module.sales",
+    permissionsAny: ["module.sales", "module.gift_cards"],
     roles: ["super_admin", "admin", "editor", "seller", "concierge", "user", CANCAGUA_STAFF_ROLE],
     items: [
-      { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales" },
-      { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta", roles: ["super_admin", "admin", "editor", "seller", "concierge"] },
-      { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios", roles: ["super_admin", "admin"] },
-      { icon: DollarSign, label: "Comisiones", path: "/cms/concierge/vendedores", roles: ["super_admin", "admin"] },
-      { icon: DollarSign, label: "Mis Comisiones", path: "/cms/concierge/mis-comisiones", roles: ["super_admin", "admin", "editor", "seller", "concierge"] },
+      { icon: Gift, label: "Gift Cards", path: "/cms/gift-cards-sales", permission: "module.gift_cards", permissionsAny: ["module.gift_cards", "module.sales"] },
+      { icon: Handshake, label: "Concierge", path: "/cms/concierge/venta", roles: ["super_admin", "admin", "editor", "seller", "concierge"], permission: "module.sales" },
+      { icon: Package, label: "Servicios Concierge", path: "/cms/concierge/servicios", roles: ["super_admin", "admin"], permission: "module.sales" },
+      { icon: DollarSign, label: "Comisiones", path: "/cms/concierge/vendedores", roles: ["super_admin", "admin"], permission: "module.sales" },
+      { icon: DollarSign, label: "Mis Comisiones", path: "/cms/concierge/mis-comisiones", roles: ["super_admin", "admin", "editor", "seller", "concierge"], permission: "module.sales" },
     ],
   },
   {
@@ -491,14 +495,18 @@ function DashboardLayoutContent({
             <div className="px-2 py-1">
               {categories
                 .filter(cat =>
-                  hasCmsPermission(user ?? {}, cat.permission)
+                  (cat.permissionsAny
+                    ? hasAnyCmsPermission(user ?? {}, cat.permissionsAny)
+                    : hasCmsPermission(user ?? {}, cat.permission))
                   && (hasExplicitPermissions || !cat.roles || cat.roles.includes(user?.role || ""))
                   && (!cat.requiresRegularClassesAccess || hasExplicitPermissions || regularClassesAccess.data?.allowed === true)
                 )
                 .map((category) => {
                 // Filter items by role too
                 const visibleItems = category.items.filter(item =>
-                  (!item.permission || hasCmsPermission(user ?? {}, item.permission))
+                  (!item.permission || (item.permissionsAny
+                    ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
+                    : hasCmsPermission(user ?? {}, item.permission)))
                   && (hasExplicitPermissions || !item.roles || item.roles.includes(user?.role || ""))
                   && (!item.areaAdminOnly || hasExplicitPermissions || areaAdminAccess.data?.allowed === true)
                   && (

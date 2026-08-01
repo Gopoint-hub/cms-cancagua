@@ -11,6 +11,7 @@ export const CMS_PERMISSION_GROUPS = [
       { key: "module.b2c", label: "B2C: servicios, reservas y clientes" },
       { key: "module.b2b", label: "B2B: cotizaciones y CRM" },
       { key: "module.sales", label: "Ventas y canales comerciales" },
+      { key: "module.gift_cards", label: "Gift Cards" },
       { key: "module.marketing", label: "Marketing y newsletters" },
       { key: "module.metrics", label: "Métricas y analítica general" },
       { key: "module.operations", label: "Operaciones y mantención" },
@@ -86,7 +87,7 @@ const MASSAGE_READ_ROLES = new Set<CmsUserRole>([
   MASSAGE_THERAPIST_ROLE,
 ]);
 
-type PermissionUser = {
+export type PermissionUser = {
   role?: string | null;
   permissions?: string | null;
   regularClassesTeacher?: number | boolean | null;
@@ -169,6 +170,21 @@ export function hasCmsPermission(
   return getEffectiveCmsPermissions(user).includes(permission);
 }
 
+export function hasAnyCmsPermission(
+  user: PermissionUser,
+  permissions: readonly CmsPermissionKey[],
+): boolean {
+  return permissions.some((permission) => hasCmsPermission(user, permission));
+}
+
+/**
+ * `module.sales` conserva el acceso histórico de los usuarios de Ventas,
+ * mientras `module.gift_cards` permite entregar solo Gift Cards a Recepción.
+ */
+export function hasGiftCardAccess(user: PermissionUser): boolean {
+  return hasAnyCmsPermission(user, ["module.gift_cards", "module.sales"]);
+}
+
 export const isAdminRole = (role?: string | null) => ADMIN_ROLES.has(role as CmsUserRole);
 export const hasContentAdminAccess = (role?: string | null) => CONTENT_ROLES.has(role as CmsUserRole);
 export const hasB2CAccess = (role?: string | null) => STAFF_OPERATION_ROLES.has(role as CmsUserRole);
@@ -238,7 +254,7 @@ const EXACT_PATH_PERMISSIONS = new Map<string, CmsPermissionKey>([
   ["/cms/cotizacion-wizard", "module.b2b"],
   ["/cms/productos-corporativos", "module.b2b"],
   ["/cms/crm-pipeline", "module.b2b"],
-  ["/cms/gift-cards-sales", "module.sales"],
+  ["/cms/gift-cards-sales", "module.gift_cards"],
   ["/cms/concierge", "module.sales"],
   ["/cms/concierge/venta", "module.sales"],
   ["/cms/concierge/servicios", "module.sales"],
@@ -306,6 +322,9 @@ export function canAccessCmsPath(
   if (explicitPermissions) {
     if (path === "/" || path === "/cms") return true;
     const required = resolvePathPermission(path);
+    if (required === "module.gift_cards") {
+      return hasGiftCardAccess({ role, permissions, regularClassesTeacher });
+    }
     return required ? explicitPermissions.includes(required) : false;
   }
 

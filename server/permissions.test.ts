@@ -153,6 +153,8 @@ describe("Terapeuta de Masajes permissions", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(caller.masajes.agenda.updateStatus({ id: 1, status: "completed" }))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.giftCardsAdmin.getAll())
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("allows an explicitly authorized therapist to assign massages without exposing sales", async () => {
@@ -223,6 +225,43 @@ describe("Terapeuta de Masajes permissions", () => {
       0,
       permissions,
     )).toBe(false);
+  });
+
+  it("allows reception to open only Gift Cards without exposing other sales channels", () => {
+    const permissions = JSON.stringify([
+      "module.massages",
+      "massages.manage_agenda",
+      "massages.assign_therapists",
+      "module.gift_cards",
+    ]);
+
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/gift-cards-sales",
+      0,
+      permissions,
+    )).toBe(true);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/concierge/venta",
+      0,
+      permissions,
+    )).toBe(false);
+    expect(canAccessCmsPath(
+      MASSAGE_THERAPIST_ROLE,
+      "/cms/clientes",
+      0,
+      permissions,
+    )).toBe(false);
+  });
+
+  it("keeps Gift Cards available to existing users of the Sales module", () => {
+    expect(canAccessCmsPath(
+      "editor",
+      "/cms/gift-cards-sales",
+      0,
+      JSON.stringify(["module.sales"]),
+    )).toBe(true);
   });
 
   it("treats an explicit empty permission list as removal of legacy role access", () => {

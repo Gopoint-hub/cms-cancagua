@@ -14,7 +14,7 @@ import { masajesRouter } from "./masajesRouter";
 import { clientesRouter } from "./clientesRouter";
 import { marketingRouter } from "./marketingRouter";
 import { regularClassesRouter } from "./regularClassesRouter";
-import { hasB2CAccess, hasMaintenanceAccess } from "@shared/permissions";
+import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
 import {
@@ -3287,7 +3287,7 @@ Devuelve un JSON con este formato:
         orderType: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (!canRedeemGiftCard(ctx.user.role)) {
+        if (!canRedeemGiftCard(ctx.user)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
         }
         try {
@@ -3696,7 +3696,10 @@ Devuelve un JSON con este formato:
   // Gift Cards Admin (CMS)
   giftCardsAdmin: router({
     getAll: protectedProcedure
-      .query(async () => {
+      .query(async ({ ctx }) => {
+        if (!hasGiftCardAccess(ctx.user)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para Gift Cards" });
+        }
         // Auto-cleanup: marcar como abandonadas las gift cards pendientes por más de 30 minutos
         try {
           const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
@@ -3710,7 +3713,7 @@ Devuelve un JSON con este formato:
     redeemService: protectedProcedure
       .input(z.object({ code: z.string().min(1).max(20) }))
       .mutation(async ({ ctx, input }) => {
-        if (!canRedeemGiftCard(ctx.user.role)) {
+        if (!canRedeemGiftCard(ctx.user)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
         }
         try {
@@ -3724,7 +3727,7 @@ Devuelve un JSON con este formato:
     resendEmail: protectedProcedure
       .input(z.object({ giftCardId: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (!hasB2CAccess(ctx.user.role)) {
+        if (!hasGiftCardAccess(ctx.user)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
         }
 
@@ -3793,7 +3796,7 @@ Devuelve un JSON con este formato:
      */
     markAbandonedGiftCards: protectedProcedure
       .mutation(async ({ ctx }) => {
-        if (!hasB2CAccess(ctx.user.role)) {
+        if (!hasGiftCardAccess(ctx.user)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos" });
         }
 
@@ -3821,6 +3824,9 @@ Devuelve un JSON con este formato:
         personalMessage: z.string().max(500).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
+        if (!hasGiftCardAccess(ctx.user)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para Gift Cards" });
+        }
         try {
           const { buildManualGiftCardData } = await import("./manualGiftCards");
           const giftCardData = buildManualGiftCardData(input, {

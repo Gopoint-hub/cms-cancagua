@@ -12,6 +12,7 @@ import { useLocation } from "wouter";
 import { SEOHead } from "@/components/SEOHead";
 import { useEffect } from "react";
 import {
+  hasAnyCmsPermission,
   hasCmsPermission,
   MASSAGE_THERAPIST_ROLE,
   parseCmsPermissions,
@@ -106,7 +107,9 @@ function AdminDashboard() {
   const handleCategoryClick = (categoryId: CategoryId) => {
     const category = categories.find(c => c.id === categoryId);
     const firstVisibleItem = category?.items.find(item =>
-      (!item.permission || hasCmsPermission(user ?? {}, item.permission))
+      (!item.permission || (item.permissionsAny
+        ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
+        : hasCmsPermission(user ?? {}, item.permission)))
       && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole)),
     );
     if (firstVisibleItem) {
@@ -150,7 +153,9 @@ function AdminDashboard() {
 
   // Filter categories by role
   const visibleCategories = categories.filter(
-    cat => hasCmsPermission(user ?? {}, cat.permission)
+    cat => (cat.permissionsAny
+      ? hasAnyCmsPermission(user ?? {}, cat.permissionsAny)
+      : hasCmsPermission(user ?? {}, cat.permission))
       && (hasExplicitPermissions || !cat.roles || cat.roles.includes(userRole)),
   );
 
@@ -171,7 +176,9 @@ function AdminDashboard() {
           {visibleCategories.map((category) => {
             // Also filter items by role
             const visibleItems = category.items.filter(
-              item => (!item.permission || hasCmsPermission(user ?? {}, item.permission))
+              item => (!item.permission || (item.permissionsAny
+                ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
+                : hasCmsPermission(user ?? {}, item.permission)))
                 && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole)),
             );
             return (

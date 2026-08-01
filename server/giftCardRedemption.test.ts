@@ -3,18 +3,25 @@ import { canRedeemGiftCard, validateGiftCardRedemption, validateServiceGiftCardR
 
 describe("permisos de canje de Gift Cards", () => {
   it("permite canjear al personal Cancagua que tiene acceso al módulo de ventas", () => {
-    expect(canRedeemGiftCard("cancagua_staff")).toBe(true);
+    expect(canRedeemGiftCard({ role: "cancagua_staff" })).toBe(true);
   });
 
   it("mantiene el canje para administración y edición", () => {
-    expect(canRedeemGiftCard("super_admin")).toBe(true);
-    expect(canRedeemGiftCard("admin")).toBe(true);
-    expect(canRedeemGiftCard("editor")).toBe(true);
+    expect(canRedeemGiftCard({ role: "super_admin" })).toBe(true);
+    expect(canRedeemGiftCard({ role: "admin" })).toBe(true);
+    expect(canRedeemGiftCard({ role: "editor" })).toBe(true);
   });
 
   it("no permite canjear a roles sin acceso operativo", () => {
-    expect(canRedeemGiftCard("massage_therapist")).toBe(false);
-    expect(canRedeemGiftCard("user")).toBe(false);
+    expect(canRedeemGiftCard({ role: "massage_therapist" })).toBe(false);
+    expect(canRedeemGiftCard({ role: "user", permissions: "[]" })).toBe(false);
+  });
+
+  it("permite canjear a recepción con el permiso exclusivo de Gift Cards", () => {
+    expect(canRedeemGiftCard({
+      role: "massage_therapist",
+      permissions: JSON.stringify(["module.gift_cards"]),
+    })).toBe(true);
   });
 });
 
