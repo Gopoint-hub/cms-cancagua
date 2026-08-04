@@ -1,6 +1,7 @@
 import { getDb, fastBulkImportSubscribers, getSubscriberIdsByEmails, bulkAddSubscribersToList, createList } from "./db";
 import { sql } from "drizzle-orm";
 import { existsSync, readFileSync } from "fs";
+import { fileURLToPath } from "url";
 import { join } from "path";
 
 const DEFAULT_LISTS = [
@@ -17,9 +18,11 @@ const DEFAULT_LISTS = [
 
 function getSeedContactsPath() {
   const candidates = [
+    // Works from both server/seed.ts in development and dist/index.js after
+    // esbuild bundles the production server as ESM.
+    fileURLToPath(new URL("../server/data/seed_contacts.json", import.meta.url)),
     join(process.cwd(), "server", "data", "seed_contacts.json"),
     join(process.cwd(), "dist", "data", "seed_contacts.json"),
-    join(__dirname, "data", "seed_contacts.json"),
   ];
   const found = candidates.find((path) => existsSync(path));
   if (!found) {
