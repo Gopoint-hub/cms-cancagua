@@ -26,7 +26,7 @@ import {
   FileText, FileSpreadsheet, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell, ClipboardList
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell, ClipboardList, Waves, Ban
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -50,7 +50,7 @@ import {
 import { trpc } from "@/lib/trpc";
 
 // Definición de categorías y sus items de menú
-export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "masajes" | "regular_classes";
+export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "biopools" | "masajes" | "regular_classes";
 
 interface MenuItem {
   icon: any;
@@ -189,6 +189,22 @@ export const categories: Category[] = [
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
       { icon: RefreshCw, label: "Integraciones", path: "/cms/integraciones" },
       { icon: Settings, label: "Configuración", path: "/cms/configuracion" },
+    ],
+  },
+  {
+    id: "biopools",
+    label: "Biopiscinas",
+    icon: Waves,
+    description: "Agenda, aforo & operación",
+    color: "bg-cyan-600",
+    permission: "module.biopools",
+    roles: ["super_admin", "admin", "editor", CANCAGUA_STAFF_ROLE],
+    items: [
+      { icon: LayoutDashboard, label: "Dashboard", path: "/cms/biopiscinas" },
+      { icon: CalendarCheck, label: "Agenda", path: "/cms/biopiscinas/agenda", permission: "biopools.manage_agenda" },
+      { icon: Ban, label: "Bloqueos", path: "/cms/biopiscinas/bloqueos", permission: "biopools.manage_blocks" },
+      { icon: Waves, label: "Servicios", path: "/cms/biopiscinas/servicios", permission: "biopools.manage_catalog" },
+      { icon: Settings, label: "Configuración", path: "/cms/biopiscinas/configuracion", permission: "biopools.manage_settings" },
     ],
   },
   {

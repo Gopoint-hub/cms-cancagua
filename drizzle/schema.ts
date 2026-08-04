@@ -49,6 +49,173 @@ export type InsertUser = typeof users.$inferInsert;
 export type UserRole = "super_admin" | "admin" | "editor" | "user" | "seller" | "concierge" | "cancagua_staff" | "massage_therapist";
 export type UserStatus = "active" | "pending" | "inactive";
 
+// Biopiscinas: catálogo, aforo compartido, agenda y comunicaciones.
+export const biopoolServices = mysqlTable("biopool_services", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 180 }).notNull(),
+  slug: varchar("slug", { length: 180 }).notNull().unique(),
+  description: mediumtext("description"),
+  status: mysqlEnum("status", ["draft", "published", "hidden", "archived"]).default("draft").notNull(),
+  capacity: int("capacity").default(40).notNull(),
+  openingTime: varchar("opening_time", { length: 5 }).default("10:00").notNull(),
+  waterCloseTime: varchar("water_close_time", { length: 5 }).default("21:30").notNull(),
+  facilityCloseTime: varchar("facility_close_time", { length: 5 }).default("22:00").notNull(),
+  firstEntryTime: varchar("first_entry_time", { length: 5 }).default("10:00").notNull(),
+  lastEntryTime: varchar("last_entry_time", { length: 5 }).default("18:00").notNull(),
+  slotIntervalMinutes: int("slot_interval_minutes").default(60).notNull(),
+  standardDurationMinutes: int("standard_duration_minutes").default(240).notNull(),
+  finalEntryDurationMinutes: int("final_entry_duration_minutes").default(210).notNull(),
+  bookingHorizonMonths: int("booking_horizon_months"),
+  customerCanCancel: int("customer_can_cancel").default(0).notNull(),
+  customerCanReschedule: int("customer_can_reschedule").default(0).notNull(),
+  maxStaffReschedules: int("max_staff_reschedules").default(2).notNull(),
+  refundNoticeHours: int("refund_notice_hours").default(72).notNull(),
+  rescheduleNoticeHours: int("reschedule_notice_hours").default(48).notNull(),
+  refundFeePercent: decimal("refund_fee_percent", { precision: 5, scale: 2 }).default("0.25").notNull(),
+  childMinAge: int("child_min_age").default(5).notNull(),
+  childMaxAge: int("child_max_age").default(12).notNull(),
+  childRequiresAdult: int("child_requires_adult").default(1).notNull(),
+  reminderHoursBefore: int("reminder_hours_before").default(24).notNull(),
+  reminderEmailEnabled: int("reminder_email_enabled").default(1).notNull(),
+  reminderWhatsappEnabled: int("reminder_whatsapp_enabled").default(1).notNull(),
+  notificationEmail: varchar("notification_email", { length: 320 }).default("contacto@cancagua.cl").notNull(),
+  mapsUrl: text("maps_url"),
+  rulesUrl: text("rules_url"),
+  confirmationEmailSubject: varchar("confirmation_email_subject", { length: 250 }),
+  confirmationEmailBody: mediumtext("confirmation_email_body"),
+  reminderEmailSubject: varchar("reminder_email_subject", { length: 250 }),
+  reminderEmailBody: mediumtext("reminder_email_body"),
+  reminderWhatsappBody: mediumtext("reminder_whatsapp_body"),
+  createdByUserId: int("created_by_user_id"),
+  archivedAt: timestamp("archived_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const biopoolTicketTypes = mysqlTable("biopool_ticket_types", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("service_id").notNull(),
+  code: varchar("code", { length: 40 }).notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  priceClp: int("price_clp").notNull(),
+  minimumAge: int("minimum_age"),
+  maximumAge: int("maximum_age"),
+  requiresAdult: int("requires_adult").default(0).notNull(),
+  displayOrder: int("display_order").default(0).notNull(),
+  active: int("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const biopoolSchedules = mysqlTable("biopool_schedules", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("service_id").notNull(),
+  dayOfWeek: int("day_of_week").notNull(),
+  enabled: int("enabled").default(1).notNull(),
+  openingTime: varchar("opening_time", { length: 5 }).default("10:00").notNull(),
+  firstEntryTime: varchar("first_entry_time", { length: 5 }).default("10:00").notNull(),
+  lastEntryTime: varchar("last_entry_time", { length: 5 }).default("18:00").notNull(),
+  waterCloseTime: varchar("water_close_time", { length: 5 }).default("21:30").notNull(),
+  facilityCloseTime: varchar("facility_close_time", { length: 5 }).default("22:00").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const biopoolServiceImages = mysqlTable("biopool_service_images", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("service_id").notNull(),
+  url: text("url").notNull(),
+  altText: varchar("alt_text", { length: 250 }),
+  displayOrder: int("display_order").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const biopoolBlocks = mysqlTable("biopool_blocks", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("service_id").notNull(),
+  startDate: date("start_date", { mode: "string" }).notNull(),
+  endDate: date("end_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).default("10:00").notNull(),
+  endTime: varchar("end_time", { length: 5 }).default("22:00").notNull(),
+  blockedCapacity: int("blocked_capacity").default(40).notNull(),
+  reason: mysqlEnum("reason", ["technical", "temperature", "private_event", "maintenance", "other"]).notNull(),
+  notes: text("notes"),
+  referenceType: varchar("reference_type", { length: 40 }),
+  referenceId: varchar("reference_id", { length: 80 }),
+  active: int("active").default(1).notNull(),
+  createdByUserId: int("created_by_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const biopoolBookings = mysqlTable("biopool_bookings", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingCode: varchar("booking_code", { length: 32 }).notNull().unique(),
+  serviceId: int("service_id").notNull(),
+  clientId: int("client_id"),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }).notNull(),
+  clientPhone: varchar("client_phone", { length: 40 }).notNull(),
+  bookingDate: date("booking_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  adultQuantity: int("adult_quantity").default(1).notNull(),
+  childQuantity: int("child_quantity").default(0).notNull(),
+  totalGuests: int("total_guests").notNull(),
+  status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
+  attendanceConfirmation: mysqlEnum("attendance_confirmation", ["pending", "confirmed", "declined"]).default("pending").notNull(),
+  attendanceToken: varchar("attendance_token", { length: 64 }).notNull().unique(),
+  paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "partially_refunded", "refunded"]).default("pending").notNull(),
+  paymentMethod: varchar("payment_method", { length: 60 }),
+  paymentReference: varchar("payment_reference", { length: 160 }),
+  originalAmountClp: int("original_amount_clp").notNull(),
+  discountAmountClp: int("discount_amount_clp").default(0).notNull(),
+  amountPaidClp: int("amount_paid_clp").default(0).notNull(),
+  refundAmountClp: int("refund_amount_clp").default(0).notNull(),
+  refundFeeAmountClp: int("refund_fee_amount_clp").default(0).notNull(),
+  refundStatus: mysqlEnum("refund_status", ["none", "pending", "processed", "rejected"]).default("none").notNull(),
+  refundFeePercent: decimal("refund_fee_percent", { precision: 5, scale: 2 }).default("0.25").notNull(),
+  source: mysqlEnum("source", ["cms", "web", "skedu_import", "b2b"]).default("cms").notNull(),
+  rescheduleCount: int("reschedule_count").default(0).notNull(),
+  notes: text("notes"),
+  cancellationReason: text("cancellation_reason"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledByUserId: int("cancelled_by_user_id"),
+  createdByUserId: int("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const biopoolBookingActivity = mysqlTable("biopool_booking_activity", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingId: int("booking_id").notNull(),
+  action: varchar("action", { length: 80 }).notNull(),
+  detail: text("detail"),
+  userId: int("user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const biopoolNotifications = mysqlTable("biopool_notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingId: int("booking_id").notNull(),
+  type: mysqlEnum("type", ["confirmation", "reminder"]).notNull(),
+  channel: mysqlEnum("channel", ["email", "whatsapp"]).notNull(),
+  status: mysqlEnum("status", ["pending", "sending", "sent", "failed", "skipped"]).default("pending").notNull(),
+  scheduledAt: timestamp("scheduled_at"),
+  sentAt: timestamp("sent_at"),
+  providerId: varchar("provider_id", { length: 180 }),
+  error: text("error"),
+  attemptCount: int("attempt_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type BiopoolService = typeof biopoolServices.$inferSelect;
+export type BiopoolTicketType = typeof biopoolTicketTypes.$inferSelect;
+export type BiopoolSchedule = typeof biopoolSchedules.$inferSelect;
+export type BiopoolBlock = typeof biopoolBlocks.$inferSelect;
+export type BiopoolBooking = typeof biopoolBookings.$inferSelect;
+
 // Servicios de Skedu
 export const services = mysqlTable("services", {
   id: int("id").autoincrement().primaryKey(),

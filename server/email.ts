@@ -41,6 +41,7 @@ interface SendEmailOptions {
   tags?: { name: string; value: string }[];
   senderName?: string; // Nombre personalizado del remitente
   senderType?: EmailSenderType; // Tipo de email para usar nombre predefinido
+  fromEmail?: string;
 }
 
 interface SendBulkEmailOptions {
@@ -76,7 +77,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
     } else if (options.senderType) {
       senderName = EMAIL_SENDER_NAMES[options.senderType];
     }
-    const fromEmail = formatSender(senderName);
+    const fromEmail = formatSender(senderName, options.fromEmail ?? BASE_EMAIL);
 
     const { data, error } = await getResendClient().emails.send({
       from: fromEmail,
@@ -84,7 +85,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
       subject: options.subject,
       html: options.html,
       text: options.text,
-      replyTo: options.replyTo,
+      replyTo: options.replyTo ?? DEFAULT_REPLY_TO,
       tags: options.tags,
     });
 

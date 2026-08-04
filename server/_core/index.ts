@@ -27,6 +27,7 @@ import { ensureMaintenanceShiftSchema } from "../ensureMaintenanceShiftSchema";
 import { ensureRegularClassesSchema } from "../ensureRegularClassesSchema";
 import { ensureUserPermissionsSchema } from "../ensureUserPermissionsSchema";
 import { ensureMassageAssignmentSchema } from "../ensureMassageAssignmentSchema";
+import { ensureBiopoolsSchema } from "../ensureBiopoolsSchema";
 import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
 
@@ -61,6 +62,7 @@ async function startServer() {
   await ensureMassageMonthlyClosureSchema();
   await ensureMassageCheckoutSchema();
   await ensureRegularClassesSchema();
+  await ensureBiopoolsSchema();
   await ensureMaintenanceShiftSchema();
   startTherapistAssignmentExpiryWorker();
   const app = express();
@@ -149,6 +151,8 @@ startServer()
     startMassageNpsScheduler();
     const { startMassageCheckoutScheduler } = await import("../massageCheckout");
     startMassageCheckoutScheduler();
+    const { startBiopoolNotificationScheduler } = await import("../biopoolNotifications");
+    startBiopoolNotificationScheduler();
     const { runSeedIfNeeded } = await import("../seed");
     try {
       await runSeedIfNeeded();

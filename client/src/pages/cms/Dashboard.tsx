@@ -140,6 +140,9 @@ function AdminDashboard() {
     masajes: [
       { label: "Área de masajes", value: "Ver", icon: Store },
     ],
+    biopools: [
+      { label: "Agenda y aforo", value: "Ver", icon: CalendarCheck },
+    ],
     regular_classes: [
       { label: "Programa integrado", value: "Ver", icon: CalendarCheck },
     ],

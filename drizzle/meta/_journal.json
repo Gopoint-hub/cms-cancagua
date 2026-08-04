@@ -197,6 +197,13 @@
       "when": 1785269138000,
       "tag": "0031_regular_classes_calendar_months",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1785804399000,
+      "tag": "0034_biopools",
+      "breakpoints": true
     }
   ]
 }

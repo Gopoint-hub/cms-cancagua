@@ -63,6 +63,13 @@ import MasajesAdminArea from "./pages/cms/masajes/AdminArea";
 import ReservarMasaje from "./pages/masajes/ReservarMasaje";
 import ConfirmacionPago from "./pages/masajes/ConfirmacionPago";
 import NpsMasaje from "./pages/masajes/NpsMasaje";
+// Módulo Biopiscinas
+import BiopiscinasDashboard from "./pages/cms/biopiscinas/Dashboard";
+import BiopiscinasAgenda from "./pages/cms/biopiscinas/Agenda";
+import BiopiscinasBlocks from "./pages/cms/biopiscinas/Blocks";
+import BiopiscinasServices from "./pages/cms/biopiscinas/Services";
+import BiopiscinasConfiguration from "./pages/cms/biopiscinas/Configuration";
+import ConfirmBiopoolAttendance from "./pages/biopiscinas/ConfirmAttendance";
 // Módulo Clases Regulares
 import RegularClassesDashboard from "./pages/cms/clases-regulares/Dashboard";
 import RegularClassesAttendance from "./pages/cms/clases-regulares/Attendance";
@@ -82,6 +89,7 @@ function Router() {
       <Route path="/cms/activar-cuenta" component={CMSActivarCuenta} />
       <Route path="/cms/recuperar-contrasena" component={CMSRecuperarContrasena} />
       <Route path="/cms/restablecer-contrasena" component={CMSRestablecerContrasena} />
+      <Route path="/biopiscinas/confirmar/:token" component={ConfirmBiopoolAttendance} />
 
       {/* CMS Dashboard pages */}
       <Route path="/" component={CMSDashboard} />
@@ -139,6 +147,13 @@ function Router() {
       <Route path="/cms/masajes/admin" component={MasajesAdminArea} />
       <Route path="/cms/masajes/rrhh" component={MasajesRRHH} />
       <Route path="/cms/masajes/configuracion" component={MasajesConfiguracion} />
+
+      {/* Módulo Biopiscinas */}
+      <Route path="/cms/biopiscinas" component={BiopiscinasDashboard} />
+      <Route path="/cms/biopiscinas/agenda" component={BiopiscinasAgenda} />
+      <Route path="/cms/biopiscinas/bloqueos" component={BiopiscinasBlocks} />
+      <Route path="/cms/biopiscinas/servicios" component={BiopiscinasServices} />
+      <Route path="/cms/biopiscinas/configuracion" component={BiopiscinasConfiguration} />
 
       {/* Módulo Clases Regulares */}
       <Route path="/cms/clases-regulares" component={RegularClassesDashboard} />
