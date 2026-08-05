@@ -347,7 +347,7 @@ async function offerNextTherapist(
   const db = await getDb();
   if (!db) return { offered: false };
   const booking = await getAssignmentBooking(bookingType, bookingId);
-  if (!booking || booking.status === "cancelled" || booking.status === "completed") {
+  if (!booking || ["confirmed", "cancelled", "completed", "no_show"].includes(booking.status)) {
     return { offered: false };
   }
 
@@ -420,12 +420,22 @@ async function offerNextTherapist(
   scheduleAssignmentExpiration(insertedRequest.id, expiresAt);
 
   if (bookingType === "massage") {
-    await db.update(massageBookings).set({
+    const assignmentUpdate = await db.update(massageBookings).set({
       therapistId: candidate.id,
       status: "pending",
       freelanceApprovalStatus: "awaiting_therapist",
       therapistConfirmationToken: token,
-    }).where(eq(massageBookings.id, bookingId));
+    }).where(and(
+      eq(massageBookings.id, bookingId),
+      eq(massageBookings.status, "pending"),
+    ));
+    if (affectedRows(assignmentUpdate) !== 1) {
+      await db.update(massageTherapistAssignmentRequests).set({
+        status: "superseded",
+        respondedAt: new Date(),
+      }).where(eq(massageTherapistAssignmentRequests.id, insertedRequest.id));
+      return { offered: false };
+    }
   } else {
     await db.update(massageProgramBookings).set({
       ...(slotIndex === 1

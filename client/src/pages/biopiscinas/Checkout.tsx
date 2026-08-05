@@ -28,15 +28,15 @@ export default function BiopoolCheckout() {
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "+56" });
   const catalog = trpc.biopools.public.catalog.useQuery();
   const service = catalog.data?.service;
+  const totalGuests = adults + children;
   const availability = trpc.biopools.public.availability.useQuery(
-    { serviceId: service?.id ?? 0, date },
+    { serviceId: service?.id ?? 0, date, guestCount: totalGuests },
     { enabled: Boolean(service && date), refetchInterval: 30_000 }
   );
-  const totalGuests = adults + children;
   const adultTicket = catalog.data?.tickets.find(ticket => ticket.code === "adult");
   const childTicket = catalog.data?.tickets.find(ticket => ticket.code === "child");
   const total = adults * (adultTicket?.priceClp ?? 0) + children * (childTicket?.priceClp ?? 0);
-  const slots = useMemo(() => (availability.data?.slots ?? []).filter(slot => slot.availableSeats >= totalGuests), [availability.data, totalGuests]);
+  const slots = useMemo(() => availability.data?.slots ?? [], [availability.data]);
   useEffect(() => {
     if (!slots.some(slot => slot.startTime === startTime)) setStartTime(slots[0]?.startTime ?? "");
   }, [slots, startTime]);
@@ -96,7 +96,7 @@ export default function BiopoolCheckout() {
           </CardContent></Card>
           <Card><CardContent className="space-y-5 p-6"><h2 className="flex items-center gap-2 text-xl font-semibold"><CalendarDays className="text-[#536481]" /> Fecha y hora de ingreso</h2>
             <div className="max-w-xs"><Label htmlFor="date">Fecha</Label><Input id="date" type="date" min={today()} value={date} onChange={event => setDate(event.target.value)} /></div>
-            {availability.isLoading ? <p className="text-sm text-stone-500">Consultando disponibilidad…</p> : slots.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">{slots.map(slot => <button type="button" key={slot.startTime} onClick={() => setStartTime(slot.startTime)} className={`rounded-xl border p-3 text-left transition ${startTime === slot.startTime ? "border-[#536481] bg-[#536481] text-white" : "bg-white hover:border-[#536481]"}`}><span className="flex items-center gap-2 font-semibold"><Clock className="h-4 w-4" />{slot.startTime}</span><span className={`mt-1 block text-xs ${startTime === slot.startTime ? "text-white/80" : "text-stone-500"}`}>hasta {slot.endTime} · {slot.availableSeats} disponibles</span></button>)}</div> : <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">No hay cupos para esta cantidad de personas en la fecha seleccionada.</p>}
+            {availability.isLoading ? <p className="text-sm text-stone-500">Consultando disponibilidad…</p> : slots.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">{slots.map(slot => <button type="button" key={slot.startTime} onClick={() => setStartTime(slot.startTime)} className={`rounded-xl border p-3 text-left transition ${startTime === slot.startTime ? "border-[#536481] bg-[#536481] text-white" : "bg-white hover:border-[#536481]"}`}><span className="flex items-center gap-2 font-semibold"><Clock className="h-4 w-4" />{slot.startTime}</span><span className={`mt-1 block text-xs ${startTime === slot.startTime ? "text-white/80" : "text-stone-500"}`}>hasta {slot.endTime}</span></button>)}</div> : <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">No hay horarios disponibles para esta cantidad de personas en la fecha seleccionada.</p>}
           </CardContent></Card>
           <Card><CardContent className="space-y-4 p-6"><h2 className="text-xl font-semibold">Datos de quien reserva</h2>
             <div><Label htmlFor="name">Nombre completo</Label><Input id="name" required minLength={2} value={customer.name} onChange={event => setCustomer({ ...customer, name: event.target.value })} /></div>

@@ -10,6 +10,7 @@ import {
   getRecurringMassageAvailabilityHorizon,
   expandSkeduProgramResourceBlocks,
   isSkeduProgramDurationAllowed,
+  isPendingManualMassageAssignment,
   listAutomaticMassageSlots,
   MASSAGE_AGENDA_STATUSES,
   MANUAL_ASSIGNMENT_REJECTION_STATUSES,
@@ -51,6 +52,33 @@ describe("massage agenda visibility", () => {
       "therapist_rejected",
       "assignment_exhausted",
     ]);
+  });
+
+  it("opens the exceptional manual selector only for paid, pending, unresolved bookings", () => {
+    expect(isPendingManualMassageAssignment({
+      paymentStatus: "paid",
+      status: "pending",
+      therapistId: null,
+      freelanceApprovalStatus: "assignment_exhausted",
+    })).toBe(true);
+    expect(isPendingManualMassageAssignment({
+      paymentStatus: "paid",
+      status: "pending",
+      therapistId: 8,
+      freelanceApprovalStatus: "therapist_rejected",
+    })).toBe(true);
+    expect(isPendingManualMassageAssignment({
+      paymentStatus: "paid",
+      status: "confirmed",
+      therapistId: 8,
+      freelanceApprovalStatus: "manual_assigned",
+    })).toBe(false);
+    expect(isPendingManualMassageAssignment({
+      paymentStatus: "pending",
+      status: "pending",
+      therapistId: null,
+      freelanceApprovalStatus: null,
+    })).toBe(false);
   });
 });
 

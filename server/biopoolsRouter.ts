@@ -47,6 +47,7 @@ import { ENV } from "./_core/env";
 import { calculateWellnessCartDiscount } from "./massageDiscounts";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
 const bookingStatuses = [
   "pending",
@@ -83,6 +84,14 @@ function serializeDate(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 10);
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value).slice(0, 10);
+}
+
+function datesInMonth(month: string): string[] {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const totalDays = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return Array.from({ length: totalDays }, (_, index) =>
+    `${month}-${String(index + 1).padStart(2, "0")}`
+  );
 }
 
 function hoursUntil(date: string, time: string): number {
@@ -641,15 +650,104 @@ export const biopoolsRouter = router({
       return { ...primary, services: catalogs };
     }),
     availability: publicProcedure
-      .input(z.object({ serviceId: z.number(), date: dateSchema }))
+      .input(z.object({
+        serviceId: z.number(),
+        date: dateSchema,
+        guestCount: z.number().int().min(1).max(40).default(1),
+      }))
       .query(async ({ input }) => {
         const result = await availabilityForDay(await database(), input.serviceId, input.date);
         if (result.service.status !== "published") throw new TRPCError({ code: "NOT_FOUND" });
         const now = new Date();
         return {
-          slots: result.slots.filter(slot => chileLocalDateTimeToUtc(input.date, slot.startTime) > now),
-          capacity: result.service.capacity,
+          slots: result.slots
+            .filter(slot =>
+              chileLocalDateTimeToUtc(input.date, slot.startTime) > now &&
+              slot.availableSeats >= input.guestCount
+            )
+            .map(slot => ({ startTime: slot.startTime, endTime: slot.endTime })),
         };
+      }),
+    availableDates: publicProcedure
+      .input(z.object({
+        serviceId: z.number().int().positive(),
+        month: monthSchema,
+        guestCount: z.number().int().min(1).max(40),
+      }))
+      .query(async ({ input }) => {
+        const db = await database();
+        const dates = datesInMonth(input.month);
+        const from = dates[0];
+        const to = dates[dates.length - 1];
+        const [service] = await db
+          .select()
+          .from(biopoolServices)
+          .where(eq(biopoolServices.id, input.serviceId))
+          .limit(1);
+        if (!service || service.status !== "published") {
+          throw new TRPCError({ code: "NOT_FOUND", message: "El servicio no está publicado" });
+        }
+
+        const [schedules, bookings, blocks, checkoutHolds] = await Promise.all([
+          db
+            .select()
+            .from(biopoolSchedules)
+            .where(eq(biopoolSchedules.serviceId, input.serviceId)),
+          db
+            .select()
+            .from(biopoolBookings)
+            .where(and(
+              gte(biopoolBookings.bookingDate, from),
+              lte(biopoolBookings.bookingDate, to),
+              inArray(biopoolBookings.status, ["pending", "confirmed", "completed"])
+            )),
+          db
+            .select()
+            .from(biopoolBlocks)
+            .where(and(
+              eq(biopoolBlocks.active, 1),
+              lte(biopoolBlocks.startDate, to),
+              gte(biopoolBlocks.endDate, from)
+            )),
+          db
+            .select()
+            .from(biopoolCheckoutOrders)
+            .where(and(
+              gte(biopoolCheckoutOrders.bookingDate, from),
+              lte(biopoolCheckoutOrders.bookingDate, to),
+              inArray(biopoolCheckoutOrders.status, ["initiating", "payment_pending"]),
+              gt(biopoolCheckoutOrders.expiresAt, new Date())
+            )),
+        ]);
+
+        const now = new Date();
+        const availableDates = dates.filter(date => {
+          const schedule = schedules.find(item => item.dayOfWeek === dayOfWeek(date));
+          if (!schedule?.enabled) return false;
+          const occupancy = [
+            ...bookings
+              .filter(booking => serializeDate(booking.bookingDate) === date)
+              .map(booking => ({ startTime: booking.startTime, endTime: booking.endTime, seats: booking.totalGuests })),
+            ...blocks
+              .filter(block => serializeDate(block.startDate) <= date && serializeDate(block.endDate) >= date)
+              .map(block => ({ startTime: block.startTime, endTime: block.endTime, seats: block.blockedCapacity })),
+            ...checkoutHolds
+              .filter(hold => serializeDate(hold.bookingDate) === date)
+              .map(hold => ({ startTime: hold.startTime, endTime: hold.endTime, seats: hold.totalGuests })),
+          ];
+          return buildEntrySlots({
+            firstEntryTime: schedule.firstEntryTime,
+            lastEntryTime: schedule.lastEntryTime,
+            slotIntervalMinutes: service.slotIntervalMinutes,
+            standardDurationMinutes: service.standardDurationMinutes,
+            finalEntryDurationMinutes: service.finalEntryDurationMinutes,
+          }).some(slot =>
+            chileLocalDateTimeToUtc(date, slot.startTime) > now &&
+            minimumAvailableSeats(service.capacity, slot, occupancy) >= input.guestCount
+          );
+        });
+
+        return { dates: availableDates };
       }),
     validateDiscount: publicProcedure
       .input(z.object({
@@ -707,7 +805,7 @@ export const biopoolsRouter = router({
             const slot = availability.slots.find((item: any) => item.startTime === input.startTime);
             if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "El horario seleccionado no está disponible" });
             const totalGuests = input.adultQuantity + input.childQuantity;
-            if (slot.availableSeats < totalGuests) throw new TRPCError({ code: "CONFLICT", message: `Solo quedan ${slot.availableSeats} cupos` });
+            if (slot.availableSeats < totalGuests) throw new TRPCError({ code: "CONFLICT", message: "Este horario ya no está disponible para la cantidad de personas seleccionada" });
             const tickets = await tx.select().from(biopoolTicketTypes).where(and(eq(biopoolTicketTypes.serviceId, input.serviceId), eq(biopoolTicketTypes.active, 1)));
             const adult = tickets.find((ticket: any) => ticket.code === "adult");
             const child = tickets.find((ticket: any) => ticket.code === "child");

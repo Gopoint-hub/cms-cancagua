@@ -15,6 +15,7 @@ import { clientesRouter } from "./clientesRouter";
 import { marketingRouter } from "./marketingRouter";
 import { regularClassesRouter } from "./regularClassesRouter";
 import { biopoolsRouter } from "./biopoolsRouter";
+import { operations360Router } from "./operations360Router";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
@@ -58,6 +59,8 @@ export const appRouter = router({
   regularClasses: regularClassesRouter,
   // Módulo Biopiscinas - agenda, cupos, bloqueos y comunicaciones
   biopools: biopoolsRouter,
+  // Vista transversal de agenda y clientes entre los módulos operativos.
+  operations360: operations360Router,
   clientes: clientesRouter,
   marketing: marketingRouter,
   auth: router({

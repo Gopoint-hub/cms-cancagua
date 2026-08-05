@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { AlertTriangle, CalendarCheck, CalendarPlus, Users, Clock, TrendingUp, UserX, Send, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
@@ -29,6 +31,8 @@ export default function MasajesDashboard() {
   const [stockPage, setStockPage] = useState(0);
   const [skeduDialogOpen, setSkeduDialogOpen] = useState(false);
   const [pendingCancellation, setPendingCancellation] = useState<any | null>(null);
+  const [manualAssignmentTarget, setManualAssignmentTarget] = useState<any | null>(null);
+  const [manualTherapistId, setManualTherapistId] = useState("");
   const { data: bookings, isLoading: loadingBookings } = trpc.masajes.agenda.getByDateRange.useQuery(
     { from: today, to: today }
   );
@@ -37,11 +41,25 @@ export default function MasajesDashboard() {
     { enabled: canManageInventory },
   );
   const { data: activeTherapistCount, isLoading: loadingTherapists } = trpc.masajes.terapeutas.getActiveCount.useQuery();
+  const { data: therapists } = trpc.masajes.terapeutas.getAll.useQuery(
+    undefined,
+    { enabled: canAssignTherapists },
+  );
 
   const { data: pendingAssignment, isLoading: loadingPending } = trpc.masajes.agenda.getPendingManualAssignment.useQuery(
     undefined,
-    { enabled: canManageAgenda },
+    { enabled: canAssignTherapists },
   );
+  const manualAssignMut = trpc.masajes.agenda.assignPendingManually.useMutation({
+    onSuccess: ({ therapistName }) => {
+      utils.masajes.agenda.getPendingManualAssignment.invalidate();
+      utils.masajes.agenda.getByDateRange.invalidate();
+      toast.success(`Reserva asignada manualmente a ${therapistName}`);
+      setManualAssignmentTarget(null);
+      setManualTherapistId("");
+    },
+    onError: e => toast.error(e.message),
+  });
   const notifyMut = trpc.masajes.agenda.notifyFreelanceTherapist.useMutation({
     onSuccess: () => {
       utils.masajes.agenda.getPendingManualAssignment.invalidate();
@@ -146,7 +164,7 @@ export default function MasajesDashboard() {
         </div>
 
         {/* Asignación manual pendiente — siempre visible */}
-        {canManageAgenda && <Card className="border-amber-300 bg-amber-50">
+        {canAssignTherapists && <Card className="border-amber-300 bg-amber-50">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex flex-wrap items-center gap-2 text-amber-800">
               <UserX className="w-5 h-5" />
@@ -194,22 +212,30 @@ export default function MasajesDashboard() {
                           <Send className="w-3 h-3 mr-1" />
                           Notificar
                         </Button>
-                        <Link href={`/cms/masajes/agenda?date=${b.bookingDate}`}>
-                          <Button variant="outline" size="sm" className="w-full text-xs border-amber-400 hover:bg-amber-100 sm:w-auto">
-                            Asignar
-                          </Button>
-                        </Link>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="flex-1 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 sm:flex-none"
-                          disabled={dismissMut.isPending}
-                          title="Cancelar y quitar de asignaciones pendientes"
-                          onClick={() => setPendingCancellation(b)}
+                          className="flex-1 text-xs border-amber-400 hover:bg-amber-100 sm:flex-none"
+                          onClick={() => {
+                            setManualAssignmentTarget(b);
+                            setManualTherapistId("");
+                          }}
                         >
-                          <Trash2 className="w-3 h-3 mr-1" />
-                          Eliminar
+                          Asignar manualmente
                         </Button>
+                        {canManageAgenda && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 sm:flex-none"
+                            disabled={dismissMut.isPending}
+                            title="Cancelar y quitar de asignaciones pendientes"
+                            onClick={() => setPendingCancellation(b)}
+                          >
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            Eliminar
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );
@@ -372,6 +398,88 @@ export default function MasajesDashboard() {
             }}
           />
         </>
+      )}
+      {canAssignTherapists && (
+        <Dialog
+          open={!!manualAssignmentTarget}
+          onOpenChange={(next) => {
+            if (!next) {
+              setManualAssignmentTarget(null);
+              setManualTherapistId("");
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Asignación manual excepcional</DialogTitle>
+            </DialogHeader>
+            {manualAssignmentTarget && (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="font-medium">{manualAssignmentTarget.clientName}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {manualAssignmentTarget.techniqueName} · {manualAssignmentTarget.duration} min
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {manualAssignmentTarget.bookingDate} · {manualAssignmentTarget.startTime}–{manualAssignmentTarget.endTime}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  Aquí se muestran todos los terapeutas activos, aunque no tengan disponibilidad registrada para este horario.
+                  Usa esta excepción solo cuando recepción ya confirmó directamente el cupo con el terapeuta.
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Terapeuta confirmado por recepción</p>
+                  <Select value={manualTherapistId} onValueChange={setManualTherapistId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar terapeuta" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(therapists ?? []).filter(t => t.active === 1 && t.type === "inhouse").length > 0 && (
+                        <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inhouse</div>
+                      )}
+                      {(therapists ?? []).filter(t => t.active === 1 && t.type === "inhouse").map(t => (
+                        <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                      ))}
+                      {(therapists ?? []).filter(t => t.active === 1 && t.type === "freelance").length > 0 && (
+                        <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Freelance</div>
+                      )}
+                      {(therapists ?? []).filter(t => t.active === 1 && t.type === "freelance").map(t => (
+                        <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  La asignación automática conserva sus reglas normales de disponibilidad, técnica, anticipación y cruces de agenda.
+                </p>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setManualAssignmentTarget(null);
+                  setManualTherapistId("");
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                disabled={!manualTherapistId || manualAssignMut.isPending}
+                onClick={() => {
+                  if (!manualAssignmentTarget || !manualTherapistId) return;
+                  manualAssignMut.mutate({
+                    bookingId: manualAssignmentTarget.id,
+                    therapistId: Number(manualTherapistId),
+                  });
+                }}
+              >
+                {manualAssignMut.isPending ? "Asignando…" : "Confirmar asignación"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </DashboardLayout>
   );

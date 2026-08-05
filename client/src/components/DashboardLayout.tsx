@@ -79,6 +79,31 @@ interface Category {
   permissionsAny?: CmsPermissionKey[];
 }
 
+const quickMenuItems: Array<MenuItem & { permissionsAny: CmsPermissionKey[] }> = [
+  {
+    icon: Home,
+    label: "Inicio",
+    path: "/cms",
+    permissionsAny: [
+      "module.b2c", "module.b2b", "module.sales", "module.gift_cards",
+      "module.marketing", "module.metrics", "module.operations", "module.admin",
+      "module.biopools", "module.massages", "module.regular_classes", "module.help",
+    ],
+  },
+  {
+    icon: CalendarDays,
+    label: "Calendario 360",
+    path: "/cms/calendario",
+    permissionsAny: ["module.massages", "module.biopools", "module.regular_classes"],
+  },
+  {
+    icon: UsersRound,
+    label: "Cliente 360",
+    path: "/cms/clientes-360",
+    permissionsAny: ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
+  },
+];
+
 export const categories: Category[] = [
   {
     id: "b2c",
@@ -440,6 +465,7 @@ function DashboardLayoutContent({
   // Detectar categoría y módulo activo para el header móvil
   const activeCategory = categories.find(c => c.items.some(i => i.path === location));
   const activeMenuItem = activeCategory?.items.find(item => item.path === location);
+  const activeQuickItem = quickMenuItems.find(item => item.path === location);
 
   useEffect(() => {
     if (isCollapsed) {
@@ -508,6 +534,29 @@ function DashboardLayoutContent({
           </SidebarHeader>
 
           <SidebarContent className="gap-0 overflow-y-auto">
+            <SidebarMenu className="px-2 pb-2">
+              {quickMenuItems
+                .filter(item => hasAnyCmsPermission(user ?? {}, item.permissionsAny))
+                .map(item => {
+                  const isActive = location === item.path;
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        onClick={() => {
+                          setLocation(item.path);
+                          if (isMobile) setOpenMobile(false);
+                        }}
+                        tooltip={item.label}
+                        className="h-11 font-medium md:h-9"
+                      >
+                        <item.icon className={cn("h-4 w-4", isActive && "text-primary")} />
+                        <span className="text-sm">{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+            </SidebarMenu>
             {/* Menú Acordeón - Categorías filtradas por rol */}
             <div className="px-2 py-1">
               {categories
@@ -669,9 +718,9 @@ function DashboardLayoutContent({
                   </div>
                 )}
                 <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate text-xs text-muted-foreground">{activeCategory?.label ?? "CMS"}</span>
+                  <span className="truncate text-xs text-muted-foreground">{activeCategory?.label ?? (activeQuickItem ? "Vista 360" : "CMS")}</span>
                   <span className="truncate text-sm tracking-tight text-foreground">
-                    {activeMenuItem?.label ?? "Menu"}
+                    {activeMenuItem?.label ?? activeQuickItem?.label ?? "Menu"}
                   </span>
                 </div>
               </div>

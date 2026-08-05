@@ -1,4 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearch } from "wouter";
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameMonth,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+  subDays,
+  subMonths,
+  subWeeks,
+} from "date-fns";
+import { es } from "date-fns/locale";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,11 +54,6 @@ import { toast } from "sonner";
 function localDate(date = new Date()) {
   return date.toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 }
-function moveDate(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
 const clp = new Intl.NumberFormat("es-CL", {
   style: "currency",
   currency: "CLP",
@@ -53,11 +66,21 @@ const statusLabel: Record<string, string> = {
   cancelled: "Cancelada",
   no_show: "No asistió",
 };
+type ViewMode = "day" | "week" | "month";
+
+function bookingDate(value: unknown) {
+  if (typeof value === "string") return value.slice(0, 10);
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value ?? "").slice(0, 10);
+}
 
 export default function BiopiscinasAgenda() {
+  const search = useSearch();
   const { user } = useAuth();
   const canManage = hasCmsPermission(user ?? {}, "biopools.manage_agenda");
-  const [date, setDate] = useState(localDate());
+  const initialDate = new URLSearchParams(search).get("date") ?? localDate();
+  const [date, setDate] = useState(initialDate);
+  const [view, setView] = useState<ViewMode>("day");
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [startTime, setStartTime] = useState("");
@@ -93,6 +116,20 @@ export default function BiopiscinasAgenda() {
     { id: service?.id ?? 0 },
     { enabled: Boolean(service) }
   );
+  const selected = parseISO(date);
+  const range = useMemo(() => {
+    if (view === "day") return { from: date, to: date };
+    if (view === "week") {
+      return {
+        from: format(startOfWeek(selected, { weekStartsOn: 1 }), "yyyy-MM-dd"),
+        to: format(endOfWeek(selected, { weekStartsOn: 1 }), "yyyy-MM-dd"),
+      };
+    }
+    return {
+      from: format(startOfWeek(startOfMonth(selected), { weekStartsOn: 1 }), "yyyy-MM-dd"),
+      to: format(endOfWeek(endOfMonth(selected), { weekStartsOn: 1 }), "yyyy-MM-dd"),
+    };
+  }, [date, selected, view]);
   const query = { serviceId: service?.id ?? 0, date };
   const { data: availability, isLoading } =
     trpc.biopools.availability.day.useQuery(query, {
@@ -105,7 +142,7 @@ export default function BiopiscinasAgenda() {
       { enabled: Boolean(service && rescheduleBooking) }
     );
   const { data: bookings } = trpc.biopools.bookings.list.useQuery(
-    { serviceId: service?.id ?? 0, from: date, to: date },
+    { serviceId: service?.id ?? 0, from: range.from, to: range.to },
     { enabled: Boolean(service), refetchInterval: 30_000 }
   );
   const create = trpc.biopools.bookings.create.useMutation({
@@ -171,7 +208,7 @@ export default function BiopiscinasAgenda() {
       (availability?.slots ?? []).map(slot => ({
         slot,
         bookings: (bookings ?? []).filter(
-          booking => booking.startTime === slot.startTime
+          booking => bookingDate(booking.bookingDate) === date && booking.startTime === slot.startTime
         ),
       })),
     [availability, bookings]
@@ -247,6 +284,22 @@ export default function BiopiscinasAgenda() {
       notes: form.notes || undefined,
     });
   };
+  const move = (direction: -1 | 1) => {
+    const current = parseISO(date);
+    const next = view === "day"
+      ? (direction < 0 ? subDays(current, 1) : addDays(current, 1))
+      : view === "week"
+        ? (direction < 0 ? subWeeks(current, 1) : addWeeks(current, 1))
+        : (direction < 0 ? subMonths(current, 1) : addMonths(current, 1));
+    setDate(format(next, "yyyy-MM-dd"));
+  };
+  const calendarDays = eachDayOfInterval({ start: parseISO(range.from), end: parseISO(range.to) });
+  const calendarTitle = view === "day"
+    ? format(selected, "EEEE d 'de' MMMM yyyy", { locale: es })
+    : view === "week"
+      ? `${format(parseISO(range.from), "d MMM", { locale: es })} – ${format(parseISO(range.to), "d MMM yyyy", { locale: es })}`
+      : format(selected, "MMMM yyyy", { locale: es });
+  const bookingsForDate = (value: string) => (bookings ?? []).filter(item => bookingDate(item.bookingDate) === value);
 
   return (
     <DashboardLayout>
@@ -279,7 +332,7 @@ export default function BiopiscinasAgenda() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => setDate(moveDate(date, -1))}
+              onClick={() => move(-1)}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -292,7 +345,7 @@ export default function BiopiscinasAgenda() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => setDate(moveDate(date, 1))}
+              onClick={() => move(1)}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
@@ -308,8 +361,58 @@ export default function BiopiscinasAgenda() {
             )}
           </div>
         </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-3">
+          <div className="flex rounded-lg border p-1">
+            {(["day", "week", "month"] as ViewMode[]).map(mode => (
+              <Button
+                key={mode}
+                size="sm"
+                variant={view === mode ? "default" : "ghost"}
+                onClick={() => setView(mode)}
+              >
+                {mode === "day" ? "Día" : mode === "week" ? "Semana" : "Mes"}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDate(localDate())}>Hoy</Button>
+            <p className="min-w-52 text-center text-sm font-semibold capitalize">{calendarTitle}</p>
+          </div>
+        </div>
         {isLoading ? (
           <p>Cargando disponibilidad…</p>
+        ) : view !== "day" ? (
+          <div className={view === "week" ? "grid gap-3 md:grid-cols-7" : "grid grid-cols-7 gap-px overflow-hidden rounded-xl border bg-border"}>
+            {calendarDays.map(day => {
+              const key = format(day, "yyyy-MM-dd");
+              const dayBookings = bookingsForDate(key);
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  className={view === "week"
+                    ? "min-h-[24rem] rounded-xl border bg-background p-3 text-left hover:bg-muted/30"
+                    : `min-h-32 bg-background p-2 text-left hover:bg-muted/30 ${!isSameMonth(day, selected) ? "bg-muted/40 text-muted-foreground" : ""}`}
+                  onClick={() => { setDate(key); setView("day"); }}
+                >
+                  <p className="mb-3 text-xs font-semibold capitalize">
+                    {format(day, view === "week" ? "EEE d" : "d", { locale: es })}
+                  </p>
+                  <div className="space-y-1.5">
+                    {dayBookings.slice(0, view === "week" ? 10 : 3).map(booking => (
+                      <div key={booking.id} className="rounded-lg border border-cyan-200 bg-cyan-50 p-2">
+                        <p className="text-xs font-semibold">{booking.startTime} · {booking.clientName}</p>
+                        {view === "week" && <p className="mt-1 text-[11px] text-muted-foreground">{booking.totalGuests} persona(s) · {statusLabel[booking.status]}</p>}
+                      </div>
+                    ))}
+                    {dayBookings.length > (view === "week" ? 10 : 3) && (
+                      <p className="text-xs font-medium text-cyan-700">+{dayBookings.length - (view === "week" ? 10 : 3)} más</p>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         ) : !groups.length ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">

@@ -240,6 +240,8 @@ export const hasRegularClassesAccess = (
 export const CANCAGUA_STAFF_ALLOWED_PATHS = new Set([
   "/",
   "/cms",
+  "/cms/calendario",
+  "/cms/clientes-360",
   "/cms/b2c",
   "/cms/carta",
   "/cms/reservas",
@@ -360,11 +362,32 @@ export function canAccessCmsPath(
   const explicitPermissions = parseCmsPermissions(permissions);
   if (explicitPermissions) {
     if (path === "/" || path === "/cms") return true;
+    if (path === "/cms/calendario") {
+      return ["module.massages", "module.biopools", "module.regular_classes"]
+        .some(permission => explicitPermissions.includes(permission as CmsPermissionKey));
+    }
+    if (path === "/cms/clientes-360") {
+      return ["massages.view_clients", "biopools.view_clients", "regular_classes.students"]
+        .some(permission => explicitPermissions.includes(permission as CmsPermissionKey));
+    }
     const required = resolvePathPermission(path);
     if (required === "module.gift_cards") {
       return hasGiftCardAccess({ role, permissions, regularClassesTeacher });
     }
     return required ? explicitPermissions.includes(required) : false;
+  }
+
+  if (path === "/cms/calendario") {
+    return hasAnyCmsPermission(
+      { role, permissions, regularClassesTeacher },
+      ["module.massages", "module.biopools", "module.regular_classes"],
+    );
+  }
+  if (path === "/cms/clientes-360") {
+    return hasAnyCmsPermission(
+      { role, permissions, regularClassesTeacher },
+      ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
+    );
   }
 
   if (path.startsWith("/cms/clases-regulares")) {

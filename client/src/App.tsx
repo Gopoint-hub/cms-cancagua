@@ -44,6 +44,8 @@ import CMSLogin from "./pages/cms/Login";
 import CMSActivarCuenta from "./pages/cms/ActivarCuenta";
 import CMSRecuperarContrasena from "./pages/cms/RecuperarContrasena";
 import CMSRestablecerContrasena from "./pages/cms/RestablecerContrasena";
+import CMSCalendario360 from "./pages/cms/Calendario360";
+import CMSClientes360 from "./pages/cms/Clientes360";
 // Marketing modules
 import CMSEnvioPersonal from "./pages/cms/EnvioPersonal";
 import CMSCalendarioMarketing from "./pages/cms/CalendarioMarketing";
@@ -99,6 +101,8 @@ function Router() {
       {/* CMS Dashboard pages */}
       <Route path="/" component={CMSDashboard} />
       <Route path="/cms" component={CMSDashboard} />
+      <Route path="/cms/calendario" component={CMSCalendario360} />
+      <Route path="/cms/clientes-360" component={CMSClientes360} />
       <Route path="/cms/usuarios" component={CMSUsuarios} />
       <Route path="/cms/carta" component={CMSCarta} />
       <Route path="/cms/reservas" component={CMSReservas} />
