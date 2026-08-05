@@ -30,6 +30,7 @@ import { ensureMassageAssignmentSchema } from "../ensureMassageAssignmentSchema"
 import { ensureBiopoolsSchema } from "../ensureBiopoolsSchema";
 import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
+import biopoolWebpayReturnRouter, { startBiopoolCheckoutScheduler } from "../biopoolWebpay";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -114,6 +115,8 @@ async function startServer() {
   // Catálogo público consumido por cancagua.cl
   app.use("/api/public/masajes", publicMasajesCatalog);
   app.use("/api/public/clases", publicRegularClassesCatalog);
+  // Retorno servidor-a-servidor de Webpay Plus para Biopiscinas.
+  app.use("/api/biopiscinas/webpay", biopoolWebpayReturnRouter);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
   // Cerebro: grafo de conocimiento del proyecto (solo admins)
@@ -153,6 +156,7 @@ startServer()
     startMassageCheckoutScheduler();
     const { startBiopoolNotificationScheduler } = await import("../biopoolNotifications");
     startBiopoolNotificationScheduler();
+    startBiopoolCheckoutScheduler();
     const { runSeedIfNeeded } = await import("../seed");
     try {
       await runSeedIfNeeded();

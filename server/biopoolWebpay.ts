@@ -1,0 +1,233 @@
+import express from "express";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import {
+  biopoolBookingActivity,
+  biopoolBookings,
+  biopoolCheckoutOrders,
+  biopoolNotifications,
+  biopoolServices,
+  clients,
+} from "../drizzle/schema";
+import { getDb } from "./db";
+import { commitTransaction, isTransactionApproved } from "./webpay";
+import { chileLocalDateTimeToUtc } from "./massageNps";
+import { ENV } from "./_core/env";
+import { recordMassageDiscountUsage } from "./massageDiscounts";
+
+export type BiopoolPaymentOrderCheck = {
+  buyOrder: string | null;
+  sessionId: string | null;
+  totalClp: number;
+  webpayToken: string | null;
+};
+
+export type BiopoolPaymentResultCheck = {
+  buyOrder: string;
+  sessionId: string;
+  amount: number;
+  responseCode: number;
+  status: string;
+};
+
+export function validateBiopoolPayment(
+  order: BiopoolPaymentOrderCheck,
+  result: BiopoolPaymentResultCheck,
+  token: string
+): { approved: boolean; reason?: string } {
+  if (!order.webpayToken || order.webpayToken !== token)
+    return { approved: false, reason: "Token Webpay no corresponde a la orden" };
+  if (!order.buyOrder || result.buyOrder !== order.buyOrder)
+    return { approved: false, reason: "Orden de compra Webpay no corresponde" };
+  if (!order.sessionId || result.sessionId !== order.sessionId)
+    return { approved: false, reason: "Sesión Webpay no corresponde" };
+  if (Number(result.amount) !== order.totalClp)
+    return { approved: false, reason: "Monto Webpay no corresponde al total del CMS" };
+  if (!isTransactionApproved(result.responseCode, result.status))
+    return { approved: false, reason: "Pago rechazado por Webpay" };
+  return { approved: true };
+}
+
+function dateValue(value: unknown): string {
+  if (typeof value === "string") return value.slice(0, 10);
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function resultUrl(publicToken: string, state: string): string {
+  const frontend = (ENV.frontendUrl || "https://cancagua.cl").replace(/\/$/, "");
+  return `${frontend}/servicios/biopiscinas/pago/resultado?order=${encodeURIComponent(publicToken)}&estado=${encodeURIComponent(state)}`;
+}
+
+async function finalizeApprovedPayment(orderId: number, result: any): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Base de datos no disponible");
+  await db.transaction(async tx => {
+    const [order] = await tx.select().from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.id, orderId)).limit(1);
+    if (!order) throw new Error("Orden no encontrada");
+    if (order.bookingId && order.status === "paid") return;
+
+    const [service] = await tx.select().from(biopoolServices).where(eq(biopoolServices.id, order.serviceId)).limit(1);
+    if (!service) throw new Error("Servicio no encontrado");
+    const normalizedEmail = order.clientEmail.trim().toLowerCase();
+    let [client] = await tx.select().from(clients).where(or(eq(clients.email, normalizedEmail), eq(clients.phone, order.clientPhone))).limit(1);
+    if (client) {
+      await tx.update(clients).set({
+        name: order.clientName,
+        email: normalizedEmail,
+        phone: order.clientPhone,
+        utmSource: order.utmSource ?? client.utmSource,
+        utmMedium: order.utmMedium ?? client.utmMedium,
+        utmCampaign: order.utmCampaign ?? client.utmCampaign,
+      }).where(eq(clients.id, client.id));
+    } else {
+      const [created] = await tx.insert(clients).values({
+        email: normalizedEmail,
+        name: order.clientName,
+        phone: order.clientPhone,
+        origen: "web_biopiscinas",
+        utmSource: order.utmSource,
+        utmMedium: order.utmMedium,
+        utmCampaign: order.utmCampaign,
+      }).$returningId();
+      [client] = await tx.select().from(clients).where(eq(clients.id, created.id)).limit(1);
+    }
+
+    const [createdBooking] = await tx.insert(biopoolBookings).values({
+      bookingCode: `BIO-${dateValue(order.bookingDate).replaceAll("-", "")}-${nanoid(6).toUpperCase()}`,
+      serviceId: order.serviceId,
+      clientId: client.id,
+      clientName: order.clientName,
+      clientEmail: normalizedEmail,
+      clientPhone: order.clientPhone,
+      bookingDate: dateValue(order.bookingDate),
+      startTime: order.startTime,
+      endTime: order.endTime,
+      adultQuantity: order.adultQuantity,
+      childQuantity: order.childQuantity,
+      totalGuests: order.totalGuests,
+      status: "confirmed",
+      attendanceToken: nanoid(48),
+      paymentStatus: "paid",
+      paymentMethod: "webpay_plus",
+      paymentReference: result.authorizationCode || order.buyOrder,
+      originalAmountClp: order.subtotalClp,
+      discountAmountClp: order.discountClp,
+      amountPaidClp: order.totalClp,
+      refundFeePercent: service.refundFeePercent,
+      source: "web",
+    }).$returningId();
+
+    await tx.insert(biopoolBookingActivity).values({
+      bookingId: createdBooking.id,
+      action: "booking_created_webpay",
+      detail: JSON.stringify({ orderId: order.id, buyOrder: order.buyOrder, authorizationCode: result.authorizationCode }),
+    });
+    const reminderAt = new Date(chileLocalDateTimeToUtc(dateValue(order.bookingDate), order.startTime).getTime() - service.reminderHoursBefore * 3_600_000);
+    await tx.insert(biopoolNotifications).values([
+      { bookingId: createdBooking.id, type: "confirmation", channel: "email", scheduledAt: new Date() },
+      ...(service.reminderEmailEnabled ? [{ bookingId: createdBooking.id, type: "reminder" as const, channel: "email" as const, scheduledAt: reminderAt }] : []),
+      ...(service.reminderWhatsappEnabled ? [{ bookingId: createdBooking.id, type: "reminder" as const, channel: "whatsapp" as const, scheduledAt: reminderAt }] : []),
+    ]);
+    if (order.discountCodeId && order.discountClp > 0) {
+      await recordMassageDiscountUsage(tx, {
+        discountCodeId: order.discountCodeId,
+        requestId: order.buyOrder || order.publicToken,
+        email: normalizedEmail,
+        originalAmount: order.subtotalClp,
+        discountAmount: order.discountClp,
+        finalAmount: order.totalClp,
+      });
+    }
+
+    const visitDate = dateValue(order.bookingDate);
+    const visitDateObject = new Date(`${visitDate}T12:00:00Z`);
+    const priorServices = (() => {
+      try { return JSON.parse(client.serviciosUsados || "[]"); } catch { return []; }
+    })();
+    const servicesUsed = Array.from(new Set([...priorServices, "Biopiscinas"]));
+    await tx.update(clients).set({
+      totalVisitas: sql`COALESCE(${clients.totalVisitas}, 0) + 1`,
+      visitas2026: sql`COALESCE(${clients.visitas2026}, 0) + 1`,
+      totalGasto: sql`COALESCE(${clients.totalGasto}, 0) + ${order.totalClp}`,
+      gasto2026: sql`COALESCE(${clients.gasto2026}, 0) + ${order.totalClp}`,
+      primerVisita: client.primerVisita ?? visitDateObject,
+      ultimaVisita: visitDateObject,
+      serviciosUsados: JSON.stringify(servicesUsed),
+      ticketPromedio: sql`ROUND((COALESCE(${clients.totalGasto}, 0) + ${order.totalClp}) / (COALESCE(${clients.totalVisitas}, 0) + 1))`,
+    }).where(eq(clients.id, client.id));
+
+    await tx.update(biopoolCheckoutOrders).set({
+      bookingId: createdBooking.id,
+      status: "paid",
+      webpayStatus: result.status,
+      responseCode: result.responseCode,
+      authorizationCode: result.authorizationCode,
+      cardNumber: result.cardNumber,
+      paymentTypeCode: result.paymentTypeCode,
+      transactionDate: result.transactionDate,
+      rawResponse: JSON.stringify(result),
+      paidAt: new Date(),
+      completedAt: new Date(),
+      error: null,
+    }).where(eq(biopoolCheckoutOrders.id, order.id));
+  });
+}
+
+export const biopoolWebpayReturnRouter = express.Router();
+
+biopoolWebpayReturnRouter.all("/return", async (req, res) => {
+  const db = await getDb();
+  if (!db) return res.redirect(resultUrl("unavailable", "error"));
+  const token = String(req.body?.token_ws || req.query?.token_ws || "");
+  const abortedBuyOrder = String(req.body?.TBK_ORDEN_COMPRA || req.query?.TBK_ORDEN_COMPRA || "");
+  const abortedSession = String(req.body?.TBK_ID_SESION || req.query?.TBK_ID_SESION || "");
+  try {
+    if (!token) {
+      const [order] = await db.select().from(biopoolCheckoutOrders).where(and(eq(biopoolCheckoutOrders.buyOrder, abortedBuyOrder), eq(biopoolCheckoutOrders.sessionId, abortedSession))).limit(1);
+      if (!order) return res.redirect(resultUrl("not-found", "abortado"));
+      if (order.status !== "paid") await db.update(biopoolCheckoutOrders).set({ status: "aborted", error: "Pago abortado por el usuario" }).where(eq(biopoolCheckoutOrders.id, order.id));
+      return res.redirect(resultUrl(order.publicToken, "abortado"));
+    }
+    const [order] = await db.select().from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.webpayToken, token)).limit(1);
+    if (!order) return res.redirect(resultUrl("not-found", "error"));
+    if (order.status === "paid" && order.bookingId) return res.redirect(resultUrl(order.publicToken, "pagado"));
+    const result = await commitTransaction(token);
+    const validation = validateBiopoolPayment(order, result, token);
+    if (!validation.approved) {
+      await db.update(biopoolCheckoutOrders).set({
+        status: isTransactionApproved(result.responseCode, result.status) ? "failed" : "rejected",
+        webpayStatus: result.status,
+        responseCode: result.responseCode,
+        rawResponse: JSON.stringify(result),
+        error: validation.reason,
+        completedAt: new Date(),
+      }).where(eq(biopoolCheckoutOrders.id, order.id));
+      return res.redirect(resultUrl(order.publicToken, "rechazado"));
+    }
+    await finalizeApprovedPayment(order.id, result);
+    return res.redirect(resultUrl(order.publicToken, "pagado"));
+  } catch (error) {
+    console.error("[biopools:webpay] Error procesando retorno", error);
+    if (token) await db.update(biopoolCheckoutOrders).set({ error: String(error).slice(0, 2000) }).where(eq(biopoolCheckoutOrders.webpayToken, token));
+    const [order] = token ? await db.select().from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.webpayToken, token)).limit(1) : [];
+    return res.redirect(resultUrl(order?.publicToken || "error", "procesando"));
+  }
+});
+
+export async function expireBiopoolCheckoutHolds(now = new Date()): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(biopoolCheckoutOrders).set({ status: "expired", error: "Tiempo de pago agotado" }).where(and(inArray(biopoolCheckoutOrders.status, ["initiating", "payment_pending"]), lt(biopoolCheckoutOrders.expiresAt, now)));
+}
+
+let schedulerStarted = false;
+export function startBiopoolCheckoutScheduler(): void {
+  if (schedulerStarted || process.env.NODE_ENV === "test") return;
+  schedulerStarted = true;
+  void expireBiopoolCheckoutHolds();
+  const timer = setInterval(() => void expireBiopoolCheckoutHolds(), 60_000);
+  timer.unref?.();
+}
+
+export default biopoolWebpayReturnRouter;

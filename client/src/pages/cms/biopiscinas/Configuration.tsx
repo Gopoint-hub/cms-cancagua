@@ -324,7 +324,7 @@ export default function BiopiscinasConfiguration() {
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <NumberField
-              label="Aforo simultáneo"
+              label="Aforo simultáneo compartido"
               value={form.capacity}
               set={capacity => setForm({ ...form, capacity })}
             />

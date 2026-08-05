@@ -50,6 +50,32 @@ describe("Biopiscinas capacity", () => {
     ).toBe(28);
   });
 
+  it("shares capacity between a Full Day stay and regular four-hour entries", () => {
+    const fullDaySlots = buildEntrySlots({
+      firstEntryTime: "10:00",
+      lastEntryTime: "13:00",
+      slotIntervalMinutes: 60,
+      standardDurationMinutes: 480,
+      finalEntryDurationMinutes: 480,
+    });
+    expect(fullDaySlots).toEqual([
+      { startTime: "10:00", endTime: "18:00", durationMinutes: 480 },
+      { startTime: "11:00", endTime: "19:00", durationMinutes: 480 },
+      { startTime: "12:00", endTime: "20:00", durationMinutes: 480 },
+      { startTime: "13:00", endTime: "21:00", durationMinutes: 480 },
+    ]);
+    expect(
+      minimumAvailableSeats(
+        40,
+        { startTime: "12:00", endTime: "16:00" },
+        [
+          { startTime: "10:00", endTime: "18:00", seats: 18 },
+          { startTime: "11:00", endTime: "15:00", seats: 12 },
+        ]
+      )
+    ).toBe(10);
+  });
+
   it("requires an adult whenever children are included", () => {
     expect(validateAdultChildQuantities(0, 1)).toMatch(/acompañado/);
     expect(validateAdultChildQuantities(1, 3)).toBeNull();

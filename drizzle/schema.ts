@@ -210,11 +210,74 @@ export const biopoolNotifications = mysqlTable("biopool_notifications", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
+export const biopoolCheckoutOrders = mysqlTable("biopool_checkout_orders", {
+  id: int("id").autoincrement().primaryKey(),
+  publicToken: varchar("public_token", { length: 64 }).notNull().unique(),
+  serviceId: int("service_id").notNull(),
+  bookingId: int("booking_id"),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }).notNull(),
+  clientPhone: varchar("client_phone", { length: 40 }).notNull(),
+  bookingDate: date("booking_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  adultQuantity: int("adult_quantity").notNull(),
+  childQuantity: int("child_quantity").default(0).notNull(),
+  totalGuests: int("total_guests").notNull(),
+  subtotalClp: int("subtotal_clp").notNull(),
+  discountClp: int("discount_clp").default(0).notNull(),
+  discountCodeId: int("discount_code_id"),
+  discountCode: varchar("discount_code", { length: 50 }),
+  totalClp: int("total_clp").notNull(),
+  status: mysqlEnum("status", [
+    "initiating",
+    "payment_pending",
+    "paid",
+    "rejected",
+    "aborted",
+    "timeout",
+    "expired",
+    "failed",
+  ]).default("initiating").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  webpayToken: varchar("webpay_token", { length: 180 }).unique(),
+  buyOrder: varchar("buy_order", { length: 26 }).unique(),
+  sessionId: varchar("session_id", { length: 61 }),
+  webpayStatus: varchar("webpay_status", { length: 40 }),
+  responseCode: int("response_code"),
+  authorizationCode: varchar("authorization_code", { length: 80 }),
+  cardNumber: varchar("card_number", { length: 40 }),
+  paymentTypeCode: varchar("payment_type_code", { length: 10 }),
+  transactionDate: varchar("transaction_date", { length: 60 }),
+  rawResponse: mediumtext("raw_response"),
+  error: text("error"),
+  utmSource: varchar("utm_source", { length: 100 }),
+  utmMedium: varchar("utm_medium", { length: 100 }),
+  utmCampaign: varchar("utm_campaign", { length: 100 }),
+  paidAt: timestamp("paid_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const biopoolCheckoutItems = mysqlTable("biopool_checkout_items", {
+  id: int("id").autoincrement().primaryKey(),
+  orderId: int("order_id").notNull(),
+  ticketTypeId: int("ticket_type_id").notNull(),
+  code: varchar("code", { length: 40 }).notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  unitPriceClp: int("unit_price_clp").notNull(),
+  quantity: int("quantity").notNull(),
+  subtotalClp: int("subtotal_clp").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export type BiopoolService = typeof biopoolServices.$inferSelect;
 export type BiopoolTicketType = typeof biopoolTicketTypes.$inferSelect;
 export type BiopoolSchedule = typeof biopoolSchedules.$inferSelect;
 export type BiopoolBlock = typeof biopoolBlocks.$inferSelect;
 export type BiopoolBooking = typeof biopoolBookings.$inferSelect;
+export type BiopoolCheckoutOrder = typeof biopoolCheckoutOrders.$inferSelect;
 
 // Servicios de Skedu
 export const services = mysqlTable("services", {

@@ -202,6 +202,7 @@ export const categories: Category[] = [
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/cms/biopiscinas" },
       { icon: CalendarCheck, label: "Agenda", path: "/cms/biopiscinas/agenda", permission: "biopools.manage_agenda" },
+      { icon: DollarSign, label: "Ventas", path: "/cms/biopiscinas/ventas", permission: "biopools.manage_agenda" },
       { icon: Ban, label: "Bloqueos", path: "/cms/biopiscinas/bloqueos", permission: "biopools.manage_blocks" },
       { icon: Waves, label: "Servicios", path: "/cms/biopiscinas/servicios", permission: "biopools.manage_catalog" },
       { icon: Settings, label: "Configuración", path: "/cms/biopiscinas/configuracion", permission: "biopools.manage_settings" },

@@ -69,7 +69,10 @@ import BiopiscinasAgenda from "./pages/cms/biopiscinas/Agenda";
 import BiopiscinasBlocks from "./pages/cms/biopiscinas/Blocks";
 import BiopiscinasServices from "./pages/cms/biopiscinas/Services";
 import BiopiscinasConfiguration from "./pages/cms/biopiscinas/Configuration";
+import BiopiscinasSales from "./pages/cms/biopiscinas/Sales";
 import ConfirmBiopoolAttendance from "./pages/biopiscinas/ConfirmAttendance";
+import BiopoolCheckout from "./pages/biopiscinas/Checkout";
+import BiopoolPaymentResult from "./pages/biopiscinas/PaymentResult";
 // Módulo Clases Regulares
 import RegularClassesDashboard from "./pages/cms/clases-regulares/Dashboard";
 import RegularClassesAttendance from "./pages/cms/clases-regulares/Attendance";
@@ -90,6 +93,8 @@ function Router() {
       <Route path="/cms/recuperar-contrasena" component={CMSRecuperarContrasena} />
       <Route path="/cms/restablecer-contrasena" component={CMSRestablecerContrasena} />
       <Route path="/biopiscinas/confirmar/:token" component={ConfirmBiopoolAttendance} />
+      <Route path="/reservar/biopiscinas" component={BiopoolCheckout} />
+      <Route path="/biopiscinas/pago/resultado" component={BiopoolPaymentResult} />
 
       {/* CMS Dashboard pages */}
       <Route path="/" component={CMSDashboard} />
@@ -154,6 +159,7 @@ function Router() {
       <Route path="/cms/biopiscinas/bloqueos" component={BiopiscinasBlocks} />
       <Route path="/cms/biopiscinas/servicios" component={BiopiscinasServices} />
       <Route path="/cms/biopiscinas/configuracion" component={BiopiscinasConfiguration} />
+      <Route path="/cms/biopiscinas/ventas" component={BiopiscinasSales} />
 
       {/* Módulo Clases Regulares */}
       <Route path="/cms/clases-regulares" component={RegularClassesDashboard} />

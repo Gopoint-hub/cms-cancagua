@@ -129,6 +129,18 @@ export async function getTransactionStatus(token: string) {
   }
 }
 
+/** Reversa o reembolsa una transacción Webpay Plus por el monto indicado. */
+export async function refundTransaction(token: string, amount: number) {
+  try {
+    const options = getWebpayOptions();
+    const tx = new WebpayPlus.Transaction(options);
+    return await tx.refund(token, amount);
+  } catch (error: any) {
+    console.error("WebPay refundTransaction error:", error);
+    throw new Error(`Error al solicitar reembolso WebPay: ${error.message}`);
+  }
+}
+
 /**
  * Verificar si una transacción fue exitosa
  */
@@ -150,6 +162,11 @@ export function generateBuyOrder(saleId: number): string {
 export function generateGiftCardBuyOrder(giftCardId: number): string {
   const timestamp = Date.now().toString(36).slice(-4);
   return `GC-${giftCardId}-${timestamp}`.substring(0, 26);
+}
+
+export function generateBiopoolBuyOrder(orderId: number): string {
+  const timestamp = Date.now().toString(36).slice(-6);
+  return `BIO-${orderId}-${timestamp}`.substring(0, 26);
 }
 
 /**

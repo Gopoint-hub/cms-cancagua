@@ -58,6 +58,7 @@ export default function BiopiscinasAgenda() {
   const { user } = useAuth();
   const canManage = hasCmsPermission(user ?? {}, "biopools.manage_agenda");
   const [date, setDate] = useState(localDate());
+  const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [startTime, setStartTime] = useState("");
   const [rescheduleBooking, setRescheduleBooking] = useState<{
@@ -82,7 +83,12 @@ export default function BiopiscinasAgenda() {
   const utils = trpc.useUtils();
   const { data: services } = trpc.biopools.services.list.useQuery();
   const service =
-    services?.find(item => item.status !== "archived") ?? services?.[0];
+    services?.find(item => item.id === selectedServiceId) ??
+    services?.find(item => item.status !== "archived") ??
+    services?.[0];
+  useEffect(() => {
+    if (!selectedServiceId && service) setSelectedServiceId(service.id);
+  }, [selectedServiceId, service]);
   const { data: detail } = trpc.biopools.services.get.useQuery(
     { id: service?.id ?? 0 },
     { enabled: Boolean(service) }
@@ -112,9 +118,13 @@ export default function BiopiscinasAgenda() {
   });
   const updateStatus = trpc.biopools.bookings.updateStatus.useMutation({
     onSuccess: result => {
-      if (result.refund?.eligible) {
+      if (result.automaticRefund) {
         toast.success(
-          `Reembolso pendiente: ${clp.format(result.refund.netClp)} (descuento ${clp.format(result.refund.feeClp)})`
+          `Reembolso Webpay procesado: ${clp.format(result.refund?.netClp ?? 0)}`
+        );
+      } else if (result.refund?.eligible) {
+        toast.success(
+          `${result.refundError ?? "Reembolso pendiente"}: ${clp.format(result.refund.netClp)} (descuento ${clp.format(result.refund.feeClp)})`
         );
       } else {
         toast.success("Estado de la reserva actualizado");
@@ -249,6 +259,23 @@ export default function BiopiscinasAgenda() {
             <h1 className="text-3xl font-semibold">Biopiscinas</h1>
           </div>
           <div className="flex items-center gap-2">
+            <Select
+              value={service ? String(service.id) : undefined}
+              onValueChange={value => setSelectedServiceId(Number(value))}
+            >
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="Selecciona modalidad" />
+              </SelectTrigger>
+              <SelectContent>
+                {services
+                  ?.filter(item => item.status !== "archived")
+                  .map(item => (
+                    <SelectItem key={item.id} value={String(item.id)}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
             <Button
               variant="outline"
               size="icon"
