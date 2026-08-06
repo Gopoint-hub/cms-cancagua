@@ -54,12 +54,31 @@ function dateValue(value: unknown): string {
   return String(value).slice(0, 10);
 }
 
-function resultUrl(publicToken: string, state: string): string {
+export function biopoolResultUrl(publicToken: string, state: string): string {
   const frontend = (ENV.frontendUrl || "https://cancagua.cl").replace(/\/$/, "");
   return `${frontend}/servicios/biopiscinas/pago/resultado?order=${encodeURIComponent(publicToken)}&estado=${encodeURIComponent(state)}`;
 }
 
-async function finalizeApprovedPayment(orderId: number, result: any): Promise<void> {
+export function isFullyDiscountedBiopoolOrder(order: {
+  subtotalClp: number;
+  discountClp: number;
+  totalClp: number;
+  discountCodeId: number | null;
+}): boolean {
+  return order.subtotalClp > 0
+    && order.totalClp === 0
+    && order.discountClp === order.subtotalClp
+    && Boolean(order.discountCodeId);
+}
+
+type BiopoolOrderCompletion =
+  | { kind: "webpay"; result: any }
+  | { kind: "discount" };
+
+export async function finalizeApprovedBiopoolOrder(
+  orderId: number,
+  completion: BiopoolOrderCompletion,
+): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
   await db.transaction(async tx => {
@@ -109,8 +128,10 @@ async function finalizeApprovedPayment(orderId: number, result: any): Promise<vo
       status: "confirmed",
       attendanceToken: nanoid(48),
       paymentStatus: "paid",
-      paymentMethod: "webpay_plus",
-      paymentReference: result.authorizationCode || order.buyOrder,
+      paymentMethod: completion.kind === "webpay" ? "webpay_plus" : "discount_code",
+      paymentReference: completion.kind === "webpay"
+        ? completion.result.authorizationCode || order.buyOrder
+        : order.discountCode || order.publicToken,
       originalAmountClp: order.subtotalClp,
       discountAmountClp: order.discountClp,
       amountPaidClp: order.totalClp,
@@ -120,8 +141,16 @@ async function finalizeApprovedPayment(orderId: number, result: any): Promise<vo
 
     await tx.insert(biopoolBookingActivity).values({
       bookingId: createdBooking.id,
-      action: "booking_created_webpay",
-      detail: JSON.stringify({ orderId: order.id, buyOrder: order.buyOrder, authorizationCode: result.authorizationCode }),
+      action: completion.kind === "webpay" ? "booking_created_webpay" : "booking_created_discount_code",
+      detail: JSON.stringify(completion.kind === "webpay"
+        ? { orderId: order.id, buyOrder: order.buyOrder, authorizationCode: completion.result.authorizationCode }
+        : {
+            orderId: order.id,
+            discountCode: order.discountCode,
+            originalAmountClp: order.subtotalClp,
+            discountAmountClp: order.discountClp,
+            amountPaidClp: 0,
+          }),
     });
     const reminderAt = new Date(chileLocalDateTimeToUtc(dateValue(order.bookingDate), order.startTime).getTime() - service.reminderHoursBefore * 3_600_000);
     await tx.insert(biopoolNotifications).values([
@@ -160,13 +189,15 @@ async function finalizeApprovedPayment(orderId: number, result: any): Promise<vo
     await tx.update(biopoolCheckoutOrders).set({
       bookingId: createdBooking.id,
       status: "paid",
-      webpayStatus: result.status,
-      responseCode: result.responseCode,
-      authorizationCode: result.authorizationCode,
-      cardNumber: result.cardNumber,
-      paymentTypeCode: result.paymentTypeCode,
-      transactionDate: result.transactionDate,
-      rawResponse: JSON.stringify(result),
+      webpayStatus: completion.kind === "webpay" ? completion.result.status : "NOT_REQUIRED",
+      responseCode: completion.kind === "webpay" ? completion.result.responseCode : 0,
+      authorizationCode: completion.kind === "webpay" ? completion.result.authorizationCode : null,
+      cardNumber: completion.kind === "webpay" ? completion.result.cardNumber : null,
+      paymentTypeCode: completion.kind === "webpay" ? completion.result.paymentTypeCode : null,
+      transactionDate: completion.kind === "webpay" ? completion.result.transactionDate : null,
+      rawResponse: JSON.stringify(completion.kind === "webpay"
+        ? completion.result
+        : { paymentRequired: false, reason: "fully_discounted", discountCode: order.discountCode }),
       paidAt: new Date(),
       completedAt: new Date(),
       error: null,
@@ -178,20 +209,20 @@ export const biopoolWebpayReturnRouter = express.Router();
 
 biopoolWebpayReturnRouter.all("/return", async (req, res) => {
   const db = await getDb();
-  if (!db) return res.redirect(resultUrl("unavailable", "error"));
+  if (!db) return res.redirect(biopoolResultUrl("unavailable", "error"));
   const token = String(req.body?.token_ws || req.query?.token_ws || "");
   const abortedBuyOrder = String(req.body?.TBK_ORDEN_COMPRA || req.query?.TBK_ORDEN_COMPRA || "");
   const abortedSession = String(req.body?.TBK_ID_SESION || req.query?.TBK_ID_SESION || "");
   try {
     if (!token) {
       const [order] = await db.select().from(biopoolCheckoutOrders).where(and(eq(biopoolCheckoutOrders.buyOrder, abortedBuyOrder), eq(biopoolCheckoutOrders.sessionId, abortedSession))).limit(1);
-      if (!order) return res.redirect(resultUrl("not-found", "abortado"));
+      if (!order) return res.redirect(biopoolResultUrl("not-found", "abortado"));
       if (order.status !== "paid") await db.update(biopoolCheckoutOrders).set({ status: "aborted", error: "Pago abortado por el usuario" }).where(eq(biopoolCheckoutOrders.id, order.id));
-      return res.redirect(resultUrl(order.publicToken, "abortado"));
+      return res.redirect(biopoolResultUrl(order.publicToken, "abortado"));
     }
     const [order] = await db.select().from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.webpayToken, token)).limit(1);
-    if (!order) return res.redirect(resultUrl("not-found", "error"));
-    if (order.status === "paid" && order.bookingId) return res.redirect(resultUrl(order.publicToken, "pagado"));
+    if (!order) return res.redirect(biopoolResultUrl("not-found", "error"));
+    if (order.status === "paid" && order.bookingId) return res.redirect(biopoolResultUrl(order.publicToken, "pagado"));
     const result = await commitTransaction(token);
     const validation = validateBiopoolPayment(order, result, token);
     if (!validation.approved) {
@@ -203,15 +234,15 @@ biopoolWebpayReturnRouter.all("/return", async (req, res) => {
         error: validation.reason,
         completedAt: new Date(),
       }).where(eq(biopoolCheckoutOrders.id, order.id));
-      return res.redirect(resultUrl(order.publicToken, "rechazado"));
+      return res.redirect(biopoolResultUrl(order.publicToken, "rechazado"));
     }
-    await finalizeApprovedPayment(order.id, result);
-    return res.redirect(resultUrl(order.publicToken, "pagado"));
+    await finalizeApprovedBiopoolOrder(order.id, { kind: "webpay", result });
+    return res.redirect(biopoolResultUrl(order.publicToken, "pagado"));
   } catch (error) {
     console.error("[biopools:webpay] Error procesando retorno", error);
     if (token) await db.update(biopoolCheckoutOrders).set({ error: String(error).slice(0, 2000) }).where(eq(biopoolCheckoutOrders.webpayToken, token));
     const [order] = token ? await db.select().from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.webpayToken, token)).limit(1) : [];
-    return res.redirect(resultUrl(order?.publicToken || "error", "procesando"));
+    return res.redirect(biopoolResultUrl(order?.publicToken || "error", "procesando"));
   }
 });
 

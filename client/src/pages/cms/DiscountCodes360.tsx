@@ -20,6 +20,7 @@ type CatalogModule = {
   itemName: string;
   services: Array<{ id: string; name: string }>;
 };
+type DiscountScope = { module: ModuleId; all: boolean; serviceIds: string[] };
 type ScopeState = Record<ModuleId, { selected: boolean; all: boolean; serviceIds: string[] }>;
 type FormState = {
   id?: number;
@@ -149,7 +150,7 @@ export default function DiscountCodes360() {
     return { label: "Activo", variant: "default" as const };
   };
 
-  const scopeSummary = (item: typeof codes[number]) => item.scopes.map((scope) => {
+  const scopeSummary = (item: typeof codes[number]) => item.scopes.map((scope: DiscountScope) => {
     const module = catalog.find((candidate) => candidate.id === scope.module);
     if (scope.all) return `${module?.name ?? scope.module}: todos`;
     return `${module?.name ?? scope.module}: ${scope.serviceIds.length}`;
@@ -157,7 +158,7 @@ export default function DiscountCodes360() {
 
   const edit = (item: typeof codes[number]) => {
     const scopes = emptyScopes();
-    for (const scope of item.scopes) {
+    for (const scope of item.scopes as DiscountScope[]) {
       scopes[scope.module] = { selected: true, all: scope.all, serviceIds: [...scope.serviceIds] };
     }
     setForm({

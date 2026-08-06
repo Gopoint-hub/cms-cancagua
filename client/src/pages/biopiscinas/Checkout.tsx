@@ -49,6 +49,10 @@ export default function BiopoolCheckout() {
   }, [slots, startTime]);
   const startPayment = trpc.biopools.public.startPayment.useMutation({
     onSuccess: result => {
+      if (!result.paymentRequired) {
+        window.location.assign(result.resultUrl);
+        return;
+      }
       const form = document.createElement("form");
       form.method = "POST";
       form.action = result.paymentUrl;
@@ -140,10 +144,10 @@ export default function BiopoolCheckout() {
             {appliedDiscount && <div className="flex justify-between text-emerald-700"><span>Descuento {appliedDiscount.code}</span><span>−{clp.format(appliedDiscount.discountTotal)}</span></div>}
             <div className="text-base font-semibold flex justify-between"><span>Total</span><span>{clp.format(total)}</span></div>
           </div>
-          <ul className="space-y-2 text-sm text-stone-600"><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Estadía de 4 horas (3,5 h al ingresar a las 18:00)</li><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Bata o toalla, gorra y locker</li><li className="flex gap-2"><ShieldCheck className="h-4 w-4 text-emerald-700" /> Pago seguro con Transbank Webpay Plus</li></ul>
+          <ul className="space-y-2 text-sm text-stone-600"><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Estadía de 4 horas (3,5 h al ingresar a las 18:00)</li><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Bata o toalla, gorra y locker</li><li className="flex gap-2"><ShieldCheck className="h-4 w-4 text-emerald-700" /> {total === 0 ? "Reserva liberada con código de descuento" : "Pago seguro con Transbank Webpay Plus"}</li></ul>
           <label className="flex cursor-pointer items-start gap-3 text-sm"><Checkbox checked={accepted} onCheckedChange={value => setAccepted(value === true)} /><span>Acepto las <a className="underline" href={service.rulesUrl || "#"} target="_blank" rel="noreferrer">condiciones y reglamento</a>. Entiendo que los niños deben asistir con un adulto.</span></label>
-          <Button type="submit" size="lg" className="w-full bg-[#536481] hover:bg-[#43526a]" disabled={startPayment.isPending || !startTime}>{startPayment.isPending ? "Conectando con Webpay…" : `Pagar ${clp.format(total)}`}</Button>
-          <p className="text-center text-xs text-stone-500">Tus cupos se reservarán por 30 minutos mientras completas el pago.</p>
+          <Button type="submit" size="lg" className="w-full bg-[#536481] hover:bg-[#43526a]" disabled={startPayment.isPending || !startTime}>{startPayment.isPending ? (total === 0 ? "Confirmando reserva…" : "Conectando con Webpay…") : (total === 0 ? "Confirmar reserva por $0" : `Pagar ${clp.format(total)}`)}</Button>
+          <p className="text-center text-xs text-stone-500">{total === 0 ? "No se abrirá Transbank ni se realizará ningún cobro." : "Tus cupos se reservarán por 30 minutos mientras completas el pago."}</p>
         </CardContent></Card></aside>
       </form>
     </section>

@@ -45,6 +45,11 @@ import {
 } from "./webpay";
 import { ENV } from "./_core/env";
 import { calculateWellnessCartDiscount } from "./massageDiscounts";
+import {
+  biopoolResultUrl,
+  finalizeApprovedBiopoolOrder,
+  isFullyDiscountedBiopoolOrder,
+} from "./biopoolWebpay";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -797,6 +802,9 @@ export const biopoolsRouter = router({
         let orderId = 0;
         let publicToken = "";
         let totalClp = 0;
+        let subtotalClpForOrder = 0;
+        let discountClpForOrder = 0;
+        let discountCodeIdForOrder: number | null = null;
         const lockName = `biopool:shared:${input.bookingDate}`;
         await db.transaction(async tx => {
           await acquireCapacityLock(tx, lockName);
@@ -821,6 +829,9 @@ export const biopoolsRouter = router({
               }
             }
             totalClp = discount?.finalTotal ?? subtotalClp;
+            subtotalClpForOrder = subtotalClp;
+            discountClpForOrder = discount?.discountTotal ?? 0;
+            discountCodeIdForOrder = discount?.discountCodeId ?? null;
             publicToken = nanoid(48);
             const [created] = await tx.insert(biopoolCheckoutOrders).values({
               publicToken,
@@ -854,13 +865,41 @@ export const biopoolsRouter = router({
             await releaseCapacityLock(tx, lockName);
           }
         });
+        if (isFullyDiscountedBiopoolOrder({
+          subtotalClp: subtotalClpForOrder,
+          discountClp: discountClpForOrder,
+          totalClp,
+          discountCodeId: discountCodeIdForOrder,
+        })) {
+          try {
+            await finalizeApprovedBiopoolOrder(orderId, { kind: "discount" });
+            return {
+              paymentRequired: false as const,
+              paymentUrl: null,
+              token: null,
+              orderToken: publicToken,
+              resultUrl: biopoolResultUrl(publicToken, "pagado"),
+            };
+          } catch (error) {
+            await db.update(biopoolCheckoutOrders)
+              .set({ status: "failed", error: String(error).slice(0, 2000) })
+              .where(eq(biopoolCheckoutOrders.id, orderId));
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No pudimos confirmar la reserva. Intenta nuevamente." });
+          }
+        }
         const buyOrder = generateBiopoolBuyOrder(orderId);
         const sessionId = generateSessionId();
         const origin = (ENV.appUrl || "https://cms.cancagua.cl").replace(/\/$/, "");
         try {
           const payment = await createTransaction(buyOrder, sessionId, totalClp, `${origin}/api/biopiscinas/webpay/return`);
           await db.update(biopoolCheckoutOrders).set({ status: "payment_pending", buyOrder, sessionId, webpayToken: payment.token }).where(eq(biopoolCheckoutOrders.id, orderId));
-          return { paymentUrl: payment.url, token: payment.token, orderToken: publicToken };
+          return {
+            paymentRequired: true as const,
+            paymentUrl: payment.url,
+            token: payment.token,
+            orderToken: publicToken,
+            resultUrl: null,
+          };
         } catch (error) {
           await db.update(biopoolCheckoutOrders).set({ status: "failed", error: String(error) }).where(eq(biopoolCheckoutOrders.id, orderId));
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No pudimos iniciar el pago. Intenta nuevamente." });
@@ -878,6 +917,8 @@ export const biopoolsRouter = router({
           date: serializeDate(order.bookingDate),
           startTime: order.startTime,
           totalClp: order.totalClp,
+          discountClp: order.discountClp,
+          discountCode: order.discountCode,
           clientEmail: order.clientEmail.replace(/^(.{2}).*(@.*)$/, "$1***$2"),
         };
       }),

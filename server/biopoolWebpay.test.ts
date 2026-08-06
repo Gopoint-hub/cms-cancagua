@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateBiopoolPayment } from "./biopoolWebpay";
+import { isFullyDiscountedBiopoolOrder, validateBiopoolPayment } from "./biopoolWebpay";
 
 const order = {
   buyOrder: "BIO-42-abc123",
@@ -34,5 +34,24 @@ describe("validateBiopoolPayment", () => {
 
   it("rechaza un token distinto", () => {
     expect(validateBiopoolPayment(order, approved, "token-falso")).toMatchObject({ approved: false });
+  });
+});
+
+describe("isFullyDiscountedBiopoolOrder", () => {
+  it("omite Webpay cuando un código cubre el 100% de una compra con valor", () => {
+    expect(isFullyDiscountedBiopoolOrder({
+      subtotalClp: 72_000,
+      discountClp: 72_000,
+      totalClp: 0,
+      discountCodeId: 12,
+    })).toBe(true);
+  });
+
+  it.each([
+    { subtotalClp: 72_000, discountClp: 36_000, totalClp: 36_000, discountCodeId: 12 },
+    { subtotalClp: 72_000, discountClp: 72_000, totalClp: 0, discountCodeId: null },
+    { subtotalClp: 0, discountClp: 0, totalClp: 0, discountCodeId: 12 },
+  ])("mantiene el flujo de pago si la orden no está liberada completamente", (candidate) => {
+    expect(isFullyDiscountedBiopoolOrder(candidate)).toBe(false);
   });
 });
