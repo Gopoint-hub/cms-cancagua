@@ -97,6 +97,12 @@ describe("B2B Quotation Module Fixes", () => {
     it("last step is 5 for save/publish buttons", () => {
       expect(wizardContent).toContain("currentStep === 5 ?");
     });
+
+    it("new quotes are always created as drafts", () => {
+      expect(wizardContent).toContain('status: "draft"');
+      expect(wizardContent).toContain('"Crear como borrador"');
+      expect(wizardContent).not.toContain('handleSave("sent")');
+    });
   });
 
   // ============================================

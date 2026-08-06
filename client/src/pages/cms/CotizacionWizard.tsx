@@ -51,7 +51,6 @@ import {
   Trash2,
   Eye,
   Save,
-  Send,
   GripVertical,
   Search,
   Building2,
@@ -653,7 +652,7 @@ export default function CotizacionWizard() {
   };
 
   // Guardar cotización
-  const handleSave = async (status: "draft" | "sent" = "draft") => {
+  const handleSave = async () => {
     if (!validateStep(1) || !validateStep(2) || !validateStep(3) || !validateStep(4)) {
       toast.error("Por favor completa todos los pasos requeridos");
       return;
@@ -678,7 +677,6 @@ export default function CotizacionWizard() {
         subtotal,
         total,
         validUntil: quoteDetails.validUntil,
-        status,
         notes: quoteDetails.notes || undefined,
         termsOfPurchase: quoteDetails.termsOfPurchase || undefined,
         items: items.map((item) => ({
@@ -702,12 +700,11 @@ export default function CotizacionWizard() {
         });
         toast.success("Cotización actualizada");
       } else {
-        await createQuoteMutation.mutateAsync(quotePayload);
-        toast.success(
-          status === "draft"
-            ? "Cotización guardada como borrador"
-            : "Cotización creada y lista para enviar"
-        );
+        await createQuoteMutation.mutateAsync({
+          ...quotePayload,
+          status: "draft",
+        });
+        toast.success("Cotización guardada como borrador");
       }
 
       setLocation("/cms/cotizaciones");
@@ -1784,31 +1781,17 @@ export default function CotizacionWizard() {
 
           <div className="flex gap-2">
             {currentStep === 5 ? (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => handleSave("draft")}
-                  disabled={createQuoteMutation.isPending || updateQuoteMutation.isPending}
-                >
-                  {(createQuoteMutation.isPending || updateQuoteMutation.isPending) ? (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4 mr-2" />
-                  )}
-                  Guardar
-                </Button>
-                <Button
-                  onClick={() => handleSave("sent")}
-                  disabled={createQuoteMutation.isPending || updateQuoteMutation.isPending}
-                >
-                  {(createQuoteMutation.isPending || updateQuoteMutation.isPending) ? (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4 mr-2" />
-                  )}
-                  Publicar
-                </Button>
-              </>
+              <Button
+                onClick={handleSave}
+                disabled={createQuoteMutation.isPending || updateQuoteMutation.isPending}
+              >
+                {(createQuoteMutation.isPending || updateQuoteMutation.isPending) ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 mr-2" />
+                )}
+                {isEditing ? "Guardar cambios" : "Crear como borrador"}
+              </Button>
             ) : (
               <Button onClick={handleNext}>
                 Siguiente
