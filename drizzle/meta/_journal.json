@@ -204,6 +204,13 @@
       "when": 1785804399000,
       "tag": "0034_biopools",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "5",
+      "when": 1786030912000,
+      "tag": "0036_newsletter_consent",
+      "breakpoints": true
     }
   ]
 }

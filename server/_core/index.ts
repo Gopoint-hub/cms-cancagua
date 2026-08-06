@@ -10,6 +10,7 @@ import { serveStatic, setupVite } from "./vite";
 import conciergeWebhook from "../conciergeWebhook";
 import getnetWebhook from "../getnetWebhook";
 import unsubscribeRouter from "../unsubscribeRoute";
+import newsletterConfirmationRouter from "../newsletterConfirmationRoute";
 import freelanceApprovalRouter from "../freelanceApproval";
 import cerebroRouter from "../cerebroRoute";
 import publicMasajesCatalog from "../publicMasajesCatalog";
@@ -119,6 +120,7 @@ async function startServer() {
   app.use("/api/biopiscinas/webpay", biopoolWebpayReturnRouter);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
+  app.use("/api/newsletter", newsletterConfirmationRouter);
   // Cerebro: grafo de conocimiento del proyecto (solo admins)
   app.use("/api/cerebro", cerebroRouter);
   // tRPC API
@@ -157,12 +159,6 @@ startServer()
     const { startBiopoolNotificationScheduler } = await import("../biopoolNotifications");
     startBiopoolNotificationScheduler();
     startBiopoolCheckoutScheduler();
-    const { runSeedIfNeeded } = await import("../seed");
-    try {
-      await runSeedIfNeeded();
-    } catch (error) {
-      console.error("[seed] Startup seed failed:", error);
-    }
     try {
       const { runInitialMassageTherapistInvitations } = await import("../massageTherapistInvitations");
       await runInitialMassageTherapistInvitations();

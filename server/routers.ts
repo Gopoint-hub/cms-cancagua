@@ -2111,6 +2111,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
       .input(z.object({
         newsletterId: z.number(),
         listIds: z.array(z.number()),
+        audienceConfirmed: z.boolean().optional().default(false),
       }))
       .mutation(async ({ ctx, input }) => {
         if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
@@ -2131,6 +2132,22 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
 
         if (allSubscribers.length === 0) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "No hay suscriptores activos en las listas seleccionadas" });
+        }
+
+        // Barreras de seguridad: un salto brusco de audiencia requiere una
+        // confirmación humana y nunca puede superar el máximo operativo.
+        const maxRecipients = Number(process.env.NEWSLETTER_MAX_RECIPIENTS || 10000);
+        if (allSubscribers.length > maxRecipients) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Envío bloqueado: ${allSubscribers.length.toLocaleString("es-CL")} destinatarios superan el máximo seguro de ${maxRecipients.toLocaleString("es-CL")}. Revisa el origen y consentimiento de la audiencia.`,
+          });
+        }
+        if (allSubscribers.length > 1000 && !input.audienceConfirmed) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Debes confirmar expresamente la audiencia antes de enviar a más de 1.000 personas.",
+          });
         }
 
         // Actualizar estado a 'sending' y guardar recipientCount inmediatamente
@@ -2221,6 +2238,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
                 newsletterId,
                 subscriberId: sub.id,
                 status: chunkResult.sent > 0 ? 'sent' : 'failed',
+                error: chunkResult.errors.join(" | ") || undefined,
               })));
 
               console.log(`[Newsletter BG] Chunk ${chunkNum}/${totalChunks} completado. Acumulado: enviados=${totalSent}, fallidos=${totalFailed}`);
@@ -2233,7 +2251,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
 
             // Actualizar newsletter con resultados finales
             await db.updateNewsletter(newsletterId, {
-              status: totalSent > 0 ? 'sent' : 'failed',
+              status: totalFailed === 0 && totalSent > 0 ? 'sent' : 'failed',
               sentAt: new Date(),
               recipientCount: allSubscribers.length,
             });
@@ -2732,8 +2750,26 @@ ${pagesHtml}
         name: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        await db.subscribeToNewsletter(input.email, input.name);
-        return { success: true };
+        const request = await db.requestNewsletterSubscription(input.email, input.name);
+        if (request.state === "active") {
+          return { success: true, state: "active" as const };
+        }
+
+        const { sendEmail } = await import("./email");
+        const { ENV } = await import("./_core/env");
+        const confirmUrl = `${ENV.appUrl || "https://cms.cancagua.cl"}/api/newsletter/confirm?token=${request.token}`;
+        const result = await sendEmail({
+          to: input.email,
+          subject: "Confirma tu suscripción a Cancagua",
+          senderName: "Cancagua",
+          tags: [{ name: "type", value: "newsletter_confirmation" }],
+          html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#222221"><h2>Confirma tu suscripción</h2><p>Recibimos una solicitud para recibir novedades de Cancagua.</p><p><a href="${confirmUrl}" style="display:inline-block;background:#4B5872;color:#fff;padding:12px 20px;text-decoration:none;border-radius:4px">Confirmar suscripción</a></p><p style="color:#777;font-size:13px">Si no realizaste esta solicitud, ignora este mensaje. El enlace vence en 24 horas.</p></div>`,
+          text: `Confirma tu suscripción a Cancagua: ${confirmUrl}\n\nSi no realizaste esta solicitud, ignora este mensaje.`,
+        });
+        if (!result.success) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No pudimos enviar el correo de confirmación. Intenta nuevamente." });
+        }
+        return { success: true, state: "pending" as const };
       }),
 
     unsubscribe: publicProcedure

@@ -153,6 +153,7 @@ export default function CMSCrearNewsletter() {
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [audienceConfirmed, setAudienceConfirmed] = useState(false);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   
   // Preview state
@@ -240,6 +241,7 @@ export default function CMSCrearNewsletter() {
         sendNewsletterMutation.mutate({
           newsletterId: data.id,
           listIds: selectedLists,
+          audienceConfirmed,
         });
       } else {
         toast.success("Newsletter guardado como borrador");
@@ -258,6 +260,7 @@ export default function CMSCrearNewsletter() {
         sendNewsletterMutation.mutate({
           newsletterId: editId!,
           listIds: selectedLists,
+          audienceConfirmed,
         });
       } else {
         toast.success("Newsletter actualizado correctamente");
@@ -693,6 +696,16 @@ export default function CMSCrearNewsletter() {
 
     if (sendOption === "schedule" && (!scheduledDate || !scheduledTime)) {
       toast.error("Por favor selecciona fecha y hora para programar el envío");
+      return;
+    }
+
+    if (sendOption === "now" && totalRecipients > 10000) {
+      toast.error("Envío bloqueado: la audiencia supera el máximo seguro de 10.000 personas");
+      return;
+    }
+
+    if (sendOption === "now" && totalRecipients > 1000 && !audienceConfirmed) {
+      toast.error("Confirma que revisaste el origen y consentimiento de la audiencia");
       return;
     }
 
@@ -1692,6 +1705,32 @@ export default function CMSCrearNewsletter() {
                 </CardContent>
               </Card>
 
+              {sendOption === "now" && totalRecipients > 1000 && (
+                <Card className={totalRecipients > 10000 ? "border-red-300 bg-red-50" : "border-amber-300 bg-amber-50"}>
+                  <CardContent className="pt-6">
+                    {totalRecipients > 10000 ? (
+                      <div>
+                        <p className="font-semibold text-red-800">Envío masivo bloqueado</p>
+                        <p className="mt-1 text-sm text-red-700">
+                          La audiencia tiene {totalRecipients.toLocaleString("es-CL")} personas y supera el máximo operativo de 10.000. Revisa las listas y su consentimiento antes de continuar.
+                        </p>
+                      </div>
+                    ) : (
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <Checkbox
+                          checked={audienceConfirmed}
+                          onCheckedChange={(checked) => setAudienceConfirmed(checked === true)}
+                          className="mt-1"
+                        />
+                        <span className="text-sm text-amber-900">
+                          Confirmo que revisé el origen de esta audiencia de {totalRecipients.toLocaleString("es-CL")} personas y que cuenta con autorización para recibir newsletters de Cancagua.
+                        </span>
+                      </label>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Preview Button */}
               <Button
                 variant="outline"
@@ -1742,7 +1781,12 @@ export default function CMSCrearNewsletter() {
           ) : (
             <Button
               onClick={handleAction}
-              disabled={createNewsletterMutation.isPending || isSending}
+              disabled={
+                createNewsletterMutation.isPending ||
+                isSending ||
+                (sendOption === "now" && totalRecipients > 10000) ||
+                (sendOption === "now" && totalRecipients > 1000 && !audienceConfirmed)
+              }
               className="bg-[#44580E] hover:bg-[#3a4c0c] px-8"
             >
               {isSending || createNewsletterMutation.isPending ? (

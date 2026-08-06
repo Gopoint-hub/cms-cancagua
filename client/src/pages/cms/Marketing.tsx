@@ -19,14 +19,12 @@ import {
   Mail,
   MailPlus,
   Newspaper,
-  RefreshCw,
   Send,
   Tag,
   TrendingUp,
   Users,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { toast } from "sonner";
 
 type CalendarEvent = {
   id: number;
@@ -84,22 +82,12 @@ function eventTypeClass(type: CalendarEvent["type"]) {
 
 export default function CMSMarketing() {
   const [, setLocation] = useLocation();
-  const utils = trpc.useUtils();
 
   const { data: newslettersData, isLoading: loadingNewsletters } = trpc.newsletters.getAll.useQuery();
   const { data: subscribersData, isLoading: loadingSubscribers } = trpc.subscribers.getAll.useQuery();
   const { data: listsData, isLoading: loadingLists } = trpc.lists.getAll.useQuery();
   const { data: calendarEvents = [], isLoading: loadingCalendar } = trpc.marketing.listCalendarEvents.useQuery();
   const { data: blogArticles = [], isLoading: loadingBlog } = trpc.marketing.listBlogArticles.useQuery();
-
-  const syncJustoMutation = trpc.marketing.syncJustoDatabase.useMutation({
-    onSuccess: (result) => {
-      toast.success(`BBDD Justo sincronizada: ${result.created} nuevos, ${result.assigned} asignaciones`);
-      utils.subscribers.getAll.invalidate();
-      utils.lists.getAll.invalidate();
-    },
-    onError: (error) => toast.error(error.message || "No se pudo sincronizar Justo"),
-  });
 
   const today = localDateString();
   const weekDates = Array.from({ length: 7 }, (_, index) => localDateString(addDays(new Date(), index)));
@@ -145,15 +133,6 @@ export default function CMSMarketing() {
               {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
             </p>
           </div>
-          <Button
-            variant="outline"
-            onClick={() => syncJustoMutation.mutate()}
-            disabled={syncJustoMutation.isPending}
-            className="gap-2 w-full sm:w-auto"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncJustoMutation.isPending ? "animate-spin" : ""}`} />
-            {syncJustoMutation.isPending ? "Sincronizando Justo..." : "Sincronizar BBDD Justo"}
-          </Button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
