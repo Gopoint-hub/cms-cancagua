@@ -17,7 +17,7 @@ import { regularClassesRouter } from "./regularClassesRouter";
 import { biopoolsRouter } from "./biopoolsRouter";
 import { operations360Router } from "./operations360Router";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
-import { ALL_CMS_PERMISSIONS } from "@shared/permissions";
+import { ALL_CMS_PERMISSIONS, hasCmsPermission } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
 import {
   CANCAGUA_EMAIL_REFINEMENT_RULES,
@@ -52,6 +52,31 @@ async function assertShiftReportEditable(reportId: number): Promise<void> {
     });
   }
 }
+
+type UsuarioB2B = {
+  role?: string | null;
+  permissions?: string | null;
+  regularClassesTeacher?: number | boolean | null;
+};
+
+/**
+ * Acceso al área B2B (negocios y cotizaciones).
+ *
+ * Antes cada endpoint traía una lista de roles escrita a mano que IGNORABA el
+ * sistema de permisos del CMS. Recepción tenía "module.b2b" concedido y el menú
+ * la dejaba entrar al wizard, pero al guardar la API respondía FORBIDDEN.
+ *
+ * El cambio es ADITIVO a propósito: cada router conserva los roles que ya tenía
+ * (deals traía seller, quotes traía editor) y se suma quien tenga el permiso.
+ * Así nadie pierde acceso. Mismo criterio que masajesRouter con module.massages.
+ */
+function puedeB2B(user: UsuarioB2B, rolesHeredados: string[]): boolean {
+  if (user.role && rolesHeredados.includes(user.role)) return true;
+  return hasCmsPermission(user, "module.b2b");
+}
+
+const ROLES_B2B_NEGOCIOS = ["super_admin", "admin", "seller"];
+const ROLES_B2B_COTIZACIONES = ["super_admin", "admin", "editor"];
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -1117,7 +1142,7 @@ export const appRouter = router({
   // Productos corporativos (CMS - solo admin y editor)
   corporateProducts: router({
     getAll: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para gestionar productos corporativos" });
       }
       return await db.getAllCorporateProducts();
@@ -1130,7 +1155,7 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getCorporateProductById(input.id);
@@ -1149,7 +1174,7 @@ export const appRouter = router({
         active: z.number().default(1),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.createCorporateProduct(input);
@@ -1169,7 +1194,7 @@ export const appRouter = router({
         active: z.number().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...data } = input;
@@ -1179,7 +1204,7 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteCorporateProduct(input.id);
@@ -1188,7 +1213,7 @@ export const appRouter = router({
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const results = await Promise.all(
@@ -1200,7 +1225,7 @@ export const appRouter = router({
     bulkDuplicate: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const products = await Promise.all(
@@ -1239,7 +1264,7 @@ export const appRouter = router({
         }))
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const results = await Promise.all(
@@ -1252,7 +1277,7 @@ export const appRouter = router({
   // Clientes corporativos (CMS - solo admin y editor)
   corporateClients: router({
     getAll: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllCorporateClients();
@@ -1261,7 +1286,7 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getCorporateClientById(input.id);
@@ -1270,7 +1295,7 @@ export const appRouter = router({
     getByEmail: protectedProcedure
       .input(z.object({ email: z.string() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getCorporateClientByEmail(input.email);
@@ -1292,7 +1317,7 @@ export const appRouter = router({
         notes: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.createCorporateClient(input);
@@ -1315,7 +1340,7 @@ export const appRouter = router({
         notes: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...data } = input;
@@ -1325,7 +1350,7 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteCorporateClient(input.id);
@@ -1335,7 +1360,7 @@ export const appRouter = router({
   // Cotizaciones (CMS - solo admin y editor)
   quotes: router({
     getAll: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllQuotes();
@@ -1344,7 +1369,7 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getQuoteById(input.id);
@@ -1353,7 +1378,7 @@ export const appRouter = router({
     getItems: protectedProcedure
       .input(z.object({ quoteId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getQuoteItems(input.quoteId);
@@ -1397,7 +1422,7 @@ export const appRouter = router({
         })),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -1473,7 +1498,7 @@ export const appRouter = router({
         })).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -1502,7 +1527,7 @@ export const appRouter = router({
         status: z.enum(["draft", "sent", "approved", "event_completed", "paid", "invoiced"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.updateQuoteStatus(input.id, input.status);
@@ -1511,7 +1536,7 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteQuote(input.id);
@@ -1521,7 +1546,7 @@ export const appRouter = router({
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkDeleteQuotes(input.ids);
@@ -1534,7 +1559,7 @@ export const appRouter = router({
         status: z.enum(["draft", "sent", "approved", "event_completed", "paid", "invoiced"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkUpdateQuotesStatus(input.ids, input.status);
@@ -1544,7 +1569,7 @@ export const appRouter = router({
     bulkDuplicate: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -1611,7 +1636,7 @@ export const appRouter = router({
     generatePDF: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -1674,7 +1699,7 @@ export const appRouter = router({
         additionalEmails: z.array(z.string().email()).optional(), // Emails adicionales para enviar
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -1760,7 +1785,7 @@ export const appRouter = router({
   newsletters: router({
     getAll: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getAllNewsletters();
@@ -1769,7 +1794,7 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getNewsletterById(input.id);
@@ -1786,7 +1811,7 @@ export const appRouter = router({
         scheduledAt: z.date().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -1826,7 +1851,7 @@ export const appRouter = router({
         scheduledAt: z.date().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...updateData } = input;
@@ -1839,7 +1864,7 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteNewsletter(input.id);
@@ -1848,7 +1873,7 @@ export const appRouter = router({
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkDeleteNewsletters(input.ids);
@@ -1858,7 +1883,7 @@ export const appRouter = router({
     duplicate: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const newNewsletter = await db.duplicateNewsletter(input.id);
@@ -1875,7 +1900,7 @@ export const appRouter = router({
         generateImages: z.boolean().optional().default(true),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2063,7 +2088,7 @@ NO incluyas marcadores de código. Devuelve SOLO el JSON válido.`;
         refinementRequest: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2120,7 +2145,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
     getLists: protectedProcedure
       .input(z.object({ newsletterId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getListsForNewsletter(input.newsletterId);
@@ -2132,7 +2157,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
         testEmail: z.string().email(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2162,7 +2187,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
         audienceConfirmed: z.boolean().optional().default(false),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2347,7 +2372,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
         fileName: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2381,7 +2406,7 @@ IMPORTANTE: Devuelve SOLO el código HTML puro modificado, sin marcadores de có
         fileName: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2465,7 +2490,7 @@ ${pagesHtml}
         htmlContent: z.string().optional(), // HTML from separate .html file
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { processHtmlZip, processHtmlWithZipAssets } = await import('./newsletterZipProcessor');
@@ -2481,7 +2506,7 @@ ${pagesHtml}
         url: z.string().url(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2670,7 +2695,7 @@ ${pagesHtml}
         audioData: z.string(), // Base64 encoded audio data
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2713,7 +2738,7 @@ ${pagesHtml}
   subscribers: router({
     getAll: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getAllSubscribers();
@@ -2722,7 +2747,7 @@ ${pagesHtml}
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getSubscriberById(input.id);
@@ -2735,7 +2760,7 @@ ${pagesHtml}
         metadata: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.createSubscriber({
@@ -2753,7 +2778,7 @@ ${pagesHtml}
         metadata: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...updateData } = input;
@@ -2763,7 +2788,7 @@ ${pagesHtml}
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteSubscriber(input.id);
@@ -2772,7 +2797,7 @@ ${pagesHtml}
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkDeleteSubscribers(input.ids);
@@ -2785,7 +2810,7 @@ ${pagesHtml}
         status: z.enum(["active", "unsubscribed"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkUpdateSubscribersStatus(input.ids, input.status);
@@ -2814,7 +2839,7 @@ ${pagesHtml}
         csvData: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2882,7 +2907,7 @@ ${pagesHtml}
         listId: z.number().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const mapped = input.contacts.map(c => ({
@@ -2908,7 +2933,7 @@ ${pagesHtml}
         csvData: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -2968,7 +2993,7 @@ Devuelve un JSON con este formato:
     getLists: protectedProcedure
       .input(z.object({ subscriberId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getListsForSubscriber(input.subscriberId);
@@ -2981,7 +3006,7 @@ Devuelve un JSON con este formato:
   lists: router({
     getAll: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getAllLists();
@@ -2990,7 +3015,7 @@ Devuelve un JSON con este formato:
     uniqueSubscriberCount: protectedProcedure
       .input(z.object({ listIds: z.array(z.number()) }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         if (input.listIds.length === 0) {
@@ -3002,7 +3027,7 @@ Devuelve un JSON con este formato:
 
     totalActiveSubscribers: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const count = await db.getTotalUniqueActiveSubscribers();
@@ -3012,7 +3037,7 @@ Devuelve un JSON con este formato:
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getListById(input.id);
@@ -3025,7 +3050,7 @@ Devuelve un JSON con este formato:
         segmentationRules: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.createList(input);
@@ -3039,7 +3064,7 @@ Devuelve un JSON con este formato:
         segmentationRules: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...updateData } = input;
@@ -3049,7 +3074,7 @@ Devuelve un JSON con este formato:
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteList(input.id);
@@ -3058,7 +3083,7 @@ Devuelve un JSON con este formato:
     getSubscribers: protectedProcedure
       .input(z.object({ listId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getSubscribersInList(input.listId);
@@ -3070,7 +3095,7 @@ Devuelve un JSON con este formato:
         subscriberId: z.number(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.addSubscriberToList(input.subscriberId, input.listId);
@@ -3082,7 +3107,7 @@ Devuelve un JSON con este formato:
         subscriberId: z.number(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.removeSubscriberFromList(input.subscriberId, input.listId);
@@ -3094,7 +3119,7 @@ Devuelve un JSON con este formato:
         subscriberIds: z.array(z.number()),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkAddSubscribersToList(input.subscriberIds, input.listId);
@@ -3107,7 +3132,7 @@ Devuelve un JSON con este formato:
         subscriberIds: z.array(z.number()),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkRemoveSubscribersFromList(input.subscriberIds, input.listId);
@@ -3117,7 +3142,7 @@ Devuelve un JSON con este formato:
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()) }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.bulkDeleteLists(input.ids);
@@ -3131,7 +3156,7 @@ Devuelve un JSON con este formato:
   discountCodes: router({
     getAll: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getAllDiscountCodes();
@@ -3140,7 +3165,7 @@ Devuelve un JSON con este formato:
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getDiscountCodeById(input.id);
@@ -3163,7 +3188,7 @@ Devuelve un JSON con este formato:
         expiresAt: z.date().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -3199,7 +3224,7 @@ Devuelve un JSON con este formato:
         active: z.number().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -3215,7 +3240,7 @@ Devuelve un JSON con este formato:
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteDiscountCode(input.id);
@@ -3234,7 +3259,7 @@ Devuelve un JSON con este formato:
     getUsages: protectedProcedure
       .input(z.object({ discountCodeId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getUsagesForDiscountCode(input.discountCodeId);
@@ -3247,7 +3272,7 @@ Devuelve un JSON con este formato:
   giftCards: router({
     getAll: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getAllGiftCards();
@@ -3256,7 +3281,7 @@ Devuelve un JSON con este formato:
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getGiftCardById(input.id);
@@ -3304,7 +3329,7 @@ Devuelve un JSON con este formato:
         deliveredAt: z.date().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...updateData } = input;
@@ -3314,7 +3339,7 @@ Devuelve un JSON con este formato:
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteGiftCard(input.id);
@@ -3375,7 +3400,7 @@ Devuelve un JSON con este formato:
     getTransactions: protectedProcedure
       .input(z.object({ giftCardId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getGiftCardTransactions(input.giftCardId);
@@ -3940,7 +3965,7 @@ Devuelve un JSON con este formato:
 
     // Admin: listar todos los eventos
     list: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+      if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllEvents();
@@ -4162,7 +4187,7 @@ Example output: {"key1": "Hello world"}`;
     // Admin: listar todas las traducciones
     list: protectedProcedure
       .query(async ({ ctx }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getAllTranslations();
@@ -4175,7 +4200,7 @@ Example output: {"key1": "Hello world"}`;
         translatedContent: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.updateTranslationContent(input.id, input.translatedContent, ctx.user.id);
@@ -4185,7 +4210,7 @@ Example output: {"key1": "Hello world"}`;
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.deleteTranslation(input.id);
@@ -4198,7 +4223,7 @@ Example output: {"key1": "Hello world"}`;
         context: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "editor") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
@@ -4225,14 +4250,14 @@ Example output: {"key1": "Hello world"}`;
   // ============================================
   deals: router({
     getAll: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+      if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getAllDeals();
     }),
 
     getWithQuoteCount: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+      if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return await db.getDealsWithQuoteCount();
@@ -4241,7 +4266,7 @@ Example output: {"key1": "Hello world"}`;
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getDealById(input.id);
@@ -4250,7 +4275,7 @@ Example output: {"key1": "Hello world"}`;
     search: protectedProcedure
       .input(z.object({ query: z.string() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.searchDeals(input.query);
@@ -4259,7 +4284,7 @@ Example output: {"key1": "Hello world"}`;
     getQuotes: protectedProcedure
       .input(z.object({ dealId: z.number() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.getQuotesByDealId(input.dealId);
@@ -4275,7 +4300,7 @@ Example output: {"key1": "Hello world"}`;
         notes: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.createDeal({
@@ -4295,7 +4320,7 @@ Example output: {"key1": "Hello world"}`;
         notes: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         const { id, ...data } = input;
@@ -4309,7 +4334,7 @@ Example output: {"key1": "Hello world"}`;
         stage: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.updateDealStage(input.id, input.stage);
@@ -4319,7 +4344,7 @@ Example output: {"key1": "Hello world"}`;
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.deleteDeal(input.id);
@@ -4332,7 +4357,7 @@ Example output: {"key1": "Hello world"}`;
     search: protectedProcedure
       .input(z.object({ query: z.string() }))
       .query(async ({ ctx, input }) => {
-        if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin" && ctx.user.role !== "seller") {
+        if (!puedeB2B(ctx.user, ROLES_B2B_NEGOCIOS)) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         return await db.searchCorporateClients(input.query);
