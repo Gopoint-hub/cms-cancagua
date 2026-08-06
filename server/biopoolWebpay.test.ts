@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFullyDiscountedBiopoolOrder, validateBiopoolPayment } from "./biopoolWebpay";
+import { isFullyDiscountedBiopoolOrder, parseClientServicesUsed, validateBiopoolPayment } from "./biopoolWebpay";
 
 const order = {
   buyOrder: "BIO-42-abc123",
@@ -54,4 +54,18 @@ describe("isFullyDiscountedBiopoolOrder", () => {
   ])("mantiene el flujo de pago si la orden no está liberada completamente", (candidate) => {
     expect(isFullyDiscountedBiopoolOrder(candidate)).toBe(false);
   });
+});
+
+describe("parseClientServicesUsed", () => {
+  it("conserva sólo servicios válidos de un arreglo JSON", () => {
+    expect(parseClientServicesUsed('["Masajes",null,"",7,"Clases regulares"]')).toEqual([
+      "Masajes",
+      "Clases regulares",
+    ]);
+  });
+
+  it.each([null, "", "null", "{}", "texto legado"])(
+    "normaliza datos históricos que no son arreglos (%s)",
+    (value) => expect(parseClientServicesUsed(value)).toEqual([]),
+  );
 });

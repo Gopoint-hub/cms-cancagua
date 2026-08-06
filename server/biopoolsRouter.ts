@@ -881,6 +881,10 @@ export const biopoolsRouter = router({
               resultUrl: biopoolResultUrl(publicToken, "pagado"),
             };
           } catch (error) {
+            console.error("[biopools:checkout] No se pudo confirmar una reserva cubierta por descuento", {
+              orderId,
+              error,
+            });
             await db.update(biopoolCheckoutOrders)
               .set({ status: "failed", error: String(error).slice(0, 2000) })
               .where(eq(biopoolCheckoutOrders.id, orderId));

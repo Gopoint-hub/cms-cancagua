@@ -54,6 +54,18 @@ function dateValue(value: unknown): string {
   return String(value).slice(0, 10);
 }
 
+export function parseClientServicesUsed(value: unknown): string[] {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((service): service is string => typeof service === "string" && Boolean(service.trim()))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function biopoolResultUrl(publicToken: string, state: string): string {
   const frontend = (ENV.frontendUrl || "https://cancagua.cl").replace(/\/$/, "");
   return `${frontend}/servicios/biopiscinas/pago/resultado?order=${encodeURIComponent(publicToken)}&estado=${encodeURIComponent(state)}`;
@@ -81,10 +93,12 @@ export async function finalizeApprovedBiopoolOrder(
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
-  await db.transaction(async tx => {
+  const completed = await db.transaction(async tx => {
     const [order] = await tx.select().from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.id, orderId)).limit(1);
     if (!order) throw new Error("Orden no encontrada");
-    if (order.bookingId && order.status === "paid") return;
+    if (order.bookingId && order.status === "paid") {
+      return { alreadyFinalized: true as const, clientId: null, visitDate: "", totalClp: 0 };
+    }
 
     const [service] = await tx.select().from(biopoolServices).where(eq(biopoolServices.id, order.serviceId)).limit(1);
     if (!service) throw new Error("Servicio no encontrado");
@@ -169,23 +183,6 @@ export async function finalizeApprovedBiopoolOrder(
       });
     }
 
-    const visitDate = dateValue(order.bookingDate);
-    const visitDateObject = new Date(`${visitDate}T12:00:00Z`);
-    const priorServices = (() => {
-      try { return JSON.parse(client.serviciosUsados || "[]"); } catch { return []; }
-    })();
-    const servicesUsed = Array.from(new Set([...priorServices, "Biopiscinas"]));
-    await tx.update(clients).set({
-      totalVisitas: sql`COALESCE(${clients.totalVisitas}, 0) + 1`,
-      visitas2026: sql`COALESCE(${clients.visitas2026}, 0) + 1`,
-      totalGasto: sql`COALESCE(${clients.totalGasto}, 0) + ${order.totalClp}`,
-      gasto2026: sql`COALESCE(${clients.gasto2026}, 0) + ${order.totalClp}`,
-      primerVisita: client.primerVisita ?? visitDateObject,
-      ultimaVisita: visitDateObject,
-      serviciosUsados: JSON.stringify(servicesUsed),
-      ticketPromedio: sql`ROUND((COALESCE(${clients.totalGasto}, 0) + ${order.totalClp}) / (COALESCE(${clients.totalVisitas}, 0) + 1))`,
-    }).where(eq(clients.id, client.id));
-
     await tx.update(biopoolCheckoutOrders).set({
       bookingId: createdBooking.id,
       status: "paid",
@@ -202,7 +199,43 @@ export async function finalizeApprovedBiopoolOrder(
       completedAt: new Date(),
       error: null,
     }).where(eq(biopoolCheckoutOrders.id, order.id));
+
+    return {
+      alreadyFinalized: false as const,
+      clientId: client.id,
+      visitDate: dateValue(order.bookingDate),
+      totalClp: order.totalClp,
+    };
   });
+
+  // El historial comercial es complementario: un dato legado mal formado no
+  // puede revertir una reserva ya confirmada ni la aplicación del descuento.
+  if (!completed.alreadyFinalized && completed.clientId) {
+    try {
+      const [client] = await db.select().from(clients).where(eq(clients.id, completed.clientId)).limit(1);
+      if (!client) return;
+      const visitDateObject = new Date(`${completed.visitDate}T12:00:00Z`);
+      const servicesUsed = Array.from(new Set([
+        ...parseClientServicesUsed(client.serviciosUsados),
+        "Biopiscinas",
+      ]));
+      await db.update(clients).set({
+        totalVisitas: sql`COALESCE(${clients.totalVisitas}, 0) + 1`,
+        visitas2026: sql`COALESCE(${clients.visitas2026}, 0) + 1`,
+        totalGasto: sql`COALESCE(${clients.totalGasto}, 0) + ${completed.totalClp}`,
+        gasto2026: sql`COALESCE(${clients.gasto2026}, 0) + ${completed.totalClp}`,
+        primerVisita: client.primerVisita ?? visitDateObject,
+        ultimaVisita: visitDateObject,
+        serviciosUsados: JSON.stringify(servicesUsed),
+        ticketPromedio: sql`ROUND((COALESCE(${clients.totalGasto}, 0) + ${completed.totalClp}) / (COALESCE(${clients.totalVisitas}, 0) + 1))`,
+      }).where(eq(clients.id, client.id));
+    } catch (error) {
+      console.error("[biopools:checkout] Reserva confirmada; no se pudo actualizar el historial comercial", {
+        clientId: completed.clientId,
+        error,
+      });
+    }
+  }
 }
 
 export const biopoolWebpayReturnRouter = express.Router();
