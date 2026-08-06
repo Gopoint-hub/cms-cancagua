@@ -28,6 +28,7 @@ export type MassageDiscountResult = {
 export type WellnessDiscountLine = {
   service: "masajes" | "clases" | "biopiscinas";
   originalAmount: number;
+  serviceId?: number | string;
   techniqueId?: number;
 };
 
@@ -71,6 +72,31 @@ export function calculateWellnessDiscountAmounts(
 
 const normalizeCode = (code: string) => code.trim().toUpperCase();
 
+export function isWellnessDiscountLineEligible(
+  applicableServices: string[],
+  allowedLegacyMassageTechniqueIds: Set<number>,
+  line: WellnessDiscountLine,
+) {
+  const appliesToAll = applicableServices.length === 0 || applicableServices.includes("all");
+  const selectedServiceId = line.serviceId ?? line.techniqueId;
+  const canonicalWildcard = applicableServices.includes(`${line.service}:*`);
+  const canonicalSpecific = selectedServiceId != null
+    && applicableServices.includes(`${line.service}:${selectedServiceId}`);
+  const legacyModule = applicableServices.includes(line.service);
+  const serviceAllowed = appliesToAll || canonicalWildcard || canonicalSpecific || legacyModule;
+  if (!serviceAllowed) return false;
+  if (
+    line.service === "masajes"
+    && legacyModule
+    && !canonicalWildcard
+    && !canonicalSpecific
+    && allowedLegacyMassageTechniqueIds.size > 0
+  ) {
+    return line.techniqueId != null && allowedLegacyMassageTechniqueIds.has(line.techniqueId);
+  }
+  return true;
+}
+
 export async function calculateMassageDiscount(
   db: any,
   rawCode: string,
@@ -78,6 +104,7 @@ export async function calculateMassageDiscount(
 ): Promise<MassageDiscountResult> {
   return calculateWellnessCartDiscount(db, rawCode, lines.map((line) => ({
     service: "masajes",
+    serviceId: line.techniqueId,
     techniqueId: line.techniqueId,
     originalAmount: line.originalAmount,
   })));
@@ -102,8 +129,6 @@ export async function calculateWellnessCartDiscount(
     catch { return []; }
   })();
   const applicableServices = Array.isArray(applicable) ? applicable : [];
-  const appliesToAll = applicableServices.length === 0 || applicableServices.includes("all");
-
   const now = new Date();
   if (discount.startsAt && new Date(discount.startsAt) > now) {
     throw new Error("Este código todavía no está vigente.");
@@ -119,11 +144,7 @@ export async function calculateWellnessCartDiscount(
     .from(massageDiscountCodeTechniques)
     .where(eq(massageDiscountCodeTechniques.discountCodeId, discount.id));
   const allowedIds = new Set<number>(mappings.map((row: any) => row.techniqueId));
-  const eligible = lines.map((line) => {
-    const serviceAllowed = appliesToAll || applicableServices.includes(line.service);
-    if (!serviceAllowed) return false;
-    return line.service !== "masajes" || allowedIds.size === 0 || (line.techniqueId != null && allowedIds.has(line.techniqueId));
-  });
+  const eligible = lines.map((line) => isWellnessDiscountLineEligible(applicableServices, allowedIds, line));
   const { eligibleSubtotal, originalTotal, discountTotal, finalTotal, lineDiscounts } = calculateWellnessDiscountAmounts(
     lines,
     eligible,

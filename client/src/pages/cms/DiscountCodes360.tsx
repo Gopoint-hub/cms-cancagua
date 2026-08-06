@@ -9,10 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ChevronDown, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 type DiscountType = "percentage" | "fixed";
+type ModuleId = "masajes" | "clases" | "biopiscinas";
+type ScopeState = Record<ModuleId, { selected: boolean; all: boolean; serviceIds: string[] }>;
 type FormState = {
   id?: number;
   code: string;
@@ -24,13 +26,27 @@ type FormState = {
   startsAt: string;
   expiresAt: string;
   active: boolean;
-  techniqueIds: number[];
+  scopes: ScopeState;
 };
 
-const emptyForm: FormState = {
-  code: "", name: "", description: "", discountType: "percentage", discountValue: "",
-  indefinite: true, startsAt: "", expiresAt: "", active: true, techniqueIds: [],
-};
+const emptyScopes = (): ScopeState => ({
+  masajes: { selected: false, all: true, serviceIds: [] },
+  clases: { selected: false, all: true, serviceIds: [] },
+  biopiscinas: { selected: false, all: true, serviceIds: [] },
+});
+
+const emptyForm = (): FormState => ({
+  code: "",
+  name: "",
+  description: "",
+  discountType: "percentage",
+  discountValue: "",
+  indefinite: true,
+  startsAt: "",
+  expiresAt: "",
+  active: true,
+  scopes: emptyScopes(),
+});
 
 const toLocalInput = (value?: Date | string | null) => {
   if (!value) return "";
@@ -39,25 +55,25 @@ const toLocalInput = (value?: Date | string | null) => {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 };
 
-export default function MasajesDescuentos() {
+export default function DiscountCodes360() {
   const utils = trpc.useUtils();
-  const { data: codes = [], isLoading } = trpc.masajes.descuentos.list.useQuery();
-  const { data: techniques = [] } = trpc.masajes.public.getCatalog.useQuery();
+  const { data: codes = [], isLoading } = trpc.discounts360.list.useQuery();
+  const { data: catalog = [] } = trpc.discounts360.catalog.useQuery();
   const [search, setSearch] = useState("");
   const [descending, setDescending] = useState(false);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<FormState>(emptyForm);
+  const [form, setForm] = useState<FormState>(emptyForm());
 
-  const refresh = () => utils.masajes.descuentos.list.invalidate();
-  const create = trpc.masajes.descuentos.create.useMutation({
+  const refresh = () => utils.discounts360.list.invalidate();
+  const create = trpc.discounts360.create.useMutation({
     onSuccess: () => { toast.success("Código creado"); setOpen(false); refresh(); },
     onError: (error) => toast.error(error.message),
   });
-  const update = trpc.masajes.descuentos.update.useMutation({
+  const update = trpc.discounts360.update.useMutation({
     onSuccess: () => { toast.success("Código actualizado"); setOpen(false); refresh(); },
     onError: (error) => toast.error(error.message),
   });
-  const remove = trpc.masajes.descuentos.remove.useMutation({
+  const remove = trpc.discounts360.remove.useMutation({
     onSuccess: (result) => {
       toast.success(result.archived ? "Código archivado para conservar su historial" : "Código eliminado");
       refresh();
@@ -83,25 +99,52 @@ export default function MasajesDescuentos() {
     return { label: "Activo", variant: "default" as const };
   };
 
+  const scopeSummary = (item: typeof codes[number]) => item.scopes.map((scope) => {
+    const module = catalog.find((candidate) => candidate.id === scope.module);
+    if (scope.all) return `${module?.name ?? scope.module}: todos`;
+    return `${module?.name ?? scope.module}: ${scope.serviceIds.length}`;
+  }).join(" · ") || "Sin servicios 360";
+
   const edit = (item: typeof codes[number]) => {
+    const scopes = emptyScopes();
+    for (const scope of item.scopes) {
+      scopes[scope.module] = { selected: true, all: scope.all, serviceIds: [...scope.serviceIds] };
+    }
     setForm({
-      id: item.id, code: item.code, name: item.name, description: item.description ?? "",
-      discountType: item.discountType, discountValue: String(item.discountValue),
+      id: item.id,
+      code: item.code,
+      name: item.name,
+      description: item.description ?? "",
+      discountType: item.discountType,
+      discountValue: String(item.discountValue),
       indefinite: !item.startsAt && !item.expiresAt,
-      startsAt: toLocalInput(item.startsAt), expiresAt: toLocalInput(item.expiresAt),
-      active: item.active === 1, techniqueIds: item.techniqueIds,
+      startsAt: toLocalInput(item.startsAt),
+      expiresAt: toLocalInput(item.expiresAt),
+      active: item.active === 1,
+      scopes,
     });
     setOpen(true);
   };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
+    const scopes = (Object.entries(form.scopes) as Array<[ModuleId, ScopeState[ModuleId]]>)
+      .filter(([, scope]) => scope.selected)
+      .map(([module, scope]) => ({ module, all: scope.all, serviceIds: scope.serviceIds }));
+    if (!scopes.length) {
+      toast.error("Selecciona al menos un módulo de servicios.");
+      return;
+    }
     const payload = {
-      code: form.code.trim().toUpperCase(), name: form.name.trim(), description: form.description.trim() || undefined,
-      discountType: form.discountType, discountValue: Number(form.discountValue),
+      code: form.code.trim().toUpperCase(),
+      name: form.name.trim(),
+      description: form.description.trim() || undefined,
+      discountType: form.discountType,
+      discountValue: Number(form.discountValue),
       startsAt: form.indefinite || !form.startsAt ? null : new Date(form.startsAt),
       expiresAt: form.indefinite || !form.expiresAt ? null : new Date(form.expiresAt),
-      active: form.active ? 1 : 0, techniqueIds: form.techniqueIds,
+      active: form.active ? 1 : 0,
+      scopes,
     };
     if (form.id) update.mutate({ id: form.id, ...payload });
     else create.mutate(payload);
@@ -110,21 +153,29 @@ export default function MasajesDescuentos() {
   const download = async () => {
     const XLSX = await import("xlsx");
     const rows = visible.map((item) => ({
-      Código: item.code, Nombre: item.name,
+      Código: item.code,
+      Nombre: item.name,
       Tipo: item.discountType === "percentage" ? "Porcentaje" : "Monto fijo",
       Valor: item.discountValue,
-      Servicios: item.techniqueIds.length
-        ? techniques.filter((technique) => item.techniqueIds.includes(technique.id)).map((technique) => technique.name).join(", ")
-        : "Todos los masajes",
+      "Servicios aplicables": scopeSummary(item),
       Inicio: item.startsAt ? new Date(item.startsAt).toLocaleString("es-CL") : "Indefinido",
       Término: item.expiresAt ? new Date(item.expiresAt).toLocaleString("es-CL") : "Indefinido",
-      Estado: status(item).label, Usos: item.currentUses, "Total descontado": Number(item.totalDiscounted),
+      Estado: status(item).label,
+      Usos: item.currentUses,
+      "Total descontado": Number(item.totalDiscounted),
     }));
     const sheet = XLSX.utils.json_to_sheet(rows);
-    sheet["!cols"] = [18, 28, 14, 12, 45, 22, 22, 14, 10, 20].map((wch) => ({ wch }));
+    sheet["!cols"] = [18, 28, 14, 12, 55, 22, 22, 14, 10, 20].map((wch) => ({ wch }));
     const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Códigos masajes");
-    XLSX.writeFile(book, "codigos-descuento-masajes.xlsx");
+    XLSX.utils.book_append_sheet(book, sheet, "Códigos 360");
+    XLSX.writeFile(book, "codigos-descuento-360.xlsx");
+  };
+
+  const setModuleScope = (module: ModuleId, patch: Partial<ScopeState[ModuleId]>) => {
+    setForm((current) => ({
+      ...current,
+      scopes: { ...current.scopes, [module]: { ...current.scopes[module], ...patch } },
+    }));
   };
 
   return (
@@ -132,21 +183,29 @@ export default function MasajesDescuentos() {
       <div className="p-6 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">Códigos de descuento</h1>
-            <p className="text-sm text-muted-foreground">Promociones exclusivas para servicios de masajes</p>
+            <h1 className="text-2xl font-semibold">Códigos de descuento 360</h1>
+            <p className="text-sm text-muted-foreground">Promociones aplicables a todos los servicios de Cancagua</p>
           </div>
-          <Button className="w-full sm:w-auto" onClick={() => { setForm(emptyForm); setOpen(true); }}><Plus className="w-4 h-4 mr-2" />Nuevo código</Button>
+          <Button className="w-full sm:w-auto" onClick={() => { setForm(emptyForm()); setOpen(true); }}>
+            <Plus className="w-4 h-4 mr-2" />Nuevo código
+          </Button>
         </div>
+
         <Card>
           <CardContent className="p-4 flex flex-wrap gap-3">
             <div className="relative min-w-0 w-full flex-1 sm:min-w-[240px]">
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por código o nombre" className="pl-9" />
             </div>
-            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setDescending((value) => !value)}>Orden {descending ? "Z–A" : "A–Z"}</Button>
-            <Button className="flex-1 sm:flex-none" variant="outline" onClick={download} disabled={!visible.length}><Download className="w-4 h-4 mr-2" />Excel</Button>
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setDescending((value) => !value)}>
+              Orden {descending ? "Z–A" : "A–Z"}
+            </Button>
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={download} disabled={!visible.length}>
+              <Download className="w-4 h-4 mr-2" />Excel
+            </Button>
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader><CardTitle className="text-base">{visible.length} código{visible.length === 1 ? "" : "s"}</CardTitle></CardHeader>
           <CardContent>
@@ -164,7 +223,7 @@ export default function MasajesDescuentos() {
                     return <tr key={item.id} className="border-b">
                       <td className="py-3 pr-4"><code className="font-semibold">{item.code}</code><p className="text-muted-foreground">{item.name}</p></td>
                       <td className="pr-4">{item.discountType === "percentage" ? `${item.discountValue}%` : `$${item.discountValue.toLocaleString("es-CL")}`}</td>
-                      <td className="pr-4">{item.techniqueIds.length ? `${item.techniqueIds.length} específico(s)` : "Todos"}</td>
+                      <td className="pr-4 max-w-[320px]">{scopeSummary(item)}</td>
                       <td className="pr-4 whitespace-nowrap">{item.expiresAt ? `Hasta ${new Date(item.expiresAt).toLocaleDateString("es-CL")}` : "Indefinida"}</td>
                       <td className="pr-4"><Badge variant={itemStatus.variant}>{itemStatus.label}</Badge></td>
                       <td className="pr-4 text-right">{item.currentUses}</td>
@@ -183,7 +242,7 @@ export default function MasajesDescuentos() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{form.id ? "Editar" : "Nuevo"} código de descuento</DialogTitle></DialogHeader>
           <form onSubmit={submit} className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
@@ -195,16 +254,32 @@ export default function MasajesDescuentos() {
             <div><Label>Descripción interna</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.indefinite} onChange={(e) => setForm({ ...form, indefinite: e.target.checked })} />Vigencia indefinida</label>
             {!form.indefinite && <div className="grid sm:grid-cols-2 gap-4"><div><Label>Inicio</Label><Input type="datetime-local" value={form.startsAt} onChange={(e) => setForm({ ...form, startsAt: e.target.value })} /></div><div><Label>Término</Label><Input type="datetime-local" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} /></div></div>}
-            <div>
-              <Label>Servicios aplicables</Label>
-              <p className="text-xs text-muted-foreground mb-2">Sin selección aplica a todos los masajes.</p>
-              <div className="grid sm:grid-cols-2 gap-2 rounded-lg border p-3">
-                {techniques.map((technique) => <label key={technique.id} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={form.techniqueIds.includes(technique.id)} onChange={(e) => setForm({
-                    ...form, techniqueIds: e.target.checked ? [...form.techniqueIds, technique.id] : form.techniqueIds.filter((id) => id !== technique.id),
-                  })} />{technique.name}
-                </label>)}
-              </div>
+
+            <div className="space-y-3">
+              <div><Label>Servicios aplicables *</Label><p className="text-xs text-muted-foreground">Elige uno o más módulos y luego todos sus servicios o sólo algunos.</p></div>
+              {catalog.map((module) => {
+                const scope = form.scopes[module.id];
+                return <div key={module.id} className={`rounded-lg border ${scope.selected ? "border-primary/40 bg-primary/[0.02]" : ""}`}>
+                  <label className="flex cursor-pointer items-center justify-between gap-3 p-3 font-medium">
+                    <span className="flex items-center gap-2"><input type="checkbox" checked={scope.selected} onChange={(event) => setModuleScope(module.id, { selected: event.target.checked })} />{module.name}</span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${scope.selected ? "rotate-180" : ""}`} />
+                  </label>
+                  {scope.selected && <div className="border-t p-3 space-y-3">
+                    <div className="flex flex-wrap gap-5 text-sm">
+                      <label className="flex items-center gap-2"><input type="radio" name={`${module.id}-mode`} checked={scope.all} onChange={() => setModuleScope(module.id, { all: true, serviceIds: [] })} />Todos los {module.itemName}</label>
+                      <label className="flex items-center gap-2"><input type="radio" name={`${module.id}-mode`} checked={!scope.all} onChange={() => setModuleScope(module.id, { all: false })} />Seleccionar específicos</label>
+                    </div>
+                    {!scope.all && <div className="grid sm:grid-cols-2 gap-2 rounded-md bg-muted/40 p-3">
+                      {module.services.map((service) => <label key={service.id} className="flex items-start gap-2 text-sm">
+                        <input type="checkbox" className="mt-0.5" checked={scope.serviceIds.includes(service.id)} onChange={(event) => setModuleScope(module.id, {
+                          serviceIds: event.target.checked ? [...scope.serviceIds, service.id] : scope.serviceIds.filter((id) => id !== service.id),
+                        })} />{service.name}
+                      </label>)}
+                      {!module.services.length && <p className="text-sm text-muted-foreground">No hay servicios configurados en este módulo.</p>}
+                    </div>}
+                  </div>}
+                </div>;
+              })}
             </div>
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />Código activo</label>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button type="submit" disabled={create.isPending || update.isPending}>Guardar</Button></DialogFooter>

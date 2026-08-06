@@ -105,13 +105,13 @@ router.post("/discount/validate", async (req: Request, res: Response) => {
       const prices = [technique.price50min, technique.price80min, technique.price110min];
       const price = index >= 0 && prices[index] ? Number(prices[index]) : 0;
       if (!price) return res.status(400).json({ error: `Precio no configurado para ${technique.name}.` });
-      for (let count = 0; count < quantity; count += 1) lines.push({ service: "masajes", techniqueId, originalAmount: price });
+      for (let count = 0; count < quantity; count += 1) lines.push({ service: "masajes", serviceId: techniqueId, techniqueId, originalAmount: price });
     }
     if (Number.isInteger(classPlanId) && classPlanId > 0) {
       const [plan] = await db.select().from(regularClassPlans)
         .where(eq(regularClassPlans.id, classPlanId)).limit(1);
       if (!plan || plan.active !== 1) return res.status(400).json({ error: "El plan de clases ya no está disponible." });
-      lines.push({ service: "clases", originalAmount: plan.priceClp });
+      lines.push({ service: "clases", serviceId: plan.id, originalAmount: plan.priceClp });
     }
     const result = await calculateWellnessCartDiscount(db, code, lines);
     res.setHeader("Cache-Control", "no-store");

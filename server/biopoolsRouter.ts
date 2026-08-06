@@ -765,6 +765,7 @@ export const biopoolsRouter = router({
         try {
           return await calculateWellnessCartDiscount(db, input.code, [{
             service: "biopiscinas",
+            serviceId: input.serviceId,
             originalAmount: adult.priceClp * input.adultQuantity + child.priceClp * input.childQuantity,
           }]);
         } catch (error) {
@@ -814,7 +815,7 @@ export const biopoolsRouter = router({
             let discount: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
             if (input.discountCode) {
               try {
-                discount = await calculateWellnessCartDiscount(tx, input.discountCode, [{ service: "biopiscinas", originalAmount: subtotalClp }]);
+                discount = await calculateWellnessCartDiscount(tx, input.discountCode, [{ service: "biopiscinas", serviceId: input.serviceId, originalAmount: subtotalClp }]);
               } catch (error) {
                 throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "El código no es válido" });
               }

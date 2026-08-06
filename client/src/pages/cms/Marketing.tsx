@@ -20,7 +20,6 @@ import {
   MailPlus,
   Newspaper,
   Send,
-  Tag,
   TrendingUp,
   Users,
 } from "lucide-react";
@@ -120,7 +119,6 @@ export default function CMSMarketing() {
     { href: "/cms/calendario-marketing", label: "Calendario", icon: Calendar },
     { href: "/cms/blog-contenido", label: "Blog & Contenido", icon: BookOpen },
     { href: "/cms/marketing-roi", label: "ROI", icon: BarChart3 },
-    { href: "/cms/codigos-descuento", label: "Códigos", icon: Tag },
   ];
 
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateMassageDiscountAmounts, calculateWellnessDiscountAmounts } from "./massageDiscounts";
+import { calculateMassageDiscountAmounts, calculateWellnessDiscountAmounts, isWellnessDiscountLineEligible } from "./massageDiscounts";
 
 describe("calculateMassageDiscountAmounts", () => {
   const lines = [
@@ -45,5 +45,22 @@ describe("calculateWellnessDiscountAmounts", () => {
     expect(result.discountTotal).toBe(21_000);
     expect(result.lineDiscounts.reduce((sum, amount) => sum + amount, 0)).toBe(21_000);
     expect(result.finalTotal).toBe(84_000);
+  });
+});
+
+describe("isWellnessDiscountLineEligible", () => {
+  it("applies a module-wide scope only to that service module", () => {
+    expect(isWellnessDiscountLineEligible(["biopiscinas:*"], new Set(), { service: "biopiscinas", serviceId: 2, originalAmount: 36_000 })).toBe(true);
+    expect(isWellnessDiscountLineEligible(["biopiscinas:*"], new Set(), { service: "masajes", serviceId: 2, techniqueId: 2, originalAmount: 50_000 })).toBe(false);
+  });
+
+  it("applies a specific scope only to the selected service", () => {
+    expect(isWellnessDiscountLineEligible(["clases:4"], new Set(), { service: "clases", serviceId: 4, originalAmount: 89_000 })).toBe(true);
+    expect(isWellnessDiscountLineEligible(["clases:4"], new Set(), { service: "clases", serviceId: 5, originalAmount: 99_000 })).toBe(false);
+  });
+
+  it("keeps legacy massage technique mappings working", () => {
+    expect(isWellnessDiscountLineEligible(["masajes"], new Set([7]), { service: "masajes", serviceId: 7, techniqueId: 7, originalAmount: 50_000 })).toBe(true);
+    expect(isWellnessDiscountLineEligible(["masajes"], new Set([7]), { service: "masajes", serviceId: 8, techniqueId: 8, originalAmount: 50_000 })).toBe(false);
   });
 });

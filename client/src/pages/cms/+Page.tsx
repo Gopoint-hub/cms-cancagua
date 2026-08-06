@@ -16,7 +16,7 @@ import CMSNewsletter from "./Newsletter";
 import CMSCrearNewsletter from "./CrearNewsletter";
 import CMSSuscriptores from "./Suscriptores";
 import CMSListas from "./Listas";
-import CMSCodigosDescuento from "./CodigosDescuento";
+import DiscountCodes360 from "./DiscountCodes360";
 import CMSAnalytics from "./Analytics";
 import CMSConfiguracion from "./Configuracion";
 import CMSCRMPipeline from "./CRMPipeline";
@@ -67,7 +67,7 @@ export default function CMSPage() {
       <Route path="/cms/crear-newsletter" component={CMSCrearNewsletter} />
       <Route path="/cms/suscriptores" component={CMSSuscriptores} />
       <Route path="/cms/listas" component={CMSListas} />
-      <Route path="/cms/codigos-descuento" component={CMSCodigosDescuento} />
+      <Route path="/cms/codigos-descuento" component={DiscountCodes360} />
       <Route path="/cms/analytics" component={CMSAnalytics} />
       <Route path="/cms/configuracion" component={CMSConfiguracion} />
       <Route path="/cms/crm-pipeline" component={CMSCRMPipeline} />

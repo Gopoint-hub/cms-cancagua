@@ -16,6 +16,7 @@ import { marketingRouter } from "./marketingRouter";
 import { regularClassesRouter } from "./regularClassesRouter";
 import { biopoolsRouter } from "./biopoolsRouter";
 import { operations360Router } from "./operations360Router";
+import { discounts360Router } from "./discounts360Router";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS, hasCmsPermission } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
@@ -93,6 +94,8 @@ export const appRouter = router({
   biopools: biopoolsRouter,
   // Vista transversal de agenda y clientes entre los módulos operativos.
   operations360: operations360Router,
+  // Códigos transversales para todos los módulos de servicios.
+  discounts360: discounts360Router,
   sidebar: router({
     getOrder: protectedProcedure.query(async () => {
       const settings = await db.getSiteSettings();

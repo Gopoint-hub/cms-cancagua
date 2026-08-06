@@ -25,6 +25,12 @@ export default function BiopoolCheckout() {
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
   const [accepted, setAccepted] = useState(false);
+  const [discountCode, setDiscountCode] = useState("");
+  const [appliedDiscount, setAppliedDiscount] = useState<{
+    code: string;
+    discountTotal: number;
+    finalTotal: number;
+  } | null>(null);
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "+56" });
   const catalog = trpc.biopools.public.catalog.useQuery();
   const service = catalog.data?.service;
@@ -35,7 +41,8 @@ export default function BiopoolCheckout() {
   );
   const adultTicket = catalog.data?.tickets.find(ticket => ticket.code === "adult");
   const childTicket = catalog.data?.tickets.find(ticket => ticket.code === "child");
-  const total = adults * (adultTicket?.priceClp ?? 0) + children * (childTicket?.priceClp ?? 0);
+  const subtotal = adults * (adultTicket?.priceClp ?? 0) + children * (childTicket?.priceClp ?? 0);
+  const total = appliedDiscount?.finalTotal ?? subtotal;
   const slots = useMemo(() => availability.data?.slots ?? [], [availability.data]);
   useEffect(() => {
     if (!slots.some(slot => slot.startTime === startTime)) setStartTime(slots[0]?.startTime ?? "");
@@ -55,6 +62,20 @@ export default function BiopoolCheckout() {
     },
     onError: error => toast.error(error.message),
   });
+  const validateDiscount = trpc.biopools.public.validateDiscount.useMutation({
+    onSuccess: result => {
+      setAppliedDiscount(result);
+      setDiscountCode(result.code);
+      toast.success(`Código ${result.code} aplicado`);
+    },
+    onError: error => {
+      setAppliedDiscount(null);
+      toast.error(error.message);
+    },
+  });
+  useEffect(() => {
+    setAppliedDiscount(null);
+  }, [service?.id, adults, children]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!service || !startTime) return toast.error("Selecciona una fecha y un horario disponible");
@@ -69,6 +90,7 @@ export default function BiopoolCheckout() {
       startTime,
       adultQuantity: adults,
       childQuantity: children,
+      discountCode: appliedDiscount?.code,
       acceptedTerms: true,
       utmSource: params.get("utm_source") || undefined,
       utmMedium: params.get("utm_medium") || undefined,
@@ -104,7 +126,20 @@ export default function BiopoolCheckout() {
           </CardContent></Card>
         </div>
         <aside><Card className="sticky top-5 overflow-hidden border-0 shadow-xl"><div className="bg-[#314d57] p-6 text-white"><p className="text-xs uppercase tracking-[.25em] text-white/70">Tu reserva</p><h2 className="mt-2 font-serif text-2xl">Biopiscinas</h2></div><CardContent className="space-y-5 p-6">
-          <div className="space-y-3 text-sm"><div className="flex justify-between"><span>{adults} × Adulto</span><span>{clp.format(adults * (adultTicket?.priceClp ?? 0))}</span></div>{children > 0 && <div className="flex justify-between"><span>{children} × Niño</span><span>{clp.format(children * (childTicket?.priceClp ?? 0))}</span></div>}<div className="border-t pt-3 text-base font-semibold flex justify-between"><span>Total</span><span>{clp.format(total)}</span></div></div>
+          <div className="space-y-3 text-sm"><div className="flex justify-between"><span>{adults} × Adulto</span><span>{clp.format(adults * (adultTicket?.priceClp ?? 0))}</span></div>{children > 0 && <div className="flex justify-between"><span>{children} × Niño</span><span>{clp.format(children * (childTicket?.priceClp ?? 0))}</span></div>}
+            <div className="border-t pt-3 space-y-2">
+              <Label htmlFor="biopool-discount">Aplicar código de descuento</Label>
+              <div className="flex gap-2">
+                <Input id="biopool-discount" value={discountCode} onChange={event => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); }} placeholder="Ingresa tu código" />
+                <Button type="button" variant="outline" disabled={!discountCode.trim() || validateDiscount.isPending} onClick={() => service && validateDiscount.mutate({ serviceId: service.id, adultQuantity: adults, childQuantity: children, code: discountCode })}>
+                  {validateDiscount.isPending ? "Validando…" : "Aplicar"}
+                </Button>
+              </div>
+            </div>
+            <div className="border-t pt-3 flex justify-between"><span>Subtotal</span><span className={appliedDiscount ? "line-through text-stone-500" : ""}>{clp.format(subtotal)}</span></div>
+            {appliedDiscount && <div className="flex justify-between text-emerald-700"><span>Descuento {appliedDiscount.code}</span><span>−{clp.format(appliedDiscount.discountTotal)}</span></div>}
+            <div className="text-base font-semibold flex justify-between"><span>Total</span><span>{clp.format(total)}</span></div>
+          </div>
           <ul className="space-y-2 text-sm text-stone-600"><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Estadía de 4 horas (3,5 h al ingresar a las 18:00)</li><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Bata o toalla, gorra y locker</li><li className="flex gap-2"><ShieldCheck className="h-4 w-4 text-emerald-700" /> Pago seguro con Transbank Webpay Plus</li></ul>
           <label className="flex cursor-pointer items-start gap-3 text-sm"><Checkbox checked={accepted} onCheckedChange={value => setAccepted(value === true)} /><span>Acepto las <a className="underline" href={service.rulesUrl || "#"} target="_blank" rel="noreferrer">condiciones y reglamento</a>. Entiendo que los niños deben asistir con un adulto.</span></label>
           <Button type="submit" size="lg" className="w-full bg-[#536481] hover:bg-[#43526a]" disabled={startPayment.isPending || !startTime}>{startPayment.isPending ? "Conectando con Webpay…" : `Pagar ${clp.format(total)}`}</Button>

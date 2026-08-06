@@ -194,7 +194,6 @@ export const categories: Category[] = [
       { icon: Calendar, label: "Calendario", path: "/cms/calendario-marketing" },
       { icon: BookOpen, label: "Blog & Contenido", path: "/cms/blog-contenido" },
       { icon: TrendingUp, label: "ROI de Marketing", path: "/cms/marketing-roi" },
-      { icon: Tag, label: "Códigos Dcto.", path: "/cms/codigos-descuento" },
     ],
   },
   {
@@ -236,6 +235,7 @@ export const categories: Category[] = [
       { icon: Brain, label: "Cerebro", path: "/cms/cerebro" },
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
       { icon: RefreshCw, label: "Integraciones", path: "/cms/integraciones" },
+      { icon: Tag, label: "Códigos de descuento", path: "/cms/codigos-descuento" },
       { icon: Settings, label: "Configuración", path: "/cms/configuracion" },
     ],
   },
@@ -273,7 +273,6 @@ export const categories: Category[] = [
       { icon: UsersRound, label: "Clientes", path: "/cms/masajes/clientes", roles: ["super_admin", "admin", "editor"], permission: "massages.view_clients" },
       { icon: BarChart3, label: "Ventas", path: "/cms/masajes/analytics", roles: ["super_admin", "admin", "editor"], permission: "massages.view_sales" },
       { icon: FileSpreadsheet, label: "Admin área", path: "/cms/masajes/admin", areaAdminOnly: true, permission: "massages.area_admin" },
-      { icon: Tag, label: "Códigos de descuento", path: "/cms/masajes/descuentos", roles: ["super_admin", "admin", "editor"], permission: "massages.manage_discounts" },
       { icon: Users, label: "RRHH", path: "/cms/masajes/rrhh", roles: ["super_admin", "admin", "editor"], permission: "massages.view_hr" },
       { icon: Settings, label: "Configuración", path: "/cms/masajes/configuracion", roles: ["super_admin", "admin", "editor"], permission: "massages.manage_settings" },
     ],

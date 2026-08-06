@@ -3338,14 +3338,14 @@ const masajesPublicRouter = router({
         const price = index >= 0 && configuredPrices[index] ? Number(configuredPrices[index]) : 0;
         if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}.` });
         for (let quantity = 0; quantity < item.quantity; quantity += 1) {
-          lines.push({ service: "masajes", techniqueId: item.techniqueId, originalAmount: price });
+          lines.push({ service: "masajes", serviceId: item.techniqueId, techniqueId: item.techniqueId, originalAmount: price });
         }
       }
       if (input.classPlanId) {
         const [plan] = await db.select().from(regularClassPlans)
           .where(and(eq(regularClassPlans.id, input.classPlanId), eq(regularClassPlans.active, 1))).limit(1);
         if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "El plan de clases ya no está disponible." });
-        lines.push({ service: "clases", originalAmount: plan.priceClp });
+        lines.push({ service: "clases", serviceId: plan.id, originalAmount: plan.priceClp });
       }
       try {
         return await calculateWellnessCartDiscount(db, input.code, lines);
@@ -3943,8 +3943,8 @@ const masajesPublicRouter = router({
             db,
             input.discountCode,
             [
-              ...prepared.map((item) => ({ service: "masajes" as const, techniqueId: item.item.techniqueId, originalAmount: item.price })),
-              ...(classPlan ? [{ service: "clases" as const, originalAmount: classPlan.priceClp }] : []),
+              ...prepared.map((item) => ({ service: "masajes" as const, serviceId: item.item.techniqueId, techniqueId: item.item.techniqueId, originalAmount: item.price })),
+              ...(classPlan ? [{ service: "clases" as const, serviceId: classPlan.id, originalAmount: classPlan.priceClp }] : []),
             ],
           );
         } catch (error) {

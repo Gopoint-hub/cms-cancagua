@@ -22,7 +22,7 @@ import CMSNewsletter from "./pages/cms/Newsletter";
 import CMSCrearNewsletter from "./pages/cms/CrearNewsletter";
 import CMSSuscriptores from "./pages/cms/Suscriptores";
 import CMSListas from "./pages/cms/Listas";
-import CMSCodigosDescuento from "./pages/cms/CodigosDescuento";
+import DiscountCodes360 from "./pages/cms/DiscountCodes360";
 import CMSAnalytics from "./pages/cms/Analytics";
 import CMSConfiguracion from "./pages/cms/Configuracion";
 import CMSCRMPipeline from "./pages/cms/CRMPipeline";
@@ -60,7 +60,6 @@ import MasajesClientes from "./pages/cms/masajes/Clientes";
 import MasajesAnalytics from "./pages/cms/masajes/Analytics";
 import MasajesRRHH from "./pages/cms/masajes/RRHH";
 import MasajesConfiguracion from "./pages/cms/masajes/Configuracion";
-import MasajesDescuentos from "./pages/cms/masajes/Descuentos";
 import MasajesAdminArea from "./pages/cms/masajes/AdminArea";
 import ReservarMasaje from "./pages/masajes/ReservarMasaje";
 import ConfirmacionPago from "./pages/masajes/ConfirmacionPago";
@@ -120,7 +119,7 @@ function Router() {
       <Route path="/cms/crear-newsletter/:id" component={CMSCrearNewsletter} />
       <Route path="/cms/suscriptores" component={CMSSuscriptores} />
       <Route path="/cms/listas" component={CMSListas} />
-      <Route path="/cms/codigos-descuento" component={CMSCodigosDescuento} />
+      <Route path="/cms/codigos-descuento" component={DiscountCodes360} />
       <Route path="/cms/analytics" component={CMSAnalytics} />
       <Route path="/cms/configuracion" component={CMSConfiguracion} />
       <Route path="/cms/crm-pipeline" component={CMSCRMPipeline} />
@@ -152,7 +151,7 @@ function Router() {
       <Route path="/cms/masajes/inventario" component={MasajesInventario} />
       <Route path="/cms/masajes/clientes" component={MasajesClientes} />
       <Route path="/cms/masajes/analytics" component={MasajesAnalytics} />
-      <Route path="/cms/masajes/descuentos" component={MasajesDescuentos} />
+      <Route path="/cms/masajes/descuentos" component={DiscountCodes360} />
       <Route path="/cms/masajes/admin" component={MasajesAdminArea} />
       <Route path="/cms/masajes/rrhh" component={MasajesRRHH} />
       <Route path="/cms/masajes/configuracion" component={MasajesConfiguracion} />
