@@ -94,10 +94,18 @@ export async function finalizeApprovedBiopoolOrder(
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
   const completed = await db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM biopool_checkout_orders WHERE id = ${orderId} FOR UPDATE`);
     const [order] = await tx.select().from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.id, orderId)).limit(1);
     if (!order) throw new Error("Orden no encontrada");
     if (order.bookingId && order.status === "paid") {
-      return { alreadyFinalized: true as const, clientId: null, visitDate: "", totalClp: 0 };
+      return {
+        alreadyFinalized: true as const,
+        bookingId: order.bookingId,
+        clientId: null,
+        normalizedEmail: "",
+        order,
+        service: null,
+      };
     }
 
     const [service] = await tx.select().from(biopoolServices).where(eq(biopoolServices.id, order.serviceId)).limit(1);
@@ -153,36 +161,6 @@ export async function finalizeApprovedBiopoolOrder(
       source: "web",
     }).$returningId();
 
-    await tx.insert(biopoolBookingActivity).values({
-      bookingId: createdBooking.id,
-      action: completion.kind === "webpay" ? "booking_created_webpay" : "booking_created_discount_code",
-      detail: JSON.stringify(completion.kind === "webpay"
-        ? { orderId: order.id, buyOrder: order.buyOrder, authorizationCode: completion.result.authorizationCode }
-        : {
-            orderId: order.id,
-            discountCode: order.discountCode,
-            originalAmountClp: order.subtotalClp,
-            discountAmountClp: order.discountClp,
-            amountPaidClp: 0,
-          }),
-    });
-    const reminderAt = new Date(chileLocalDateTimeToUtc(dateValue(order.bookingDate), order.startTime).getTime() - service.reminderHoursBefore * 3_600_000);
-    await tx.insert(biopoolNotifications).values([
-      { bookingId: createdBooking.id, type: "confirmation", channel: "email", scheduledAt: new Date() },
-      ...(service.reminderEmailEnabled ? [{ bookingId: createdBooking.id, type: "reminder" as const, channel: "email" as const, scheduledAt: reminderAt }] : []),
-      ...(service.reminderWhatsappEnabled ? [{ bookingId: createdBooking.id, type: "reminder" as const, channel: "whatsapp" as const, scheduledAt: reminderAt }] : []),
-    ]);
-    if (order.discountCodeId && order.discountClp > 0) {
-      await recordMassageDiscountUsage(tx, {
-        discountCodeId: order.discountCodeId,
-        requestId: order.buyOrder || order.publicToken,
-        email: normalizedEmail,
-        originalAmount: order.subtotalClp,
-        discountAmount: order.discountClp,
-        finalAmount: order.totalClp,
-      });
-    }
-
     await tx.update(biopoolCheckoutOrders).set({
       bookingId: createdBooking.id,
       status: "paid",
@@ -202,19 +180,85 @@ export async function finalizeApprovedBiopoolOrder(
 
     return {
       alreadyFinalized: false as const,
+      bookingId: createdBooking.id,
       clientId: client.id,
-      visitDate: dateValue(order.bookingDate),
-      totalClp: order.totalClp,
+      normalizedEmail,
+      order,
+      service,
     };
   });
 
-  // El historial comercial es complementario: un dato legado mal formado no
-  // puede revertir una reserva ya confirmada ni la aplicación del descuento.
-  if (!completed.alreadyFinalized && completed.clientId) {
+  if (completed.alreadyFinalized || !completed.clientId || !completed.service) return;
+
+  // Estas tareas son complementarias. Si una integración auxiliar falla, la
+  // reserva y el cupo permanecen confirmados y el error queda registrado.
+  try {
+    await db.insert(biopoolBookingActivity).values({
+      bookingId: completed.bookingId,
+      action: completion.kind === "webpay" ? "booking_created_webpay" : "booking_created_discount_code",
+      detail: JSON.stringify(completion.kind === "webpay"
+        ? {
+            orderId: completed.order.id,
+            buyOrder: completed.order.buyOrder,
+            authorizationCode: completion.result.authorizationCode,
+          }
+        : {
+            orderId: completed.order.id,
+            discountCodeId: completed.order.discountCodeId,
+            discountCode: completed.order.discountCode,
+            originalAmountClp: completed.order.subtotalClp,
+            discountAmountClp: completed.order.discountClp,
+            amountPaidClp: 0,
+          }),
+    });
+  } catch (error) {
+    console.error("[biopools:checkout] Reserva confirmada; no se pudo registrar la actividad", {
+      bookingId: completed.bookingId,
+      error,
+    });
+  }
+
+  try {
+    const reminderAt = new Date(
+      chileLocalDateTimeToUtc(dateValue(completed.order.bookingDate), completed.order.startTime).getTime()
+      - completed.service.reminderHoursBefore * 3_600_000,
+    );
+    await db.insert(biopoolNotifications).values([
+      { bookingId: completed.bookingId, type: "confirmation", channel: "email", scheduledAt: new Date() },
+      ...(completed.service.reminderEmailEnabled ? [{ bookingId: completed.bookingId, type: "reminder" as const, channel: "email" as const, scheduledAt: reminderAt }] : []),
+      ...(completed.service.reminderWhatsappEnabled ? [{ bookingId: completed.bookingId, type: "reminder" as const, channel: "whatsapp" as const, scheduledAt: reminderAt }] : []),
+    ]);
+  } catch (error) {
+    console.error("[biopools:checkout] Reserva confirmada; no se pudieron programar las notificaciones", {
+      bookingId: completed.bookingId,
+      error,
+    });
+  }
+
+  if (completed.order.discountCodeId && completed.order.discountClp > 0) {
     try {
-      const [client] = await db.select().from(clients).where(eq(clients.id, completed.clientId)).limit(1);
-      if (!client) return;
-      const visitDateObject = new Date(`${completed.visitDate}T12:00:00Z`);
+      await recordMassageDiscountUsage(db, {
+        discountCodeId: completed.order.discountCodeId,
+        requestId: completed.order.buyOrder || completed.order.publicToken,
+        email: completed.normalizedEmail,
+        originalAmount: completed.order.subtotalClp,
+        discountAmount: completed.order.discountClp,
+        finalAmount: completed.order.totalClp,
+      });
+    } catch (error) {
+      console.error("[biopools:checkout] Reserva confirmada; no se pudo registrar el uso del descuento", {
+        bookingId: completed.bookingId,
+        discountCodeId: completed.order.discountCodeId,
+        error,
+      });
+    }
+  }
+
+  try {
+    const [client] = await db.select().from(clients).where(eq(clients.id, completed.clientId)).limit(1);
+    if (client) {
+      const visitDate = dateValue(completed.order.bookingDate);
+      const visitDateObject = new Date(`${visitDate}T12:00:00Z`);
       const servicesUsed = Array.from(new Set([
         ...parseClientServicesUsed(client.serviciosUsados),
         "Biopiscinas",
@@ -222,19 +266,19 @@ export async function finalizeApprovedBiopoolOrder(
       await db.update(clients).set({
         totalVisitas: sql`COALESCE(${clients.totalVisitas}, 0) + 1`,
         visitas2026: sql`COALESCE(${clients.visitas2026}, 0) + 1`,
-        totalGasto: sql`COALESCE(${clients.totalGasto}, 0) + ${completed.totalClp}`,
-        gasto2026: sql`COALESCE(${clients.gasto2026}, 0) + ${completed.totalClp}`,
+        totalGasto: sql`COALESCE(${clients.totalGasto}, 0) + ${completed.order.totalClp}`,
+        gasto2026: sql`COALESCE(${clients.gasto2026}, 0) + ${completed.order.totalClp}`,
         primerVisita: client.primerVisita ?? visitDateObject,
         ultimaVisita: visitDateObject,
         serviciosUsados: JSON.stringify(servicesUsed),
-        ticketPromedio: sql`ROUND((COALESCE(${clients.totalGasto}, 0) + ${completed.totalClp}) / (COALESCE(${clients.totalVisitas}, 0) + 1))`,
+        ticketPromedio: sql`ROUND((COALESCE(${clients.totalGasto}, 0) + ${completed.order.totalClp}) / (COALESCE(${clients.totalVisitas}, 0) + 1))`,
       }).where(eq(clients.id, client.id));
-    } catch (error) {
-      console.error("[biopools:checkout] Reserva confirmada; no se pudo actualizar el historial comercial", {
-        clientId: completed.clientId,
-        error,
-      });
     }
+  } catch (error) {
+    console.error("[biopools:checkout] Reserva confirmada; no se pudo actualizar el historial comercial", {
+      clientId: completed.clientId,
+      error,
+    });
   }
 }
 
