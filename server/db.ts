@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, analyticsCache } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { validateGiftCardRedemption, validateServiceGiftCardRedemption } from "./giftCardRedemption";
-import { randomBytes } from "node:crypto";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -497,66 +496,6 @@ export async function subscribeToNewsletter(email: string, name?: string) {
   }
 
   await db.insert(newsletterSubscribers).values({ email, name, status: "active" });
-}
-
-export async function requestNewsletterSubscription(email: string, name?: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const { newsletterSubscribers } = await import("../drizzle/schema");
-  const normalizedEmail = email.trim().toLowerCase();
-  const existing = await db.select().from(newsletterSubscribers)
-    .where(eq(newsletterSubscribers.email, normalizedEmail)).limit(1);
-
-  if (existing[0]?.status === "active") {
-    return { state: "active" as const };
-  }
-
-  const token = randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  if (existing.length > 0) {
-    await db.update(newsletterSubscribers).set({
-      name: name || existing[0].name,
-      status: "pending",
-      source: "website_double_opt_in",
-      confirmationToken: token,
-      confirmationExpiresAt: expiresAt,
-      unsubscribedAt: null,
-      updatedAt: new Date(),
-    }).where(eq(newsletterSubscribers.id, existing[0].id));
-  } else {
-    await db.insert(newsletterSubscribers).values({
-      email: normalizedEmail,
-      name,
-      status: "pending",
-      source: "website_double_opt_in",
-      confirmationToken: token,
-      confirmationExpiresAt: expiresAt,
-    });
-  }
-  return { state: "pending" as const, token };
-}
-
-export async function confirmNewsletterSubscriptionByToken(token: string) {
-  const db = await getDb();
-  if (!db) return false;
-  const { newsletterSubscribers } = await import("../drizzle/schema");
-  const matches = await db.select().from(newsletterSubscribers)
-    .where(and(
-      eq(newsletterSubscribers.confirmationToken, token),
-      eq(newsletterSubscribers.status, "pending"),
-      gte(newsletterSubscribers.confirmationExpiresAt, new Date()),
-    )).limit(1);
-  if (matches.length === 0) return false;
-
-  await db.update(newsletterSubscribers).set({
-    status: "active",
-    confirmationToken: null,
-    confirmationExpiresAt: null,
-    consentedAt: new Date(),
-    subscribedAt: new Date(),
-    updatedAt: new Date(),
-  }).where(eq(newsletterSubscribers.id, matches[0].id));
-  return true;
 }
 
 export async function confirmNewsletterSubscription(email: string) {

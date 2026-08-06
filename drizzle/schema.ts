@@ -363,14 +363,11 @@ export const newsletterSubscribers = mysqlTable("newsletter_subscribers", {
   id: int("id").autoincrement().primaryKey(),
   email: varchar("email", { length: 320 }).notNull().unique(),
   name: text("name"),
-  status: mysqlEnum("status", ["pending", "active", "unsubscribed"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["active", "unsubscribed"]).default("active").notNull(),
   source: varchar("source", { length: 100 }).default("website").notNull(), // website, import, manual
   metadata: text("metadata"), // JSON con datos adicionales (ciudad, fecha compra, etc.)
   subscribedAt: timestamp("subscribed_at").defaultNow().notNull(),
   unsubscribedAt: timestamp("unsubscribed_at"),
-  confirmationToken: varchar("confirmation_token", { length: 64 }),
-  confirmationExpiresAt: timestamp("confirmation_expires_at"),
-  consentedAt: timestamp("consented_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });

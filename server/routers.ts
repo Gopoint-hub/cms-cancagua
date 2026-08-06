@@ -2750,26 +2750,8 @@ ${pagesHtml}
         name: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        const request = await db.requestNewsletterSubscription(input.email, input.name);
-        if (request.state === "active") {
-          return { success: true, state: "active" as const };
-        }
-
-        const { sendEmail } = await import("./email");
-        const { ENV } = await import("./_core/env");
-        const confirmUrl = `${ENV.appUrl || "https://cms.cancagua.cl"}/api/newsletter/confirm?token=${request.token}`;
-        const result = await sendEmail({
-          to: input.email,
-          subject: "Confirma tu suscripción a Cancagua",
-          senderName: "Cancagua",
-          tags: [{ name: "type", value: "newsletter_confirmation" }],
-          html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#222221"><h2>Confirma tu suscripción</h2><p>Recibimos una solicitud para recibir novedades de Cancagua.</p><p><a href="${confirmUrl}" style="display:inline-block;background:#4B5872;color:#fff;padding:12px 20px;text-decoration:none;border-radius:4px">Confirmar suscripción</a></p><p style="color:#777;font-size:13px">Si no realizaste esta solicitud, ignora este mensaje. El enlace vence en 24 horas.</p></div>`,
-          text: `Confirma tu suscripción a Cancagua: ${confirmUrl}\n\nSi no realizaste esta solicitud, ignora este mensaje.`,
-        });
-        if (!result.success) {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No pudimos enviar el correo de confirmación. Intenta nuevamente." });
-        }
-        return { success: true, state: "pending" as const };
+        await db.subscribeToNewsletter(input.email, input.name);
+        return { success: true };
       }),
 
     unsubscribe: publicProcedure
