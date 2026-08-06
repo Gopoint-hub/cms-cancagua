@@ -55,6 +55,7 @@ interface SendBulkEmailOptions {
   senderName?: string; // Nombre personalizado del remitente
   senderType?: EmailSenderType; // Tipo de email para usar nombre predefinido
   replyTo?: string; // Email de respuesta (por defecto: contacto@cancagua.cl)
+  fromEmail?: string; // Subdominio dedicado a marketing cuando esté verificado
 }
 
 // Email de respuesta por defecto para newsletters
@@ -141,7 +142,8 @@ export async function sendBulkEmails(options: SendBulkEmailOptions): Promise<{
       } else if (options.senderType) {
         senderName = EMAIL_SENDER_NAMES[options.senderType];
       }
-      const fromEmail = formatSender(senderName);
+      const newsletterFromAddress = options.fromEmail || process.env.NEWSLETTER_FROM_EMAIL || BASE_EMAIL;
+      const fromEmail = formatSender(senderName, newsletterFromAddress);
 
       // Enviar batch usando la API de batch de Resend
       const batchEmails = batch.map(email => ({
