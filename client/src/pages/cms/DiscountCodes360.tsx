@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronDown, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 type DiscountType = "percentage" | "fixed";
@@ -34,6 +34,8 @@ type FormState = {
   active: boolean;
   scopes: ScopeState;
 };
+
+const CODES_PER_PAGE = 10;
 
 const emptyScopes = (): ScopeState => ({
   masajes: { selected: false, all: true, serviceIds: [] },
@@ -72,6 +74,7 @@ export default function DiscountCodes360() {
   const biopoolsCatalog = trpc.biopools.public.catalog.useQuery();
   const [search, setSearch] = useState("");
   const [descending, setDescending] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
 
@@ -124,6 +127,19 @@ export default function DiscountCodes360() {
       return descending ? -comparison : comparison;
     });
   }, [codes, search, descending]);
+  const pageCount = Math.max(1, Math.ceil(visible.length / CODES_PER_PAGE));
+  const paginatedCodes = useMemo(() => {
+    const firstIndex = (currentPage - 1) * CODES_PER_PAGE;
+    return visible.slice(firstIndex, firstIndex + CODES_PER_PAGE);
+  }, [visible, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, descending]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, pageCount));
+  }, [pageCount]);
 
   const status = (item: typeof codes[number]) => {
     const now = Date.now();
@@ -256,7 +272,7 @@ export default function DiscountCodes360() {
                     <th className="pr-4">Estado</th><th className="pr-4 text-right">Usos</th>
                     <th className="pr-4 text-right">Descontado</th><th />
                   </tr></thead>
-                  <tbody>{visible.map((item) => {
+                  <tbody>{paginatedCodes.map((item) => {
                     const itemStatus = status(item);
                     return <tr key={item.id} className="border-b">
                       <td className="py-3 pr-4"><code className="font-semibold">{item.code}</code><p className="text-muted-foreground">{item.name}</p></td>
@@ -273,6 +289,34 @@ export default function DiscountCodes360() {
                     </tr>;
                   })}</tbody>
                 </table>
+                {pageCount > 1 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 mt-2">
+                    <p className="text-sm text-muted-foreground">
+                      Mostrando {(currentPage - 1) * CODES_PER_PAGE + 1}–{Math.min(currentPage * CODES_PER_PAGE, visible.length)} de {visible.length}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      >
+                        <ChevronLeft className="h-4 w-4 mr-1" />Anterior
+                      </Button>
+                      <span className="min-w-24 text-center text-sm">Página {currentPage} de {pageCount}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={currentPage === pageCount}
+                        onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))}
+                      >
+                        Siguiente<ChevronRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
