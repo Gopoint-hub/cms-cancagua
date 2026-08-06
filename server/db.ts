@@ -1743,7 +1743,7 @@ export async function getSiteSettings() {
 
 export async function updateSiteSetting(key: string, value: string) {
   const db = await getDb();
-  if (!db) return;
+  if (!db) throw new Error("Database not available");
   try {
     const { siteSettings } = await import("../drizzle/schema");
 
@@ -1755,6 +1755,7 @@ export async function updateSiteSetting(key: string, value: string) {
     }
   } catch (error) {
     console.error(`[Database] Error updating site setting ${key}:`, error);
+    throw error;
   }
 }
 

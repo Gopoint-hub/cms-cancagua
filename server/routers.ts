@@ -27,6 +27,13 @@ import { calculateFiltering } from "@shared/maintenanceFiltering";
 import { BIO_VENUE_KEYS } from "@shared/maintenanceShiftCatalog";
 import { summarizeShiftDay } from "@shared/maintenanceShiftDashboard";
 import { chileNowMinutes, chileToday, getLastBioExit } from "./maintenanceShiftContext";
+import {
+  DEFAULT_SIDEBAR_MODULE_ORDER,
+  normalizeSidebarModuleOrder,
+  SIDEBAR_MODULE_IDS,
+} from "@shared/sidebar";
+
+const SIDEBAR_ORDER_SETTING_KEY = "cms_sidebar_module_order";
 
 /**
  * Un turno cerrado no se sigue editando: el reporte ya se envió y con él el
@@ -61,6 +68,47 @@ export const appRouter = router({
   biopools: biopoolsRouter,
   // Vista transversal de agenda y clientes entre los módulos operativos.
   operations360: operations360Router,
+  sidebar: router({
+    getOrder: protectedProcedure.query(async () => {
+      const settings = await db.getSiteSettings();
+      const saved = settings[SIDEBAR_ORDER_SETTING_KEY];
+
+      if (!saved) {
+        return { order: DEFAULT_SIDEBAR_MODULE_ORDER };
+      }
+
+      try {
+        return { order: normalizeSidebarModuleOrder(JSON.parse(saved)) };
+      } catch {
+        return { order: DEFAULT_SIDEBAR_MODULE_ORDER };
+      }
+    }),
+
+    updateOrder: protectedProcedure
+      .input(z.object({
+        order: z.array(z.enum(SIDEBAR_MODULE_IDS)).length(SIDEBAR_MODULE_IDS.length),
+      }).superRefine(({ order }, ctx) => {
+        if (new Set(order).size !== SIDEBAR_MODULE_IDS.length) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["order"],
+            message: "El orden debe contener cada módulo una sola vez",
+          });
+        }
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "super_admin") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Solo los súper administradores pueden reordenar los módulos",
+          });
+        }
+
+        const order = normalizeSidebarModuleOrder(input.order);
+        await db.updateSiteSetting(SIDEBAR_ORDER_SETTING_KEY, JSON.stringify(order));
+        return { success: true, order };
+      }),
+  }),
   clientes: clientesRouter,
   marketing: marketingRouter,
   auth: router({

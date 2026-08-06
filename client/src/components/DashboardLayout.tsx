@@ -26,7 +26,8 @@ import {
   FileText, FileSpreadsheet, MessageSquare, Package, Newspaper, Settings, Store, Briefcase,
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
-  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell, ClipboardList, Waves, Ban
+  Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell, ClipboardList, Waves, Ban,
+  GripVertical, Check
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -48,6 +49,12 @@ import {
   parseCmsPermissions,
 } from "@shared/permissions";
 import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+import {
+  DEFAULT_SIDEBAR_MODULE_ORDER,
+  normalizeSidebarModuleOrder,
+  SidebarModuleId,
+} from "@shared/sidebar";
 
 // Definición de categorías y sus items de menú
 export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "biopools" | "masajes" | "regular_classes";
@@ -79,8 +86,22 @@ interface Category {
   permissionsAny?: CmsPermissionKey[];
 }
 
-const quickMenuItems: Array<MenuItem & { permissionsAny: CmsPermissionKey[] }> = [
+type SidebarEntry =
+  | {
+      id: SidebarModuleId;
+      kind: "quick";
+      item: MenuItem & { id: SidebarModuleId; permissionsAny: CmsPermissionKey[] };
+    }
+  | {
+      id: SidebarModuleId;
+      kind: "category";
+      category: Category;
+      visibleItems: MenuItem[];
+    };
+
+const quickMenuItems: Array<MenuItem & { id: SidebarModuleId; permissionsAny: CmsPermissionKey[] }> = [
   {
+    id: "home",
     icon: Home,
     label: "Inicio",
     path: "/cms",
@@ -91,12 +112,14 @@ const quickMenuItems: Array<MenuItem & { permissionsAny: CmsPermissionKey[] }> =
     ],
   },
   {
+    id: "calendar360",
     icon: CalendarDays,
     label: "Calendario 360",
     path: "/cms/calendario",
     permissionsAny: ["module.massages", "module.biopools", "module.regular_classes"],
   },
   {
+    id: "clients360",
     icon: UsersRound,
     label: "Cliente 360",
     path: "/cms/clientes-360",
@@ -459,13 +482,37 @@ function DashboardLayoutContent({
   const { state, toggleSidebar, setOpenMobile } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
+  const [isReordering, setIsReordering] = useState(false);
+  const [draggedModuleId, setDraggedModuleId] = useState<SidebarModuleId | null>(null);
+  const [dragOverModuleId, setDragOverModuleId] = useState<SidebarModuleId | null>(null);
+  const [sidebarOrder, setSidebarOrder] = useState<SidebarModuleId[]>(
+    DEFAULT_SIDEBAR_MODULE_ORDER,
+  );
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const isSuperAdmin = user?.role === "super_admin";
+  const trpcUtils = trpc.useUtils();
+  const sidebarOrderQuery = trpc.sidebar.getOrder.useQuery(undefined, {
+    enabled: Boolean(user),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const updateSidebarOrder = trpc.sidebar.updateOrder.useMutation();
 
   // Detectar categoría y módulo activo para el header móvil
   const activeCategory = categories.find(c => c.items.some(i => i.path === location));
   const activeMenuItem = activeCategory?.items.find(item => item.path === location);
   const activeQuickItem = quickMenuItems.find(item => item.path === location);
+
+  useEffect(() => {
+    if (sidebarOrderQuery.data?.order) {
+      setSidebarOrder(normalizeSidebarModuleOrder(sidebarOrderQuery.data.order));
+    }
+  }, [sidebarOrderQuery.data?.order]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) setIsReordering(false);
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     if (isCollapsed) {
@@ -503,6 +550,85 @@ function DashboardLayoutContent({
     };
   }, [isResizing, setSidebarWidth]);
 
+  const visibleQuickItems = quickMenuItems.filter(item =>
+    hasAnyCmsPermission(user ?? {}, item.permissionsAny),
+  );
+
+  const visibleCategories = categories.flatMap(category => {
+    const canSeeCategory = (
+      category.permissionsAny
+        ? hasAnyCmsPermission(user ?? {}, category.permissionsAny)
+        : hasCmsPermission(user ?? {}, category.permission)
+    )
+      && (hasExplicitPermissions || !category.roles || category.roles.includes(user?.role || ""))
+      && (!category.requiresRegularClassesAccess || hasExplicitPermissions || regularClassesAccess.data?.allowed === true);
+
+    if (!canSeeCategory) return [];
+
+    const visibleItems = category.items.filter(item =>
+      (!item.permission || (item.permissionsAny
+        ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
+        : hasCmsPermission(user ?? {}, item.permission)))
+      && (hasExplicitPermissions || !item.roles || item.roles.includes(user?.role || ""))
+      && (!item.areaAdminOnly || hasExplicitPermissions || areaAdminAccess.data?.allowed === true)
+      && (
+        !item.regularClassesAccess
+        || hasExplicitPermissions
+        || (item.regularClassesAccess === "admin" && regularClassesAccess.data?.isAdmin)
+        || (item.regularClassesAccess === "reception" && regularClassesAccess.data?.isReception)
+        || (item.regularClassesAccess === "teacher" && (regularClassesAccess.data?.isTeacher || regularClassesAccess.data?.isAdmin))
+      ),
+    );
+
+    return visibleItems.length > 0 ? [{ category, visibleItems }] : [];
+  });
+
+  const sidebarEntries = sidebarOrder.reduce<SidebarEntry[]>((entries, moduleId) => {
+    const quickItem = visibleQuickItems.find(item => item.id === moduleId);
+    if (quickItem) {
+      entries.push({ id: moduleId, kind: "quick", item: quickItem });
+      return entries;
+    }
+
+    const categoryEntry = visibleCategories.find(entry => entry.category.id === moduleId);
+    if (categoryEntry) {
+      entries.push({
+        id: moduleId,
+        kind: "category",
+        category: categoryEntry.category,
+        visibleItems: categoryEntry.visibleItems,
+      });
+    }
+
+    return entries;
+  }, []);
+
+  const moveSidebarModule = async (
+    targetId: SidebarModuleId,
+    placeAfterTarget: boolean,
+  ) => {
+    if (!isSuperAdmin || !draggedModuleId || draggedModuleId === targetId) return;
+
+    const previousOrder = sidebarOrder;
+    const nextOrder = sidebarOrder.filter(id => id !== draggedModuleId);
+    const targetIndex = nextOrder.indexOf(targetId);
+    if (targetIndex < 0) return;
+    nextOrder.splice(targetIndex + (placeAfterTarget ? 1 : 0), 0, draggedModuleId);
+
+    setSidebarOrder(nextOrder);
+    setDraggedModuleId(null);
+    setDragOverModuleId(null);
+
+    try {
+      const result = await updateSidebarOrder.mutateAsync({ order: nextOrder });
+      trpcUtils.sidebar.getOrder.setData(undefined, { order: result.order });
+      toast.success("Orden del menú actualizado");
+    } catch (error) {
+      setSidebarOrder(previousOrder);
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar el orden del menú");
+    }
+  };
+
   return (
     <>
       <div className="relative" ref={sidebarRef}>
@@ -534,125 +660,173 @@ function DashboardLayoutContent({
           </SidebarHeader>
 
           <SidebarContent className="gap-0 overflow-y-auto">
-            <SidebarMenu className="px-2 pb-2">
-              {quickMenuItems
-                .filter(item => hasAnyCmsPermission(user ?? {}, item.permissionsAny))
-                .map(item => {
-                  const isActive = location === item.path;
-                  return (
-                    <SidebarMenuItem key={item.path}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => {
-                          setLocation(item.path);
-                          if (isMobile) setOpenMobile(false);
-                        }}
-                        tooltip={item.label}
-                        className="h-11 font-medium md:h-9"
-                      >
-                        <item.icon className={cn("h-4 w-4", isActive && "text-primary")} />
-                        <span className="text-sm">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-            </SidebarMenu>
-            {/* Menú Acordeón - Categorías filtradas por rol */}
-            <div className="px-2 py-1">
-              {categories
-                .filter(cat =>
-                  (cat.permissionsAny
-                    ? hasAnyCmsPermission(user ?? {}, cat.permissionsAny)
-                    : hasCmsPermission(user ?? {}, cat.permission))
-                  && (hasExplicitPermissions || !cat.roles || cat.roles.includes(user?.role || ""))
-                  && (!cat.requiresRegularClassesAccess || hasExplicitPermissions || regularClassesAccess.data?.allowed === true)
-                )
-                .map((category) => {
-                // Filter items by role too
-                const visibleItems = category.items.filter(item =>
-                  (!item.permission || (item.permissionsAny
-                    ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
-                    : hasCmsPermission(user ?? {}, item.permission)))
-                  && (hasExplicitPermissions || !item.roles || item.roles.includes(user?.role || ""))
-                  && (!item.areaAdminOnly || hasExplicitPermissions || areaAdminAccess.data?.allowed === true)
-                  && (
-                    !item.regularClassesAccess
-                    || hasExplicitPermissions
-                    || (item.regularClassesAccess === "admin" && regularClassesAccess.data?.isAdmin)
-                    || (item.regularClassesAccess === "reception" && regularClassesAccess.data?.isReception)
-                    || (item.regularClassesAccess === "teacher" && (regularClassesAccess.data?.isTeacher || regularClassesAccess.data?.isAdmin))
-                  )
-                );
-                if (visibleItems.length === 0) return null;
-                const isExpanded = expandedCategories.has(category.id);
-                const hasActiveItem = visibleItems.some(item => item.path === location);
-                
+            {isSuperAdmin && !isCollapsed && (
+              <div className="shrink-0 px-2 pb-2">
+                <Button
+                  type="button"
+                  variant={isReordering ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-9 w-full justify-start gap-2"
+                  disabled={updateSidebarOrder.isPending}
+                  onClick={() => setIsReordering(current => !current)}
+                >
+                  {isReordering ? <Check className="h-4 w-4" /> : <GripVertical className="h-4 w-4" />}
+                  {isReordering ? "Terminar orden" : "Reordenar módulos"}
+                </Button>
+              </div>
+            )}
+
+            {/* Una sola columna evita que las vistas 360 se monten sobre los modulos. */}
+            <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 pb-2">
+              {sidebarEntries.map(entry => {
+                const canDrag = isSuperAdmin && isReordering && !isCollapsed && !updateSidebarOrder.isPending;
+                const isDragTarget = dragOverModuleId === entry.id && draggedModuleId !== entry.id;
+
                 return (
-                  <Collapsible
-                    key={category.id}
-                    open={isExpanded}
-                    onOpenChange={() => toggleCategory(category.id)}
-                    className="mb-1"
+                  <div
+                    key={entry.id}
+                    draggable={canDrag}
+                    onDragStart={event => {
+                      if (!canDrag) return;
+                      setDraggedModuleId(entry.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", entry.id);
+                    }}
+                    onDragOver={event => {
+                      if (!canDrag || !draggedModuleId) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverModuleId(entry.id);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverModuleId === entry.id) setDragOverModuleId(null);
+                    }}
+                    onDrop={event => {
+                      if (!canDrag) return;
+                      event.preventDefault();
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      const placeAfterTarget = event.clientY > bounds.top + bounds.height / 2;
+                      void moveSidebarModule(entry.id, placeAfterTarget);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedModuleId(null);
+                      setDragOverModuleId(null);
+                    }}
+                    className={cn(
+                      "flex min-w-0 shrink-0 items-start gap-1 rounded-lg transition-colors",
+                      canDrag && "cursor-grab active:cursor-grabbing",
+                      isDragTarget && "bg-primary/10 ring-1 ring-primary/30",
+                    )}
                   >
-                    <CollapsibleTrigger asChild>
+                    {canDrag && (
                       <button
-                        className={cn(
-                          "flex min-h-11 items-center gap-2 w-full px-2 py-2 rounded-lg transition-colors text-left md:min-h-0",
-                          "hover:bg-accent/50",
-                          hasActiveItem && "bg-accent/30"
-                        )}
+                        type="button"
+                        className="mt-1 flex h-8 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                        aria-label={`Mover ${entry.kind === "quick" ? entry.item.label : entry.category.label}`}
+                        title="Arrastra para cambiar la posición"
                       >
-                        {!isCollapsed && (
-                          <ChevronRight 
-                            className={cn(
-                              "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 shrink-0",
-                              isExpanded && "rotate-90"
-                            )} 
-                          />
-                        )}
-                        <div className={cn(
-                          "h-6 w-6 rounded flex items-center justify-center shrink-0",
-                          category.color
-                        )}>
-                          <category.icon className="h-3.5 w-3.5 text-white" />
-                        </div>
-                        {!isCollapsed && (
-                          <span className={cn(
-                            "text-sm font-medium truncate",
-                            hasActiveItem && "text-foreground"
-                          )}>
-                            {category.label}
-                          </span>
-                        )}
+                        <GripVertical className="h-4 w-4" />
                       </button>
-                    </CollapsibleTrigger>
-                    
-                    <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
-                      <SidebarMenu className={cn("mt-1", !isCollapsed && "ml-5 pl-2 border-l border-border/50")}>
-                        {visibleItems.map((item) => {
-                          const isActive = location === item.path;
-                          return (
-                            <SidebarMenuItem key={item.path}>
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      {entry.kind === "quick" ? (() => {
+                        const item = entry.item;
+                        const isActive = location === item.path;
+                        return (
+                          <SidebarMenu>
+                            <SidebarMenuItem>
                               <SidebarMenuButton
                                 isActive={isActive}
                                 onClick={() => {
+                                  if (isReordering) return;
                                   setLocation(item.path);
                                   if (isMobile) setOpenMobile(false);
                                 }}
                                 tooltip={item.label}
-                                className="h-11 transition-all font-normal md:h-9"
+                                className="h-10 font-medium"
                               >
-                                <item.icon
-                                  className={cn("h-4 w-4", isActive && "text-primary")}
-                                />
+                                <item.icon className={cn("h-4 w-4", isActive && "text-primary")} />
                                 <span className="text-sm">{item.label}</span>
                               </SidebarMenuButton>
                             </SidebarMenuItem>
-                          );
-                        })}
-                      </SidebarMenu>
-                    </CollapsibleContent>
-                  </Collapsible>
+                          </SidebarMenu>
+                        );
+                      })() : (() => {
+                        const { category, visibleItems } = entry;
+                        const isExpanded = expandedCategories.has(category.id);
+                        const hasActiveItem = visibleItems.some(item => item.path === location);
+
+                        return (
+                          <Collapsible
+                            open={isExpanded}
+                            onOpenChange={() => {
+                              if (!isReordering) toggleCategory(category.id);
+                            }}
+                          >
+                            <CollapsibleTrigger asChild>
+                              <button
+                                className={cn(
+                                  "flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
+                                  "hover:bg-accent/50",
+                                  hasActiveItem && "bg-accent/30",
+                                )}
+                              >
+                                {!isCollapsed && (
+                                  <ChevronRight
+                                    className={cn(
+                                      "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+                                      isExpanded && "rotate-90",
+                                    )}
+                                  />
+                                )}
+                                <div className={cn(
+                                  "flex h-6 w-6 shrink-0 items-center justify-center rounded",
+                                  category.color,
+                                )}>
+                                  <category.icon className="h-3.5 w-3.5 text-white" />
+                                </div>
+                                {!isCollapsed && (
+                                  <span className={cn(
+                                    "truncate text-sm font-medium",
+                                    hasActiveItem && "text-foreground",
+                                  )}>
+                                    {category.label}
+                                  </span>
+                                )}
+                              </button>
+                            </CollapsibleTrigger>
+
+                            {!isReordering && (
+                              <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
+                                <SidebarMenu className={cn("mt-1", !isCollapsed && "ml-5 border-l border-border/50 pl-2")}>
+                                  {visibleItems.map(item => {
+                                    const isActive = location === item.path;
+                                    return (
+                                      <SidebarMenuItem key={item.path}>
+                                        <SidebarMenuButton
+                                          isActive={isActive}
+                                          onClick={() => {
+                                            setLocation(item.path);
+                                            if (isMobile) setOpenMobile(false);
+                                          }}
+                                          tooltip={item.label}
+                                          className="h-10 font-normal transition-all"
+                                        >
+                                          <item.icon className={cn("h-4 w-4", isActive && "text-primary")} />
+                                          <span className="text-sm">{item.label}</span>
+                                        </SidebarMenuButton>
+                                      </SidebarMenuItem>
+                                    );
+                                  })}
+                                </SidebarMenu>
+                              </CollapsibleContent>
+                            )}
+                          </Collapsible>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 );
               })}
             </div>
