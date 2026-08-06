@@ -108,18 +108,26 @@ async function listCodes(db: any) {
     currentUses: discountCodes.currentUses,
     applicableServices: discountCodes.applicableServices,
     createdAt: discountCodes.createdAt,
-    totalDiscounted: sql<string>`COALESCE(SUM(${discountCodeUsages.discountAmount}), 0)`,
   }).from(discountCodes)
-    .leftJoin(discountCodeUsages, eq(discountCodeUsages.discountCodeId, discountCodes.id))
-    .groupBy(discountCodes.id)
     .orderBy(asc(discountCodes.code));
-  const mappings = await db.select().from(massageDiscountCodeTechniques);
+  const [mappings, usageTotals] = await Promise.all([
+    db.select().from(massageDiscountCodeTechniques),
+    db.select({
+      discountCodeId: discountCodeUsages.discountCodeId,
+      totalDiscounted: sql<string>`COALESCE(SUM(${discountCodeUsages.discountAmount}), 0)`,
+    }).from(discountCodeUsages)
+      .groupBy(discountCodeUsages.discountCodeId),
+  ]);
+  const usageByCode = new Map(
+    usageTotals.map((usage: any) => [usage.discountCodeId, usage.totalDiscounted]),
+  );
   return rows.map((row: any) => {
     const techniqueIds = mappings
       .filter((mapping: any) => mapping.discountCodeId === row.id)
       .map((mapping: any) => mapping.techniqueId);
     return {
       ...row,
+      totalDiscounted: usageByCode.get(row.id) ?? "0",
       scopes: tokensToScopes(parseServices(row.applicableServices), techniqueIds),
     };
   });

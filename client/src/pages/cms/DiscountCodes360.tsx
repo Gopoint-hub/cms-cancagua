@@ -14,6 +14,12 @@ import { toast } from "sonner";
 
 type DiscountType = "percentage" | "fixed";
 type ModuleId = "masajes" | "clases" | "biopiscinas";
+type CatalogModule = {
+  id: ModuleId;
+  name: string;
+  itemName: string;
+  services: Array<{ id: string; name: string }>;
+};
 type ScopeState = Record<ModuleId, { selected: boolean; all: boolean; serviceIds: string[] }>;
 type FormState = {
   id?: number;
@@ -57,12 +63,40 @@ const toLocalInput = (value?: Date | string | null) => {
 
 export default function DiscountCodes360() {
   const utils = trpc.useUtils();
-  const { data: codes = [], isLoading } = trpc.discounts360.list.useQuery();
-  const { data: catalog = [] } = trpc.discounts360.catalog.useQuery();
+  const { data: codes = [], isLoading, error: codesError } = trpc.discounts360.list.useQuery();
+  // Estos tres catálogos públicos son los mismos que alimentan las vitrinas y
+  // carritos. Consultarlos por separado evita que la caída de un módulo o una
+  // consulta administrativa deje ocultos también los otros dos.
+  const massageCatalog = trpc.masajes.public.getCatalog.useQuery();
+  const classesCatalog = trpc.regularClasses.public.catalog.useQuery();
+  const biopoolsCatalog = trpc.biopools.public.catalog.useQuery();
   const [search, setSearch] = useState("");
   const [descending, setDescending] = useState(false);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
+
+  const catalog = useMemo<CatalogModule[]>(() => [
+    {
+      id: "masajes",
+      name: "Masajes",
+      itemName: "técnicas",
+      services: (massageCatalog.data ?? []).map((item) => ({ id: String(item.id), name: item.name })),
+    },
+    {
+      id: "clases",
+      name: "Clases regulares",
+      itemName: "planes",
+      services: (classesCatalog.data?.plans ?? []).map((item) => ({ id: String(item.id), name: item.name })),
+    },
+    {
+      id: "biopiscinas",
+      name: "Biopiscinas",
+      itemName: "servicios",
+      services: (biopoolsCatalog.data?.services ?? []).map((item) => ({ id: String(item.service.id), name: item.service.name })),
+    },
+  ], [massageCatalog.data, classesCatalog.data, biopoolsCatalog.data]);
+  const catalogLoading = massageCatalog.isLoading || classesCatalog.isLoading || biopoolsCatalog.isLoading;
+  const catalogErrors = [massageCatalog.error, classesCatalog.error, biopoolsCatalog.error].filter(Boolean);
 
   const refresh = () => utils.discounts360.list.invalidate();
   const create = trpc.discounts360.create.useMutation({
@@ -209,7 +243,11 @@ export default function DiscountCodes360() {
         <Card>
           <CardHeader><CardTitle className="text-base">{visible.length} código{visible.length === 1 ? "" : "s"}</CardTitle></CardHeader>
           <CardContent>
-            {isLoading ? <p>Cargando…</p> : !visible.length ? <p className="py-8 text-center text-muted-foreground">No hay códigos para mostrar.</p> : (
+            {codesError ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                No se pudieron cargar los códigos. {codesError.message}
+              </div>
+            ) : isLoading ? <p>Cargando…</p> : !visible.length ? <p className="py-8 text-center text-muted-foreground">No hay códigos para mostrar.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="border-b text-left text-muted-foreground">
@@ -257,6 +295,14 @@ export default function DiscountCodes360() {
 
             <div className="space-y-3">
               <div><Label>Servicios aplicables *</Label><p className="text-xs text-muted-foreground">Elige uno o más módulos y luego todos sus servicios o sólo algunos.</p></div>
+              {catalogLoading && (
+                <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">Cargando servicios disponibles…</p>
+              )}
+              {catalogErrors.length > 0 && !catalogLoading && (
+                <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                  Uno de los catálogos no pudo cargarse. Puedes volver a intentar recargando esta ventana.
+                </p>
+              )}
               {catalog.map((module) => {
                 const scope = form.scopes[module.id];
                 return <div key={module.id} className={`rounded-lg border ${scope.selected ? "border-primary/40 bg-primary/[0.02]" : ""}`}>
