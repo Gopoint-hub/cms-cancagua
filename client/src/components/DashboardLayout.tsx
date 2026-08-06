@@ -660,22 +660,6 @@ function DashboardLayoutContent({
           </SidebarHeader>
 
           <SidebarContent className="gap-0 overflow-y-auto">
-            {isSuperAdmin && !isCollapsed && (
-              <div className="shrink-0 px-2 pb-2">
-                <Button
-                  type="button"
-                  variant={isReordering ? "secondary" : "outline"}
-                  size="sm"
-                  className="h-9 w-full justify-start gap-2"
-                  disabled={updateSidebarOrder.isPending}
-                  onClick={() => setIsReordering(current => !current)}
-                >
-                  {isReordering ? <Check className="h-4 w-4" /> : <GripVertical className="h-4 w-4" />}
-                  {isReordering ? "Terminar orden" : "Reordenar módulos"}
-                </Button>
-              </div>
-            )}
-
             {/* Una sola columna evita que las vistas 360 se monten sobre los modulos. */}
             <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 pb-2">
               {sidebarEntries.map(entry => {
@@ -833,6 +817,19 @@ function DashboardLayoutContent({
           </SidebarContent>
 
           <SidebarFooter className="p-3">
+            {isSuperAdmin && !isCollapsed && (
+              <Button
+                type="button"
+                variant={isReordering ? "secondary" : "outline"}
+                size="sm"
+                className="h-9 w-full justify-start gap-2"
+                disabled={updateSidebarOrder.isPending}
+                onClick={() => setIsReordering(current => !current)}
+              >
+                {isReordering ? <Check className="h-4 w-4" /> : <GripVertical className="h-4 w-4" />}
+                {isReordering ? "Terminar orden" : "Reordenar módulos"}
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
