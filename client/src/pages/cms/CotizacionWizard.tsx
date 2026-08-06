@@ -141,8 +141,11 @@ const DEAL_STAGES = [
   { value: "reunion_programada", label: "Reunión programada" },
   { value: "cotizacion_enviada", label: "Cotización enviada" },
   { value: "negociacion", label: "Negociación" },
-  { value: "ganado", label: "Ganado" },
-  { value: "perdido", label: "Perdido" },
+  // Los valores tienen que calzar con el enum `stage` de la tabla deals
+  // (drizzle/schema.ts:568). El wizard mandaba "ganado"/"perdido", que la base
+  // rechaza: el insert moría con "Failed query" apenas alguien elegía Ganado.
+  { value: "cerrado_ganado", label: "Ganado" },
+  { value: "cerrado_perdido", label: "Perdido" },
 ];
 
 // Términos de compra por defecto
