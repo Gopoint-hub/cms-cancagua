@@ -132,6 +132,7 @@ const PIPELINES = [
   { value: "jornada_autocuidado", label: "Jornada de autocuidado" },
   { value: "eventos_corporativos", label: "Eventos corporativos" },
   { value: "retiros", label: "Retiros" },
+  { value: "agencias", label: "Agencias" },
 ];
 
 // Etapas del negocio

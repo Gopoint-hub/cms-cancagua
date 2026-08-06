@@ -55,6 +55,7 @@ const PIPELINE_LABELS: Record<string, string> = {
   eventos_corporativos: "Eventos Corporativos",
   retiros: "Retiros",
   spa_day: "Spa Day",
+  agencias: "Agencias",
 };
 
 const STAGE_CONFIG: Record<string, { label: string; color: string }> = {
@@ -435,6 +436,7 @@ export default function Negocios() {
                       </SelectItem>
                       <SelectItem value="retiros">Retiros</SelectItem>
                       <SelectItem value="spa_day">Spa Day</SelectItem>
+                      <SelectItem value="agencias">Agencias</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
