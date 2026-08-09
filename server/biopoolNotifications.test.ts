@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { renderBiopoolTemplate } from "./biopoolNotifications";
+import { afterEach, describe, expect, it } from "vitest";
+import { renderBiopoolTemplate, staffRecipient } from "./biopoolNotifications";
 
 describe("Biopiscinas reminder template", () => {
   it("renders reservation, location and attendance confirmation data", () => {
@@ -26,5 +26,28 @@ describe("Biopiscinas reminder template", () => {
     expect(message).toContain("María · Biopiscinas Geotermales");
     expect(message).toContain("10:00 · https://maps.google.com/cancagua");
     expect(message).toContain("/biopiscinas/confirmar/token-confirmacion-123456789");
+  });
+});
+
+describe("Destinatario de la copia a recepcion", () => {
+  afterEach(() => {
+    delete process.env.BIOPOOL_STAFF_EMAIL;
+  });
+
+  it("usa el email de notificacion del servicio cuando no hay variable", () => {
+    expect(
+      staffRecipient({ notificationEmail: "contacto@cancagua.cl" } as any)
+    ).toBe("contacto@cancagua.cl");
+  });
+
+  it("prefiere BIOPOOL_STAFF_EMAIL cuando esta definida", () => {
+    process.env.BIOPOOL_STAFF_EMAIL = " recepcion@cancagua.cl ";
+    expect(
+      staffRecipient({ notificationEmail: "contacto@cancagua.cl" } as any)
+    ).toBe("recepcion@cancagua.cl");
+  });
+
+  it("devuelve vacio si no hay ninguno, para no intentar un envio sin destino", () => {
+    expect(staffRecipient({ notificationEmail: "" } as any)).toBe("");
   });
 });

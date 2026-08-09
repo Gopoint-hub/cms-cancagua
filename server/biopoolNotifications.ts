@@ -64,6 +64,59 @@ export function renderBiopoolTemplate(
   );
 }
 
+export function staffRecipient(
+  service: typeof biopoolServices.$inferSelect
+): string {
+  return (
+    process.env.BIOPOOL_STAFF_EMAIL?.trim() || service.notificationEmail || ""
+  );
+}
+
+// Copia interna para recepcion: la confirmacion al cliente no les avisa a ellos,
+// asi que una reserva de biopiscinas podia entrar sin que nadie en el local se
+// enterara hasta mirar el panel.
+async function sendStaffConfirmation(
+  booking: typeof biopoolBookings.$inferSelect,
+  service: typeof biopoolServices.$inferSelect
+): Promise<{ success: boolean; error?: string }> {
+  const to = staffRecipient(service);
+  if (!to) return { success: false, error: "Sin destinatario de recepcion" };
+
+  const rows: [string, string][] = [
+    ["Código", booking.bookingCode],
+    ["Servicio", service.name],
+    ["Fecha", formatDate(booking.bookingDate)],
+    ["Hora", `${booking.startTime} a ${booking.endTime}`],
+    [
+      "Personas",
+      `${booking.adultQuantity} adulto(s) · ${booking.childQuantity} niño(s) · ${booking.totalGuests} en total`,
+    ],
+    ["Cliente", booking.clientName],
+    ["Teléfono", booking.clientPhone],
+    ["Email", booking.clientEmail],
+    ["Pagado", `$${booking.amountPaidClp.toLocaleString("es-CL")}`],
+    ["Estado", booking.status],
+  ];
+
+  const text = rows.map(([label, value]) => `${label}: ${value}`).join("\n");
+  const html = `<div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;line-height:1.6;color:#292524"><h1 style="font-size:20px">Nueva reserva de ${escapeHtml(service.name)}</h1><table cellpadding="6" style="border-collapse:collapse">${rows
+    .map(
+      ([label, value]) =>
+        `<tr><td style="color:#78716c">${escapeHtml(label)}</td><td><strong>${escapeHtml(value)}</strong></td></tr>`
+    )
+    .join("")}</table></div>`;
+
+  return sendEmail({
+    to,
+    subject: `Nueva reserva ${booking.bookingCode} · ${formatDate(booking.bookingDate)} ${booking.startTime} · ${booking.clientName}`,
+    html,
+    text,
+    senderName: "Cancagua",
+    fromEmail: service.notificationEmail,
+    replyTo: booking.clientEmail,
+  });
+}
+
 async function claimNotification(id: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
@@ -171,6 +224,23 @@ export async function processBiopoolNotificationQueue(
         action: `${item.notification.type}_${item.notification.channel}_${result.success ? "sent" : "failed"}`,
         detail: result.success ? null : JSON.stringify({ error: result.error }),
       });
+
+      // La copia a recepcion va pegada a la confirmacion del cliente: si esa no
+      // salio, la reserva todavia se reintenta y no corresponde avisar dos veces.
+      if (
+        result.success &&
+        !isReminder &&
+        item.notification.channel === "email"
+      ) {
+        const staff = await sendStaffConfirmation(item.booking, item.service);
+        await db.insert(biopoolBookingActivity).values({
+          bookingId: item.booking.id,
+          action: `confirmation_staff_email_${staff.success ? "sent" : "failed"}`,
+          detail: staff.success
+            ? JSON.stringify({ to: staffRecipient(item.service) })
+            : JSON.stringify({ error: staff.error }),
+        });
+      }
     } catch (error) {
       await db
         .update(biopoolNotifications)
