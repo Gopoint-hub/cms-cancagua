@@ -97,12 +97,14 @@ function AdminDashboard() {
   const { data: bookingsData } = trpc.bookings.list.useQuery();
   const { data: messagesData } = trpc.contactMessages.list.useQuery();
   const { data: quotesData } = trpc.quotes.getAll.useQuery(undefined, { enabled: isFullAdmin });
-  const { data: subscribersData } = trpc.subscribers.getAll.useQuery(undefined, { enabled: isFullAdmin });
+  // Solo el numero: pedir getAll aca traia las 56.000 filas de suscriptores en
+  // cada carga del dashboard y el proceso se quedaba sin heap.
+  const { data: activeSubscribers } = trpc.subscribers.countActive.useQuery(undefined, { enabled: isFullAdmin });
 
   const pendingBookings = bookingsData?.filter((b: any) => b.status === "pending").length || 0;
   const unreadMessages = messagesData?.filter((m: any) => m.status === "new").length || 0;
   const pendingQuotes = quotesData?.filter((q: any) => q.status === "sent").length || 0;
-  const totalSubscribers = subscribersData?.filter((s: any) => s.status === "active").length || 0;
+  const totalSubscribers = activeSubscribers ?? 0;
 
   const handleCategoryClick = (categoryId: CategoryId) => {
     const category = categories.find(c => c.id === categoryId);

@@ -771,6 +771,20 @@ export async function getAllNewsletterSubscribers() {
   return await db.select().from(newsletterSubscribers).orderBy(desc(newsletterSubscribers.subscribedAt));
 }
 
+// Cuenta en la base en vez de traerse la tabla entera. El dashboard solo
+// necesita el numero, y con 56.000 suscriptores un getAll ahi le costaba el
+// heap al proceso: cada carga del panel se traia todas las filas a memoria.
+export async function countActiveNewsletterSubscribers(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const { newsletterSubscribers } = await import("../drizzle/schema");
+  const filas = await db
+    .select({ n: sql<number>`COUNT(*)` })
+    .from(newsletterSubscribers)
+    .where(eq(newsletterSubscribers.status, "active"));
+  return Number(filas[0]?.n ?? 0);
+}
+
 export async function getNewsletterSubscriberById(id: number) {
   const db = await getDb();
   if (!db) return undefined;

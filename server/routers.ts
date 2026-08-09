@@ -2747,6 +2747,14 @@ ${pagesHtml}
         return await db.getAllSubscribers();
       }),
 
+    countActive: protectedProcedure
+      .query(async ({ ctx }) => {
+        if (!puedeB2B(ctx.user, ROLES_B2B_COTIZACIONES)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        return await db.countActiveNewsletterSubscribers();
+      }),
+
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ ctx, input }) => {
