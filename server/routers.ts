@@ -1643,7 +1643,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
-        const { generateQuotePDF } = await import("./pdfGenerator");
+        const { generateQuotePDF } = await import("./quotePdfGenerator");
 
         // Obtener cotización y sus items
         const quote = await db.getQuoteById(input.id);
@@ -1678,11 +1678,16 @@ export const appRouter = router({
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             total: item.total,
+            scheduleTime: item.scheduleTime || undefined,
+            sortOrder: item.sortOrder || undefined,
           })),
           subtotal,
           tax,
           total: quote.total || 0,
           validUntil: quote.validUntil ? new Date(quote.validUntil).toLocaleDateString("es-CL") : undefined,
+          notes: quote.notes || undefined,
+          termsOfPurchase: quote.termsOfPurchase || undefined,
+          dealName: quote.name || undefined,
         };
 
         // Generar PDF
@@ -1706,7 +1711,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN" });
         }
 
-        const { generateQuotePDF } = await import("./pdfGenerator");
+        const { generateQuotePDF } = await import("./quotePdfGenerator");
         const { sendQuoteEmail } = await import("./email");
 
         // Obtener cotización y sus items
@@ -1742,11 +1747,16 @@ export const appRouter = router({
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             total: item.total,
+            scheduleTime: item.scheduleTime || undefined,
+            sortOrder: item.sortOrder || undefined,
           })),
           subtotal,
           tax,
           total: quote.total || 0,
           validUntil: quote.validUntil ? new Date(quote.validUntil).toLocaleDateString("es-CL") : undefined,
+          notes: quote.notes || undefined,
+          termsOfPurchase: quote.termsOfPurchase || undefined,
+          dealName: quote.name || undefined,
         };
 
         // Generar PDF
