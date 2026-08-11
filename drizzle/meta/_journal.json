@@ -218,6 +218,13 @@
       "when": 1786033500000,
       "tag": "0037_remove_double_opt_in",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1786352400000,
+      "tag": "0038_hot_tub_orders",
+      "breakpoints": true
     }
   ]
 }

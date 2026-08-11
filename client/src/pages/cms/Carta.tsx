@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { hasB2CAccess } from "@shared/permissions";
-import { Loader2, Plus, Pencil, Trash2, Leaf, Wheat, Flame, Eye, Upload, X } from "lucide-react";
+import { Loader2, Plus, Pencil, Trash2, Leaf, Wheat, Flame, Eye, Upload, X, Clock3, Coffee, Radio, PackageCheck } from "lucide-react";
 import { Link } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 
@@ -20,6 +20,7 @@ export default function CMSCarta() {
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<any | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
 
@@ -28,6 +29,8 @@ export default function CMSCarta() {
     trpc.menuAdmin.getAllCategories.useQuery();
   const { data: items, isLoading: itemsLoading, refetch: refetchItems } = 
     trpc.menuAdmin.getAllItems.useQuery();
+  const { data: hotTubOrders, isLoading: ordersLoading, refetch: refetchOrders } =
+    trpc.menuAdmin.getHotTubOrders.useQuery(undefined, { refetchInterval: 30000 });
 
   // Mutations
   const uploadImageMutation = trpc.upload.menuItemImage.useMutation({
@@ -81,6 +84,20 @@ export default function CMSCarta() {
       toast.success("Item eliminado");
       refetchItems();
     },
+  });
+
+  const updateItemMutation = trpc.menuAdmin.updateItem.useMutation({
+    onSuccess: () => {
+      toast.success("Producto actualizado");
+      refetchItems();
+      setEditingItem(null);
+    },
+    onError: (error) => toast.error(error.message || "No fue posible actualizar el producto"),
+  });
+
+  const updateOrderStatusMutation = trpc.menuAdmin.updateHotTubOrderStatus.useMutation({
+    onSuccess: () => refetchOrders(),
+    onError: (error) => toast.error(error.message || "No fue posible actualizar la comanda"),
   });
 
   // Verificar permisos
@@ -157,6 +174,7 @@ export default function CMSCarta() {
     if (formData.get("keto")) dietaryTags.push("keto");
 
     const specialNotes = formData.get("specialNotes") as string;
+    const preparationArea = formData.get("preparationArea") as "cafe" | "reception";
 
     createItemMutation.mutate({
       categoryId: selectedCategory,
@@ -165,6 +183,7 @@ export default function CMSCarta() {
       prices: JSON.stringify(prices),
       dietaryTags: JSON.stringify(dietaryTags),
       specialNotes: specialNotes || undefined,
+      preparationArea,
       displayOrder: items?.filter((i: any) => i.categoryId === selectedCategory).length || 0,
     }, {
       onSuccess: async (data, variables) => {
@@ -194,6 +213,46 @@ export default function CMSCarta() {
     });
   };
 
+  const handleUpdateItem = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    const formData = new FormData(e.currentTarget);
+    const priceType = formData.get("editPriceType") as string;
+    const prices = priceType === "single"
+      ? { default: Number(formData.get("editPriceDefault")) }
+      : {
+          for_2: Number(formData.get("editPrice2")) || undefined,
+          for_4: Number(formData.get("editPrice4")) || undefined,
+          for_6: Number(formData.get("editPrice6")) || undefined,
+        };
+    if (!Object.values(prices).some(value => typeof value === "number" && value >= 0)) {
+      toast.error("Ingresa al menos un precio válido");
+      return;
+    }
+    const dietaryTags = ["vegan", "gluten_free", "keto"].filter(tag => formData.get(`edit_${tag}`));
+    updateItemMutation.mutate({
+      id: editingItem.id,
+      categoryId: Number(formData.get("editCategoryId")),
+      name: String(formData.get("editName") || "").trim(),
+      description: String(formData.get("editDescription") || "").trim(),
+      prices: JSON.stringify(prices),
+      dietaryTags: JSON.stringify(dietaryTags),
+      specialNotes: String(formData.get("editSpecialNotes") || "").trim(),
+      preparationArea: formData.get("editPreparationArea") as "cafe" | "reception",
+    });
+  };
+
+  const toggleItemStock = (item: any) => {
+    updateItemMutation.mutate({ id: item.id, inStock: item.inStock === 1 ? 0 : 1 });
+  };
+
+  const formatMoney = (amount: number) => `$${amount.toLocaleString("es-CL")}`;
+  const formatDateTime = (value: string | Date | null) => value
+    ? new Intl.DateTimeFormat("es-CL", { dateStyle: "short", timeStyle: "short" }).format(new Date(value))
+    : "—";
+  const elapsedMinutes = (from: string | Date, to?: string | Date | null) =>
+    Math.max(0, Math.round((new Date(to || Date.now()).getTime() - new Date(from).getTime()) / 60000));
+
   const toggleCategoryActive = (id: number, currentActive: number) => {
     updateCategoryMutation.mutate({
       id,
@@ -219,10 +278,10 @@ export default function CMSCarta() {
           </div>
           <div className="flex gap-3">
             <Button asChild variant="outline">
-              <Link href="/carta">
+              <a href="https://cancagua.cl/cartahottubs" target="_blank" rel="noreferrer">
                 <Eye className="w-4 h-4 mr-2" />
-                Ver Carta Pública
-              </Link>
+                Ver Carta Hot Tub
+              </a>
             </Button>
             <Button asChild variant="outline">
               <Link href="/cms">Volver al Dashboard</Link>
@@ -235,6 +294,12 @@ export default function CMSCarta() {
           <TabsList>
             <TabsTrigger value="categories">Categorías</TabsTrigger>
             <TabsTrigger value="items">Items de Menú</TabsTrigger>
+            <TabsTrigger value="orders" className="relative">
+              Comandas Hot Tub
+              {hotTubOrders?.some((order: any) => order.status === "submitted") && (
+                <span className="ml-2 h-2 w-2 rounded-full bg-red-500" />
+              )}
+            </TabsTrigger>
           </TabsList>
 
           {/* Categorías */}
@@ -535,6 +600,13 @@ export default function CMSCarta() {
                           placeholder="Ej: Solicitar con 48 hrs de anticipación"
                         />
                       </div>
+                      <div>
+                        <Label htmlFor="preparationArea">Área responsable *</Label>
+                        <select id="preparationArea" name="preparationArea" defaultValue="cafe" className="w-full border rounded-md px-3 py-2 mt-1">
+                          <option value="cafe">Cafetería (avisar por walkie-talkie)</option>
+                          <option value="reception">Recepción (bebestibles disponibles en recepción)</option>
+                        </select>
+                      </div>
                     </div>
                     <DialogFooter>
                       <Button type="button" variant="outline" onClick={() => setIsAddItemOpen(false)}>
@@ -595,9 +667,14 @@ export default function CMSCarta() {
                                       </CardDescription>
                                     )}
                                   </div>
-                                  <Badge variant={item.active === 1 ? "default" : "secondary"}>
-                                    {item.active === 1 ? "Activo" : "Inactivo"}
-                                  </Badge>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <Badge variant={item.inStock === 1 ? "default" : "destructive"}>
+                                      {item.inStock === 1 ? "Con stock" : "Agotado"}
+                                    </Badge>
+                                    <span className="text-[11px] text-gray-500">
+                                      {item.preparationArea === "reception" ? "Recepción" : "Cafetería"}
+                                    </span>
+                                  </div>
                                 </div>
                               </CardHeader>
                               <CardContent>
@@ -639,7 +716,18 @@ export default function CMSCarta() {
                                       {item.specialNotes}
                                     </p>
                                   )}
-                                  <div className="flex gap-2 pt-2">
+                                  <div className="flex flex-wrap gap-2 pt-2">
+                                    <Button
+                                      size="sm"
+                                      variant={item.inStock === 1 ? "outline" : "default"}
+                                      onClick={() => toggleItemStock(item)}
+                                      disabled={updateItemMutation.isPending}
+                                    >
+                                      {item.inStock === 1 ? "Marcar sin stock" : "Reponer stock"}
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => setEditingItem(item)}>
+                                      <Pencil className="w-4 h-4" />
+                                    </Button>
                                     <label className="cursor-pointer">
                                       <Button
                                         size="sm"
@@ -701,7 +789,138 @@ export default function CMSCarta() {
               </div>
             )}
           </TabsContent>
+
+          <TabsContent value="orders" className="space-y-6">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">Comandas Hot Tub</h2>
+                <p className="text-sm text-gray-500">Actualización automática cada 30 segundos.</p>
+              </div>
+              <Button variant="outline" onClick={() => refetchOrders()} disabled={ordersLoading}>
+                {ordersLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Actualizar
+              </Button>
+            </div>
+
+            {hotTubOrders && hotTubOrders.length > 0 && (() => {
+              const completed = hotTubOrders.filter((order: any) => order.deliveredAt);
+              const ready = hotTubOrders.filter((order: any) => order.readyAt);
+              const avgReady = ready.length
+                ? Math.round(ready.reduce((sum: number, order: any) => sum + elapsedMinutes(order.requestedAt, order.readyAt), 0) / ready.length)
+                : null;
+              const avgDelivered = completed.length
+                ? Math.round(completed.reduce((sum: number, order: any) => sum + elapsedMinutes(order.requestedAt, order.deliveredAt), 0) / completed.length)
+                : null;
+              return (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Card><CardContent className="pt-5"><p className="text-xs uppercase tracking-wide text-gray-500">Pendientes</p><p className="text-2xl font-semibold">{hotTubOrders.filter((order: any) => !["delivered", "cancelled"].includes(order.status)).length}</p></CardContent></Card>
+                  <Card><CardContent className="pt-5"><p className="text-xs uppercase tracking-wide text-gray-500">Promedio hasta lista</p><p className="text-2xl font-semibold">{avgReady === null ? "—" : `${avgReady} min`}</p></CardContent></Card>
+                  <Card><CardContent className="pt-5"><p className="text-xs uppercase tracking-wide text-gray-500">Promedio hasta entrega</p><p className="text-2xl font-semibold">{avgDelivered === null ? "—" : `${avgDelivered} min`}</p></CardContent></Card>
+                </div>
+              );
+            })()}
+
+            {ordersLoading && !hotTubOrders && <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-[#44580E]" /></div>}
+            {!ordersLoading && hotTubOrders?.length === 0 && (
+              <Card><CardContent className="py-12 text-center text-gray-500">Todavía no hay pedidos de Hot Tub.</CardContent></Card>
+            )}
+
+            <div className="space-y-4">
+              {hotTubOrders?.map((order: any) => {
+                const statusInfo: Record<string, { label: string; className: string }> = {
+                  submitted: { label: "Nuevo", className: "bg-red-100 text-red-800" },
+                  acknowledged: { label: "Recibido", className: "bg-blue-100 text-blue-800" },
+                  preparing: { label: "En preparación", className: "bg-amber-100 text-amber-800" },
+                  ready: { label: "Listo para retirar", className: "bg-emerald-100 text-emerald-800" },
+                  delivered: { label: "Entregado", className: "bg-gray-100 text-gray-700" },
+                  cancelled: { label: "Cancelado", className: "bg-gray-100 text-gray-500" },
+                };
+                const nextStatus: Record<string, { status: any; label: string }> = {
+                  submitted: { status: "acknowledged", label: "Acusar recibo" },
+                  acknowledged: { status: "preparing", label: "Iniciar preparación" },
+                  preparing: { status: "ready", label: "Marcar listo" },
+                  ready: { status: "delivered", label: "Marcar entregado" },
+                };
+                const next = nextStatus[order.status];
+                return (
+                  <Card key={order.id} className={order.status === "submitted" ? "border-red-300 shadow-sm" : ""}>
+                    <CardHeader className="pb-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <CardTitle className="text-lg">{order.orderNumber}</CardTitle>
+                            <Badge className={statusInfo[order.status]?.className}>{statusInfo[order.status]?.label || order.status}</Badge>
+                          </div>
+                          <CardDescription className="mt-1">
+                            {order.customerName} · {order.customerPhone} · Hot Tub {order.hotTubCode} — {order.hotTubName}
+                          </CardDescription>
+                        </div>
+                        <div className="text-sm sm:text-right">
+                          <p className="font-medium">{order.serviceDate || "Fecha por coordinar"}{order.desiredTime ? ` · ${order.desiredTime}` : ""}</p>
+                          <p className="text-gray-500">Pedido {formatDateTime(order.requestedAt)} · hace {elapsedMinutes(order.requestedAt)} min</p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {order.items.map((item: any) => (
+                          <div key={item.id} className="flex items-start justify-between rounded-md bg-gray-50 px-3 py-2 text-sm">
+                            <span><strong>{item.quantity}×</strong> {item.itemName}{item.priceLabel ? ` (${item.priceLabel})` : ""}<br /><span className="text-xs text-gray-500">{item.preparationArea === "reception" ? "Recepción" : "Cafetería"}</span></span>
+                            <span>{formatMoney(item.lineTotal)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {order.notes && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900"><strong>Notas:</strong> {order.notes}</p>}
+                      <div className="flex flex-wrap items-center gap-3 border-t pt-3 text-xs text-gray-500">
+                        <span className="inline-flex items-center gap-1"><Radio className="w-3.5 h-3.5" /> Recepción: {order.receptionNotificationStatus === "sent" ? "WhatsApp generado" : order.receptionNotificationStatus}</span>
+                        <span className="inline-flex items-center gap-1"><Coffee className="w-3.5 h-3.5" /> Café: {order.cafeNotificationStatus === "sent" ? "WhatsApp enviado" : order.cafeNotificationStatus === "not_configured" ? "grupo no configurado; usar walkie" : order.cafeNotificationStatus === "not_required" ? "no requerido" : order.cafeNotificationStatus}</span>
+                        {order.readyAt && <span className="inline-flex items-center gap-1"><Clock3 className="w-3.5 h-3.5" /> Lista en {elapsedMinutes(order.requestedAt, order.readyAt)} min</span>}
+                        {order.deliveredAt && <span className="inline-flex items-center gap-1"><PackageCheck className="w-3.5 h-3.5" /> Entregada en {elapsedMinutes(order.requestedAt, order.deliveredAt)} min</span>}
+                        <strong className="ml-auto text-sm text-gray-900">Total {formatMoney(order.subtotal)} · pago en recepción</strong>
+                      </div>
+                      {!["delivered", "cancelled"].includes(order.status) && (
+                        <div className="flex flex-wrap gap-2">
+                          {next && <Button onClick={() => updateOrderStatusMutation.mutate({ id: order.id, status: next.status })} disabled={updateOrderStatusMutation.isPending}>{next.label}</Button>}
+                          <Button variant="ghost" className="text-red-700" onClick={() => confirm("¿Cancelar esta comanda?") && updateOrderStatusMutation.mutate({ id: order.id, status: "cancelled" })}>Cancelar</Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </TabsContent>
         </Tabs>
+
+        <Dialog open={Boolean(editingItem)} onOpenChange={(open) => !open && setEditingItem(null)}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            {editingItem && (() => {
+              const prices = editingItem.prices ? JSON.parse(editingItem.prices) : {};
+              const tags: string[] = editingItem.dietaryTags ? JSON.parse(editingItem.dietaryTags) : [];
+              const multiple = Boolean(prices.for_2 || prices.for_4 || prices.for_6);
+              return (
+                <form onSubmit={handleUpdateItem}>
+                  <DialogHeader><DialogTitle>Editar producto</DialogTitle><DialogDescription>Los cambios se reflejan en la carta pública.</DialogDescription></DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div><Label>Categoría</Label><select name="editCategoryId" defaultValue={editingItem.categoryId} className="w-full border rounded-md px-3 py-2 mt-1">{categories?.map((cat: any) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></div>
+                    <div><Label>Nombre</Label><Input name="editName" defaultValue={editingItem.name} required /></div>
+                    <div><Label>Descripción</Label><Textarea name="editDescription" defaultValue={editingItem.description || ""} rows={3} /></div>
+                    <div>
+                      <Label>Tipo de precio</Label>
+                      <div className="flex gap-5 mt-2"><label><input type="radio" name="editPriceType" value="single" defaultChecked={!multiple} /> Único</label><label><input type="radio" name="editPriceType" value="multiple" defaultChecked={multiple} /> Por tamaño</label></div>
+                      <Input type="number" name="editPriceDefault" defaultValue={prices.default} placeholder="Precio único" className="mt-2" />
+                      <div className="grid grid-cols-3 gap-2 mt-2"><Input type="number" name="editPrice2" defaultValue={prices.for_2} placeholder="Para 2" /><Input type="number" name="editPrice4" defaultValue={prices.for_4} placeholder="Para 4" /><Input type="number" name="editPrice6" defaultValue={prices.for_6} placeholder="Para 6" /></div>
+                    </div>
+                    <div><Label>Etiquetas</Label><div className="flex flex-wrap gap-4 mt-2"><label><input type="checkbox" name="edit_vegan" defaultChecked={tags.includes("vegan")} /> Vegano</label><label><input type="checkbox" name="edit_gluten_free" defaultChecked={tags.includes("gluten_free")} /> Sin gluten</label><label><input type="checkbox" name="edit_keto" defaultChecked={tags.includes("keto")} /> Keto</label></div></div>
+                    <div><Label>Notas especiales</Label><Input name="editSpecialNotes" defaultValue={editingItem.specialNotes || ""} /></div>
+                    <div><Label>Área responsable</Label><select name="editPreparationArea" defaultValue={editingItem.preparationArea || "cafe"} className="w-full border rounded-md px-3 py-2 mt-1"><option value="cafe">Cafetería</option><option value="reception">Recepción</option></select></div>
+                  </div>
+                  <DialogFooter><Button type="button" variant="outline" onClick={() => setEditingItem(null)}>Cancelar</Button><Button type="submit" disabled={updateItemMutation.isPending}>{updateItemMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Guardar cambios</Button></DialogFooter>
+                </form>
+              );
+            })()}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
     </DashboardLayout>

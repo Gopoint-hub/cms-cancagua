@@ -6,6 +6,21 @@ afterEach(() => {
   delete process.env.WHAPI_CANCAGUA_TOKEN;
 });
 
+describe("findWhatsAppGroupId", () => {
+  it("resolves the café group by its visible WhatsApp name", async () => {
+    process.env.WHAPI_CANCAGUA_TOKEN = "test-token";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ groups: [
+        { id: "120363000000000000@g.us", name: "Café Cancagua 🍓" },
+      ] }),
+    }));
+    const { findWhatsAppGroupId } = await import("./_core/whapi");
+
+    await expect(findWhatsAppGroupId("Cafe Cancagua 🍓")).resolves.toBe("120363000000000000@g.us");
+  });
+});
+
 describe("sendWhatsApp", () => {
   it("normalizes Chilean local mobile numbers without country code", async () => {
     process.env.WHAPI_CANCAGUA_TOKEN = "test-token";
@@ -50,6 +65,18 @@ describe("sendWhatsApp", () => {
     expect(result.success).toBe(true);
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(requestBody.to).toBe("5491112345678@s.whatsapp.net");
+  });
+
+  it("preserves WhatsApp group chat identifiers", async () => {
+    process.env.WHAPI_CANCAGUA_TOKEN = "test-token";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const { sendWhatsApp } = await import("./_core/whapi");
+
+    await sendWhatsApp("120363000000000000@g.us", "Nueva comanda");
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(requestBody.to).toBe("120363000000000000@g.us");
   });
 
   it("returns a failure when WHAPI token is not configured", async () => {

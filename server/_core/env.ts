@@ -48,4 +48,7 @@ export const ENV = {
 
   // WhatsApp (WHAPI)
   whapiToken: process.env.WHAPI_CANCAGUA_TOKEN ?? "",
+  receptionWhatsApp: process.env.HOT_TUB_RECEPTION_WHATSAPP ?? "56940073999",
+  cafeWhatsAppGroupId: process.env.HOT_TUB_CAFE_WHATSAPP_GROUP_ID ?? "",
+  cafeWhatsAppGroupName: process.env.HOT_TUB_CAFE_WHATSAPP_GROUP_NAME ?? "Café Cancagua 🍓",
 };

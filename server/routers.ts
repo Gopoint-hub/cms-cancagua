@@ -365,6 +365,87 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return await db.getActiveMenuItemsByCategory(input.categoryId);
       }),
+
+    submitHotTubOrder: publicProcedure
+      .input(z.object({
+        customerName: z.string().trim().min(2).max(180),
+        customerPhone: z.string().trim().min(8).max(50),
+        hotTubCode: z.enum(["1006", "1005", "1004", "1003", "1002", "1001"]),
+        serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        desiredTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+        notes: z.string().trim().max(500).optional(),
+        source: z.enum(["menu", "checkout"]).default("menu"),
+        items: z.array(z.object({
+          menuItemId: z.number().int().positive(),
+          priceKey: z.enum(["default", "for_2", "for_4", "for_6"]),
+          quantity: z.number().int().min(1).max(20),
+        })).min(1).max(30),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const order = await db.createHotTubOrder(input);
+          const { ENV } = await import("./_core/env");
+          const { sendWhatsApp, findWhatsAppGroupId } = await import("./_core/whapi");
+          const formatMoney = (amount: number) => `$${amount.toLocaleString("es-CL")}`;
+          const lines = order.items.map(item =>
+            `• ${item.quantity}× ${item.itemName}${item.priceLabel ? ` (${item.priceLabel})` : ""} — ${formatMoney(item.lineTotal)}`,
+          ).join("\n");
+          const schedule = [input.serviceDate, input.desiredTime].filter(Boolean).join(" · ") || "Coordinar en recepción";
+          const message = [
+            `*PREORDEN HOT TUB ${order.orderNumber}*`,
+            `Cliente: ${input.customerName}`,
+            `Hot Tub: ${input.hotTubCode} - ${order.hotTubName}`,
+            `Fecha/hora: ${schedule}`,
+            "",
+            lines,
+            "",
+            `Total a pagar en recepción: ${formatMoney(order.subtotal)}`,
+            input.notes ? `Notas: ${input.notes}` : "",
+          ].filter(Boolean).join("\n");
+
+          const cafeLines = order.items.filter(item => item.preparationArea === "cafe");
+          try {
+            if (cafeLines.length > 0) {
+              const cafeGroupId = ENV.cafeWhatsAppGroupId || await findWhatsAppGroupId(ENV.cafeWhatsAppGroupName);
+              if (cafeGroupId) {
+                const cafeMessage = [
+                  `*COMANDA HOT TUB ${order.orderNumber}*`,
+                  `${input.hotTubCode} - ${order.hotTubName} · ${schedule}`,
+                  ...cafeLines.map(item => `• ${item.quantity}× ${item.itemName}${item.priceLabel ? ` (${item.priceLabel})` : ""}`),
+                  input.notes ? `Notas: ${input.notes}` : "",
+                  "Recepción reforzará esta comanda por walkie-talkie.",
+                ].filter(Boolean).join("\n");
+                const cafeResult = await sendWhatsApp(cafeGroupId, cafeMessage);
+                await db.updateHotTubOrderNotificationStatus(order.id, {
+                  cafeNotificationStatus: cafeResult.success ? "sent" : "failed",
+                });
+              } else {
+                await db.updateHotTubOrderNotificationStatus(order.id, { cafeNotificationStatus: "not_configured" });
+              }
+            }
+
+            // El mensaje a recepción se entrega como enlace prellenado para que
+            // salga desde el WhatsApp del propio cliente.
+            await db.updateHotTubOrderNotificationStatus(order.id, { receptionNotificationStatus: "sent" });
+          } catch (notificationError) {
+            // La comanda ya quedó registrada: un fallo de notificación nunca
+            // debe inducir al cliente a reenviarla y crear un duplicado.
+            console.error(`[HotTubOrder ${order.orderNumber}] Notification error:`, notificationError);
+          }
+
+          return {
+            success: true,
+            orderNumber: order.orderNumber,
+            subtotal: order.subtotal,
+            whatsappUrl: `https://wa.me/${ENV.receptionWhatsApp.replace(/\D/g, "")}?text=${encodeURIComponent(message)}`,
+          };
+        } catch (error) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error instanceof Error ? error.message : "No fue posible registrar el pedido",
+          });
+        }
+      }),
   }),
 
   // Formulario de contacto público
@@ -490,6 +571,7 @@ export const appRouter = router({
         prices: z.string(), // JSON string
         dietaryTags: z.string().optional(), // JSON string
         specialNotes: z.string().optional(),
+        preparationArea: z.enum(["cafe", "reception"]).default("cafe"),
         displayOrder: z.number().default(0),
       }))
       .mutation(async ({ ctx, input }) => {
@@ -510,6 +592,8 @@ export const appRouter = router({
         prices: z.string().optional(),
         dietaryTags: z.string().optional(),
         specialNotes: z.string().optional(),
+        inStock: z.number().int().min(0).max(1).optional(),
+        preparationArea: z.enum(["cafe", "reception"]).optional(),
         displayOrder: z.number().optional(),
         active: z.number().optional(),
       }))
@@ -529,6 +613,23 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN" });
         }
         await db.deleteMenuItem(input.id);
+        return { success: true };
+      }),
+
+    getHotTubOrders: protectedProcedure
+      .query(async ({ ctx }) => {
+        if (!hasB2CAccess(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
+        return await db.getHotTubOrders();
+      }),
+
+    updateHotTubOrderStatus: protectedProcedure
+      .input(z.object({
+        id: z.number().int().positive(),
+        status: z.enum(["submitted", "acknowledged", "preparing", "ready", "delivered", "cancelled"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasB2CAccess(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
+        await db.updateHotTubOrderStatus(input.id, input.status);
         return { success: true };
       }),
   }),

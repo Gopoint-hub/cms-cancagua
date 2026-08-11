@@ -606,7 +606,9 @@ export async function getAllMenuItems() {
   const db = await getDb();
   if (!db) return [];
   const { menuItems } = await import("../drizzle/schema");
-  return await db.select().from(menuItems).orderBy(asc(menuItems.displayOrder));
+  return await db.select().from(menuItems)
+    .where(eq(menuItems.active, 1))
+    .orderBy(asc(menuItems.displayOrder));
 }
 
 export async function getMenuItemsByCategory(categoryId: number) {
@@ -645,7 +647,8 @@ export async function deleteMenuItem(id: number) {
   const db = await getDb();
   if (!db) return;
   const { menuItems } = await import("../drizzle/schema");
-  await db.delete(menuItems).where(eq(menuItems.id, id));
+  // Baja lógica: las comandas conservan su vínculo histórico al producto.
+  await db.update(menuItems).set({ active: 0, inStock: 0 }).where(eq(menuItems.id, id));
 }
 
 // Menú completo con categorías e items
@@ -664,8 +667,156 @@ export async function getFullMenu() {
 
   return categories.map(cat => ({
     ...cat,
-    items: items.filter(item => item.categoryId === cat.id),
+    items: items.filter(item => item.categoryId === cat.id).map(item => ({
+      ...item,
+      prices: safeJsonParse<Record<string, number>>(item.prices, {}),
+      dietaryTags: safeJsonParse<string[]>(item.dietaryTags, []),
+    })),
   }));
+}
+
+function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export const HOT_TUB_NAMES: Record<string, string> = {
+  "1006": "Fío Fío",
+  "1005": "Chucao",
+  "1004": "Chirihue",
+  "1003": "Pitío",
+  "1002": "Loica",
+  "1001": "Colibrí",
+};
+
+type HotTubOrderDraft = {
+  customerName: string;
+  customerPhone: string;
+  hotTubCode: "1006" | "1005" | "1004" | "1003" | "1002" | "1001";
+  serviceDate?: string;
+  desiredTime?: string;
+  notes?: string;
+  source: "menu" | "checkout";
+  items: Array<{
+    menuItemId: number;
+    priceKey: "default" | "for_2" | "for_4" | "for_6";
+    quantity: number;
+  }>;
+};
+
+export async function createHotTubOrder(input: HotTubOrderDraft) {
+  const database = await getDb();
+  if (!database) throw new Error("Base de datos no disponible");
+
+  const { hotTubOrders, hotTubOrderItems, menuItems } = await import("../drizzle/schema");
+  return await database.transaction(async (tx) => {
+    const requestedIds = Array.from(new Set(input.items.map(item => item.menuItemId)));
+    const products = await tx.select().from(menuItems).where(inArray(menuItems.id, requestedIds));
+    const productsById = new Map(products.map(product => [product.id, product]));
+
+    const lines = input.items.map(requested => {
+      const product = productsById.get(requested.menuItemId);
+      if (!product || product.active !== 1) throw new Error("Uno de los productos ya no está disponible");
+      if (product.inStock !== 1) throw new Error(`${product.name} está agotado`);
+
+      const prices = safeJsonParse<Record<string, number>>(product.prices, {});
+      const unitPrice = prices[requested.priceKey];
+      if (!Number.isInteger(unitPrice) || unitPrice < 0) throw new Error(`El precio de ${product.name} cambió. Revisa tu pedido.`);
+
+      const labels: Record<string, string> = {
+        default: "",
+        for_2: "Para 2",
+        for_4: "Para 4",
+        for_6: "Para 6",
+      };
+      return {
+        menuItemId: product.id,
+        itemName: product.name,
+        priceKey: requested.priceKey,
+        priceLabel: labels[requested.priceKey] || null,
+        unitPrice,
+        quantity: requested.quantity,
+        lineTotal: unitPrice * requested.quantity,
+        preparationArea: product.preparationArea,
+      };
+    });
+
+    const subtotal = lines.reduce((sum, line) => sum + line.lineTotal, 0);
+    const orderNumber = `HT-${new Date().toISOString().slice(2, 10).replaceAll("-", "")}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
+    const result = await tx.insert(hotTubOrders).values({
+      orderNumber,
+      customerName: input.customerName.trim(),
+      customerPhone: input.customerPhone.trim(),
+      hotTubCode: input.hotTubCode,
+      serviceDate: input.serviceDate ? new Date(`${input.serviceDate}T12:00:00`) : null,
+      desiredTime: input.desiredTime || null,
+      notes: input.notes?.trim() || null,
+      source: input.source,
+      subtotal,
+      cafeNotificationStatus: lines.some(line => line.preparationArea === "cafe") ? "pending" : "not_required",
+    });
+    const orderId = Number((result as any)?.[0]?.insertId);
+    if (!orderId) throw new Error("No fue posible registrar el pedido");
+
+    await tx.insert(hotTubOrderItems).values(lines.map(line => ({ ...line, orderId })));
+    return {
+      id: orderId,
+      orderNumber,
+      subtotal,
+      hotTubName: HOT_TUB_NAMES[input.hotTubCode],
+      items: lines,
+    };
+  });
+}
+
+export async function updateHotTubOrderNotificationStatus(
+  id: number,
+  data: Partial<{ receptionNotificationStatus: "pending" | "sent" | "failed" | "not_configured"; cafeNotificationStatus: "pending" | "sent" | "failed" | "not_required" | "not_configured" }>,
+) {
+  const database = await getDb();
+  if (!database) return;
+  const { hotTubOrders } = await import("../drizzle/schema");
+  await database.update(hotTubOrders).set(data).where(eq(hotTubOrders.id, id));
+}
+
+export async function getHotTubOrders(limit = 200) {
+  const database = await getDb();
+  if (!database) return [];
+  const { hotTubOrders, hotTubOrderItems } = await import("../drizzle/schema");
+  const orders = await database.select().from(hotTubOrders).orderBy(desc(hotTubOrders.requestedAt)).limit(limit);
+  if (!orders.length) return [];
+  const orderItems = await database.select().from(hotTubOrderItems)
+    .where(inArray(hotTubOrderItems.orderId, orders.map(order => order.id)));
+  return orders.map(order => ({
+    ...order,
+    hotTubName: HOT_TUB_NAMES[order.hotTubCode],
+    items: orderItems.filter(item => item.orderId === order.id),
+  }));
+}
+
+export async function updateHotTubOrderStatus(
+  id: number,
+  status: "submitted" | "acknowledged" | "preparing" | "ready" | "delivered" | "cancelled",
+) {
+  const database = await getDb();
+  if (!database) throw new Error("Base de datos no disponible");
+  const { hotTubOrders } = await import("../drizzle/schema");
+  const now = new Date();
+  const timestampFields: Partial<Record<typeof status, string>> = {
+    acknowledged: "acknowledgedAt",
+    preparing: "preparingAt",
+    ready: "readyAt",
+    delivered: "deliveredAt",
+    cancelled: "cancelledAt",
+  };
+  const timestampField = timestampFields[status];
+  const changes: Record<string, unknown> = { status };
+  if (timestampField) changes[timestampField] = now;
+  await database.update(hotTubOrders).set(changes).where(eq(hotTubOrders.id, id));
 }
 
 // Reservas

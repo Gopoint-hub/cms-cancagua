@@ -510,12 +510,61 @@ export const menuItems = mysqlTable("menu_items", {
   specialNotes: text("special_notes"),
   displayOrder: int("display_order").default(0).notNull(),
   active: int("active").default(1).notNull(),
+  // Disponibilidad operativa. A diferencia de `active`, mantiene el producto
+  // visible en la carta, pero impide agregarlo al pedido y lo muestra agotado.
+  inStock: int("in_stock").default(1).notNull(),
+  preparationArea: mysqlEnum("preparation_area", ["cafe", "reception"]).default("cafe").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
 export type MenuItem = typeof menuItems.$inferSelect;
 export type InsertMenuItem = typeof menuItems.$inferInsert;
+
+// Preórdenes de alimentos y bebestibles para Hot Tubs.
+export const hotTubOrders = mysqlTable("hot_tub_orders", {
+  id: int("id").autoincrement().primaryKey(),
+  orderNumber: varchar("order_number", { length: 32 }).notNull().unique(),
+  customerName: varchar("customer_name", { length: 180 }).notNull(),
+  customerPhone: varchar("customer_phone", { length: 50 }).notNull(),
+  hotTubCode: mysqlEnum("hot_tub_code", ["1006", "1005", "1004", "1003", "1002", "1001"]).notNull(),
+  serviceDate: date("service_date"),
+  desiredTime: varchar("desired_time", { length: 5 }),
+  notes: text("notes"),
+  source: mysqlEnum("source", ["menu", "checkout"]).default("menu").notNull(),
+  status: mysqlEnum("status", ["submitted", "acknowledged", "preparing", "ready", "delivered", "cancelled"]).default("submitted").notNull(),
+  subtotal: int("subtotal").notNull(),
+  receptionNotificationStatus: mysqlEnum("reception_notification_status", ["pending", "sent", "failed", "not_configured"]).default("pending").notNull(),
+  cafeNotificationStatus: mysqlEnum("cafe_notification_status", ["pending", "sent", "failed", "not_required", "not_configured"]).default("pending").notNull(),
+  requestedAt: timestamp("requested_at").defaultNow().notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  preparingAt: timestamp("preparing_at"),
+  readyAt: timestamp("ready_at"),
+  deliveredAt: timestamp("delivered_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type HotTubOrder = typeof hotTubOrders.$inferSelect;
+export type InsertHotTubOrder = typeof hotTubOrders.$inferInsert;
+
+export const hotTubOrderItems = mysqlTable("hot_tub_order_items", {
+  id: int("id").autoincrement().primaryKey(),
+  orderId: int("order_id").references(() => hotTubOrders.id).notNull(),
+  menuItemId: int("menu_item_id").references(() => menuItems.id).notNull(),
+  itemName: varchar("item_name", { length: 255 }).notNull(),
+  priceKey: varchar("price_key", { length: 40 }).notNull(),
+  priceLabel: varchar("price_label", { length: 80 }),
+  unitPrice: int("unit_price").notNull(),
+  quantity: int("quantity").notNull(),
+  lineTotal: int("line_total").notNull(),
+  preparationArea: mysqlEnum("preparation_area", ["cafe", "reception"]).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type HotTubOrderItem = typeof hotTubOrderItems.$inferSelect;
+export type InsertHotTubOrderItem = typeof hotTubOrderItems.$inferInsert;
 
 // Reservas (bookings)
 export const bookings = mysqlTable("bookings", {

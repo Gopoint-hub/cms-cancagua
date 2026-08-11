@@ -2,6 +2,7 @@ import { ENV } from "./env";
 
 const WHAPI_URL = "https://gate.whapi.cloud/messages/text";
 const WHAPI_HEALTH_URL = "https://gate.whapi.cloud/health";
+const WHAPI_GROUPS_URL = "https://gate.whapi.cloud/groups";
 
 export type WhatsAppResult = {
   success: boolean;
@@ -15,6 +16,31 @@ export type WhatsAppHealthResult = {
   status?: number;
   error?: string;
 };
+
+let groupCache: { name: string; id: string | null; expiresAt: number } | null = null;
+
+/** Busca el ID interno de un grupo por nombre, sin exponerlo al cliente. */
+export async function findWhatsAppGroupId(name: string): Promise<string | null> {
+  if (!ENV.whapiToken || !name.trim()) return null;
+  if (groupCache?.name === name && groupCache.expiresAt > Date.now()) return groupCache.id;
+  try {
+    const response = await fetch(WHAPI_GROUPS_URL, {
+      headers: { "Authorization": `Bearer ${ENV.whapiToken}`, "Accept": "application/json" },
+    });
+    if (!response.ok) return null;
+    const payload: any = await response.json();
+    const groups: any[] = Array.isArray(payload) ? payload : payload.groups || payload.data || [];
+    const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").trim();
+    const expected = normalize(name);
+    const match = groups.find(group => normalize(String(group.name || group.subject || "")) === expected);
+    const id = typeof match?.id === "string" ? match.id : null;
+    groupCache = { name, id, expiresAt: Date.now() + 5 * 60 * 1000 };
+    return id;
+  } catch (error) {
+    console.error("[WHAPI] Error resolving WhatsApp group:", error);
+    return null;
+  }
+}
 
 export async function checkWhatsAppHealth(): Promise<WhatsAppHealthResult> {
   if (!ENV.whapiToken) {
@@ -54,6 +80,10 @@ export async function checkWhatsAppHealth(): Promise<WhatsAppHealthResult> {
 }
 
 function normalizePhone(phone: string): string {
+  // Whapi identifica los grupos con el sufijo @g.us. En ese caso el ID debe
+  // conservarse tal cual y no pasar por la normalización de teléfonos.
+  if (phone.trim().endsWith("@g.us")) return phone.trim();
+  if (phone.trim().endsWith("@s.whatsapp.net")) return phone.trim();
   let digits = phone.replace(/\D/g, "");
   if (digits.startsWith("00")) digits = digits.slice(2);
   if (digits.startsWith("56") && digits.length === 10) return "569" + digits.slice(2) + "@s.whatsapp.net";
