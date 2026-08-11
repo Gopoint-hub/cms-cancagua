@@ -10,6 +10,7 @@ export const SIDEBAR_MODULE_IDS = [
   "operations",
   "admin",
   "biopools",
+  "sauna",
   "masajes",
   "regular_classes",
   "ayuda",

@@ -279,6 +279,160 @@ export type BiopoolBlock = typeof biopoolBlocks.$inferSelect;
 export type BiopoolBooking = typeof biopoolBookings.$inferSelect;
 export type BiopoolCheckoutOrder = typeof biopoolCheckoutOrders.$inferSelect;
 
+// Sauna: espejo de Skedu, agenda de aforo compartido, pases Detox y pagos Webpay.
+export const saunaSettings = mysqlTable("sauna_settings", {
+  id: int("id").primaryKey(),
+  capacity: int("capacity").default(6).notNull(),
+  durationMinutes: int("duration_minutes").default(60).notNull(),
+  slotIntervalMinutes: int("slot_interval_minutes").default(30).notNull(),
+  bookingLeadHours: int("booking_lead_hours").default(2).notNull(),
+  cancellationNoticeHours: int("cancellation_notice_hours").default(72).notNull(),
+  rescheduleNoticeHours: int("reschedule_notice_hours").default(48).notNull(),
+  maxReschedules: int("max_reschedules").default(2).notNull(),
+  checkoutEnabled: int("checkout_enabled").default(0).notNull(),
+  scheduleJson: text("schedule_json").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const saunaServices = mysqlTable("sauna_services", {
+  id: int("id").autoincrement().primaryKey(),
+  skeduServiceUuid: varchar("skedu_service_uuid", { length: 64 }).notNull().unique(),
+  skeduVariantUuid: varchar("skedu_variant_uuid", { length: 64 }),
+  name: varchar("name", { length: 220 }).notNull(),
+  kind: mysqlEnum("kind", ["shared", "private", "staff", "program"]).notNull(),
+  partySize: int("party_size").notNull(),
+  capacityUsed: int("capacity_used").notNull(),
+  priceClp: int("price_clp").default(0).notNull(),
+  durationMinutes: int("duration_minutes").default(60).notNull(),
+  intervalMinutes: int("interval_minutes").default(90).notNull(),
+  published: int("published").default(0).notNull(),
+  rawJson: mediumtext("raw_json"),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const saunaBookings = mysqlTable("sauna_bookings", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingCode: varchar("booking_code", { length: 40 }).notNull().unique(),
+  skeduAppointmentUuid: varchar("skedu_appointment_uuid", { length: 64 }).unique(),
+  skeduGroupUuid: varchar("skedu_group_uuid", { length: 64 }),
+  skeduUserUuid: varchar("skedu_user_uuid", { length: 64 }),
+  skeduServiceUuid: varchar("skedu_service_uuid", { length: 64 }),
+  serviceName: varchar("service_name", { length: 220 }).notNull(),
+  kind: mysqlEnum("kind", ["shared", "private", "staff", "detox", "manual"]).default("shared").notNull(),
+  clientName: varchar("client_name", { length: 200 }),
+  clientEmail: varchar("client_email", { length: 320 }),
+  clientPhone: varchar("client_phone", { length: 40 }),
+  bookingDate: date("booking_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  guests: int("guests").notNull(),
+  capacityUsed: int("capacity_used").notNull(),
+  isPrivate: int("is_private").default(0).notNull(),
+  status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("confirmed").notNull(),
+  isConfirmed: int("is_confirmed").default(0).notNull(),
+  paymentStatus: mysqlEnum("payment_status", ["unknown", "pending", "paid", "partially_refunded", "refunded"]).default("unknown").notNull(),
+  paymentMethod: varchar("payment_method", { length: 60 }),
+  paymentReference: varchar("payment_reference", { length: 160 }),
+  amountClp: int("amount_clp").default(0).notNull(),
+  source: mysqlEnum("source", ["skedu", "web", "cms", "detox"]).default("cms").notNull(),
+  origin: varchar("origin", { length: 40 }),
+  rescheduleCount: int("reschedule_count").default(0).notNull(),
+  notes: text("notes"),
+  externalUpdatedAt: timestamp("external_updated_at"),
+  lastSyncedAt: timestamp("last_synced_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  createdByUserId: int("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const saunaBlocks = mysqlTable("sauna_blocks", {
+  id: int("id").autoincrement().primaryKey(),
+  blockDate: date("block_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  blockedCapacity: int("blocked_capacity").default(6).notNull(),
+  reason: mysqlEnum("reason", ["maintenance", "private_event", "detox", "operational", "other"]).notNull(),
+  notes: text("notes"),
+  active: int("active").default(1).notNull(),
+  createdByUserId: int("created_by_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const saunaProgramQueue = mysqlTable("sauna_program_queue", {
+  id: int("id").autoincrement().primaryKey(),
+  skeduAppointmentUuid: varchar("skedu_appointment_uuid", { length: 64 }).notNull().unique(),
+  skeduGroupUuid: varchar("skedu_group_uuid", { length: 64 }),
+  skeduUserUuid: varchar("skedu_user_uuid", { length: 64 }),
+  skeduServiceUuid: varchar("skedu_service_uuid", { length: 64 }),
+  serviceName: varchar("service_name", { length: 240 }).notNull(),
+  variantName: varchar("variant_name", { length: 240 }),
+  programStartsAt: timestamp("program_starts_at").notNull(),
+  guests: int("guests").notNull(),
+  clientName: varchar("client_name", { length: 200 }),
+  clientEmail: varchar("client_email", { length: 320 }),
+  clientPhone: varchar("client_phone", { length: 40 }),
+  status: mysqlEnum("status", ["pending", "scheduled", "dismissed", "cancelled"]).default("pending").notNull(),
+  saunaBookingId: int("sauna_booking_id"),
+  lastSyncedAt: timestamp("last_synced_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const saunaSyncRuns = mysqlTable("sauna_sync_runs", {
+  id: int("id").autoincrement().primaryKey(),
+  status: mysqlEnum("status", ["running", "completed", "failed"]).default("running").notNull(),
+  rangeFrom: date("range_from", { mode: "string" }).notNull(),
+  rangeTo: date("range_to", { mode: "string" }).notNull(),
+  appointmentsRead: int("appointments_read").default(0).notNull(),
+  bookingsUpserted: int("bookings_upserted").default(0).notNull(),
+  programsQueued: int("programs_queued").default(0).notNull(),
+  error: text("error"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const saunaCheckoutOrders = mysqlTable("sauna_checkout_orders", {
+  id: int("id").autoincrement().primaryKey(),
+  publicToken: varchar("public_token", { length: 64 }).notNull().unique(),
+  bookingId: int("booking_id"),
+  serviceId: int("service_id").notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }).notNull(),
+  clientPhone: varchar("client_phone", { length: 40 }).notNull(),
+  bookingDate: date("booking_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  guests: int("guests").notNull(),
+  capacityUsed: int("capacity_used").notNull(),
+  isPrivate: int("is_private").default(0).notNull(),
+  totalClp: int("total_clp").notNull(),
+  status: mysqlEnum("status", ["initiating", "payment_pending", "paid", "rejected", "aborted", "expired", "failed"]).default("initiating").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  webpayToken: varchar("webpay_token", { length: 180 }).unique(),
+  buyOrder: varchar("buy_order", { length: 26 }).unique(),
+  sessionId: varchar("session_id", { length: 61 }),
+  webpayStatus: varchar("webpay_status", { length: 40 }),
+  responseCode: int("response_code"),
+  authorizationCode: varchar("authorization_code", { length: 80 }),
+  cardNumber: varchar("card_number", { length: 40 }),
+  paymentTypeCode: varchar("payment_type_code", { length: 10 }),
+  transactionDate: varchar("transaction_date", { length: 60 }),
+  rawResponse: mediumtext("raw_response"),
+  error: text("error"),
+  paidAt: timestamp("paid_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SaunaBooking = typeof saunaBookings.$inferSelect;
+export type SaunaService = typeof saunaServices.$inferSelect;
+export type SaunaCheckoutOrder = typeof saunaCheckoutOrders.$inferSelect;
+
 // Servicios de Skedu
 export const services = mysqlTable("services", {
   id: int("id").autoincrement().primaryKey(),

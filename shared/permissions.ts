@@ -16,10 +16,24 @@ export const CMS_PERMISSION_GROUPS = [
       { key: "module.metrics", label: "Métricas y analítica general" },
       { key: "module.operations", label: "Operaciones y mantención" },
       { key: "module.biopools", label: "Módulo Biopiscinas" },
+      { key: "module.sauna", label: "Módulo Sauna" },
       { key: "module.massages", label: "Módulo Masajes" },
       { key: "module.regular_classes", label: "Módulo Clases Regulares" },
       { key: "module.admin", label: "Administración e integraciones" },
       { key: "module.help", label: "Ayuda y documentación" },
+    ],
+  },
+  {
+    id: "sauna",
+    label: "Funciones de Sauna",
+    description: "Permisos de agenda, aforo, bloqueos, ventas y sincronización Skedu.",
+    permissions: [
+      { key: "sauna.manage_agenda", label: "Crear, cancelar y reagendar reservas" },
+      { key: "sauna.manage_blocks", label: "Gestionar bloqueos y aforo" },
+      { key: "sauna.view_clients", label: "Ver clientes de Sauna" },
+      { key: "sauna.view_sales", label: "Ver pagos y ventas de Sauna" },
+      { key: "sauna.manage_sync", label: "Sincronizar agenda con Skedu" },
+      { key: "sauna.manage_settings", label: "Configurar horarios y políticas" },
     ],
   },
   {
@@ -122,6 +136,13 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, CmsPermissionKey[]> = {
     "biopools.view_clients",
     "biopools.view_sales",
     "biopools.manage_settings",
+    "module.sauna",
+    "sauna.manage_agenda",
+    "sauna.manage_blocks",
+    "sauna.view_clients",
+    "sauna.view_sales",
+    "sauna.manage_sync",
+    "sauna.manage_settings",
     "module.massages",
     "massages.manage_agenda",
     "massages.assign_therapists",
@@ -144,6 +165,9 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, CmsPermissionKey[]> = {
     "module.biopools",
     "biopools.manage_agenda",
     "biopools.manage_blocks",
+    "module.sauna",
+    "sauna.manage_agenda",
+    "sauna.manage_blocks",
     "module.massages",
     "massages.manage_agenda",
     "massages.assign_therapists",
@@ -253,6 +277,10 @@ export const CANCAGUA_STAFF_ALLOWED_PATHS = new Set([
   "/cms/biopiscinas",
   "/cms/biopiscinas/agenda",
   "/cms/biopiscinas/bloqueos",
+  "/cms/sauna",
+  "/cms/sauna/agenda",
+  "/cms/sauna/bloqueos",
+  "/cms/sauna/programas",
   "/cms/masajes",
   "/cms/masajes/agenda",
 ]);
@@ -319,6 +347,12 @@ const EXACT_PATH_PERMISSIONS = new Map<string, CmsPermissionKey>([
   ["/cms/biopiscinas/bloqueos", "biopools.manage_blocks"],
   ["/cms/biopiscinas/servicios", "biopools.manage_catalog"],
   ["/cms/biopiscinas/configuracion", "biopools.manage_settings"],
+  ["/cms/sauna", "module.sauna"],
+  ["/cms/sauna/agenda", "module.sauna"],
+  ["/cms/sauna/bloqueos", "sauna.manage_blocks"],
+  ["/cms/sauna/programas", "sauna.manage_agenda"],
+  ["/cms/sauna/servicios", "module.sauna"],
+  ["/cms/sauna/configuracion", "sauna.manage_settings"],
   ["/cms/masajes", "module.massages"],
   ["/cms/masajes/agenda", "module.massages"],
   ["/cms/masajes/terapeutas", "massages.manage_therapists"],
@@ -361,7 +395,7 @@ export function canAccessCmsPath(
   if (explicitPermissions) {
     if (path === "/" || path === "/cms") return true;
     if (path === "/cms/calendario") {
-      return ["module.massages", "module.biopools", "module.regular_classes"]
+      return ["module.massages", "module.biopools", "module.sauna", "module.regular_classes"]
         .some(permission => explicitPermissions.includes(permission as CmsPermissionKey));
     }
     if (path === "/cms/clientes-360") {
@@ -378,7 +412,7 @@ export function canAccessCmsPath(
   if (path === "/cms/calendario") {
     return hasAnyCmsPermission(
       { role, permissions, regularClassesTeacher },
-      ["module.massages", "module.biopools", "module.regular_classes"],
+      ["module.massages", "module.biopools", "module.sauna", "module.regular_classes"],
     );
   }
   if (path === "/cms/clientes-360") {

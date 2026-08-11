@@ -74,6 +74,15 @@ import BiopiscinasSales from "./pages/cms/biopiscinas/Sales";
 import ConfirmBiopoolAttendance from "./pages/biopiscinas/ConfirmAttendance";
 import BiopoolCheckout from "./pages/biopiscinas/Checkout";
 import BiopoolPaymentResult from "./pages/biopiscinas/PaymentResult";
+// Módulo Sauna
+import SaunaDashboard from "./pages/cms/sauna/Dashboard";
+import SaunaAgenda from "./pages/cms/sauna/Agenda";
+import SaunaBlocks from "./pages/cms/sauna/Blocks";
+import SaunaPrograms from "./pages/cms/sauna/Programs";
+import SaunaServices from "./pages/cms/sauna/Services";
+import SaunaConfiguration from "./pages/cms/sauna/Configuration";
+import SaunaCheckout from "./pages/sauna/Checkout";
+import SaunaPaymentResult from "./pages/sauna/PaymentResult";
 // Módulo Clases Regulares
 import RegularClassesDashboard from "./pages/cms/clases-regulares/Dashboard";
 import RegularClassesAttendance from "./pages/cms/clases-regulares/Attendance";
@@ -96,6 +105,8 @@ function Router() {
       <Route path="/biopiscinas/confirmar/:token" component={ConfirmBiopoolAttendance} />
       <Route path="/reservar/biopiscinas" component={BiopoolCheckout} />
       <Route path="/biopiscinas/pago/resultado" component={BiopoolPaymentResult} />
+      <Route path="/reservar/sauna" component={SaunaCheckout} />
+      <Route path="/sauna/pago/resultado" component={SaunaPaymentResult} />
 
       {/* CMS Dashboard pages */}
       <Route path="/" component={CMSDashboard} />
@@ -163,6 +174,14 @@ function Router() {
       <Route path="/cms/biopiscinas/servicios" component={BiopiscinasServices} />
       <Route path="/cms/biopiscinas/configuracion" component={BiopiscinasConfiguration} />
       <Route path="/cms/biopiscinas/ventas" component={BiopiscinasSales} />
+
+      {/* Módulo Sauna */}
+      <Route path="/cms/sauna" component={SaunaDashboard} />
+      <Route path="/cms/sauna/agenda" component={SaunaAgenda} />
+      <Route path="/cms/sauna/programas" component={SaunaPrograms} />
+      <Route path="/cms/sauna/bloqueos" component={SaunaBlocks} />
+      <Route path="/cms/sauna/servicios" component={SaunaServices} />
+      <Route path="/cms/sauna/configuracion" component={SaunaConfiguration} />
 
       {/* Módulo Clases Regulares */}
       <Route path="/cms/clases-regulares" component={RegularClassesDashboard} />

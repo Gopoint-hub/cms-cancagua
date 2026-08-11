@@ -28,9 +28,12 @@ import { ensureRegularClassesSchema } from "../ensureRegularClassesSchema";
 import { ensureUserPermissionsSchema } from "../ensureUserPermissionsSchema";
 import { ensureMassageAssignmentSchema } from "../ensureMassageAssignmentSchema";
 import { ensureBiopoolsSchema } from "../ensureBiopoolsSchema";
+import { ensureSaunaSchema } from "../ensureSaunaSchema";
 import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
 import biopoolWebpayReturnRouter, { startBiopoolCheckoutScheduler } from "../biopoolWebpay";
+import saunaWebpayReturnRouter, { startSaunaCheckoutScheduler } from "../saunaWebpay";
+import { startSaunaSyncScheduler } from "../saunaSync";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -64,6 +67,7 @@ async function startServer() {
   await ensureMassageCheckoutSchema();
   await ensureRegularClassesSchema();
   await ensureBiopoolsSchema();
+  await ensureSaunaSchema();
   await ensureMaintenanceShiftSchema();
   startTherapistAssignmentExpiryWorker();
   const app = express();
@@ -117,6 +121,8 @@ async function startServer() {
   app.use("/api/public/clases", publicRegularClassesCatalog);
   // Retorno servidor-a-servidor de Webpay Plus para Biopiscinas.
   app.use("/api/biopiscinas/webpay", biopoolWebpayReturnRouter);
+  // Retorno servidor-a-servidor de Webpay Plus para Sauna.
+  app.use("/api/sauna/webpay", saunaWebpayReturnRouter);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
   // Cerebro: grafo de conocimiento del proyecto (solo admins)
@@ -157,6 +163,8 @@ startServer()
     const { startBiopoolNotificationScheduler } = await import("../biopoolNotifications");
     startBiopoolNotificationScheduler();
     startBiopoolCheckoutScheduler();
+    startSaunaCheckoutScheduler();
+    startSaunaSyncScheduler();
     try {
       const { runInitialMassageTherapistInvitations } = await import("../massageTherapistInvitations");
       await runInitialMassageTherapistInvitations();

@@ -15,6 +15,7 @@ import { clientesRouter } from "./clientesRouter";
 import { marketingRouter } from "./marketingRouter";
 import { regularClassesRouter } from "./regularClassesRouter";
 import { biopoolsRouter } from "./biopoolsRouter";
+import { saunaRouter } from "./saunaRouter";
 import { operations360Router } from "./operations360Router";
 import { discounts360Router } from "./discounts360Router";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
@@ -92,6 +93,8 @@ export const appRouter = router({
   regularClasses: regularClassesRouter,
   // Módulo Biopiscinas - agenda, cupos, bloqueos y comunicaciones
   biopools: biopoolsRouter,
+  // Módulo Sauna - aforo compartido, pases Detox, Skedu y Transbank.
+  sauna: saunaRouter,
   // Vista transversal de agenda y clientes entre los módulos operativos.
   operations360: operations360Router,
   // Códigos transversales para todos los módulos de servicios.

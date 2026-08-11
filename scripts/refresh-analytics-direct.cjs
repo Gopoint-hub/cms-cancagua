@@ -72,27 +72,36 @@ async function fetchSearchPages(startDate, endDate) {
 }
 
 async function fetchSkedu(startDate, endDate) {
-  const params = new URLSearchParams({
-    StoreUUID: SKEDU_STORE_UUID,
-    limit: "1500",
-    "StartsAt~ge": startDate + "T00:00:00Z",
-    "StartsAt~lt": endDate + "T23:59:59Z",
-  });
-  const resp = await fetch(`https://api.getskedu.com/appointments?${params}`, {
-    headers: {
-      "X-Skedu-App-ID": SKEDU_APP_ID,
-      "X-Skedu-App-Secret": SKEDU_APP_SECRET,
-      "User-Agent": "Mozilla/5.0 (compatible; CancaguaCMS/1.0; +https://cms.cancagua.cl)",
-      Accept: "application/json",
-      "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
-    },
-  });
-  if (!resp.ok) {
-    console.error("[Skedu] HTTP", resp.status);
-    return null;
-  }
-  const data = await resp.json();
-  const items = data?.Data || data?.data || [];
+  const items = [];
+  let count = 0;
+  do {
+    const params = new URLSearchParams({
+      StoreUUID: SKEDU_STORE_UUID,
+      limit: "100",
+      offset: String(items.length),
+      "StartsAt~ge": startDate + "T00:00:00Z",
+      "StartsAt~lt": endDate + "T23:59:59Z",
+    });
+    const resp = await fetch(`https://api.getskedu.com/appointments?${params}`, {
+      headers: {
+        "X-Skedu-App-ID": SKEDU_APP_ID,
+        "X-Skedu-App-Secret": SKEDU_APP_SECRET,
+        "User-Agent": "Mozilla/5.0 (compatible; CancaguaCMS/1.0; +https://cms.cancagua.cl)",
+        Accept: "application/json",
+        "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
+      },
+    });
+    if (!resp.ok) {
+      console.error("[Skedu] HTTP", resp.status);
+      return null;
+    }
+    const data = await resp.json();
+    const root = data?.Data || data?.data || data;
+    const page = Array.isArray(root) ? root : root?.Items || [];
+    count = Array.isArray(root) ? page.length : Number(root?.Count || page.length);
+    items.push(...page);
+    if (page.length < 100) break;
+  } while (items.length < count);
   if (!Array.isArray(items) || items.length === 0) return null;
 
   const bookings = items.map(b => ({

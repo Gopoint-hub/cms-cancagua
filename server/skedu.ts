@@ -5,8 +5,8 @@ const STORE_UUID = "c5e0a893-7eff-42b8-815a-296b1a9c345d";
 
 // Las credenciales se configurarán mediante variables de entorno
 const getHeaders = () => {
-  const appId = process.env.SKEDU_APP_ID || "e0fd2e66-64ce-4b44-82e1-2740581b8872";
-  const secret = process.env.SKEDU_APP_SECRET || "4b46a0a5-8e03-436a-8b11-880a4d86b48b";
+  const appId = process.env.SKEDU_APP_ID;
+  const secret = process.env.SKEDU_APP_SECRET;
 
   if (!appId || !secret) {
     throw new Error("Skedu API credentials not configured");
@@ -21,6 +21,44 @@ const getHeaders = () => {
     "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
   };
 };
+
+export type SkeduAppointmentQuery = {
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  resourceUuid?: string;
+  serviceUuid?: string;
+};
+
+/** Skedu limita cada página a 100 filas; la paginación siempre vive en backend. */
+export async function getAllSkeduAppointments(params: SkeduAppointmentQuery = {}): Promise<any[]> {
+  const pageSize = 100;
+  const items: any[] = [];
+  let total = 0;
+  do {
+    const skeduParams: Record<string, string | number> = { StoreUUID: STORE_UUID, limit: pageSize, offset: items.length };
+    if (params.startDate) skeduParams["StartsAt~ge"] = params.startDate.includes("T") ? params.startDate : `${params.startDate}T00:00:00Z`;
+    if (params.endDate) skeduParams["StartsAt~lt"] = params.endDate.includes("T") ? params.endDate : `${params.endDate}T23:59:59Z`;
+    if (params.status) skeduParams.Status = params.status;
+    if (params.resourceUuid) skeduParams.ResourceUUID = params.resourceUuid;
+    if (params.serviceUuid) skeduParams.ServiceUUID = params.serviceUuid;
+    const response = await axios.get(`${SKEDU_API_BASE_URL}/appointments`, { headers: getHeaders(), params: skeduParams });
+    const data = response.data?.Data ?? response.data?.data ?? response.data;
+    const page = Array.isArray(data) ? data : data?.Items ?? [];
+    total = Array.isArray(data) ? page.length : Number(data?.Count ?? page.length);
+    items.push(...page);
+    if (page.length < pageSize) break;
+  } while (items.length < total);
+  return items;
+}
+
+export async function getSkeduBusinessUser(businessUuid: string, userUuid: string) {
+  const response = await axios.get(`${SKEDU_API_BASE_URL}/businesses/${businessUuid}/users`, {
+    headers: getHeaders(), params: { UUID: userUuid, limit: 1, offset: 0 },
+  });
+  const data = response.data?.Data ?? response.data;
+  return (Array.isArray(data) ? data : data?.Items ?? [])[0] ?? null;
+}
 
 /**
  * Obtener lista de servicios desde Skedu
@@ -60,41 +98,9 @@ export async function getSkeduServiceById(serviceId: string) {
 /**
  * Obtener lista de eventos desde Skedu (Appointments)
  */
-export async function getSkeduEvents(params?: {
-  startDate?: string;
-  endDate?: string;
-  status?: string;
-}) {
+export async function getSkeduEvents(params?: SkeduAppointmentQuery) {
   try {
-    // Sintaxis específica requerida por Skedu: Parámetros con comparadores ~ge y ~lt
-    const skeduParams: any = {
-      StoreUUID: STORE_UUID,
-      limit: 500,
-      offset: 0,
-    };
-
-    if (params?.startDate) {
-      // Asegurar formato ISO UTC como en el ejemplo del soporte
-      skeduParams["StartsAt~ge"] = params.startDate.includes("T")
-        ? params.startDate
-        : `${params.startDate}T00:00:00Z`;
-    }
-
-    if (params?.endDate) {
-      skeduParams["StartsAt~lt"] = params.endDate.includes("T")
-        ? params.endDate
-        : `${params.endDate}T23:59:59Z`;
-    }
-
-    if (params?.status) {
-      skeduParams.Status = params.status;
-    }
-
-    const response = await axios.get(`${SKEDU_API_BASE_URL}/appointments`, {
-      headers: getHeaders(),
-      params: skeduParams,
-    });
-    return response.data;
+    return { Data: await getAllSkeduAppointments(params) };
   } catch (error) {
     console.error("[Skedu] Error fetching events:", error);
     throw error;
@@ -193,69 +199,6 @@ export async function getSkeduPayments(appointmentUuid: string) {
     return response.data;
   } catch (error) {
     console.error(`[Skedu] Error fetching payments for ${appointmentUuid}:`, error);
-    throw error;
-  }
-}
-
-/**
- * Verificar disponibilidad
- */
-export async function checkSkeduAvailability(params: {
-  serviceId?: string;
-  eventId?: string;
-  date: string;
-  time?: string;
-}) {
-  try {
-    const response = await axios.get(
-      `${SKEDU_API_BASE_URL}/availability`,
-      {
-        headers: getHeaders(),
-        params: { ...params, StoreUUID: STORE_UUID },
-      }
-    );
-    return response.data;
-  } catch (error) {
-    console.error("[Skedu] Error checking availability:", error);
-    throw error;
-  }
-}
-
-/**
- * Obtener configuración de webhooks
- */
-export async function getSkeduWebhooks() {
-  try {
-    const response = await axios.get(`${SKEDU_API_BASE_URL}/webhooks`, {
-      headers: getHeaders(),
-      params: { StoreUUID: STORE_UUID }
-    });
-    return response.data;
-  } catch (error) {
-    console.error("[Skedu] Error fetching webhooks:", error);
-    throw error;
-  }
-}
-
-/**
- * Crear o actualizar un webhook
- */
-export async function configureSkeduWebhook(data: {
-  url: string;
-  events: string[];
-  active?: boolean;
-}) {
-  try {
-    const response = await axios.post(
-      `${SKEDU_API_BASE_URL}/webhooks`,
-      { ...data, StoreUUID: STORE_UUID },
-      {
-        headers: getHeaders(),
-      }
-    );
-    return response.data;
-  } catch (error) {
-    console.error("[Skedu] Error configuring webhook:", error);
     throw error;
   }
 }

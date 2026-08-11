@@ -169,6 +169,11 @@ export function generateBiopoolBuyOrder(orderId: number): string {
   return `BIO-${orderId}-${timestamp}`.substring(0, 26);
 }
 
+export function generateSaunaBuyOrder(orderId: number): string {
+  const timestamp = Date.now().toString(36).slice(-6);
+  return `SAU-${orderId}-${timestamp}`.substring(0, 26);
+}
+
 /**
  * Generar un sessionId único
  */
