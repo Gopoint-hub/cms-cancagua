@@ -57,11 +57,11 @@ import { cn } from "@/lib/utils";
 type ViewMode = "day" | "week" | "month";
 type DayMode = "list" | "summary" | "services";
 type ServiceKey = "massages" | "biopools" | "regular_classes";
-type EventKind = "massage" | "massage_program" | "biopool" | "biopool_skedu" | "regular_class" | "regular_class_schedule";
+type EventKind = "massage" | "massage_program" | "biopool" | "regular_class" | "regular_class_schedule";
 
 type CalendarEvent = {
   id: string;
-  entityId: number | string;
+  entityId: number;
   kind: EventKind;
   service: ServiceKey;
   date: string;
@@ -294,15 +294,8 @@ function TimeGrid({
 }
 
 function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent | null; open: boolean; onOpenChange: (open: boolean) => void }) {
-  const detailInput = event?.kind === "biopool_skedu"
-    ? { kind: "biopool_skedu" as const, entityId: String(event.entityId), date: event.date }
-    : {
-        kind: (event?.kind ?? "biopool") as Exclude<EventKind, "biopool_skedu">,
-        entityId: Number(event?.entityId ?? 1),
-        date: event?.date ?? dateKey(new Date()),
-      };
   const query = trpc.operations360.detail.useQuery(
-    detailInput,
+    { kind: event?.kind ?? "biopool", entityId: event?.entityId ?? 1, date: event?.date ?? dateKey(new Date()) },
     { enabled: open && Boolean(event) }
   );
   const detail = query.data;
@@ -347,7 +340,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                 {detail.activity.length ? <div className="space-y-4">{detail.activity.map(item => <div key={item.id} className="relative border-l-2 border-primary/30 pl-4"><span className="absolute -left-[5px] top-1 h-2 w-2 rounded-full bg-primary" /><p className="font-medium">{item.label}</p>{item.detail && <p className="text-sm text-muted-foreground">{item.detail}</p>}<p className="mt-1 text-xs text-muted-foreground">{item.at ? new Date(item.at).toLocaleString("es-CL") : "Sin fecha"}</p></div>)}</div> : <p className="py-6 text-center text-sm text-muted-foreground">Aún no hay actividad adicional registrada.</p>}
               </TabsContent>
             </Tabs>
-            {detail.href && <div className="flex justify-end"><Button asChild><a href={detail.href}>Abrir agenda del módulo <ExternalLink className="ml-2 h-4 w-4" /></a></Button></div>}
+            <div className="flex justify-end"><Button asChild><a href={detail.href}>Abrir agenda del módulo <ExternalLink className="ml-2 h-4 w-4" /></a></Button></div>
           </>
         ) : null}
       </DialogContent>

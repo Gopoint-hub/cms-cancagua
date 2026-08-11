@@ -27,10 +27,6 @@ import {
 } from "../shared/permissions";
 import { protectedProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import {
-  getSkeduBiopoolCalendarEvents,
-  getSkeduBiopoolDetail,
-} from "./skeduBiopoolCalendar";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const serviceSchema = z.enum(["massages", "biopools", "regular_classes"]);
@@ -40,7 +36,6 @@ const eventKindSchema = z.enum([
   "massage",
   "massage_program",
   "biopool",
-  "biopool_skedu",
   "regular_class",
   "regular_class_schedule",
 ]);
@@ -368,24 +363,16 @@ export const operations360Router = router({
       }
 
       if (selected.includes("biopools")) {
-        const [rows, skeduRows] = await Promise.all([
-          db
-            .select({ booking: biopoolBookings, serviceName: biopoolServices.name })
-            .from(biopoolBookings)
-            .innerJoin(biopoolServices, eq(biopoolBookings.serviceId, biopoolServices.id))
-            .where(
-              and(
-                gte(biopoolBookings.bookingDate, input.from),
-                lte(biopoolBookings.bookingDate, input.to)
-              )
-            ),
-          getSkeduBiopoolCalendarEvents(input.from, input.to).catch(error => {
-            // Una caída temporal de Skedu no debe ocultar masajes, clases ni
-            // las reservas que ya viven en el CMS.
-            console.error("[Calendario 360] No se pudieron cargar Biopiscinas desde Skedu:", error);
-            return [];
-          }),
-        ]);
+        const rows = await db
+          .select({ booking: biopoolBookings, serviceName: biopoolServices.name })
+          .from(biopoolBookings)
+          .innerJoin(biopoolServices, eq(biopoolBookings.serviceId, biopoolServices.id))
+          .where(
+            and(
+              gte(biopoolBookings.bookingDate, input.from),
+              lte(biopoolBookings.bookingDate, input.to)
+            )
+          );
         events.push(
           ...rows.map(({ booking, serviceName }) => ({
             id: `biopool:${booking.id}`,
@@ -401,21 +388,6 @@ export const operations360Router = router({
             paymentStatus: booking.paymentStatus,
             people: booking.totalGuests,
             href: `/cms/biopiscinas/agenda?date=${serializeDate(booking.bookingDate)}`,
-          })),
-          ...skeduRows.map(booking => ({
-            id: `biopool-skedu:${booking.appointmentUuid}`,
-            entityId: booking.appointmentUuid,
-            kind: "biopool_skedu",
-            service: "biopools",
-            date: booking.date,
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-            title: booking.title,
-            clientName: booking.clientName,
-            status: booking.status,
-            paymentStatus: null,
-            people: booking.people,
-            href: null,
           }))
         );
       }
@@ -508,58 +480,10 @@ export const operations360Router = router({
     }),
 
   detail: protectedProcedure
-    .input(
-      z.discriminatedUnion("kind", [
-        z.object({
-          kind: z.literal("biopool_skedu"),
-          entityId: z.string().uuid(),
-          date: dateSchema,
-        }),
-        z.object({
-          kind: eventKindSchema.exclude(["biopool_skedu"]),
-          entityId: z.number().int().positive(),
-          date: dateSchema,
-        }),
-      ])
-    )
+    .input(z.object({ kind: eventKindSchema, entityId: z.number().int().positive(), date: dateSchema }))
     .query(async ({ ctx, input }) => {
       const db = await database();
       const allowed = calendarServices(ctx.user);
-
-      if (input.kind === "biopool_skedu") {
-        if (!allowed.includes("biopools")) throw new TRPCError({ code: "FORBIDDEN" });
-        const result = await getSkeduBiopoolDetail(input.entityId);
-        if (!result) throw new TRPCError({ code: "NOT_FOUND" });
-        const { event, payment } = result;
-        return {
-          service: "biopools" as const,
-          title: event.title,
-          client: {
-            name: event.clientName,
-            email: event.clientEmail,
-            phone: event.clientPhone,
-          },
-          schedule: {
-            date: event.date,
-            startTime: event.startTime,
-            endTime: event.endTime,
-          },
-          status: event.status,
-          payment,
-          notes: event.notes,
-          detail: `${event.variantName || "Reserva de Biopiscinas"} · ${event.people} persona(s) · Origen Skedu`,
-          activity: [
-            {
-              id: `created:${event.appointmentUuid}`,
-              type: "activity",
-              label: "Reserva creada en Skedu",
-              detail: event.groupUuid,
-              at: event.createdAt,
-            },
-          ],
-          href: null,
-        };
-      }
 
       if (input.kind === "biopool") {
         if (!allowed.includes("biopools")) throw new TRPCError({ code: "FORBIDDEN" });
