@@ -766,12 +766,12 @@ export const biopoolsRouter = router({
         const tickets = await db.select().from(biopoolTicketTypes).where(and(eq(biopoolTicketTypes.serviceId, input.serviceId), eq(biopoolTicketTypes.active, 1)));
         const adult = tickets.find(ticket => ticket.code === "adult");
         const child = tickets.find(ticket => ticket.code === "child");
-        if (!adult || !child) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La venta de tickets no está configurada" });
+        if (!adult || (input.childQuantity > 0 && !child)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La venta de tickets no está configurada" });
         try {
           return await calculateWellnessCartDiscount(db, input.code, [{
             service: "biopiscinas",
             serviceId: input.serviceId,
-            originalAmount: adult.priceClp * input.adultQuantity + child.priceClp * input.childQuantity,
+            originalAmount: adult.priceClp * input.adultQuantity + (child?.priceClp ?? 0) * input.childQuantity,
           }]);
         } catch (error) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "El código no es válido" });
@@ -818,8 +818,8 @@ export const biopoolsRouter = router({
             const tickets = await tx.select().from(biopoolTicketTypes).where(and(eq(biopoolTicketTypes.serviceId, input.serviceId), eq(biopoolTicketTypes.active, 1)));
             const adult = tickets.find((ticket: any) => ticket.code === "adult");
             const child = tickets.find((ticket: any) => ticket.code === "child");
-            if (!adult || !child) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La venta de tickets no está configurada" });
-            const subtotalClp = adult.priceClp * input.adultQuantity + child.priceClp * input.childQuantity;
+            if (!adult || (input.childQuantity > 0 && !child)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La venta de tickets no está configurada" });
+            const subtotalClp = adult.priceClp * input.adultQuantity + (child?.priceClp ?? 0) * input.childQuantity;
             let discount: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
             if (input.discountCode) {
               try {
@@ -859,7 +859,7 @@ export const biopoolsRouter = router({
             orderId = created.id;
             await tx.insert(biopoolCheckoutItems).values([
               { orderId, ticketTypeId: adult.id, code: adult.code, name: adult.name, unitPriceClp: adult.priceClp, quantity: input.adultQuantity, subtotalClp: adult.priceClp * input.adultQuantity },
-              ...(input.childQuantity > 0 ? [{ orderId, ticketTypeId: child.id, code: child.code, name: child.name, unitPriceClp: child.priceClp, quantity: input.childQuantity, subtotalClp: child.priceClp * input.childQuantity }] : []),
+              ...(input.childQuantity > 0 && child ? [{ orderId, ticketTypeId: child.id, code: child.code, name: child.name, unitPriceClp: child.priceClp, quantity: input.childQuantity, subtotalClp: child.priceClp * input.childQuantity }] : []),
             ]);
           } finally {
             await releaseCapacityLock(tx, lockName);

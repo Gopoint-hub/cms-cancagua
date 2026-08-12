@@ -127,6 +127,39 @@ Políticas de cancelación y reagendamiento:
 Reglamento: {{rulesUrl}}
 Ubicación: {{mapsUrl}}`;
 
+export const DEFAULT_LATE_HOUR_BIOPOOL_DESCRIPTION = `Nuevo horario nocturno de Biopiscinas para adultos.
+
+Disfruta de una pausa al final del día en aguas geotermales, sin cloro y frente al Lago Llanquihue. El Late Hour funciona de martes a domingo, con ingreso único a las 20:00 y salida a las 21:30.
+
+La experiencia incluye para uso en el lugar:
+• Bata por persona
+• Gorra de nado por persona
+• Bolsa pilwa con llave de locker
+
+Modalidad exclusiva para mayores de 18 años. El espacio es compartido y tiene cupos limitados.`;
+
+export const DEFAULT_LATE_HOUR_CONFIRMATION_BODY = `¡Muchas gracias por tu compra!
+
+Reserva: {{bookingCode}}
+Servicio: {{serviceName}}
+Fecha: {{date}}
+Horario: 20:00 a 21:30
+Adultos: {{adultQuantity}}
+
+Tu entrada Late Hour incluye:
+• 90 minutos en las biopiscinas geotermales.
+• Bata, gorra de nado, llave de locker y bolsa pilwa.
+• Acceso a estacionamientos, baños y vestuarios.
+
+Condiciones de servicio:
+• Modalidad exclusiva para mayores de 18 años.
+• En el check-in se solicita cédula de identidad.
+• Es obligatorio el uso de gorra de nado.
+• No usar bloqueador solar antes de ingresar, para cuidar el ecosistema de las biopiscinas.
+
+Reglamento: {{rulesUrl}}
+Ubicación: {{mapsUrl}}`;
+
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS biopool_services (
     id int AUTO_INCREMENT PRIMARY KEY, name varchar(180) NOT NULL, slug varchar(180) NOT NULL UNIQUE,
@@ -456,6 +489,88 @@ export async function ensureBiopoolsSchema(): Promise<void> {
       url: "https://res.cloudinary.com/dhuln9b1n/image/upload/v1770309169/cancagua/images/fullday-biopiscinas-hero.webp",
       altText: "Full Day en las Biopiscinas Geotermales de Cancagua",
       displayOrder: 0,
+    });
+  }
+
+  let [lateHourService] = await db
+    .select()
+    .from(biopoolServices)
+    .where(eq(biopoolServices.slug, "late-hour-biopiscinas"))
+    .limit(1);
+  if (!lateHourService) {
+    const [created] = await db
+      .insert(biopoolServices)
+      .values({
+        name: "Late Hour Biopiscinas (20:00 a 21:30)",
+        slug: "late-hour-biopiscinas",
+        description: DEFAULT_LATE_HOUR_BIOPOOL_DESCRIPTION,
+        status: "published",
+        capacity: 40,
+        openingTime: "20:00",
+        firstEntryTime: "20:00",
+        lastEntryTime: "20:00",
+        slotIntervalMinutes: 90,
+        standardDurationMinutes: 90,
+        finalEntryDurationMinutes: 90,
+        waterCloseTime: "21:30",
+        facilityCloseTime: "22:00",
+        maxStaffReschedules: 2,
+        refundNoticeHours: 72,
+        rescheduleNoticeHours: 48,
+        refundFeePercent: "0.25",
+        childMinAge: 18,
+        childMaxAge: 18,
+        childRequiresAdult: 0,
+        reminderHoursBefore: 24,
+        reminderEmailEnabled: 1,
+        reminderWhatsappEnabled: 1,
+        notificationEmail: "contacto@cancagua.cl",
+        mapsUrl: "https://www.google.com/maps/search/?api=1&query=Cancagua+Spa+Frutillar",
+        rulesUrl: "https://drive.google.com/file/d/1zV3KFg_JuQ7U6Yzy49BGKCy-oW3raJZQ/view?usp=sharing",
+        confirmationEmailSubject: "Confirmación de tu Late Hour en Cancagua",
+        confirmationEmailBody: DEFAULT_LATE_HOUR_CONFIRMATION_BODY,
+        reminderEmailSubject: "Recordatorio de tu Late Hour en Cancagua",
+        reminderEmailBody: DEFAULT_BIOPOOL_REMINDER_BODY,
+        reminderWhatsappBody: DEFAULT_BIOPOOL_REMINDER_BODY,
+      })
+      .$returningId();
+    [lateHourService] = await db
+      .select()
+      .from(biopoolServices)
+      .where(eq(biopoolServices.id, created.id))
+      .limit(1);
+  }
+
+  const lateHourTickets = await db
+    .select()
+    .from(biopoolTicketTypes)
+    .where(eq(biopoolTicketTypes.serviceId, lateHourService.id));
+  if (!lateHourTickets.some(ticket => ticket.code === "adult")) {
+    await db.insert(biopoolTicketTypes).values({
+      serviceId: lateHourService.id,
+      code: "adult",
+      name: "Ticket adulto Late Hour",
+      priceClp: 24_000,
+      minimumAge: 18,
+      displayOrder: 1,
+    });
+  }
+
+  const lateHourSchedules = await db
+    .select()
+    .from(biopoolSchedules)
+    .where(eq(biopoolSchedules.serviceId, lateHourService.id));
+  for (let dayOfWeek = 0; dayOfWeek <= 6; dayOfWeek += 1) {
+    if (lateHourSchedules.some(schedule => schedule.dayOfWeek === dayOfWeek)) continue;
+    await db.insert(biopoolSchedules).values({
+      serviceId: lateHourService.id,
+      dayOfWeek,
+      enabled: dayOfWeek === 1 ? 0 : 1,
+      openingTime: "20:00",
+      firstEntryTime: "20:00",
+      lastEntryTime: "20:00",
+      waterCloseTime: "21:30",
+      facilityCloseTime: "22:00",
     });
   }
   console.log("[database] Módulo de Biopiscinas verificado");
