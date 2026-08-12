@@ -232,6 +232,13 @@
       "when": 1786464375000,
       "tag": "0039_sauna",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1786530600000,
+      "tag": "0040_hot_tub_identification",
+      "breakpoints": true
     }
   ]
 }

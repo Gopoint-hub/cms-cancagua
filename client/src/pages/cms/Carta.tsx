@@ -852,7 +852,7 @@ export default function CMSCarta() {
                             <Badge className={statusInfo[order.status]?.className}>{statusInfo[order.status]?.label || order.status}</Badge>
                           </div>
                           <CardDescription className="mt-1">
-                            {order.customerName} · {order.customerPhone} · Hot Tub {order.hotTubCode} — {order.hotTubName}
+                            {order.customerName} · {order.customerPhone} · {order.identificationLabel}
                           </CardDescription>
                         </div>
                         <div className="text-sm sm:text-right">

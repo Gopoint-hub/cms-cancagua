@@ -369,20 +369,34 @@ export const appRouter = router({
         return await db.getActiveMenuItemsByCategory(input.categoryId);
       }),
 
+    getHotTubCatalog: publicProcedure.query(async () => {
+      return await db.getHotTubMenuCatalog();
+    }),
+
     submitHotTubOrder: publicProcedure
       .input(z.object({
         customerName: z.string().trim().min(2).max(180),
         customerPhone: z.string().trim().min(8).max(50),
-        hotTubCode: z.enum(["1006", "1005", "1004", "1003", "1002", "1001"]),
+        identificationType: z.enum(["hot_tub", "key_fob"]).default("hot_tub"),
+        hotTubCode: z.enum(["1006", "1005", "1004", "1003", "1002", "1001"]).optional(),
+        keyFobNumber: z.string().trim().regex(/^\d{1,3}$/).optional(),
         serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         desiredTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
         notes: z.string().trim().max(500).optional(),
         source: z.enum(["menu", "checkout"]).default("menu"),
         items: z.array(z.object({
-          menuItemId: z.number().int().positive(),
-          priceKey: z.enum(["default", "for_2", "for_4", "for_6"]),
+          catalogKey: z.string().trim().min(2).max(80).optional(),
+          menuItemId: z.number().int().positive().optional(),
+          priceKey: z.enum(["default", "for_2", "for_4", "for_6"]).optional(),
           quantity: z.number().int().min(1).max(20),
+        }).refine(item => Boolean(item.catalogKey || (item.menuItemId && item.priceKey)), {
+          message: "Producto inválido",
         })).min(1).max(30),
+      }).superRefine((input, ctx) => {
+        if (input.identificationType === "hot_tub" && !input.hotTubCode)
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["hotTubCode"], message: "Selecciona tu Hot Tub" });
+        if (input.identificationType === "key_fob" && !input.keyFobNumber)
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["keyFobNumber"], message: "Ingresa tu número de llavero" });
       }))
       .mutation(async ({ input }) => {
         try {
@@ -394,10 +408,11 @@ export const appRouter = router({
             `• ${item.quantity}× ${item.itemName}${item.priceLabel ? ` (${item.priceLabel})` : ""} — ${formatMoney(item.lineTotal)}`,
           ).join("\n");
           const schedule = [input.serviceDate, input.desiredTime].filter(Boolean).join(" · ") || "Coordinar en recepción";
+          const identification = order.identificationLabel;
           const message = [
             `*PREORDEN HOT TUB ${order.orderNumber}*`,
             `Cliente: ${input.customerName}`,
-            `Hot Tub: ${input.hotTubCode} - ${order.hotTubName}`,
+            `Identificación: ${identification}`,
             `Fecha/hora: ${schedule}`,
             "",
             lines,
@@ -413,7 +428,7 @@ export const appRouter = router({
               if (cafeGroupId) {
                 const cafeMessage = [
                   `*COMANDA HOT TUB ${order.orderNumber}*`,
-                  `${input.hotTubCode} - ${order.hotTubName} · ${schedule}`,
+                  `${identification} · ${schedule}`,
                   ...cafeLines.map(item => `• ${item.quantity}× ${item.itemName}${item.priceLabel ? ` (${item.priceLabel})` : ""}`),
                   input.notes ? `Notas: ${input.notes}` : "",
                   "Recepción reforzará esta comanda por walkie-talkie.",

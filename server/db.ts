@@ -693,17 +693,44 @@ export const HOT_TUB_NAMES: Record<string, string> = {
   "1001": "Colibrí",
 };
 
+export async function getHotTubMenuCatalog() {
+  const database = await getDb();
+  if (!database) return [];
+  const { menuItems } = await import("../drizzle/schema");
+  const { HOT_TUB_CATALOG } = await import("./hotTubMenu");
+  const ids = Array.from(
+    new Set(HOT_TUB_CATALOG.flatMap(section => section.items.map(entry => entry.menuItemId))),
+  );
+  const products = await database
+    .select({ id: menuItems.id, active: menuItems.active, inStock: menuItems.inStock })
+    .from(menuItems)
+    .where(inArray(menuItems.id, ids));
+  const state = new Map(products.map(product => [product.id, product]));
+  return HOT_TUB_CATALOG.map(section => ({
+    ...section,
+    items: section.items
+      .filter(entry => state.get(entry.menuItemId)?.active === 1)
+      .map(entry => ({
+        ...entry,
+        inStock: state.get(entry.menuItemId)?.inStock === 1,
+      })),
+  })).filter(section => section.items.length > 0);
+}
+
 type HotTubOrderDraft = {
   customerName: string;
   customerPhone: string;
-  hotTubCode: "1006" | "1005" | "1004" | "1003" | "1002" | "1001";
+  identificationType: "hot_tub" | "key_fob";
+  hotTubCode?: "1006" | "1005" | "1004" | "1003" | "1002" | "1001";
+  keyFobNumber?: string;
   serviceDate?: string;
   desiredTime?: string;
   notes?: string;
   source: "menu" | "checkout";
   items: Array<{
-    menuItemId: number;
-    priceKey: "default" | "for_2" | "for_4" | "for_6";
+    catalogKey?: string;
+    menuItemId?: number;
+    priceKey?: "default" | "for_2" | "for_4" | "for_6";
     quantity: number;
   }>;
 };
@@ -714,18 +741,37 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
 
   const { hotTubOrders, hotTubOrderItems, menuItems } = await import("../drizzle/schema");
   return await database.transaction(async (tx) => {
-    const requestedIds = Array.from(new Set(input.items.map(item => item.menuItemId)));
+    const { findHotTubCatalogItem } = await import("./hotTubMenu");
+    if (input.identificationType === "hot_tub" && !input.hotTubCode)
+      throw new Error("Selecciona tu Hot Tub");
+    if (input.identificationType === "key_fob" && !input.keyFobNumber?.trim())
+      throw new Error("Ingresa el número de tu llavero");
+    const requestedIds = Array.from(new Set(input.items.map(requested => {
+      const catalogItem = requested.catalogKey
+        ? findHotTubCatalogItem(requested.catalogKey)
+        : null;
+      return catalogItem?.menuItemId ?? requested.menuItemId ?? 0;
+    }).filter(Boolean)));
     const products = await tx.select().from(menuItems).where(inArray(menuItems.id, requestedIds));
     const productsById = new Map(products.map(product => [product.id, product]));
 
     const lines = input.items.map(requested => {
-      const product = productsById.get(requested.menuItemId);
+      const catalogItem = requested.catalogKey
+        ? findHotTubCatalogItem(requested.catalogKey)
+        : null;
+      if (requested.catalogKey && !catalogItem)
+        throw new Error("Uno de los productos ya no está disponible");
+      const productId = catalogItem?.menuItemId ?? requested.menuItemId;
+      const product = productId ? productsById.get(productId) : null;
       if (!product || product.active !== 1) throw new Error("Uno de los productos ya no está disponible");
       if (product.inStock !== 1) throw new Error(`${product.name} está agotado`);
 
+      const priceKey = catalogItem ? `hot_tub:${catalogItem.key}` : requested.priceKey;
       const prices = safeJsonParse<Record<string, number>>(product.prices, {});
-      const unitPrice = prices[requested.priceKey];
-      if (!Number.isInteger(unitPrice) || unitPrice < 0) throw new Error(`El precio de ${product.name} cambió. Revisa tu pedido.`);
+      const selectedPrice = catalogItem?.priceClp ?? (requested.priceKey ? prices[requested.priceKey] : undefined);
+      if (typeof selectedPrice !== "number" || !Number.isInteger(selectedPrice) || selectedPrice < 0)
+        throw new Error(`El precio de ${product.name} cambió. Revisa tu pedido.`);
+      const unitPrice = selectedPrice;
 
       const labels: Record<string, string> = {
         default: "",
@@ -735,13 +781,15 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
       };
       return {
         menuItemId: product.id,
-        itemName: product.name,
-        priceKey: requested.priceKey,
-        priceLabel: labels[requested.priceKey] || null,
+        itemName: catalogItem?.name ?? product.name,
+        priceKey: priceKey!,
+        priceLabel:
+          catalogItem?.subtitle ??
+          (requested.priceKey ? labels[requested.priceKey] || null : null),
         unitPrice,
         quantity: requested.quantity,
         lineTotal: unitPrice * requested.quantity,
-        preparationArea: product.preparationArea,
+        preparationArea: catalogItem?.preparationArea ?? product.preparationArea,
       };
     });
 
@@ -751,7 +799,9 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
       orderNumber,
       customerName: input.customerName.trim(),
       customerPhone: input.customerPhone.trim(),
-      hotTubCode: input.hotTubCode,
+      identificationType: input.identificationType,
+      hotTubCode: input.identificationType === "hot_tub" ? input.hotTubCode : null,
+      keyFobNumber: input.identificationType === "key_fob" ? input.keyFobNumber?.trim() : null,
       serviceDate: input.serviceDate ? new Date(`${input.serviceDate}T12:00:00`) : null,
       desiredTime: input.desiredTime || null,
       notes: input.notes?.trim() || null,
@@ -767,7 +817,11 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
       id: orderId,
       orderNumber,
       subtotal,
-      hotTubName: HOT_TUB_NAMES[input.hotTubCode],
+      hotTubName: input.hotTubCode ? HOT_TUB_NAMES[input.hotTubCode] : null,
+      identificationLabel:
+        input.identificationType === "hot_tub"
+          ? `Hot Tub ${input.hotTubCode} — ${HOT_TUB_NAMES[input.hotTubCode!]}`
+          : `Llavero ${input.keyFobNumber?.trim()}`,
       items: lines,
     };
   });
@@ -793,7 +847,11 @@ export async function getHotTubOrders(limit = 200) {
     .where(inArray(hotTubOrderItems.orderId, orders.map(order => order.id)));
   return orders.map(order => ({
     ...order,
-    hotTubName: HOT_TUB_NAMES[order.hotTubCode],
+    hotTubName: order.hotTubCode ? HOT_TUB_NAMES[order.hotTubCode] : null,
+    identificationLabel:
+      order.identificationType === "key_fob"
+        ? `Llavero ${order.keyFobNumber}`
+        : `Hot Tub ${order.hotTubCode} — ${order.hotTubCode ? HOT_TUB_NAMES[order.hotTubCode] : ""}`,
     items: orderItems.filter(item => item.orderId === order.id),
   }));
 }
