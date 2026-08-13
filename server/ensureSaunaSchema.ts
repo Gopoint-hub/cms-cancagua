@@ -29,7 +29,7 @@ export async function ensureSaunaSchema(): Promise<void> {
     await db.execute(sql.raw(statement));
   }
   const [columns] = await db.execute(sql`SHOW COLUMNS FROM sauna_bookings`);
-  if (!(columns as any[]).some(column => column.Field === "amount_paid_clp")) {
+  if (!((columns as unknown) as any[]).some(column => column.Field === "amount_paid_clp")) {
     await db.execute(sql`ALTER TABLE sauna_bookings ADD COLUMN amount_paid_clp int NOT NULL DEFAULT 0 AFTER amount_clp`);
   }
   await db.execute(sql.raw("ALTER TABLE `sauna_bookings` MODIFY COLUMN `payment_status` enum('unknown','pending','partially_paid','paid','partially_refunded','refunded') NOT NULL DEFAULT 'unknown'"));

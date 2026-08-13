@@ -92,7 +92,7 @@ export async function getLastBioExit(reportDate: string): Promise<{
       .slice(0, 10);
 
     const data = await getSkeduEvents({ startDate: dayBefore, endDate: dayAfter });
-    const items: any[] = data?.Data || data?.data || [];
+    const items: any[] = data?.Data || [];
 
     const exits = items
       .filter((booking) => !booking?.DeletedAt)

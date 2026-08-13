@@ -35,6 +35,7 @@ import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignm
 import biopoolWebpayReturnRouter, { startBiopoolCheckoutScheduler } from "../biopoolWebpay";
 import saunaWebpayReturnRouter, { startSaunaCheckoutScheduler } from "../saunaWebpay";
 import { startSaunaSyncScheduler } from "../saunaSync";
+import navegaRelaxWebhook from "../navegaRelaxWebhook";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -116,6 +117,7 @@ async function startServer() {
   app.use("/api/webhooks/skedu", conciergeWebhook);
   // Webhook para Getnet (Módulo Masajes)
   app.use("/api/webhooks/getnet", getnetWebhook);
+  app.use("/api/webhooks/navega-relax", navegaRelaxWebhook);
   // Aprobación de terapeutas freelance (Tamara) y confirmación de terapeutas
   app.use("/api/masajes", freelanceApprovalRouter);
   // Catálogo público consumido por cancagua.cl

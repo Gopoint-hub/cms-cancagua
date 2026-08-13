@@ -25,13 +25,13 @@ import { addMonths, format } from "date-fns";
 import { Ban, Plus } from "lucide-react";
 import { toast } from "sonner";
 
-const reasons: Record<string, string> = {
+const reasons = {
   maintenance: "Mantención",
   private_event: "Evento privado",
   detox: "Programa Detox",
   operational: "Operación",
   other: "Otro",
-};
+} as const;
 
 export default function SaunaBlocks() {
   const today = format(new Date(), "yyyy-MM-dd");

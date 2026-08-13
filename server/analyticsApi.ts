@@ -480,7 +480,7 @@ export async function fetchSkeduMetrics(startDate: string, endDate: string): Pro
     let items: any[] = [];
     try {
       const data = await getSkeduEvents({ startDate, endDate });
-      items = data?.Data || data?.data || [];
+      items = data?.Data || [];
     } catch (e) {
       console.warn("[Analytics] Skedu axios failed, trying direct fetch...");
       items = await fetchSkeduDirect(startDate, endDate);

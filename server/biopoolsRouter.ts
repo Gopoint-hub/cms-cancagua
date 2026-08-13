@@ -1412,9 +1412,7 @@ export const biopoolsRouter = router({
               ctx.user.id
             );
 
-            const paidAmount = input.paymentStatus === "paid"
-              ? originalAmountClp - input.discountAmountClp
-              : 0;
+            const paidAmount = amountPaidClp;
             const servicesUsed = Array.from(new Set([
               ...parseClientServicesUsed(client.serviciosUsados),
               "Biopiscinas",
@@ -1559,7 +1557,7 @@ export const biopoolsRouter = router({
           if (payment.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Este pago ya no está pendiente" });
           if (payment.method !== "cash" && !input.reference) throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa el código o referencia del pago" });
           if (["payment_link", "transbank_machine"].includes(payment.method) && !input.cardType) throw new TRPCError({ code: "BAD_REQUEST", message: "Indica si la tarjeta es de crédito o débito" });
-          const [booking] = await tx.select().from(biopoolBookings).where(eq(biopoolBookings.id, payment.bookingId)).limit(1);
+          const [booking] = await tx.select().from(biopoolBookings).where(eq(biopoolBookings.id, payment.reservationId)).limit(1);
           if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
           const totalClp = booking.originalAmountClp - booking.discountAmountClp;
           const newPaidTotal = booking.amountPaidClp + payment.amountClp;

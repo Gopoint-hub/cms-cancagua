@@ -930,7 +930,6 @@ export const saunaRouter = router({
             ...privateService,
             name: `Sauna Nativo ${partySize} personas`,
             partySize,
-            capacityUsed: SAUNA_CAPACITY,
             purchaseKey: `${privateService.id}:${partySize}`,
             fixedPartySize: true,
           });
