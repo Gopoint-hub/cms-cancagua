@@ -28,7 +28,7 @@ describe("Biopiscinas capacity", () => {
     });
   });
 
-  it("counts rolling simultaneous occupancy and frees seats at checkout", () => {
+  it("deducts reservations only from their own entry time", () => {
     const occupancy = [
       { startTime: "10:00", endTime: "14:00", seats: 25 },
       { startTime: "11:00", endTime: "15:00", seats: 10 },
@@ -40,17 +40,24 @@ describe("Biopiscinas capacity", () => {
         { startTime: "12:00", endTime: "16:00" },
         occupancy
       )
-    ).toBe(5);
+    ).toBe(40);
     expect(
       minimumAvailableSeats(
         40,
         { startTime: "15:00", endTime: "19:00" },
         occupancy
       )
-    ).toBe(28);
+    ).toBe(40);
+    expect(
+      minimumAvailableSeats(
+        40,
+        { startTime: "11:00", endTime: "15:00" },
+        occupancy
+      )
+    ).toBe(30);
   });
 
-  it("shares capacity between a Full Day stay and regular four-hour entries", () => {
+  it("keeps Full Day and four-hour entry quotas independent by start time", () => {
     const fullDaySlots = buildEntrySlots({
       firstEntryTime: "10:00",
       lastEntryTime: "13:00",
@@ -73,7 +80,17 @@ describe("Biopiscinas capacity", () => {
           { startTime: "11:00", endTime: "15:00", seats: 12 },
         ]
       )
-    ).toBe(10);
+    ).toBe(40);
+  });
+
+  it("applies operational blocks to every overlapping entry slot", () => {
+    expect(
+      minimumAvailableSeats(
+        40,
+        { startTime: "15:00", endTime: "19:00" },
+        [{ startTime: "14:00", endTime: "17:00", seats: 8, kind: "block" }]
+      )
+    ).toBe(32);
   });
 
   it("requires an adult whenever children are included", () => {

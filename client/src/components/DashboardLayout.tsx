@@ -57,7 +57,7 @@ import {
 } from "@shared/sidebar";
 
 // Definición de categorías y sus items de menú
-export type CategoryId = "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "biopools" | "sauna" | "masajes" | "regular_classes";
+export type CategoryId = "clients360" | "b2c" | "b2b" | "ventas" | "marketing" | "metrics" | "operations" | "admin" | "ayuda" | "biopools" | "sauna" | "masajes" | "regular_classes";
 
 interface MenuItem {
   icon: any;
@@ -68,6 +68,7 @@ interface MenuItem {
   /** Restricted massage-area accounting close (Tamara and superadmins). */
   areaAdminOnly?: boolean;
   regularClassesAccess?: "teacher" | "reception" | "admin";
+  superAdminOnly?: boolean;
   permission?: CmsPermissionKey;
   permissionsAny?: CmsPermissionKey[];
 }
@@ -118,16 +119,33 @@ const quickMenuItems: Array<MenuItem & { id: SidebarModuleId; permissionsAny: Cm
     path: "/cms/calendario",
     permissionsAny: ["module.massages", "module.biopools", "module.sauna", "module.regular_classes"],
   },
-  {
-    id: "clients360",
-    icon: UsersRound,
-    label: "Cliente 360",
-    path: "/cms/clientes-360",
-    permissionsAny: ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
-  },
 ];
 
 export const categories: Category[] = [
+  {
+    id: "clients360",
+    label: "Cliente 360",
+    icon: UsersRound,
+    description: "Historial y análisis de clientes",
+    color: "bg-slate-500",
+    permission: "massages.view_clients",
+    permissionsAny: ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
+    items: [
+      {
+        icon: Users,
+        label: "Clientes",
+        path: "/cms/clientes-360",
+        permission: "massages.view_clients",
+        permissionsAny: ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
+      },
+      {
+        icon: TrendingUp,
+        label: "Dashboard BI",
+        path: "/cms/clientes-360/dashboard-bi",
+        superAdminOnly: true,
+      },
+    ],
+  },
   {
     id: "b2c",
     label: "B2C",
@@ -137,12 +155,8 @@ export const categories: Category[] = [
     permission: "module.b2c",
     roles: ["super_admin", "admin", CANCAGUA_STAFF_ROLE],
     items: [
-      { icon: Package, label: "Servicios", path: "/cms/servicios" },
       { icon: UtensilsCrossed, label: "Carta", path: "/cms/carta" },
-      { icon: CalendarCheck, label: "Reservas", path: "/cms/reservas" },
-
       { icon: MessageSquare, label: "Mensajes", path: "/cms/mensajes" },
-      { icon: Users, label: "Clientes", path: "/cms/clientes" },
     ],
   },
   {
@@ -586,6 +600,7 @@ function DashboardLayoutContent({
         ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
         : hasCmsPermission(user ?? {}, item.permission)))
       && (hasExplicitPermissions || !item.roles || item.roles.includes(user?.role || ""))
+      && (!item.superAdminOnly || isSuperAdmin)
       && (!item.areaAdminOnly || hasExplicitPermissions || areaAdminAccess.data?.allowed === true)
       && (
         !item.regularClassesAccess

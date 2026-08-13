@@ -112,7 +112,8 @@ function AdminDashboard() {
       (!item.permission || (item.permissionsAny
         ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
         : hasCmsPermission(user ?? {}, item.permission)))
-      && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole)),
+      && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole))
+      && (!item.superAdminOnly || userRole === "super_admin")
     );
     if (firstVisibleItem) {
       setLocation(firstVisibleItem.path);
@@ -120,6 +121,9 @@ function AdminDashboard() {
   };
 
   const categoryStats: Record<CategoryId, { label: string; value: number | string; icon: any }[]> = {
+    clients360: [
+      { label: "Historial integrado", value: "Ver", icon: Users },
+    ],
     b2c: [
       { label: "Reservas pendientes", value: pendingBookings, icon: CalendarCheck },
       { label: "Mensajes sin leer", value: unreadMessages, icon: MessageSquare },
@@ -144,6 +148,9 @@ function AdminDashboard() {
     ],
     biopools: [
       { label: "Agenda y aforo", value: "Ver", icon: CalendarCheck },
+    ],
+    sauna: [
+      { label: "Agenda y programas", value: "Ver", icon: CalendarCheck },
     ],
     regular_classes: [
       { label: "Programa integrado", value: "Ver", icon: CalendarCheck },
@@ -184,7 +191,8 @@ function AdminDashboard() {
               item => (!item.permission || (item.permissionsAny
                 ? hasAnyCmsPermission(user ?? {}, item.permissionsAny)
                 : hasCmsPermission(user ?? {}, item.permission)))
-                && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole)),
+                && (hasExplicitPermissions || !item.roles || item.roles.includes(userRole))
+                && (!item.superAdminOnly || userRole === "super_admin"),
             );
             return (
               <Card 

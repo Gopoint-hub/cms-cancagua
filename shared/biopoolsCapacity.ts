@@ -2,6 +2,8 @@ export type BiopoolOccupancyInterval = {
   startTime: string;
   endTime: string;
   seats: number;
+  /** Reservations/holds consume only their entry slot; blocks cover every overlapping slot. */
+  kind?: "entry" | "block";
 };
 
 export type BiopoolSlot = {
@@ -34,40 +36,20 @@ export function intervalsOverlap(
   );
 }
 
-/**
- * Returns the lowest number of seats available at any point of a candidate
- * stay. Intervals are half-open: a guest ending at 14:00 frees their seat for
- * another guest entering at 14:00.
- */
+/** Returns available tickets for an entry time, while honoring time-range blocks. */
 export function minimumAvailableSeats(
   capacity: number,
   candidate: Pick<BiopoolOccupancyInterval, "startTime" | "endTime">,
   occupancy: BiopoolOccupancyInterval[]
 ): number {
-  const candidateStart = timeToMinutes(candidate.startTime);
-  const candidateEnd = timeToMinutes(candidate.endTime);
-  const checkpoints = new Set<number>([candidateStart]);
+  const used = occupancy.reduce((sum, interval) => {
+    const consumesSlot = interval.kind === "block"
+      ? intervalsOverlap(candidate, interval)
+      : interval.startTime === candidate.startTime;
+    return consumesSlot ? sum + interval.seats : sum;
+  }, 0);
 
-  for (const interval of occupancy) {
-    const start = timeToMinutes(interval.startTime);
-    const end = timeToMinutes(interval.endTime);
-    if (start > candidateStart && start < candidateEnd) checkpoints.add(start);
-    if (end > candidateStart && end < candidateEnd) checkpoints.add(end);
-  }
-
-  let peakUsed = 0;
-  for (const checkpoint of Array.from(checkpoints)) {
-    const used = occupancy.reduce((sum, interval) => {
-      const start = timeToMinutes(interval.startTime);
-      const end = timeToMinutes(interval.endTime);
-      return checkpoint >= start && checkpoint < end
-        ? sum + interval.seats
-        : sum;
-    }, 0);
-    peakUsed = Math.max(peakUsed, used);
-  }
-
-  return Math.max(0, capacity - peakUsed);
+  return Math.max(0, capacity - used);
 }
 
 export function buildEntrySlots(input: {

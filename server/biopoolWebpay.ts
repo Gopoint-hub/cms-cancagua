@@ -14,6 +14,7 @@ import { commitTransaction, isTransactionApproved } from "./webpay";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { ENV } from "./_core/env";
 import { recordMassageDiscountUsage } from "./massageDiscounts";
+import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
 
 export type BiopoolPaymentOrderCheck = {
   buyOrder: string | null;
@@ -223,11 +224,12 @@ export async function finalizeApprovedBiopoolOrder(
       chileLocalDateTimeToUtc(dateValue(completed.order.bookingDate), completed.order.startTime).getTime()
       - completed.service.reminderHoursBefore * 3_600_000,
     );
-    await db.insert(biopoolNotifications).values([
-      { bookingId: completed.bookingId, type: "confirmation", channel: "email", scheduledAt: new Date() },
-      ...(completed.service.reminderEmailEnabled ? [{ bookingId: completed.bookingId, type: "reminder" as const, channel: "email" as const, scheduledAt: reminderAt }] : []),
-      ...(completed.service.reminderWhatsappEnabled ? [{ bookingId: completed.bookingId, type: "reminder" as const, channel: "whatsapp" as const, scheduledAt: reminderAt }] : []),
-    ]);
+    await db.insert(biopoolNotifications).values(buildBiopoolNotificationSchedule({
+      bookingId: completed.bookingId,
+      reminderAt,
+      reminderEmailEnabled: completed.service.reminderEmailEnabled,
+      reminderWhatsappEnabled: completed.service.reminderWhatsappEnabled,
+    }));
   } catch (error) {
     console.error("[biopools:checkout] Reserva confirmada; no se pudieron programar las notificaciones", {
       bookingId: completed.bookingId,

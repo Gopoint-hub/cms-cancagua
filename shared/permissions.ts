@@ -391,6 +391,7 @@ export function canAccessCmsPath(
   permissions?: string | null,
 ): boolean {
   if (role === "super_admin") return true;
+  if (path === "/cms/clientes-360/dashboard-bi" || path === "/cms/clientes") return false;
   const explicitPermissions = parseCmsPermissions(permissions);
   if (explicitPermissions) {
     if (path === "/" || path === "/cms") return true;

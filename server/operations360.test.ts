@@ -25,4 +25,10 @@ describe("acceso a vistas 360", () => {
     const permissions = JSON.stringify(["module.biopools", "biopools.view_clients"]);
     expect(canAccessCmsPath("editor", "/cms/clientes-360", false, permissions)).toBe(true);
   });
+
+  it("reserva el Dashboard BI exclusivamente para superadministradores", () => {
+    const permissions = JSON.stringify(["module.b2c", "biopools.view_clients"]);
+    expect(canAccessCmsPath("admin", "/cms/clientes-360/dashboard-bi", false, permissions)).toBe(false);
+    expect(canAccessCmsPath("super_admin", "/cms/clientes-360/dashboard-bi", false, permissions)).toBe(true);
+  });
 });

@@ -112,6 +112,7 @@ function Router() {
       <Route path="/" component={CMSDashboard} />
       <Route path="/cms" component={CMSDashboard} />
       <Route path="/cms/calendario" component={CMSCalendario360} />
+      <Route path="/cms/clientes-360/dashboard-bi" component={CMSClientes} />
       <Route path="/cms/clientes-360" component={CMSClientes360} />
       <Route path="/cms/usuarios" component={CMSUsuarios} />
       <Route path="/cms/carta" component={CMSCarta} />

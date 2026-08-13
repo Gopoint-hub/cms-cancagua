@@ -81,11 +81,13 @@ export default function BiopiscinasAgenda() {
   const initialDate = new URLSearchParams(search).get("date") ?? localDate();
   const [date, setDate] = useState(initialDate);
   const [view, setView] = useState<ViewMode>("day");
-  const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<number | "all">("all");
+  const [manualServiceId, setManualServiceId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [startTime, setStartTime] = useState("");
   const [rescheduleBooking, setRescheduleBooking] = useState<{
     id: number;
+    serviceId: number;
     totalGuests: number;
     clientName: string;
   } | null>(null);
@@ -105,16 +107,21 @@ export default function BiopiscinasAgenda() {
   });
   const utils = trpc.useUtils();
   const { data: services } = trpc.biopools.services.list.useQuery();
-  const service =
-    services?.find(item => item.id === selectedServiceId) ??
-    services?.find(item => item.status !== "archived") ??
-    services?.[0];
-  useEffect(() => {
-    if (!selectedServiceId && service) setSelectedServiceId(service.id);
-  }, [selectedServiceId, service]);
+  const activeServices = useMemo(
+    () => services?.filter(item => item.status !== "archived") ?? [],
+    [services]
+  );
+  const selectedService =
+    selectedServiceId === "all"
+      ? undefined
+      : activeServices.find(item => item.id === selectedServiceId);
+  const manualService =
+    activeServices.find(item => item.id === manualServiceId) ??
+    selectedService ??
+    activeServices[0];
   const { data: detail } = trpc.biopools.services.get.useQuery(
-    { id: service?.id ?? 0 },
-    { enabled: Boolean(service) }
+    { id: manualService?.id ?? 0 },
+    { enabled: Boolean(manualService) }
   );
   const selected = parseISO(date);
   const range = useMemo(() => {
@@ -130,20 +137,43 @@ export default function BiopiscinasAgenda() {
       to: format(endOfWeek(endOfMonth(selected), { weekStartsOn: 1 }), "yyyy-MM-dd"),
     };
   }, [date, selected, view]);
-  const query = { serviceId: service?.id ?? 0, date };
-  const { data: availability, isLoading } =
-    trpc.biopools.availability.day.useQuery(query, {
-      enabled: Boolean(service),
-      refetchInterval: 30_000,
-    });
+  const { data: availability, isLoading: isSingleAvailabilityLoading } =
+    trpc.biopools.availability.day.useQuery(
+      { serviceId: selectedService?.id ?? 0, date },
+      {
+        enabled: Boolean(selectedService),
+        refetchInterval: 30_000,
+      }
+    );
+  const { data: allAvailability, isLoading: isAllAvailabilityLoading } =
+    trpc.biopools.availability.all.useQuery(
+      { date },
+      { enabled: selectedServiceId === "all", refetchInterval: 30_000 }
+    );
+  const availabilityRows = useMemo(
+    () => selectedServiceId === "all"
+      ? (allAvailability ?? [])
+      : (availability ? [availability] : []),
+    [allAvailability, availability, selectedServiceId]
+  );
+  const manualAvailability = availabilityRows.find(
+    item => item.service.id === manualService?.id
+  );
+  const isLoading = selectedServiceId === "all"
+    ? isAllAvailabilityLoading
+    : isSingleAvailabilityLoading;
   const { data: rescheduleAvailability } =
     trpc.biopools.availability.day.useQuery(
-      { serviceId: service?.id ?? 0, date: rescheduleDate },
-      { enabled: Boolean(service && rescheduleBooking) }
+      { serviceId: rescheduleBooking?.serviceId ?? 0, date: rescheduleDate },
+      { enabled: Boolean(rescheduleBooking) }
     );
   const { data: bookings } = trpc.biopools.bookings.list.useQuery(
-    { serviceId: service?.id ?? 0, from: range.from, to: range.to },
-    { enabled: Boolean(service), refetchInterval: 30_000 }
+    {
+      serviceId: selectedServiceId === "all" ? undefined : selectedServiceId,
+      from: range.from,
+      to: range.to,
+    },
+    { enabled: activeServices.length > 0, refetchInterval: 30_000 }
   );
   const create = trpc.biopools.bookings.create.useMutation({
     onSuccess: () => {
@@ -190,30 +220,47 @@ export default function BiopiscinasAgenda() {
     detail?.tickets.find(ticket => ticket.code === "adult")?.priceClp ?? 0;
   const childPrice =
     detail?.tickets.find(ticket => ticket.code === "child")?.priceClp ?? 0;
+  useEffect(() => {
+    if (detail && !detail.tickets.some(ticket => ticket.code === "child")) {
+      setForm(current => current.childQuantity === 0
+        ? current
+        : { ...current, childQuantity: 0 });
+    }
+  }, [detail]);
   const total =
     form.adultQuantity * adultPrice + form.childQuantity * childPrice;
-  const selectedSlot = availability?.slots.find(
+  const selectedSlot = manualAvailability?.slots.find(
     slot => slot.startTime === startTime
   );
   useEffect(() => {
     if (
-      availability?.slots.length &&
-      !availability.slots.some(slot => slot.startTime === startTime)
+      manualAvailability?.slots.length &&
+      !manualAvailability.slots.some(slot => slot.startTime === startTime)
     )
-      setStartTime(availability.slots[0].startTime);
-  }, [availability, startTime]);
+      setStartTime(manualAvailability.slots[0].startTime);
+  }, [manualAvailability, startTime]);
 
   const groups = useMemo(
     () =>
-      (availability?.slots ?? []).map(slot => ({
-        slot,
-        bookings: (bookings ?? []).filter(
-          booking => bookingDate(booking.bookingDate) === date && booking.startTime === slot.startTime
+      availabilityRows
+        .flatMap(row => row.slots.map(slot => ({
+          service: row.service,
+          slot,
+          bookings: (bookings ?? []).filter(
+            booking =>
+              booking.serviceId === row.service.id &&
+              bookingDate(booking.bookingDate) === date &&
+              booking.startTime === slot.startTime
+          ),
+        })))
+        .sort((a, b) =>
+          a.slot.startTime.localeCompare(b.slot.startTime) ||
+          a.service.name.localeCompare(b.service.name, "es")
         ),
-      })),
-    [availability, bookings]
+    [availabilityRows, bookings, date]
   );
-  const openCreate = (slot: string) => {
+  const openCreate = (serviceId: number, slot: string) => {
+    setManualServiceId(serviceId);
     setStartTime(slot);
     setOpen(true);
   };
@@ -239,6 +286,7 @@ export default function BiopiscinasAgenda() {
   };
   const openReschedule = (booking: {
     id: number;
+    serviceId: number;
     totalGuests: number;
     clientName: string;
     bookingDate: unknown;
@@ -246,6 +294,7 @@ export default function BiopiscinasAgenda() {
   }) => {
     setRescheduleBooking({
       id: booking.id,
+      serviceId: booking.serviceId,
       totalGuests: booking.totalGuests,
       clientName: booking.clientName,
     });
@@ -268,10 +317,10 @@ export default function BiopiscinasAgenda() {
       );
   }, [rescheduleAvailability, rescheduleBooking, rescheduleTime]);
   const save = () => {
-    if (!service) return;
+    if (!manualService) return;
     create.mutate({
       ...form,
-      serviceId: service.id,
+      serviceId: manualService.id,
       bookingDate: date,
       startTime,
       source: "cms",
@@ -300,6 +349,8 @@ export default function BiopiscinasAgenda() {
       ? `${format(parseISO(range.from), "d MMM", { locale: es })} – ${format(parseISO(range.to), "d MMM yyyy", { locale: es })}`
       : format(selected, "MMMM yyyy", { locale: es });
   const bookingsForDate = (value: string) => (bookings ?? []).filter(item => bookingDate(item.bookingDate) === value);
+  const serviceName = (serviceId: number) =>
+    activeServices.find(item => item.id === serviceId)?.name ?? "Biopiscinas";
 
   return (
     <DashboardLayout>
@@ -313,20 +364,22 @@ export default function BiopiscinasAgenda() {
           </div>
           <div className="flex items-center gap-2">
             <Select
-              value={service ? String(service.id) : undefined}
-              onValueChange={value => setSelectedServiceId(Number(value))}
+              value={String(selectedServiceId)}
+              onValueChange={value => {
+                setSelectedServiceId(value === "all" ? "all" : Number(value));
+                setManualServiceId(value === "all" ? null : Number(value));
+              }}
             >
               <SelectTrigger className="w-64">
                 <SelectValue placeholder="Selecciona modalidad" />
               </SelectTrigger>
               <SelectContent>
-                {services
-                  ?.filter(item => item.status !== "archived")
-                  .map(item => (
-                    <SelectItem key={item.id} value={String(item.id)}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
+                <SelectItem value="all">Todos los servicios</SelectItem>
+                {activeServices.map(item => (
+                  <SelectItem key={item.id} value={String(item.id)}>
+                    {item.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Button
@@ -351,9 +404,14 @@ export default function BiopiscinasAgenda() {
             </Button>
             {canManage && (
               <Button
-                onClick={() =>
-                  openCreate(availability?.slots[0]?.startTime ?? "10:00")
-                }
+                disabled={!manualService}
+                onClick={() => {
+                  const target = availabilityRows.find(
+                    item => item.service.id === manualService?.id
+                  );
+                  if (manualService)
+                    openCreate(manualService.id, target?.slots[0]?.startTime ?? "10:00");
+                }}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Reserva manual
@@ -402,6 +460,11 @@ export default function BiopiscinasAgenda() {
                     {dayBookings.slice(0, view === "week" ? 10 : 3).map(booking => (
                       <div key={booking.id} className="rounded-lg border border-cyan-200 bg-cyan-50 p-2">
                         <p className="text-xs font-semibold">{booking.startTime} · {booking.clientName}</p>
+                        {selectedServiceId === "all" && (
+                          <p className="mt-1 text-[11px] font-medium text-cyan-800">
+                            {serviceName(booking.serviceId)}
+                          </p>
+                        )}
                         {view === "week" && <p className="mt-1 text-[11px] text-muted-foreground">{booking.totalGuests} persona(s) · {statusLabel[booking.status]}</p>}
                       </div>
                     ))}
@@ -421,15 +484,18 @@ export default function BiopiscinasAgenda() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {groups.map(({ slot, bookings: slotBookings }) => (
+            {groups.map(({ service: groupService, slot, bookings: slotBookings }) => (
               <Card
-                key={slot.startTime}
+                key={`${groupService.id}-${slot.startTime}`}
                 className={slot.availableSeats === 0 ? "border-red-200" : ""}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between gap-4">
                     <CardTitle className="flex items-center gap-2 text-lg">
                       <Clock className="h-5 w-5 text-cyan-700" />
+                      {selectedServiceId === "all" && (
+                        <span>{groupService.name} ·</span>
+                      )}
                       {slot.startTime}–{slot.endTime}
                     </CardTitle>
                     <div className="flex items-center gap-2">
@@ -444,13 +510,13 @@ export default function BiopiscinasAgenda() {
                       >
                         <UsersRound className="h-3.5 w-3.5 mr-1" />
                         {slot.availableSeats} de{" "}
-                        {availability?.service.capacity} disponibles
+                        {groupService.capacity} disponibles
                       </Badge>
                       {canManage && slot.availableSeats > 0 && (
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => openCreate(slot.startTime)}
+                          onClick={() => openCreate(groupService.id, slot.startTime)}
                         >
                           Agregar
                         </Button>
@@ -575,10 +641,33 @@ export default function BiopiscinasAgenda() {
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>
-                Nueva reserva · {date} a las {startTime}
+                Nueva reserva · {manualService?.name} · {date} a las {startTime}
               </DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">
+              {selectedServiceId === "all" && (
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Servicio</Label>
+                  <Select
+                    value={manualService ? String(manualService.id) : undefined}
+                    onValueChange={value => {
+                      const serviceId = Number(value);
+                      const target = availabilityRows.find(
+                        item => item.service.id === serviceId
+                      );
+                      setManualServiceId(serviceId);
+                      setStartTime(target?.slots[0]?.startTime ?? "");
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Selecciona servicio" /></SelectTrigger>
+                    <SelectContent>
+                      {activeServices.map(item => (
+                        <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-2 sm:col-span-2">
                 <Label>Nombre del cliente</Label>
                 <Input
@@ -625,6 +714,7 @@ export default function BiopiscinasAgenda() {
                   type="number"
                   min={0}
                   max={40}
+                  disabled={!detail?.tickets.some(ticket => ticket.code === "child")}
                   value={form.childQuantity}
                   onChange={e =>
                     setForm({ ...form, childQuantity: Number(e.target.value) })

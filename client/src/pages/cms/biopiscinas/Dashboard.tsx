@@ -71,19 +71,19 @@ export default function BiopiscinasDashboard() {
             </p>
             <h1 className="text-3xl font-semibold">Biopiscinas</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Aforo simultáneo compartido entre ambas piscinas.
+              Cupos independientes por servicio y hora de ingreso.
             </p>
           </div>
           <Badge
             className={
-              data?.service?.status === "published"
+              data?.services?.some(service => service.status === "published")
                 ? "bg-emerald-600"
                 : "bg-slate-500"
             }
           >
-            {data?.service?.status === "published"
-              ? "Publicado"
-              : (data?.service?.status ?? "Sin servicio")}
+            {data?.services?.length
+              ? `${data.services.length} servicios activos`
+              : "Sin servicios"}
           </Badge>
         </div>
 
@@ -118,17 +118,18 @@ export default function BiopiscinasDashboard() {
             <CardContent className="space-y-4">
               {(data?.slots ?? []).map(slot => {
                 const used = slot.occupiedSeats;
-                const percentage = data?.capacity
-                  ? Math.round((used / data.capacity) * 100)
+                const percentage = slot.capacity
+                  ? Math.round((used / slot.capacity) * 100)
                   : 0;
                 return (
-                  <div key={slot.startTime} className="space-y-1.5">
+                  <div key={`${slot.serviceId}-${slot.startTime}`} className="space-y-1.5">
                     <div className="flex justify-between text-sm">
-                      <span className="font-medium">
-                        Ingreso {slot.startTime} · salida {slot.endTime}
+                      <span>
+                        <strong>{slot.serviceName}</strong>
+                        <span className="text-muted-foreground"> · ingreso {slot.startTime} · salida {slot.endTime}</span>
                       </span>
                       <span className="text-muted-foreground">
-                        {slot.availableSeats} disponibles de {data?.capacity}
+                        {slot.availableSeats} disponibles de {slot.capacity}
                       </span>
                     </div>
                     <Progress value={percentage} className="h-2" />
@@ -150,7 +151,7 @@ export default function BiopiscinasDashboard() {
               <div className="rounded-xl bg-cyan-50 p-4">
                 <strong>Aforo total</strong>
                 <p className="text-muted-foreground mt-1">
-                  {data?.capacity ?? 40} personas simultáneas.
+                  Cada servicio administra sus cupos por hora de ingreso.
                 </p>
               </div>
               <div className="rounded-xl bg-stone-50 p-4">
@@ -160,9 +161,9 @@ export default function BiopiscinasDashboard() {
                 </p>
               </div>
               <div className="rounded-xl bg-stone-50 p-4">
-                <strong>Último ingreso</strong>
+                <strong>Servicios incluidos</strong>
                 <p className="text-muted-foreground mt-1">
-                  18:00, con salida del agua a las 21:30.
+                  Full Day, 4 horas y Late Hour se muestran juntos.
                 </p>
               </div>
             </CardContent>

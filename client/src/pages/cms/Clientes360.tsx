@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, ExternalLink, Mail, MessageCircle, Phone, Search, Star, UserRound, WalletCards } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -84,9 +84,11 @@ function ClientHistory({ clientKey, service }: { clientKey: string; service: Ser
 }
 
 export default function Clientes360() {
+  const pageSize = 15;
   const [search, setSearch] = useState("");
   const [service, setService] = useState<ServiceKey>("all");
   const [selected, setSelected] = useState<any>(null);
+  const [page, setPage] = useState(1);
   const { data: access } = trpc.operations360.access.useQuery();
   const { data = [], isLoading } = trpc.operations360.clients.list.useQuery({
     search: search || undefined,
@@ -97,6 +99,12 @@ export default function Clientes360() {
     reservations: data.reduce((sum, client) => sum + client.reservations, 0),
     spent: data.reduce((sum, client) => sum + client.totalSpentClp, 0),
   }), [data]);
+  const totalPages = Math.max(1, Math.ceil(data.length / pageSize));
+  const visibleClients = data.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => setPage(1), [search, service]);
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   return (
     <DashboardLayout>
@@ -135,7 +143,7 @@ export default function Clientes360() {
           <div className="space-y-3">{Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-28" />)}</div>
         ) : data.length ? (
           <div className="space-y-3">
-            {data.map(client => (
+            {visibleClients.map(client => (
               <Card key={client.key} className="transition hover:shadow-sm">
                 <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
                   <div className="min-w-0">
@@ -159,6 +167,19 @@ export default function Clientes360() {
           </div>
         ) : (
           <Card><CardContent className="py-14 text-center text-muted-foreground">No encontramos clientes para estos filtros.</CardContent></Card>
+        )}
+
+        {data.length > pageSize && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Mostrando {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, data.length)} de {data.length} clientes
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" disabled={page === 1} onClick={() => setPage(value => value - 1)}>Anterior</Button>
+              <span className="text-sm">Página {page} de {totalPages}</span>
+              <Button variant="outline" disabled={page === totalPages} onClick={() => setPage(value => value + 1)}>Siguiente</Button>
+            </div>
+          </div>
         )}
 
         <Dialog open={Boolean(selected)} onOpenChange={open => !open && setSelected(null)}>

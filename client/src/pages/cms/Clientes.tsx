@@ -42,8 +42,8 @@ function KPICard({ icon: Icon, label, value, sub, color = "" }: any) {
 }
 
 function DashboardBI() {
-  const { data: stats, isLoading: ls } = trpc.clientes.getBIStats.useQuery();
-  const { data: charts, isLoading: lc } = trpc.clientes.getBICharts.useQuery();
+  const { data: stats, isLoading: ls } = trpc.clientes.getBIStats.useQuery(undefined, { refetchInterval: 60_000 });
+  const { data: charts, isLoading: lc } = trpc.clientes.getBICharts.useQuery(undefined, { refetchInterval: 60_000 });
 
   if (ls || lc) return <div className="space-y-4">{[1,2,3].map(i=><Skeleton key={i} className="h-48 w-full"/>)}</div>;
 
@@ -347,25 +347,13 @@ export default function CMSClientes() {
     <DashboardLayout>
       <div className="p-6 space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-wide">Clientes</h1>
+          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Cliente 360</p>
+          <h1 className="text-2xl font-semibold tracking-wide">Dashboard BI</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Base de datos completa · Análisis BI · Histórico 2025–2026
+            Indicadores históricos que se actualizan con las compras y reservas registradas.
           </p>
         </div>
-
-        <Tabs defaultValue="dashboard">
-          <TabsList>
-            <TabsTrigger value="dashboard" className="flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5"/>Dashboard BI
-            </TabsTrigger>
-            <TabsTrigger value="tabla" className="flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5"/>Base de clientes
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="dashboard" className="mt-6"><DashboardBI/></TabsContent>
-          <TabsContent value="tabla" className="mt-6"><TablaClientes/></TabsContent>
-        </Tabs>
+        <DashboardBI />
       </div>
     </DashboardLayout>
   );

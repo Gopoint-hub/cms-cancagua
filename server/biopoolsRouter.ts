@@ -49,7 +49,9 @@ import {
   biopoolResultUrl,
   finalizeApprovedBiopoolOrder,
   isFullyDiscountedBiopoolOrder,
+  parseClientServicesUsed,
 } from "./biopoolWebpay";
+import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -182,16 +184,19 @@ async function availabilityForDay(
       startTime: booking.startTime,
       endTime: booking.endTime,
       seats: booking.totalGuests,
+      kind: "entry" as const,
     })),
     ...blocks.map((block: any) => ({
       startTime: block.startTime,
       endTime: block.endTime,
       seats: block.blockedCapacity,
+      kind: "block" as const,
     })),
     ...checkoutHolds.map((hold: any) => ({
       startTime: hold.startTime,
       endTime: hold.endTime,
       seats: hold.totalGuests,
+      kind: "entry" as const,
     })),
   ];
   const slots = buildEntrySlots({
@@ -290,14 +295,15 @@ export const biopoolsRouter = router({
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Santiago",
     }).format(new Date());
-    const [service] = await db
+    const services = await db
       .select()
       .from(biopoolServices)
       .where(ne(biopoolServices.status, "archived"))
-      .limit(1);
-    if (!service)
+      .orderBy(biopoolServices.id);
+    if (!services.length)
       return {
         service: null,
+        services: [],
         today,
         bookings: 0,
         guests: 0,
@@ -316,9 +322,21 @@ export const biopoolsRouter = router({
           ne(biopoolBookings.status, "cancelled")
         )
       );
-    const availability = await availabilityForDay(db, service.id, today);
+    const availability = await Promise.all(
+      services.map(service => availabilityForDay(db, service.id, today))
+    );
+    const slots = availability.flatMap(result =>
+      result.slots.map(slot => ({
+        ...slot,
+        serviceId: result.service.id,
+        serviceName: result.service.name,
+        serviceSlug: result.service.slug,
+        capacity: result.service.capacity,
+      }))
+    );
     return {
-      service,
+      service: services[0],
+      services,
       today,
       bookings: bookings.length,
       guests: bookings.reduce((sum, item) => sum + item.totalGuests, 0),
@@ -328,8 +346,8 @@ export const biopoolsRouter = router({
       pendingPayment: bookings.filter(item => item.paymentStatus === "pending")
         .length,
       confirmed: bookings.filter(item => item.status === "confirmed").length,
-      capacity: service.capacity,
-      slots: availability.slots,
+      capacity: Math.max(...services.map(service => service.capacity)),
+      slots,
     };
   }),
 
@@ -633,6 +651,20 @@ export const biopoolsRouter = router({
           input.date
         );
       }),
+    all: protectedProcedure
+      .input(z.object({ date: dateSchema }))
+      .query(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "module.biopools");
+        const db = await database();
+        const services = await db
+          .select({ id: biopoolServices.id })
+          .from(biopoolServices)
+          .where(ne(biopoolServices.status, "archived"))
+          .orderBy(asc(biopoolServices.id));
+        return Promise.all(
+          services.map(service => availabilityForDay(db, service.id, input.date))
+        );
+      }),
   }),
 
   public: router({
@@ -732,13 +764,13 @@ export const biopoolsRouter = router({
           const occupancy = [
             ...bookings
               .filter(booking => serializeDate(booking.bookingDate) === date)
-              .map(booking => ({ startTime: booking.startTime, endTime: booking.endTime, seats: booking.totalGuests })),
+              .map(booking => ({ startTime: booking.startTime, endTime: booking.endTime, seats: booking.totalGuests, kind: "entry" as const })),
             ...blocks
               .filter(block => serializeDate(block.startDate) <= date && serializeDate(block.endDate) >= date)
-              .map(block => ({ startTime: block.startTime, endTime: block.endTime, seats: block.blockedCapacity })),
+              .map(block => ({ startTime: block.startTime, endTime: block.endTime, seats: block.blockedCapacity, kind: "block" as const })),
             ...checkoutHolds
               .filter(hold => serializeDate(hold.bookingDate) === date)
-              .map(hold => ({ startTime: hold.startTime, endTime: hold.endTime, seats: hold.totalGuests })),
+              .map(hold => ({ startTime: hold.startTime, endTime: hold.endTime, seats: hold.totalGuests, kind: "entry" as const })),
           ];
           return buildEntrySlots({
             firstEntryTime: schedule.firstEntryTime,
@@ -1015,7 +1047,7 @@ export const biopoolsRouter = router({
   bookings: router({
     list: protectedProcedure
       .input(
-        z.object({ serviceId: z.number(), from: dateSchema, to: dateSchema })
+        z.object({ serviceId: z.number().optional(), from: dateSchema, to: dateSchema })
       )
       .query(async ({ ctx, input }) => {
         requirePermission(ctx.user, "module.biopools");
@@ -1025,7 +1057,9 @@ export const biopoolsRouter = router({
           .from(biopoolBookings)
           .where(
             and(
-              eq(biopoolBookings.serviceId, input.serviceId),
+              input.serviceId !== undefined
+                ? eq(biopoolBookings.serviceId, input.serviceId)
+                : undefined,
               gte(biopoolBookings.bookingDate, input.from),
               lte(biopoolBookings.bookingDate, input.to)
             )
@@ -1123,14 +1157,14 @@ export const biopoolsRouter = router({
               );
             const adult = tickets.find(ticket => ticket.code === "adult");
             const child = tickets.find(ticket => ticket.code === "child");
-            if (!adult || !child)
+            if (!adult || (input.childQuantity > 0 && !child))
               throw new TRPCError({
                 code: "PRECONDITION_FAILED",
-                message: "Faltan los tickets adulto o niño",
+                message: "Faltan los tickets requeridos para esta reserva",
               });
             const originalAmountClp =
               adult.priceClp * input.adultQuantity +
-              child.priceClp * input.childQuantity;
+              (child?.priceClp ?? 0) * input.childQuantity;
             if (input.discountAmountClp > originalAmountClp)
               throw new TRPCError({
                 code: "BAD_REQUEST",
@@ -1217,6 +1251,37 @@ export const biopoolsRouter = router({
               ctx.user.id
             );
 
+            const paidAmount = input.paymentStatus === "paid"
+              ? originalAmountClp - input.discountAmountClp
+              : 0;
+            const servicesUsed = Array.from(new Set([
+              ...parseClientServicesUsed(client.serviciosUsados),
+              "Biopiscinas",
+            ]));
+            const yearUpdates = input.bookingDate.startsWith("2025-")
+              ? {
+                  visitas2025: sql`COALESCE(${clients.visitas2025}, 0) + 1`,
+                  gasto2025: sql`COALESCE(${clients.gasto2025}, 0) + ${paidAmount}`,
+                  esLeal: sql`CASE WHEN COALESCE(${clients.visitas2026}, 0) > 0 THEN 1 ELSE COALESCE(${clients.esLeal}, 0) END`,
+                }
+              : input.bookingDate.startsWith("2026-")
+                ? {
+                    visitas2026: sql`COALESCE(${clients.visitas2026}, 0) + 1`,
+                    gasto2026: sql`COALESCE(${clients.gasto2026}, 0) + ${paidAmount}`,
+                    esLeal: sql`CASE WHEN COALESCE(${clients.visitas2025}, 0) > 0 THEN 1 ELSE COALESCE(${clients.esLeal}, 0) END`,
+                  }
+                : {};
+            const visitDate = new Date(`${input.bookingDate}T12:00:00Z`);
+            await tx.update(clients).set({
+              totalVisitas: sql`COALESCE(${clients.totalVisitas}, 0) + 1`,
+              totalGasto: sql`COALESCE(${clients.totalGasto}, 0) + ${paidAmount}`,
+              primerVisita: client.primerVisita ?? visitDate,
+              ultimaVisita: visitDate,
+              serviciosUsados: JSON.stringify(servicesUsed),
+              ticketPromedio: sql`ROUND((COALESCE(${clients.totalGasto}, 0) + ${paidAmount}) / (COALESCE(${clients.totalVisitas}, 0) + 1))`,
+              ...yearUpdates,
+            }).where(eq(clients.id, client.id));
+
             const reminderAt = new Date(
               chileLocalDateTimeToUtc(
                 input.bookingDate,
@@ -1224,31 +1289,12 @@ export const biopoolsRouter = router({
               ).getTime() -
                 availability.service.reminderHoursBefore * 3_600_000
             );
-            const notifications: Array<
-              typeof biopoolNotifications.$inferInsert
-            > = [
-              {
-                bookingId: created.id,
-                type: "confirmation",
-                channel: "email",
-                scheduledAt: new Date(),
-              },
-            ];
-            if (availability.service.reminderEmailEnabled)
-              notifications.push({
-                bookingId: created.id,
-                type: "reminder",
-                channel: "email",
-                scheduledAt: reminderAt,
-              });
-            if (availability.service.reminderWhatsappEnabled)
-              notifications.push({
-                bookingId: created.id,
-                type: "reminder",
-                channel: "whatsapp",
-                scheduledAt: reminderAt,
-              });
-            await tx.insert(biopoolNotifications).values(notifications);
+            await tx.insert(biopoolNotifications).values(buildBiopoolNotificationSchedule({
+              bookingId: created.id,
+              reminderAt,
+              reminderEmailEnabled: availability.service.reminderEmailEnabled,
+              reminderWhatsappEnabled: availability.service.reminderWhatsappEnabled,
+            }));
             return { id: created.id };
           } finally {
             await releaseCapacityLock(tx, lockName);

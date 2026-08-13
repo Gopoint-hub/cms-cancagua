@@ -13,6 +13,47 @@ import { sendEmail } from "./email";
 const POLL_MS = 60_000;
 const RETRY_DELAY_MS = 15 * 60_000;
 
+export function buildBiopoolNotificationSchedule(input: {
+  bookingId: number;
+  reminderAt: Date;
+  reminderEmailEnabled: number;
+  reminderWhatsappEnabled: number;
+  confirmationAt?: Date;
+}): Array<typeof biopoolNotifications.$inferInsert> {
+  const confirmationAt = input.confirmationAt ?? new Date();
+  const reminderIsFuture = input.reminderAt > confirmationAt;
+  return [
+    {
+      bookingId: input.bookingId,
+      type: "confirmation",
+      channel: "email",
+      scheduledAt: confirmationAt,
+    },
+    {
+      bookingId: input.bookingId,
+      type: "confirmation",
+      channel: "whatsapp",
+      scheduledAt: confirmationAt,
+    },
+    ...(input.reminderEmailEnabled && reminderIsFuture
+      ? [{
+          bookingId: input.bookingId,
+          type: "reminder" as const,
+          channel: "email" as const,
+          scheduledAt: input.reminderAt,
+        }]
+      : []),
+    ...(input.reminderWhatsappEnabled && reminderIsFuture
+      ? [{
+          bookingId: input.bookingId,
+          type: "reminder" as const,
+          channel: "whatsapp" as const,
+          scheduledAt: input.reminderAt,
+        }]
+      : []),
+  ];
+}
+
 function serializeDate(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 10);
   if (value instanceof Date) return value.toISOString().slice(0, 10);
