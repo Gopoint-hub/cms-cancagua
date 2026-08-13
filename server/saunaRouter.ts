@@ -21,6 +21,7 @@ import {
   saunaServices,
   saunaSettings,
   saunaSyncRuns,
+  reservationPayments,
 } from "../drizzle/schema";
 import {
   addMinutesToTime,
@@ -41,6 +42,9 @@ import {
   generateSaunaBuyOrder,
   generateSessionId,
 } from "./webpay";
+import { calculatedPaymentStatus } from "../shared/reservationPayments";
+import { canRedeemGiftCard } from "./giftCardRedemption";
+import { redeemGiftCardPayment, reservationPaymentDate, reservationPaymentInputSchema, validateReservationPayment } from "./reservationPayments";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
@@ -52,6 +56,11 @@ const statusSchema = z.enum([
   "cancelled",
   "no_show",
 ]);
+const saunaPaymentMethods = ["payment_link", "bank_transfer", "cash", "transbank_machine", "gift_card"] as const;
+const saunaPaymentSchema = reservationPaymentInputSchema.refine(
+  payment => saunaPaymentMethods.includes(payment.method as any),
+  { message: "Medio de pago no disponible para sauna", path: ["method"] },
+);
 
 function requirePermission(user: any, permission: CmsPermissionKey): void {
   if (!hasCmsPermission(user, permission)) {
@@ -430,12 +439,19 @@ export const saunaRouter = router({
             .default("unknown"),
           paymentMethod: z.string().max(60).optional(),
           amountClp: z.number().int().min(0).default(0),
+          payments: z.array(saunaPaymentSchema).min(1).max(10).optional(),
           notes: z.string().max(4000).optional(),
           isConfirmed: z.boolean().default(true),
         })
       )
       .mutation(async ({ ctx, input }) => {
         requirePermission(ctx.user, "sauna.manage_agenda");
+        const payments = input.payments ?? [];
+        payments.forEach(validateReservationPayment);
+        if (payments.some(payment => payment.method === "gift_card") && !canRedeemGiftCard(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+        const plannedClp = payments.reduce((sum, payment) => sum + payment.amountClp, 0);
+        const paidClp = payments.filter(payment => payment.status === "paid").reduce((sum, payment) => sum + payment.amountClp, 0);
+        if (plannedClp > input.amountClp) throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos superan el total de la reserva" });
         const privateBooking =
           input.isPrivate || input.kind === "private" || input.guests >= 4;
         const partyError = validateSaunaParty(input.guests, privateBooking);
@@ -470,19 +486,80 @@ export const saunaRouter = router({
                 isPrivate: privateBooking ? 1 : 0,
                 status: input.isConfirmed ? "confirmed" : "pending",
                 isConfirmed: input.isConfirmed ? 1 : 0,
-                paymentStatus: input.paymentStatus,
-                paymentMethod: input.paymentMethod || null,
+                paymentStatus: payments.length ? calculatedPaymentStatus(paidClp, input.amountClp) : input.paymentStatus,
+                paymentMethod: payments.length > 1 ? "mixed" : payments[0]?.method || input.paymentMethod || null,
                 amountClp: input.amountClp,
+                amountPaidClp: payments.length ? paidClp : (input.paymentStatus === "paid" ? input.amountClp : 0),
                 source: "cms",
                 origin: "panel",
                 notes: input.notes || null,
                 createdByUserId: ctx.user.id,
               })
               .$returningId();
+            for (const payment of payments) {
+              const gift = payment.method === "gift_card"
+                ? await redeemGiftCardPayment({ tx, payment, totalClp: input.amountClp, module: "sauna", reservationId: created.id, note: `Canje en sauna ${input.clientName || created.id}` })
+                : undefined;
+              await tx.insert(reservationPayments).values({
+                module: "sauna", reservationId: created.id, method: payment.method, status: payment.status,
+                amountClp: payment.amountClp, paidAt: payment.status === "paid" ? reservationPaymentDate(payment.paidAt) : null,
+                reference: gift?.code ?? payment.reference ?? null, cardType: payment.cardType ?? null,
+                giftCardId: gift?.id ?? null, createdByUserId: ctx.user.id,
+              });
+            }
             return created;
           } finally {
             await releaseCapacityLock(tx, input.bookingDate);
           }
+        });
+      }),
+    getPayments: protectedProcedure
+      .input(z.object({ bookingId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "module.sauna");
+        const db = await database();
+        return db.select().from(reservationPayments).where(and(eq(reservationPayments.module, "sauna"), eq(reservationPayments.reservationId, input.bookingId))).orderBy(desc(reservationPayments.createdAt));
+      }),
+    addPayment: protectedProcedure
+      .input(z.object({ bookingId: z.number(), payment: saunaPaymentSchema }))
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "sauna.manage_agenda");
+        validateReservationPayment(input.payment);
+        if (input.payment.method === "gift_card" && !canRedeemGiftCard(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+        const db = await database();
+        return db.transaction(async tx => {
+          const [booking] = await tx.select().from(saunaBookings).where(eq(saunaBookings.id, input.bookingId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          if (booking.status === "cancelled") throw new TRPCError({ code: "BAD_REQUEST", message: "No se pueden agregar pagos a una reserva cancelada" });
+          const existing = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.module, "sauna"), eq(reservationPayments.reservationId, booking.id)));
+          const planned = existing.length ? existing.filter(payment => payment.status !== "refunded").reduce((sum, payment) => sum + payment.amountClp, 0) : booking.amountPaidClp;
+          if (planned + input.payment.amountClp > booking.amountClp) throw new TRPCError({ code: "BAD_REQUEST", message: "El abono supera el saldo pendiente de la reserva" });
+          const gift = input.payment.method === "gift_card" ? await redeemGiftCardPayment({ tx, payment: input.payment, totalClp: booking.amountClp, module: "sauna", reservationId: booking.id, note: `Abono Gift Card en sauna ${booking.bookingCode}` }) : undefined;
+          const [created] = await tx.insert(reservationPayments).values({
+            module: "sauna", reservationId: booking.id, method: input.payment.method, status: input.payment.status,
+            amountClp: input.payment.amountClp, paidAt: input.payment.status === "paid" ? reservationPaymentDate(input.payment.paidAt) : null,
+            reference: gift?.code ?? input.payment.reference ?? null, cardType: input.payment.cardType ?? null,
+            giftCardId: gift?.id ?? null, createdByUserId: ctx.user.id,
+          }).$returningId();
+          const newPaid = booking.amountPaidClp + (input.payment.status === "paid" ? input.payment.amountClp : 0);
+          await tx.update(saunaBookings).set({ amountPaidClp: newPaid, paymentStatus: calculatedPaymentStatus(newPaid, booking.amountClp), paymentMethod: existing.length || booking.amountPaidClp > 0 ? "mixed" : input.payment.method }).where(eq(saunaBookings.id, booking.id));
+          return created;
+        });
+      }),
+    completePayment: protectedProcedure
+      .input(z.object({ paymentId: z.number(), paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/), reference: z.string().trim().max(160), cardType: z.enum(["credit", "debit"]).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "sauna.manage_agenda");
+        const db = await database();
+        return db.transaction(async tx => {
+          const [payment] = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.id, input.paymentId), eq(reservationPayments.module, "sauna"))).limit(1);
+          if (!payment || payment.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "El pago no está pendiente" });
+          const [booking] = await tx.select().from(saunaBookings).where(eq(saunaBookings.id, payment.reservationId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          const newPaid = booking.amountPaidClp + payment.amountClp;
+          await tx.update(reservationPayments).set({ status: "paid", paidAt: reservationPaymentDate(input.paidAt), reference: input.reference, cardType: input.cardType ?? null }).where(eq(reservationPayments.id, payment.id));
+          await tx.update(saunaBookings).set({ amountPaidClp: newPaid, paymentStatus: calculatedPaymentStatus(newPaid, booking.amountClp) }).where(eq(saunaBookings.id, booking.id));
+          return { success: true };
         });
       }),
     setStatus: protectedProcedure

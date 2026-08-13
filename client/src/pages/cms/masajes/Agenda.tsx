@@ -36,6 +36,7 @@ import {
   getMassageBookingStatusLabel,
   getMassagePaymentStatusLabel,
 } from "@shared/massageBookingLabels";
+import { CARD_PAYMENT_METHODS, PENDING_PAYMENT_METHODS, type ReservationPaymentMethod } from "@shared/reservationPayments";
 
 const STATUS_VARIANTS: Record<string, any> = {
   pending: "secondary", confirmed: "default", completed: "outline",
@@ -53,6 +54,39 @@ type BookingForm = {
   manualPaymentMethod: ManualMassagePaymentMethod;
   discountCode: string; notes: string;
 };
+type PaymentDraft = {
+  method: ManualMassagePaymentMethod | ""; status: "pending" | "paid"; amountClp: string;
+  paidAt: string; reference: string; cardType: "credit" | "debit" | ""; giftCardCode: string;
+};
+
+function chileDateTimeInput() {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
+}
+
+function emptyPayment(amountClp = ""): PaymentDraft {
+  return { method: "", status: "paid", amountClp, paidAt: chileDateTimeInput(), reference: "", cardType: "", giftCardCode: "" };
+}
+
+function paymentIsComplete(payment: PaymentDraft) {
+  if (!payment.method || !Number(payment.amountClp) || Number(payment.amountClp) <= 0) return false;
+  if (payment.method === "gift_card") return Boolean(payment.giftCardCode.trim());
+  if (payment.status === "pending") return PENDING_PAYMENT_METHODS.includes(payment.method as ReservationPaymentMethod);
+  if (!payment.paidAt || (payment.method !== "cash" && !payment.reference.trim())) return false;
+  return !CARD_PAYMENT_METHODS.includes(payment.method as ReservationPaymentMethod) || Boolean(payment.cardType);
+}
+
+function PaymentFields({ payment, onChange }: { payment: PaymentDraft; onChange: (changes: Partial<PaymentDraft>) => void }) {
+  return <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+    <div><Label>Medio de pago</Label><Select value={payment.method} onValueChange={value => onChange({ method: value as ManualMassagePaymentMethod, status: PENDING_PAYMENT_METHODS.includes(value as ReservationPaymentMethod) ? "pending" : "paid", reference: "", giftCardCode: "", cardType: "" })}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{MANUAL_MASSAGE_PAYMENT_METHODS.map(method => <SelectItem key={method} value={method}>{MASSAGE_PAYMENT_METHOD_LABELS[method]}</SelectItem>)}</SelectContent></Select></div>
+    <div><Label>Monto del abono</Label><Input type="number" min={1} value={payment.amountClp} onChange={event => onChange({ amountClp: event.target.value })} /></div>
+    {PENDING_PAYMENT_METHODS.includes(payment.method as ReservationPaymentMethod) && <div><Label>Estado</Label><Select value={payment.status} onValueChange={value => onChange({ status: value as "pending" | "paid" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pending">Link enviado / pendiente</SelectItem><SelectItem value="paid">Pago confirmado</SelectItem></SelectContent></Select></div>}
+    {payment.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={payment.paidAt} onChange={event => onChange({ paidAt: event.target.value })} /></div>}
+    {payment.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código Gift Card</Label><Input value={payment.giftCardCode} onChange={event => onChange({ giftCardCode: event.target.value.toUpperCase() })} /></div> : payment.status === "paid" && payment.method !== "cash" ? <div><Label>Código o referencia</Label><Input value={payment.reference} onChange={event => onChange({ reference: event.target.value })} /></div> : null}
+    {payment.status === "paid" && CARD_PAYMENT_METHODS.includes(payment.method as ReservationPaymentMethod) && <div><Label>Tipo de tarjeta</Label><Select value={payment.cardType} onValueChange={value => onChange({ cardType: value as "credit" | "debit" })}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}
+  </div>;
+}
 
 const emptyForm = (date: string): BookingForm => ({
   clientName: "", clientEmail: "", clientPhone: "", clientOrigin: "",
@@ -342,6 +376,8 @@ export default function MasajesAgenda() {
   const [cancellationTarget, setCancellationTarget] = useState<any | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<BookingForm>(emptyForm(selectedDate));
+  const [payments, setPayments] = useState<PaymentDraft[]>([emptyPayment()]);
+  const [newPayment, setNewPayment] = useState<PaymentDraft>(emptyPayment());
   const utils = trpc.useUtils();
 
   // Calcular rango según vista
@@ -374,6 +410,10 @@ export default function MasajesAgenda() {
     { date: selectedDate, duration: form.duration },
     { enabled: open && canManageAgenda }
   );
+  const paymentQuery = trpc.masajes.agenda.getPayments.useQuery(
+    { bookingId: editingId ?? 0 },
+    { enabled: Boolean(editingId && open && canManagePayments) },
+  );
 
   const createMut = trpc.masajes.agenda.create.useMutation({
     onSuccess: () => { utils.masajes.agenda.getByDateRange.invalidate(); toast.success("Reserva creada"); setOpen(false); },
@@ -382,6 +422,14 @@ export default function MasajesAgenda() {
   const updateMut = trpc.masajes.agenda.update.useMutation({
     onSuccess: () => { utils.masajes.agenda.getByDateRange.invalidate(); toast.success("Reserva actualizada"); setOpen(false); },
     onError: e => toast.error(e.message),
+  });
+  const addPaymentMut = trpc.masajes.agenda.addPayment.useMutation({
+    onSuccess: () => { toast.success("Pago agregado"); setNewPayment(emptyPayment()); void paymentQuery.refetch(); void utils.masajes.agenda.getByDateRange.invalidate(); },
+    onError: error => toast.error(error.message),
+  });
+  const completePaymentMut = trpc.masajes.agenda.completePayment.useMutation({
+    onSuccess: () => { toast.success("Pago confirmado"); void paymentQuery.refetch(); void utils.masajes.agenda.getByDateRange.invalidate(); },
+    onError: error => toast.error(error.message),
   });
   const statusMut = trpc.masajes.agenda.updateStatus.useMutation({
     onSuccess: () => {
@@ -435,6 +483,7 @@ export default function MasajesAgenda() {
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm(selectedDate));
+    setPayments([emptyPayment()]);
     setOpen(true);
   };
 
@@ -445,13 +494,14 @@ export default function MasajesAgenda() {
     }
     if (!canManageAgenda) return;
     setEditingId(b.id);
+    setNewPayment(emptyPayment(String(Math.max(0, Number(b.originalAmount ?? b.amountPaid ?? 0) - Number(b.amountPaid ?? 0)))));
     setForm({
       clientName: b.clientName, clientEmail: b.clientEmail ?? "", clientPhone: b.clientPhone ?? "",
       clientOrigin: "", techniqueId: String(b.techniqueId), therapistId: b.therapistId ? String(b.therapistId) : "",
       roomId: String(b.roomId), duration: b.duration, bookingDate: b.bookingDate,
       startTime: b.startTime, endTime: b.endTime,
       paymentStatus: b.paymentStatus === "paid" ? "paid" : "pending",
-      amountPaid: b.amountPaid ?? "",
+      amountPaid: b.originalAmount ?? b.amountPaid ?? "",
       manualPaymentMethod: b.manualPaymentMethod ?? "getnet_link",
       discountCode: "", notes: b.notes ?? "",
     });
@@ -459,6 +509,7 @@ export default function MasajesAgenda() {
   };
 
   const handleSave = () => {
+    const totalAmountClp = Number(form.amountPaid || 0);
     const data = {
       clientName: form.clientName,
       clientEmail: form.clientEmail || undefined,
@@ -471,16 +522,36 @@ export default function MasajesAgenda() {
       bookingDate: form.bookingDate,
       startTime: form.startTime,
       endTime: form.endTime,
-      ...(canManagePayments ? {
-        paymentStatus: form.paymentStatus,
-        manualPaymentMethod: form.paymentStatus === "paid" ? form.manualPaymentMethod : undefined,
-        amountPaid: form.amountPaid || undefined,
+      ...(canManagePayments && !editingId ? {
+        totalAmountClp,
+        payments: payments.map(payment => ({ method: payment.method as ManualMassagePaymentMethod, status: payment.status, amountClp: Number(payment.amountClp), paidAt: payment.status === "paid" ? payment.paidAt : undefined, reference: payment.reference || undefined, cardType: payment.cardType || undefined, giftCardCode: payment.method === "gift_card" ? payment.giftCardCode : undefined })),
       } : {}),
       discountCode: form.discountCode || undefined,
       notes: form.notes || undefined,
     };
     if (editingId) updateMut.mutate({ id: editingId, ...data });
     else createMut.mutate(data);
+  };
+
+  const updatePayment = (index: number, changes: Partial<PaymentDraft>) => setPayments(current => current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, ...changes } : payment));
+  const submitNewPayment = () => {
+    if (!editingId || !paymentIsComplete(newPayment)) return;
+    const totalAmountClp = Number(form.amountPaid || 0);
+    addPaymentMut.mutate({ bookingId: editingId, totalAmountClp, payment: { method: newPayment.method as ManualMassagePaymentMethod, status: newPayment.status, amountClp: Number(newPayment.amountClp), paidAt: newPayment.status === "paid" ? newPayment.paidAt : undefined, reference: newPayment.reference || undefined, cardType: newPayment.cardType || undefined, giftCardCode: newPayment.method === "gift_card" ? newPayment.giftCardCode : undefined } });
+  };
+  const confirmPendingPayment = (payment: { id: number; method: string }) => {
+    const paidAt = window.prompt("Fecha y hora (AAAA-MM-DDTHH:MM):", chileDateTimeInput());
+    if (!paidAt) return;
+    const reference = window.prompt("Código o referencia del pago:")?.trim();
+    if (!reference) return;
+    let cardType: "credit" | "debit" | undefined;
+    if (CARD_PAYMENT_METHODS.includes(payment.method as ReservationPaymentMethod)) {
+      const answer = window.prompt("Tipo de tarjeta: crédito o débito")?.trim().toLowerCase();
+      if (answer === "crédito" || answer === "credito") cardType = "credit";
+      else if (answer === "débito" || answer === "debito") cardType = "debit";
+      else return toast.error("Debes indicar crédito o débito");
+    }
+    completePaymentMut.mutate({ paymentId: payment.id, paidAt, reference, cardType });
   };
 
   const setTechnique = (techniqueId: string) => {
@@ -492,6 +563,7 @@ export default function MasajesAgenda() {
       else if (form.duration === 110 && technique.price110min) price = String(technique.price110min);
     }
     setForm(f => ({ ...f, techniqueId, amountPaid: price || f.amountPaid }));
+    if (!editingId && price) setPayments([emptyPayment(price)]);
   };
 
   const setStart = (time: string) => {
@@ -506,6 +578,7 @@ export default function MasajesAgenda() {
       else if (d === 110 && technique.price110min) price = String(technique.price110min);
     }
     setForm(f => ({ ...f, duration: d, endTime: calcEndTime(f.startTime, d), amountPaid: price || f.amountPaid }));
+    if (!editingId && price) setPayments([emptyPayment(price)]);
   };
 
   // Navegación según vista
@@ -732,40 +805,18 @@ export default function MasajesAgenda() {
                 <Input value={form.startTime} onChange={e => setStart(e.target.value)} placeholder="10:00" />
               )}
             </div>
-            {canManagePayments && <div>
-              <Label>Estado de pago</Label>
-              <Select value={form.paymentStatus} onValueChange={v => setForm(f => ({ ...f, paymentStatus: v as any }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pending">Pendiente</SelectItem>
-                  <SelectItem value="paid">Pagado</SelectItem>
-                </SelectContent>
-              </Select>
+            {canManagePayments && <div><Label>Valor total del masaje</Label><Input type="number" min={1} value={form.amountPaid} onChange={e => setForm(f => ({ ...f, amountPaid: e.target.value }))} placeholder="0" /></div>}
+            {canManagePayments && !editingId && <div className="col-span-2 space-y-3">
+              <div className="flex items-center justify-between"><Label>Pagos y abonos</Label><Button type="button" size="sm" variant="outline" onClick={() => setPayments(current => [...current, emptyPayment()])}><Plus className="mr-1 h-4 w-4" />Otro pago</Button></div>
+              {payments.map((payment, index) => <div key={index}><PaymentFields payment={payment} onChange={changes => updatePayment(index, changes)} />{payments.length > 1 && <Button type="button" size="sm" variant="ghost" onClick={() => setPayments(current => current.filter((_, paymentIndex) => paymentIndex !== index))}>Quitar pago</Button>}</div>)}
+              <p className="text-sm text-muted-foreground">Abonos asignados: $ {payments.reduce((sum, payment) => sum + (Number(payment.amountClp) || 0), 0).toLocaleString("es-CL")} · Saldo: $ {Math.max(0, Number(form.amountPaid || 0) - payments.reduce((sum, payment) => sum + (Number(payment.amountClp) || 0), 0)).toLocaleString("es-CL")}</p>
             </div>}
-            {canManagePayments && form.paymentStatus === "paid" && (
-              <div>
-                <Label>Medio de pago</Label>
-                <Select
-                  value={form.manualPaymentMethod}
-                  onValueChange={(value) => setForm((current) => ({
-                    ...current,
-                    manualPaymentMethod: value as ManualMassagePaymentMethod,
-                  }))}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {MANUAL_MASSAGE_PAYMENT_METHODS.map((method) => (
-                      <SelectItem key={method} value={method}>
-                        {MASSAGE_PAYMENT_METHOD_LABELS[method]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {canManagePayments && <div>
-              <Label>Monto pagado</Label>
-              <Input value={form.amountPaid} onChange={e => setForm(f => ({ ...f, amountPaid: e.target.value }))} placeholder="0" />
+            {canManagePayments && editingId && <div className="col-span-2 space-y-3">
+              <Label>Pagos registrados</Label>
+              {(paymentQuery.data ?? []).map(payment => <div key={payment.id} className="flex items-center justify-between gap-2 rounded-lg border p-3 text-sm"><div><strong>{MASSAGE_PAYMENT_METHOD_LABELS[payment.method as keyof typeof MASSAGE_PAYMENT_METHOD_LABELS] ?? payment.method} · $ {payment.amountClp.toLocaleString("es-CL")}</strong><p className="text-xs text-muted-foreground">{payment.status === "paid" ? "Pagado" : "Pendiente"}{payment.reference ? ` · ${payment.reference}` : ""}{payment.cardType ? ` · ${payment.cardType === "credit" ? "Crédito" : "Débito"}` : ""}</p></div>{payment.status === "pending" && <Button size="sm" variant="outline" onClick={() => confirmPendingPayment(payment)}>Marcar pagado</Button>}</div>)}
+              {!paymentQuery.data?.length && <p className="text-sm text-muted-foreground">Sin desglose histórico. El monto abonado anterior se conserva.</p>}
+              <Label>Agregar pago o abono</Label><PaymentFields payment={newPayment} onChange={changes => setNewPayment(current => ({ ...current, ...changes }))} />
+              <Button type="button" variant="outline" onClick={submitNewPayment} disabled={!paymentIsComplete(newPayment) || addPaymentMut.isPending}>Agregar pago</Button>
             </div>}
             <div>
               <Label>Código descuento</Label>
@@ -789,7 +840,7 @@ export default function MasajesAgenda() {
               </Button>
             )}
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={createMut.isPending || updateMut.isPending}>
+            <Button onClick={handleSave} disabled={createMut.isPending || updateMut.isPending || (!editingId && canManagePayments && (payments.some(payment => !paymentIsComplete(payment)) || payments.reduce((sum, payment) => sum + (Number(payment.amountClp) || 0), 0) > Number(form.amountPaid || 0)))}>
               {editingId ? "Guardar cambios" : "Crear reserva"}
             </Button>
           </DialogFooter>

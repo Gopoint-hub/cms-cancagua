@@ -26,6 +26,9 @@ import {
   biopoolServices,
   biopoolTicketTypes,
   clients,
+  giftCards,
+  giftCardTransactions,
+  reservationPayments,
 } from "../drizzle/schema";
 import { hasCmsPermission, type CmsPermissionKey } from "../shared/permissions";
 import {
@@ -52,10 +55,61 @@ import {
   parseClientServicesUsed,
 } from "./biopoolWebpay";
 import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
+import {
+  canRedeemGiftCard,
+  validateGiftCardRedemption,
+  validateServiceGiftCardRedemption,
+} from "./giftCardRedemption";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
+const manualPaymentMethodSchema = z.enum([
+  "payment_link",
+  "bank_transfer",
+  "cash",
+  "transbank_machine",
+  "gift_card",
+]);
+const manualPaymentSchema = z.object({
+  method: manualPaymentMethodSchema,
+  status: z.enum(["pending", "paid"]),
+  amountClp: z.number().int().positive(),
+  paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/).optional(),
+  reference: z.string().trim().max(160).optional(),
+  cardType: z.enum(["credit", "debit"]).optional(),
+  giftCardCode: z.string().trim().min(1).max(20).optional(),
+});
+
+function validateManualPayment(payment: z.infer<typeof manualPaymentSchema>): void {
+  if (payment.method === "gift_card" && payment.status !== "paid") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Una Gift Card canjeada debe registrarse como pagada" });
+  }
+  if (payment.method === "gift_card" && !payment.giftCardCode) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa el código de la Gift Card" });
+  }
+  if (payment.status === "paid" && !payment.paidAt) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa la fecha y hora del pago" });
+  }
+  if (payment.status === "paid" && payment.method !== "cash" && payment.method !== "gift_card" && !payment.reference) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa el código o referencia del pago" });
+  }
+  if (payment.status === "paid" && ["payment_link", "transbank_machine"].includes(payment.method) && !payment.cardType) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Indica si la tarjeta es de crédito o débito" });
+  }
+}
+
+function paymentDate(value?: string): Date | null {
+  if (!value) return null;
+  const [date, time] = value.split("T");
+  return chileLocalDateTimeToUtc(date, time);
+}
+
+function bookingPaymentStatus(amountPaidClp: number, totalClp: number) {
+  if (amountPaidClp <= 0) return "pending" as const;
+  if (amountPaidClp < totalClp) return "partially_paid" as const;
+  return "paid" as const;
+}
 const bookingStatuses = [
   "pending",
   "confirmed",
@@ -1080,7 +1134,7 @@ export const biopoolsRouter = router({
           .where(eq(biopoolBookings.id, input.id))
           .limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-        const [activity, notifications] = await Promise.all([
+        const [activity, notifications, payments] = await Promise.all([
           db
             .select()
             .from(biopoolBookingActivity)
@@ -1091,8 +1145,13 @@ export const biopoolsRouter = router({
             .from(biopoolNotifications)
             .where(eq(biopoolNotifications.bookingId, input.id))
             .orderBy(desc(biopoolNotifications.createdAt)),
+          db
+            .select()
+            .from(reservationPayments)
+            .where(and(eq(reservationPayments.module, "biopools"), eq(reservationPayments.reservationId, input.id)))
+            .orderBy(desc(reservationPayments.createdAt)),
         ]);
-        return { booking, activity, notifications };
+        return { booking, activity, notifications, payments };
       }),
     create: protectedProcedure
       .input(
@@ -1105,9 +1164,7 @@ export const biopoolsRouter = router({
           startTime: timeSchema,
           adultQuantity: z.number().int().min(0).max(40),
           childQuantity: z.number().int().min(0).max(40),
-          paymentStatus: z.enum(["pending", "paid"]).default("pending"),
-          paymentMethod: z.string().max(60).optional(),
-          paymentReference: z.string().max(160).optional(),
+          payments: z.array(manualPaymentSchema).min(1).max(10),
           discountAmountClp: z.number().int().min(0).default(0),
           notes: z.string().optional(),
           source: z.enum(["cms", "web", "skedu_import", "b2b"]).default("cms"),
@@ -1115,6 +1172,13 @@ export const biopoolsRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         requirePermission(ctx.user, "biopools.manage_agenda");
+        if (input.payments.some(payment => payment.method === "gift_card") && !canRedeemGiftCard(ctx.user)) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "No tienes permisos para canjear Gift Cards",
+          });
+        }
+        input.payments.forEach(validateManualPayment);
         const quantityError = validateAdultChildQuantities(
           input.adultQuantity,
           input.childQuantity
@@ -1208,6 +1272,52 @@ export const biopoolsRouter = router({
                 .limit(1);
             }
 
+            const totalClp = originalAmountClp - input.discountAmountClp;
+            const plannedTotalClp = input.payments.reduce((sum, payment) => sum + payment.amountClp, 0);
+            const amountPaidClp = input.payments
+              .filter(payment => payment.status === "paid")
+              .reduce((sum, payment) => sum + payment.amountClp, 0);
+            if (plannedTotalClp > totalClp) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos ingresados superan el total de la reserva" });
+            }
+            const paymentStatus = bookingPaymentStatus(amountPaidClp, totalClp);
+            const giftCardPayments: Array<{
+              payment: z.infer<typeof manualPaymentSchema>;
+              card: typeof giftCards.$inferSelect;
+            }> = [];
+            for (const payment of input.payments.filter(item => item.method === "gift_card")) {
+              const code = payment.giftCardCode!.trim().toUpperCase();
+              const [card] = await tx.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
+              if (!card) throw new TRPCError({ code: "BAD_REQUEST", message: `Gift Card ${code} no encontrada` });
+              try {
+                if (card.amount === 0) {
+                  validateServiceGiftCardRedemption({
+                    status: card.status,
+                    purchaseStatus: card.purchaseStatus,
+                    amount: card.amount,
+                    expiresAt: card.expiresAt,
+                  });
+                  if (payment.amountClp !== totalClp) {
+                    throw new Error("Una Gift Card de servicio debe cubrir el total completo de la reserva");
+                  }
+                } else {
+                  validateGiftCardRedemption({
+                    status: card.status,
+                    purchaseStatus: card.purchaseStatus,
+                    balance: card.balance,
+                    amount: payment.amountClp,
+                    expiresAt: card.expiresAt,
+                  });
+                }
+              } catch (error) {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: error instanceof Error ? error.message : "No se pudo validar la Gift Card",
+                });
+              }
+              giftCardPayments.push({ payment, card });
+            }
+
             const [created] = await tx
               .insert(biopoolBookings)
               .values({
@@ -1225,24 +1335,75 @@ export const biopoolsRouter = router({
                 totalGuests,
                 status: "confirmed",
                 attendanceToken: nanoid(48),
-                paymentStatus: input.paymentStatus,
-                paymentMethod:
-                  input.paymentStatus === "paid"
-                    ? (input.paymentMethod ?? "manual")
-                    : null,
-                paymentReference: input.paymentReference ?? null,
+                paymentStatus,
+                paymentMethod: input.payments.length === 1 ? input.payments[0].method : "mixed",
+                paymentReference: input.payments.length === 1
+                  ? (input.payments[0].giftCardCode?.trim().toUpperCase() ?? input.payments[0].reference ?? null)
+                  : null,
                 originalAmountClp,
                 discountAmountClp: input.discountAmountClp,
-                amountPaidClp:
-                  input.paymentStatus === "paid"
-                    ? originalAmountClp - input.discountAmountClp
-                    : 0,
+                amountPaidClp,
                 refundFeePercent: availability.service.refundFeePercent,
                 source: input.source,
                 notes: input.notes ?? null,
                 createdByUserId: ctx.user.id,
               })
               .$returningId();
+
+            for (const { payment, card } of giftCardPayments) {
+              const redemptionAmount = card.amount === 0 ? 0 : payment.amountClp;
+              const newBalance = card.amount === 0 ? 0 : card.balance - redemptionAmount;
+              const fullyRedeemed = card.amount === 0 || newBalance === 0;
+              const updateResult: any = await tx
+                .update(giftCards)
+                .set({
+                  balance: newBalance,
+                  status: fullyRedeemed ? "redeemed" : "active",
+                  redeemedAt: fullyRedeemed ? new Date() : null,
+                })
+                .where(and(
+                  eq(giftCards.id, card.id),
+                  eq(giftCards.status, "active"),
+                  eq(giftCards.purchaseStatus, "completed"),
+                  eq(giftCards.balance, card.balance),
+                ));
+              const affectedRows = Number(
+                updateResult?.[0]?.affectedRows ?? updateResult?.affectedRows ?? 0
+              );
+              if (affectedRows !== 1) {
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: "La Gift Card cambió mientras se procesaba el canje. Intenta nuevamente",
+                });
+              }
+              await tx.insert(giftCardTransactions).values({
+                giftCardId: card.id,
+                transactionType: "redemption",
+                amount: -redemptionAmount,
+                balanceBefore: card.balance,
+                balanceAfter: newBalance,
+                orderType: "biopool_booking",
+                orderId: String(created.id),
+                notes: `Canje en reserva ${input.clientName} por ${ctx.user.name || ctx.user.email || "CMS"}`,
+              });
+            }
+            for (const payment of input.payments) {
+              const gift = giftCardPayments.find(item => item.payment === payment);
+              await tx.insert(reservationPayments).values({
+                module: "biopools",
+                reservationId: created.id,
+                method: payment.method,
+                status: payment.status,
+                amountClp: payment.amountClp,
+                paidAt: payment.status === "paid" ? paymentDate(payment.paidAt) : null,
+                reference: payment.method === "gift_card"
+                  ? payment.giftCardCode!.trim().toUpperCase()
+                  : (payment.reference ?? null),
+                cardType: payment.cardType ?? null,
+                giftCardId: gift?.card.id ?? null,
+                createdByUserId: ctx.user.id,
+              });
+            }
             await addActivity(
               tx,
               created.id,
@@ -1299,6 +1460,113 @@ export const biopoolsRouter = router({
           } finally {
             await releaseCapacityLock(tx, lockName);
           }
+        });
+      }),
+    addPayment: protectedProcedure
+      .input(z.object({ bookingId: z.number(), payment: manualPaymentSchema }))
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "biopools.manage_agenda");
+        validateManualPayment(input.payment);
+        if (input.payment.method === "gift_card" && !canRedeemGiftCard(ctx.user)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+        }
+        const db = await database();
+        return db.transaction(async tx => {
+          const lockName = `biopool:payment:${input.bookingId}`;
+          await acquireCapacityLock(tx, lockName);
+          try {
+            const [booking] = await tx.select().from(biopoolBookings).where(eq(biopoolBookings.id, input.bookingId)).limit(1);
+            if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+            if (booking.status === "cancelled") throw new TRPCError({ code: "BAD_REQUEST", message: "No se pueden agregar pagos a una reserva cancelada" });
+            const existing = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.module, "biopools"), eq(reservationPayments.reservationId, input.bookingId)));
+            const totalClp = booking.originalAmountClp - booking.discountAmountClp;
+            const detailedPlannedClp = existing.filter(item => item.status !== "refunded").reduce((sum, item) => sum + item.amountClp, 0);
+            const plannedClp = existing.length ? detailedPlannedClp : booking.amountPaidClp;
+            if (plannedClp + input.payment.amountClp > totalClp) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "El abono supera el saldo pendiente de la reserva" });
+            }
+
+            let giftCard: typeof giftCards.$inferSelect | undefined;
+            if (input.payment.method === "gift_card") {
+              const code = input.payment.giftCardCode!.trim().toUpperCase();
+              [giftCard] = await tx.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
+              if (!giftCard) throw new TRPCError({ code: "BAD_REQUEST", message: `Gift Card ${code} no encontrada` });
+              try {
+                if (giftCard.amount === 0) {
+                  validateServiceGiftCardRedemption({ status: giftCard.status, purchaseStatus: giftCard.purchaseStatus, amount: giftCard.amount, expiresAt: giftCard.expiresAt });
+                  if (input.payment.amountClp !== totalClp || plannedClp !== 0) throw new Error("Una Gift Card de servicio debe cubrir el total completo de la reserva");
+                } else {
+                  validateGiftCardRedemption({ status: giftCard.status, purchaseStatus: giftCard.purchaseStatus, balance: giftCard.balance, amount: input.payment.amountClp, expiresAt: giftCard.expiresAt });
+                }
+              } catch (error) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "No se pudo validar la Gift Card" });
+              }
+              const redemptionAmount = giftCard.amount === 0 ? 0 : input.payment.amountClp;
+              const newBalance = giftCard.amount === 0 ? 0 : giftCard.balance - redemptionAmount;
+              const updateResult: any = await tx.update(giftCards).set({
+                balance: newBalance,
+                status: giftCard.amount === 0 || newBalance === 0 ? "redeemed" : "active",
+                redeemedAt: giftCard.amount === 0 || newBalance === 0 ? new Date() : null,
+              }).where(and(eq(giftCards.id, giftCard.id), eq(giftCards.status, "active"), eq(giftCards.purchaseStatus, "completed"), eq(giftCards.balance, giftCard.balance)));
+              const affectedRows = Number(updateResult?.[0]?.affectedRows ?? updateResult?.affectedRows ?? 0);
+              if (affectedRows !== 1) throw new TRPCError({ code: "CONFLICT", message: "La Gift Card cambió mientras se procesaba el canje. Intenta nuevamente" });
+              await tx.insert(giftCardTransactions).values({
+                giftCardId: giftCard.id, transactionType: "redemption", amount: -redemptionAmount,
+                balanceBefore: giftCard.balance, balanceAfter: newBalance, orderType: "biopool_booking",
+                orderId: String(booking.id), notes: `Abono en reserva ${booking.bookingCode} por ${ctx.user.name || ctx.user.email || "CMS"}`,
+              });
+            }
+
+            const [created] = await tx.insert(reservationPayments).values({
+              module: "biopools",
+              reservationId: booking.id,
+              method: input.payment.method,
+              status: input.payment.status,
+              amountClp: input.payment.amountClp,
+              paidAt: input.payment.status === "paid" ? paymentDate(input.payment.paidAt) : null,
+              reference: input.payment.method === "gift_card" ? input.payment.giftCardCode!.trim().toUpperCase() : (input.payment.reference ?? null),
+              cardType: input.payment.cardType ?? null,
+              giftCardId: giftCard?.id ?? null,
+              createdByUserId: ctx.user.id,
+            }).$returningId();
+            const newPaidTotal = booking.amountPaidClp + (input.payment.status === "paid" ? input.payment.amountClp : 0);
+            await tx.update(biopoolBookings).set({
+              amountPaidClp: newPaidTotal,
+              paymentStatus: bookingPaymentStatus(newPaidTotal, totalClp),
+              paymentMethod: existing.length || booking.amountPaidClp > 0 ? "mixed" : input.payment.method,
+              paymentReference: existing.length || booking.amountPaidClp > 0 ? null : (input.payment.giftCardCode?.trim().toUpperCase() ?? input.payment.reference ?? null),
+            }).where(eq(biopoolBookings.id, booking.id));
+            await addActivity(tx, booking.id, "payment_added", { paymentId: created.id, method: input.payment.method, amountClp: input.payment.amountClp, status: input.payment.status }, ctx.user.id);
+            return { id: created.id };
+          } finally {
+            await releaseCapacityLock(tx, lockName);
+          }
+        });
+      }),
+    completePayment: protectedProcedure
+      .input(z.object({
+        paymentId: z.number(),
+        paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
+        reference: z.string().trim().max(160).optional(),
+        cardType: z.enum(["credit", "debit"]).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "biopools.manage_agenda");
+        const db = await database();
+        return db.transaction(async tx => {
+          const [payment] = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.id, input.paymentId), eq(reservationPayments.module, "biopools"))).limit(1);
+          if (!payment) throw new TRPCError({ code: "NOT_FOUND" });
+          if (payment.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Este pago ya no está pendiente" });
+          if (payment.method !== "cash" && !input.reference) throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa el código o referencia del pago" });
+          if (["payment_link", "transbank_machine"].includes(payment.method) && !input.cardType) throw new TRPCError({ code: "BAD_REQUEST", message: "Indica si la tarjeta es de crédito o débito" });
+          const [booking] = await tx.select().from(biopoolBookings).where(eq(biopoolBookings.id, payment.bookingId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          const totalClp = booking.originalAmountClp - booking.discountAmountClp;
+          const newPaidTotal = booking.amountPaidClp + payment.amountClp;
+          await tx.update(reservationPayments).set({ status: "paid", paidAt: paymentDate(input.paidAt), reference: input.reference ?? payment.reference, cardType: input.cardType ?? null }).where(eq(reservationPayments.id, payment.id));
+          await tx.update(biopoolBookings).set({ amountPaidClp: newPaidTotal, paymentStatus: bookingPaymentStatus(newPaidTotal, totalClp) }).where(eq(biopoolBookings.id, booking.id));
+          await addActivity(tx, booking.id, "payment_completed", { paymentId: payment.id, amountClp: payment.amountClp }, ctx.user.id);
+          return { success: true };
         });
       }),
     updateStatus: protectedProcedure

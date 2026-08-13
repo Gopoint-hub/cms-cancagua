@@ -29,6 +29,7 @@ import {
   regularClassMemberships,
   regularClassPlans,
   regularClassStudents,
+  reservationPayments,
   type User,
 } from "../drizzle/schema";
 import {
@@ -70,8 +71,20 @@ import {
 } from "./massageClients";
 import { calendarMonthRange } from "./regularClassesPeriod";
 import { cancelRegularClassPayment, confirmRegularClassPayment } from "./regularClassesPurchase";
+import { calculatedPaymentStatus } from "@shared/reservationPayments";
+import {
+  redeemGiftCardPayment,
+  reservationPaymentDate,
+  reservationPaymentInputSchema,
+  validateReservationPayment,
+} from "./reservationPayments";
+import { canRedeemGiftCard } from "./giftCardRedemption";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
+const massagePaymentInputSchema = reservationPaymentInputSchema.refine(
+  payment => MANUAL_MASSAGE_PAYMENT_METHODS.includes(payment.method as any),
+  { message: "Medio de pago no disponible para masajes", path: ["method"] },
+);
 
 const adminOrEditor = async (role: string) => {
   if (!hasMassageAdminAccess(role)) {
@@ -1385,6 +1398,7 @@ const agendaRouter = router({
         startTime: massageBookings.startTime, endTime: massageBookings.endTime,
         status: massageBookings.status, paymentStatus: massageBookings.paymentStatus,
         amountPaid: massageBookings.amountPaid,
+        originalAmount: massageBookings.originalAmount,
         manualPaymentMethod: massageBookings.manualPaymentMethod,
         notes: massageBookings.notes,
         crossSellServices: massageBookings.crossSellServices, rescheduleCount: massageBookings.rescheduleCount,
@@ -1690,22 +1704,140 @@ const agendaRouter = router({
       duration: z.number(), bookingDate: z.string(), startTime: z.string(), endTime: z.string(),
       paymentStatus: z.enum(["pending", "paid"]).default("pending"), amountPaid: z.string().optional(),
       manualPaymentMethod: manualMassagePaymentMethodSchema.optional(),
+      totalAmountClp: z.number().int().positive().optional(),
+      payments: z.array(massagePaymentInputSchema).min(1).max(10).optional(),
       discountCode: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
-      if ((input.paymentStatus === "paid" || input.amountPaid || input.manualPaymentMethod)
+      if ((input.paymentStatus === "paid" || input.amountPaid || input.manualPaymentMethod || input.payments)
           && !hasMassagePaymentAccess(ctx.user)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [inserted] = await db.insert(massageBookings)
-        .values({ ...input, bookingDate: input.bookingDate as any, bookingSource: "cms" })
-        .$returningId();
-      if (input.paymentStatus === "paid") {
+      const payments = input.payments ?? [];
+      payments.forEach(validateReservationPayment);
+      if (payments.some(payment => payment.method === "gift_card") && !canRedeemGiftCard(ctx.user)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+      }
+      const totalAmountClp = input.totalAmountClp ?? Number(input.amountPaid || 0);
+      const paidAmountClp = payments.filter(payment => payment.status === "paid").reduce((sum, payment) => sum + payment.amountClp, 0);
+      const plannedAmountClp = payments.reduce((sum, payment) => sum + payment.amountClp, 0);
+      if (payments.length && (!totalAmountClp || plannedAmountClp > totalAmountClp)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos deben respetar el total del masaje" });
+      }
+      const derivedPaymentStatus = payments.length ? calculatedPaymentStatus(paidAmountClp, totalAmountClp) : input.paymentStatus;
+      const { payments: _payments, totalAmountClp: _total, ...bookingInput } = input;
+      const inserted = await db.transaction(async tx => {
+        const [created] = await tx.insert(massageBookings)
+          .values({
+            ...bookingInput,
+            bookingDate: input.bookingDate as any,
+            bookingSource: "cms",
+            paymentStatus: derivedPaymentStatus,
+            amountPaid: payments.length ? String(paidAmountClp) : input.amountPaid,
+            originalAmount: totalAmountClp ? String(totalAmountClp) : undefined,
+            manualPaymentMethod: payments.length === 1 ? payments[0].method as any : input.manualPaymentMethod,
+          })
+          .$returningId();
+        for (const payment of payments) {
+          const gift = payment.method === "gift_card"
+            ? await redeemGiftCardPayment({ tx, payment, totalClp: totalAmountClp, module: "massages", reservationId: created.id, note: `Canje en masaje de ${input.clientName}` })
+            : undefined;
+          await tx.insert(reservationPayments).values({
+            module: "massages", reservationId: created.id, method: payment.method, status: payment.status,
+            amountClp: payment.amountClp, paidAt: payment.status === "paid" ? reservationPaymentDate(payment.paidAt) : null,
+            reference: gift?.code ?? payment.reference ?? null, cardType: payment.cardType ?? null,
+            giftCardId: gift?.id ?? null, createdByUserId: ctx.user.id,
+          });
+        }
+        return created;
+      });
+      if (derivedPaymentStatus === "paid") {
         await syncMassageSale(inserted.id);
         await startTherapistAssignmentForBooking("massage", inserted.id);
+      }
+      return { success: true };
+    }),
+
+  getPayments: protectedProcedure
+    .input(z.object({ bookingId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      await massageRead(ctx.user);
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(reservationPayments)
+        .where(and(eq(reservationPayments.module, "massages"), eq(reservationPayments.reservationId, input.bookingId)))
+        .orderBy(desc(reservationPayments.createdAt));
+    }),
+
+  addPayment: protectedProcedure
+    .input(z.object({ bookingId: z.number(), totalAmountClp: z.number().int().positive(), payment: massagePaymentInputSchema }))
+    .mutation(async ({ ctx, input }) => {
+      await massageAgenda(ctx.user);
+      if (!hasMassagePaymentAccess(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+      validateReservationPayment(input.payment);
+      if (input.payment.method === "gift_card" && !canRedeemGiftCard(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const result = await db.transaction(async tx => {
+        const [booking] = await tx.select().from(massageBookings).where(eq(massageBookings.id, input.bookingId)).limit(1);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        if (booking.status === "cancelled") throw new TRPCError({ code: "BAD_REQUEST", message: "No se pueden agregar pagos a una reserva cancelada" });
+        const existing = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.module, "massages"), eq(reservationPayments.reservationId, booking.id)));
+        const currentPaid = Number(booking.amountPaid ?? 0);
+        const planned = existing.length
+          ? existing.filter(payment => payment.status !== "refunded").reduce((sum, payment) => sum + payment.amountClp, 0)
+          : currentPaid;
+        if (planned + input.payment.amountClp > input.totalAmountClp) throw new TRPCError({ code: "BAD_REQUEST", message: "El abono supera el saldo pendiente del masaje" });
+        const gift = input.payment.method === "gift_card"
+          ? await redeemGiftCardPayment({ tx, payment: input.payment, totalClp: input.totalAmountClp, module: "massages", reservationId: booking.id, note: `Abono Gift Card en masaje #${booking.id}` })
+          : undefined;
+        const [created] = await tx.insert(reservationPayments).values({
+          module: "massages", reservationId: booking.id, method: input.payment.method, status: input.payment.status,
+          amountClp: input.payment.amountClp, paidAt: input.payment.status === "paid" ? reservationPaymentDate(input.payment.paidAt) : null,
+          reference: gift?.code ?? input.payment.reference ?? null, cardType: input.payment.cardType ?? null,
+          giftCardId: gift?.id ?? null, createdByUserId: ctx.user.id,
+        }).$returningId();
+        const newPaid = currentPaid + (input.payment.status === "paid" ? input.payment.amountClp : 0);
+        const status = calculatedPaymentStatus(newPaid, input.totalAmountClp);
+        await tx.update(massageBookings).set({
+          originalAmount: String(input.totalAmountClp), amountPaid: String(newPaid), paymentStatus: status,
+          manualPaymentMethod: existing.length || currentPaid > 0 ? null : input.payment.method as any,
+        }).where(eq(massageBookings.id, booking.id));
+        return { id: created.id, fullyPaid: status === "paid" };
+      });
+      if (result.fullyPaid) {
+        await syncMassageSale(input.bookingId);
+        await startTherapistAssignmentForBooking("massage", input.bookingId);
+      }
+      return result;
+    }),
+
+  completePayment: protectedProcedure
+    .input(z.object({ paymentId: z.number(), paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/), reference: z.string().trim().max(160), cardType: z.enum(["credit", "debit"]).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      await massageAgenda(ctx.user);
+      if (!hasMassagePaymentAccess(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const result = await db.transaction(async tx => {
+        const [payment] = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.id, input.paymentId), eq(reservationPayments.module, "massages"))).limit(1);
+        if (!payment || payment.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "El pago no está pendiente" });
+        const [booking] = await tx.select().from(massageBookings).where(eq(massageBookings.id, payment.reservationId)).limit(1);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        const total = Number(booking.originalAmount ?? 0);
+        if (!total) throw new TRPCError({ code: "BAD_REQUEST", message: "Define primero el valor total del masaje" });
+        const newPaid = Number(booking.amountPaid ?? 0) + payment.amountClp;
+        const status = calculatedPaymentStatus(newPaid, total);
+        await tx.update(reservationPayments).set({ status: "paid", paidAt: reservationPaymentDate(input.paidAt), reference: input.reference, cardType: input.cardType ?? null }).where(eq(reservationPayments.id, payment.id));
+        await tx.update(massageBookings).set({ amountPaid: String(newPaid), paymentStatus: status }).where(eq(massageBookings.id, booking.id));
+        return { bookingId: booking.id, fullyPaid: status === "paid" };
+      });
+      if (result.fullyPaid) {
+        await syncMassageSale(result.bookingId);
+        await startTherapistAssignmentForBooking("massage", result.bookingId);
       }
       return { success: true };
     }),

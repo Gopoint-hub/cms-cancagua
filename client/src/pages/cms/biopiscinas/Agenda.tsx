@@ -66,7 +66,37 @@ const statusLabel: Record<string, string> = {
   cancelled: "Cancelada",
   no_show: "No asistió",
 };
+const paymentMethodLabel: Record<string, string> = {
+  payment_link: "Link de pago",
+  bank_transfer: "Transferencia",
+  cash: "Efectivo",
+  transbank_machine: "Máquina Transbank",
+  gift_card: "Gift Card",
+};
 type ViewMode = "day" | "week" | "month";
+type PaymentMethod = "payment_link" | "bank_transfer" | "cash" | "transbank_machine" | "gift_card";
+type PaymentDraft = {
+  method: PaymentMethod | "";
+  status: "pending" | "paid";
+  amountClp: string;
+  paidAt: string;
+  reference: string;
+  cardType: "credit" | "debit" | "";
+  giftCardCode: string;
+};
+
+function chileDateTimeInput() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
+}
+
+function emptyPayment(amountClp = ""): PaymentDraft {
+  return { method: "", status: "paid", amountClp, paidAt: chileDateTimeInput(), reference: "", cardType: "", giftCardCode: "" };
+}
 
 function bookingDate(value: unknown) {
   if (typeof value === "string") return value.slice(0, 10);
@@ -94,15 +124,15 @@ export default function BiopiscinasAgenda() {
   const [rescheduleDate, setRescheduleDate] = useState(localDate());
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
+  const [payments, setPayments] = useState<PaymentDraft[]>([emptyPayment()]);
+  const [paymentBooking, setPaymentBooking] = useState<{ id: number; clientName: string; totalClp: number; amountPaidClp: number } | null>(null);
+  const [additionalPayment, setAdditionalPayment] = useState<PaymentDraft>(emptyPayment());
   const [form, setForm] = useState({
     clientName: "",
     clientEmail: "",
     clientPhone: "",
     adultQuantity: 1,
     childQuantity: 0,
-    paymentStatus: "pending" as "pending" | "paid",
-    paymentMethod: "",
-    paymentReference: "",
     notes: "",
   });
   const utils = trpc.useUtils();
@@ -175,10 +205,29 @@ export default function BiopiscinasAgenda() {
     },
     { enabled: activeServices.length > 0, refetchInterval: 30_000 }
   );
+  const { data: paymentDetail } = trpc.biopools.bookings.get.useQuery(
+    { id: paymentBooking?.id ?? 0 },
+    { enabled: Boolean(paymentBooking) }
+  );
   const create = trpc.biopools.bookings.create.useMutation({
     onSuccess: () => {
       toast.success("Reserva creada y comunicaciones programadas");
       setOpen(false);
+      utils.biopools.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const addPayment = trpc.biopools.bookings.addPayment.useMutation({
+    onSuccess: () => {
+      toast.success("Pago agregado a la reserva");
+      setAdditionalPayment(emptyPayment());
+      utils.biopools.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const completePayment = trpc.biopools.bookings.completePayment.useMutation({
+    onSuccess: () => {
+      toast.success("Pago confirmado");
       utils.biopools.invalidate();
     },
     onError: error => toast.error(error.message),
@@ -229,6 +278,7 @@ export default function BiopiscinasAgenda() {
   }, [detail]);
   const total =
     form.adultQuantity * adultPrice + form.childQuantity * childPrice;
+  const plannedPayments = payments.reduce((sum, payment) => sum + (Number(payment.amountClp) || 0), 0);
   const selectedSlot = manualAvailability?.slots.find(
     slot => slot.startTime === startTime
   );
@@ -262,7 +312,49 @@ export default function BiopiscinasAgenda() {
   const openCreate = (serviceId: number, slot: string) => {
     setManualServiceId(serviceId);
     setStartTime(slot);
+    setPayments([emptyPayment(String(total))]);
     setOpen(true);
+  };
+  const updatePayment = (index: number, changes: Partial<PaymentDraft>) => {
+    setPayments(current => current.map((payment, paymentIndex) => paymentIndex === index ? { ...payment, ...changes } : payment));
+  };
+  const paymentIsComplete = (payment: PaymentDraft) => {
+    if (!payment.method || !Number(payment.amountClp) || Number(payment.amountClp) <= 0) return false;
+    if (payment.method === "gift_card") return Boolean(payment.giftCardCode.trim());
+    if (payment.status === "pending") return payment.method === "payment_link";
+    if (!payment.paidAt) return false;
+    if (payment.method !== "cash" && !payment.reference.trim()) return false;
+    if (["payment_link", "transbank_machine"].includes(payment.method) && !payment.cardType) return false;
+    return true;
+  };
+  const submitAdditionalPayment = () => {
+    if (!paymentBooking || !paymentIsComplete(additionalPayment)) return;
+    addPayment.mutate({
+      bookingId: paymentBooking.id,
+      payment: {
+        method: additionalPayment.method as PaymentMethod,
+        status: additionalPayment.status,
+        amountClp: Number(additionalPayment.amountClp),
+        paidAt: additionalPayment.status === "paid" ? additionalPayment.paidAt : undefined,
+        reference: additionalPayment.reference || undefined,
+        cardType: additionalPayment.cardType || undefined,
+        giftCardCode: additionalPayment.method === "gift_card" ? additionalPayment.giftCardCode : undefined,
+      },
+    });
+  };
+  const confirmPendingPayment = (payment: { id: number; method: string }) => {
+    const paidAt = window.prompt("Fecha y hora del pago (AAAA-MM-DDTHH:MM):", chileDateTimeInput());
+    if (!paidAt) return;
+    const reference = payment.method === "cash" ? undefined : window.prompt("Código o referencia del pago:")?.trim();
+    if (payment.method !== "cash" && !reference) return;
+    let cardType: "credit" | "debit" | undefined;
+    if (["payment_link", "transbank_machine"].includes(payment.method)) {
+      const answer = window.prompt("Tipo de tarjeta: escribe crédito o débito")?.trim().toLowerCase();
+      if (answer === "crédito" || answer === "credito") cardType = "credit";
+      else if (answer === "débito" || answer === "debito") cardType = "debit";
+      else return toast.error("Debes indicar crédito o débito");
+    }
+    completePayment.mutate({ paymentId: payment.id, paidAt, reference, cardType });
   };
   const changeStatus = (
     id: number,
@@ -325,11 +417,15 @@ export default function BiopiscinasAgenda() {
       startTime,
       source: "cms",
       discountAmountClp: 0,
-      paymentMethod:
-        form.paymentStatus === "paid"
-          ? form.paymentMethod || "manual"
-          : undefined,
-      paymentReference: form.paymentReference || undefined,
+      payments: payments.map(payment => ({
+        method: payment.method as PaymentMethod,
+        status: payment.status,
+        amountClp: Number(payment.amountClp),
+        paidAt: payment.status === "paid" ? payment.paidAt : undefined,
+        reference: payment.reference || undefined,
+        cardType: payment.cardType || undefined,
+        giftCardCode: payment.method === "gift_card" ? payment.giftCardCode : undefined,
+      })),
       notes: form.notes || undefined,
     });
   };
@@ -547,6 +643,8 @@ export default function BiopiscinasAgenda() {
                               >
                                 {booking.paymentStatus === "paid"
                                   ? "Pagada"
+                                  : booking.paymentStatus === "partially_paid"
+                                    ? "Pago parcial"
                                   : booking.paymentStatus === "refunded"
                                     ? "Reembolsada"
                                     : "Pago pendiente"}
@@ -566,6 +664,9 @@ export default function BiopiscinasAgenda() {
                                   booking.discountAmountClp
                               )}
                             </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Abonado: {clp.format(booking.amountPaidClp)} · Saldo: {clp.format(Math.max(0, booking.originalAmountClp - booking.discountAmountClp - booking.amountPaidClp))}
+                            </p>
                             {booking.refundStatus === "pending" && (
                               <p className="text-xs text-muted-foreground mt-1">
                                 Descuento transacción:{" "}
@@ -574,6 +675,15 @@ export default function BiopiscinasAgenda() {
                             )}
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
+                            {canManage && booking.status !== "cancelled" && (
+                              <Button size="sm" variant="outline" onClick={() => {
+                                const totalClp = booking.originalAmountClp - booking.discountAmountClp;
+                                setPaymentBooking({ id: booking.id, clientName: booking.clientName, totalClp, amountPaidClp: booking.amountPaidClp });
+                                setAdditionalPayment(emptyPayment(String(Math.max(0, totalClp - booking.amountPaidClp))));
+                              }}>
+                                <Plus className="mr-1 h-4 w-4" /> Pagos
+                              </Button>
+                            )}
                             {canManage &&
                               booking.refundStatus === "pending" && (
                                 <Button
@@ -724,35 +834,74 @@ export default function BiopiscinasAgenda() {
                   Todo niño debe asistir con un adulto.
                 </p>
               </div>
-              <div className="space-y-2">
-                <Label>Estado del pago</Label>
-                <Select
-                  value={form.paymentStatus}
-                  onValueChange={(value: "pending" | "paid") =>
-                    setForm({ ...form, paymentStatus: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pending">Pendiente</SelectItem>
-                    <SelectItem value="paid">Pagado manualmente</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {form.paymentStatus === "paid" && (
-                <div className="space-y-2">
-                  <Label>Medio de pago</Label>
-                  <Input
-                    placeholder="Transferencia, efectivo, Transbank…"
-                    value={form.paymentMethod}
-                    onChange={e =>
-                      setForm({ ...form, paymentMethod: e.target.value })
-                    }
-                  />
+              <div className="space-y-3 sm:col-span-2">
+                <div className="flex items-center justify-between">
+                  <Label>Pagos y abonos</Label>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setPayments(current => [...current, emptyPayment()])}>
+                    <Plus className="mr-1 h-4 w-4" /> Agregar otro pago
+                  </Button>
                 </div>
-              )}
+                {payments.map((payment, index) => (
+                  <div key={index} className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Medio de pago</Label>
+                      <Select value={payment.method} onValueChange={value => updatePayment(index, { method: value as PaymentMethod, giftCardCode: "", reference: "", cardType: "", status: value === "payment_link" ? "pending" : "paid" })}>
+                        <SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="payment_link">Link de pago</SelectItem>
+                          <SelectItem value="bank_transfer">Transferencia</SelectItem>
+                          <SelectItem value="cash">Efectivo</SelectItem>
+                          <SelectItem value="transbank_machine">Máquina Transbank</SelectItem>
+                          <SelectItem value="gift_card">Canjear Gift Card</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Monto</Label>
+                      <Input type="number" min={1} value={payment.amountClp} onChange={event => updatePayment(index, { amountClp: event.target.value })} />
+                    </div>
+                    {payment.method === "payment_link" && (
+                      <div className="space-y-2">
+                        <Label>Estado</Label>
+                        <Select value={payment.status} onValueChange={value => updatePayment(index, { status: value as "pending" | "paid" })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectItem value="pending">Link enviado / pendiente</SelectItem><SelectItem value="paid">Pago confirmado</SelectItem></SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {payment.status === "paid" && (
+                      <div className="space-y-2">
+                        <Label>Fecha y hora del pago</Label>
+                        <Input type="datetime-local" value={payment.paidAt} onChange={event => updatePayment(index, { paidAt: event.target.value })} />
+                      </div>
+                    )}
+                    {payment.method === "gift_card" ? (
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label>Código de Gift Card</Label>
+                        <Input value={payment.giftCardCode} onChange={event => updatePayment(index, { giftCardCode: event.target.value.toUpperCase() })} />
+                      </div>
+                    ) : payment.status === "paid" && payment.method !== "cash" ? (
+                      <div className="space-y-2">
+                        <Label>Código o referencia</Label>
+                        <Input value={payment.reference} onChange={event => updatePayment(index, { reference: event.target.value })} />
+                      </div>
+                    ) : null}
+                    {payment.status === "paid" && ["payment_link", "transbank_machine"].includes(payment.method) && (
+                      <div className="space-y-2">
+                        <Label>Tipo de tarjeta</Label>
+                        <Select value={payment.cardType} onValueChange={value => updatePayment(index, { cardType: value as "credit" | "debit" })}>
+                          <SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger>
+                          <SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {payments.length > 1 && (
+                      <Button type="button" size="sm" variant="ghost" className="sm:col-span-2" onClick={() => setPayments(current => current.filter((_, paymentIndex) => paymentIndex !== index))}>Quitar este pago</Button>
+                    )}
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm"><span>Pagos ingresados: <strong>{clp.format(plannedPayments)}</strong></span><span>Saldo sin asignar: <strong>{clp.format(Math.max(0, total - plannedPayments))}</strong></span></div>
+              </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label>Notas internas</Label>
                 <Textarea
@@ -781,6 +930,8 @@ export default function BiopiscinasAgenda() {
                   !form.clientName ||
                   !form.clientEmail ||
                   !form.clientPhone ||
+                  payments.some(payment => !paymentIsComplete(payment)) ||
+                  plannedPayments > total ||
                   form.adultQuantity + form.childQuantity < 1 ||
                   (form.childQuantity > 0 && form.adultQuantity < 1) ||
                   (selectedSlot?.availableSeats ?? 0) <
@@ -790,6 +941,53 @@ export default function BiopiscinasAgenda() {
                 {create.isPending ? "Guardando…" : "Crear reserva"}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={Boolean(paymentBooking)} onOpenChange={next => !next && setPaymentBooking(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader><DialogTitle>Pagos · {paymentBooking?.clientName}</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div className="rounded-xl bg-cyan-50 p-3 text-sm flex justify-between">
+                <span>Total: <strong>{clp.format(paymentBooking?.totalClp ?? 0)}</strong></span>
+                <span>Abonado: <strong>{clp.format(paymentDetail?.booking.amountPaidClp ?? paymentBooking?.amountPaidClp ?? 0)}</strong></span>
+                <span>Saldo: <strong>{clp.format(Math.max(0, (paymentBooking?.totalClp ?? 0) - (paymentDetail?.booking.amountPaidClp ?? paymentBooking?.amountPaidClp ?? 0)))}</strong></span>
+              </div>
+              <div className="space-y-2">
+                {(paymentDetail?.payments ?? []).map(payment => (
+                  <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+                    <div>
+                      <strong>{paymentMethodLabel[payment.method] ?? payment.method} · {clp.format(payment.amountClp)}</strong>
+                      <p className="text-xs text-muted-foreground">
+                        {payment.status === "paid" ? "Pagado" : "Pendiente"}
+                        {payment.paidAt ? ` · ${new Date(payment.paidAt).toLocaleString("es-CL", { timeZone: "America/Santiago" })}` : ""}
+                        {payment.reference ? ` · Código: ${payment.reference}` : ""}
+                        {payment.cardType ? ` · ${payment.cardType === "credit" ? "Crédito" : "Débito"}` : ""}
+                      </p>
+                    </div>
+                    {payment.status === "pending" && <Button size="sm" variant="outline" onClick={() => confirmPendingPayment(payment)} disabled={completePayment.isPending}>Marcar pagado</Button>}
+                  </div>
+                ))}
+                {!paymentDetail?.payments.length && <p className="text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
+              </div>
+              <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Nuevo medio de pago</Label>
+                  <Select value={additionalPayment.method} onValueChange={value => setAdditionalPayment(current => ({ ...current, method: value as PaymentMethod, status: value === "payment_link" ? "pending" : "paid", reference: "", giftCardCode: "", cardType: "" }))}>
+                    <SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="payment_link">Link de pago</SelectItem><SelectItem value="bank_transfer">Transferencia</SelectItem><SelectItem value="cash">Efectivo</SelectItem><SelectItem value="transbank_machine">Máquina Transbank</SelectItem><SelectItem value="gift_card">Canjear Gift Card</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2"><Label>Monto</Label><Input type="number" min={1} value={additionalPayment.amountClp} onChange={event => setAdditionalPayment(current => ({ ...current, amountClp: event.target.value }))} /></div>
+                {additionalPayment.method === "payment_link" && <div className="space-y-2"><Label>Estado</Label><Select value={additionalPayment.status} onValueChange={value => setAdditionalPayment(current => ({ ...current, status: value as "pending" | "paid" }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pending">Link enviado / pendiente</SelectItem><SelectItem value="paid">Pago confirmado</SelectItem></SelectContent></Select></div>}
+                {additionalPayment.status === "paid" && <div className="space-y-2"><Label>Fecha y hora</Label><Input type="datetime-local" value={additionalPayment.paidAt} onChange={event => setAdditionalPayment(current => ({ ...current, paidAt: event.target.value }))} /></div>}
+                {additionalPayment.method === "gift_card" ? <div className="space-y-2 sm:col-span-2"><Label>Código Gift Card</Label><Input value={additionalPayment.giftCardCode} onChange={event => setAdditionalPayment(current => ({ ...current, giftCardCode: event.target.value.toUpperCase() }))} /></div> : additionalPayment.status === "paid" && additionalPayment.method !== "cash" ? <div className="space-y-2"><Label>Código o referencia</Label><Input value={additionalPayment.reference} onChange={event => setAdditionalPayment(current => ({ ...current, reference: event.target.value }))} /></div> : null}
+                {additionalPayment.status === "paid" && ["payment_link", "transbank_machine"].includes(additionalPayment.method) && <div className="space-y-2"><Label>Tipo de tarjeta</Label><Select value={additionalPayment.cardType} onValueChange={value => setAdditionalPayment(current => ({ ...current, cardType: value as "credit" | "debit" }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}
+              </div>
+            </div>
+            <DialogFooter><Button variant="outline" onClick={() => setPaymentBooking(null)}>Cerrar</Button><Button onClick={submitAdditionalPayment} disabled={addPayment.isPending || !paymentIsComplete(additionalPayment)}>Agregar pago</Button></DialogFooter>
           </DialogContent>
         </Dialog>
 

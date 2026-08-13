@@ -96,6 +96,7 @@ export async function finalizeApprovedSaunaOrder(
         paymentMethod: "webpay_plus",
         paymentReference: result.authorizationCode || order.buyOrder,
         amountClp: order.totalClp,
+        amountPaidClp: order.totalClp,
         source: "web",
         origin: "web",
       })

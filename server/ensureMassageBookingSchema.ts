@@ -51,6 +51,9 @@ export async function ensureMassageBookingSchema(): Promise<void> {
     "ALTER TABLE `massage_bookings` MODIFY COLUMN `booking_source` enum('web','cms') NOT NULL DEFAULT 'cms'",
   ));
   await db.execute(sql.raw(
+    "ALTER TABLE `massage_bookings` MODIFY COLUMN `payment_status` enum('pending','partially_paid','paid','refunded') NOT NULL DEFAULT 'pending'",
+  ));
+  await db.execute(sql.raw(
     "UPDATE `massage_bookings` SET `booking_source` = 'web' WHERE `getnet_request_id` IS NOT NULL",
   ));
 

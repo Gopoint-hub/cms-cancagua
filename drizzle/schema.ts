@@ -165,7 +165,7 @@ export const biopoolBookings = mysqlTable("biopool_bookings", {
   status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
   attendanceConfirmation: mysqlEnum("attendance_confirmation", ["pending", "confirmed", "declined"]).default("pending").notNull(),
   attendanceToken: varchar("attendance_token", { length: 64 }).notNull().unique(),
-  paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "partially_refunded", "refunded"]).default("pending").notNull(),
+  paymentStatus: mysqlEnum("payment_status", ["pending", "partially_paid", "paid", "partially_refunded", "refunded"]).default("pending").notNull(),
   paymentMethod: varchar("payment_method", { length: 60 }),
   paymentReference: varchar("payment_reference", { length: 160 }),
   originalAmountClp: int("original_amount_clp").notNull(),
@@ -181,6 +181,22 @@ export const biopoolBookings = mysqlTable("biopool_bookings", {
   cancellationReason: text("cancellation_reason"),
   cancelledAt: timestamp("cancelled_at"),
   cancelledByUserId: int("cancelled_by_user_id"),
+  createdByUserId: int("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const reservationPayments = mysqlTable("reservation_payments", {
+  id: int("id").autoincrement().primaryKey(),
+  module: varchar("module", { length: 40 }).notNull(),
+  reservationId: int("reservation_id").notNull(),
+  method: varchar("method", { length: 60 }).notNull(),
+  status: mysqlEnum("status", ["pending", "paid", "refunded"]).default("paid").notNull(),
+  amountClp: int("amount_clp").notNull(),
+  paidAt: timestamp("paid_at"),
+  reference: varchar("reference", { length: 160 }),
+  cardType: mysqlEnum("card_type", ["credit", "debit"]),
+  giftCardId: int("gift_card_id"),
   createdByUserId: int("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
@@ -332,10 +348,11 @@ export const saunaBookings = mysqlTable("sauna_bookings", {
   isPrivate: int("is_private").default(0).notNull(),
   status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("confirmed").notNull(),
   isConfirmed: int("is_confirmed").default(0).notNull(),
-  paymentStatus: mysqlEnum("payment_status", ["unknown", "pending", "paid", "partially_refunded", "refunded"]).default("unknown").notNull(),
+  paymentStatus: mysqlEnum("payment_status", ["unknown", "pending", "partially_paid", "paid", "partially_refunded", "refunded"]).default("unknown").notNull(),
   paymentMethod: varchar("payment_method", { length: 60 }),
   paymentReference: varchar("payment_reference", { length: 160 }),
   amountClp: int("amount_clp").default(0).notNull(),
+  amountPaidClp: int("amount_paid_clp").default(0).notNull(),
   source: mysqlEnum("source", ["skedu", "web", "cms", "detox"]).default("cms").notNull(),
   origin: varchar("origin", { length: 40 }),
   rescheduleCount: int("reschedule_count").default(0).notNull(),
@@ -1562,7 +1579,7 @@ export const massageBookings = mysqlTable("massage_bookings", {
   endTime: varchar("end_time", { length: 5 }).notNull(),     // "11:30"
   // Estado y pago
   status: mysqlEnum("status", ["pending", "confirmed", "completed", "cancelled", "no_show"]).default("pending").notNull(),
-  paymentStatus: mysqlEnum("payment_status", ["pending", "paid", "refunded"]).default("pending").notNull(),
+  paymentStatus: mysqlEnum("payment_status", ["pending", "partially_paid", "paid", "refunded"]).default("pending").notNull(),
   getnetRequestId: varchar("getnet_request_id", { length: 64 }),
   manualPaymentMethod: mysqlEnum("manual_payment_method", [
     "getnet_link",

@@ -8,6 +8,7 @@ const MASSAGE_BOOKING_STATUS_LABELS: Record<string, string> = {
 
 const MASSAGE_PAYMENT_STATUS_LABELS: Record<string, string> = {
   pending: "Pago pendiente",
+  partially_paid: "Pago parcial",
   paid: "Pagado",
   refunded: "Reembolsado",
 };

@@ -223,7 +223,7 @@ const CREATE_STATEMENTS = [
     end_time varchar(5) NOT NULL, adult_quantity int NOT NULL DEFAULT 1, child_quantity int NOT NULL DEFAULT 0,
     total_guests int NOT NULL, status enum('pending','confirmed','completed','cancelled','no_show') NOT NULL DEFAULT 'pending',
     attendance_confirmation enum('pending','confirmed','declined') NOT NULL DEFAULT 'pending', attendance_token varchar(64) NOT NULL UNIQUE,
-    payment_status enum('pending','paid','partially_refunded','refunded') NOT NULL DEFAULT 'pending',
+    payment_status enum('pending','partially_paid','paid','partially_refunded','refunded') NOT NULL DEFAULT 'pending',
     payment_method varchar(60) NULL, payment_reference varchar(160) NULL,
     original_amount_clp int NOT NULL, discount_amount_clp int NOT NULL DEFAULT 0,
     amount_paid_clp int NOT NULL DEFAULT 0, refund_amount_clp int NOT NULL DEFAULT 0,
@@ -236,6 +236,17 @@ const CREATE_STATEMENTS = [
     updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX biopool_bookings_date_status_idx (service_id, booking_date, status),
     INDEX biopool_bookings_client_idx (client_id), INDEX biopool_bookings_email_idx (client_email)
+  )`,
+  `CREATE TABLE IF NOT EXISTS reservation_payments (
+    id int AUTO_INCREMENT PRIMARY KEY, module varchar(40) NOT NULL, reservation_id int NOT NULL,
+    method varchar(60) NOT NULL,
+    status enum('pending','paid','refunded') NOT NULL DEFAULT 'paid', amount_clp int NOT NULL,
+    paid_at timestamp NULL, reference varchar(160) NULL,
+    card_type enum('credit','debit') NULL, gift_card_id int NULL, created_by_user_id int NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX reservation_payment_entity_idx (module, reservation_id, created_at),
+    INDEX reservation_payment_gift_card_idx (gift_card_id)
   )`,
   `CREATE TABLE IF NOT EXISTS biopool_booking_activity (
     id int AUTO_INCREMENT PRIMARY KEY, booking_id int NOT NULL, action varchar(80) NOT NULL,
@@ -291,6 +302,12 @@ export async function ensureBiopoolsSchema(): Promise<void> {
   const existingBookingColumns = new Set(
     ((bookingColumns as any)?.[0] ?? []).map((column: any) => column.Field)
   );
+  const paymentStatusColumn = ((bookingColumns as any)?.[0] ?? []).find(
+    (column: any) => column.Field === "payment_status"
+  );
+  if (paymentStatusColumn && !String(paymentStatusColumn.Type).includes("partially_paid")) {
+    await db.execute(sql`ALTER TABLE biopool_bookings MODIFY COLUMN payment_status enum('pending','partially_paid','paid','partially_refunded','refunded') NOT NULL DEFAULT 'pending'`);
+  }
   const checkoutColumns = await db.execute(sql`SHOW COLUMNS FROM biopool_checkout_orders`);
   const existingCheckoutColumns = new Set(((checkoutColumns as any)?.[0] ?? []).map((column: any) => column.Field));
   if (!existingCheckoutColumns.has("discount_code_id")) {
