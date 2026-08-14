@@ -1,5 +1,10 @@
 import { eq, sql } from "drizzle-orm";
-import { discountCodes, massageBookings, massageSales, massageTechniques } from "../drizzle/schema";
+import {
+  discountCodes,
+  massageBookings,
+  massageSales,
+  massageTechniques,
+} from "../drizzle/schema";
 import { getDb } from "./db";
 import { recordMassageDiscountUsage } from "./massageDiscounts";
 
@@ -12,7 +17,8 @@ export async function syncMassageSale(bookingId: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
-  const [booking] = await db.select({
+  const [booking] = await db
+    .select({
     id: massageBookings.id,
     paymentStatus: massageBookings.paymentStatus,
     bookingDate: massageBookings.bookingDate,
@@ -32,12 +38,25 @@ export async function syncMassageSale(bookingId: number): Promise<void> {
     discountValue: discountCodes.discountValue,
   })
     .from(massageBookings)
-    .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-    .leftJoin(discountCodes, eq(massageBookings.discountCodeId, discountCodes.id))
+    .leftJoin(
+      massageTechniques,
+      eq(massageBookings.techniqueId, massageTechniques.id)
+    )
+    .leftJoin(
+      discountCodes,
+      eq(massageBookings.discountCodeId, discountCodes.id)
+    )
     .where(eq(massageBookings.id, bookingId))
     .limit(1);
 
-  if (!booking || (booking.paymentStatus !== "paid" && booking.paymentStatus !== "refunded")) return;
+  if (!booking) return;
+  if (
+    booking.paymentStatus !== "paid" &&
+    booking.paymentStatus !== "refunded"
+  ) {
+    await db.delete(massageSales).where(eq(massageSales.bookingId, bookingId));
+    return;
+  }
 
   const sale = {
     bookingId: booking.id,
@@ -55,13 +74,19 @@ export async function syncMassageSale(bookingId: number): Promise<void> {
     discountType: booking.discountType,
     discountValue: booking.discountValue,
     paymentMethod: booking.getnetRequestId
-      ? "getnet" as const
-      : booking.manualPaymentMethod ?? "cms_manual" as const,
+      ? ("getnet" as const)
+      : (booking.manualPaymentMethod ?? ("cms_manual" as const)),
     paymentReference: booking.getnetRequestId,
-    status: booking.paymentStatus === "refunded" ? "refunded" as const : "paid" as const,
+    status:
+      booking.paymentStatus === "refunded"
+        ? ("refunded" as const)
+        : ("paid" as const),
   };
 
-  await db.insert(massageSales).values(sale).onDuplicateKeyUpdate({
+  await db
+    .insert(massageSales)
+    .values(sale)
+    .onDuplicateKeyUpdate({
     set: {
       serviceDate: sale.serviceDate,
       startTime: sale.startTime,
@@ -82,13 +107,20 @@ export async function syncMassageSale(bookingId: number): Promise<void> {
     },
   });
 
-  if (booking.paymentStatus === "paid" && booking.discountCodeId && booking.getnetRequestId) {
-    const [totals] = await db.select({
+  if (
+    booking.paymentStatus === "paid" &&
+    booking.discountCodeId &&
+    booking.getnetRequestId
+  ) {
+    const [totals] = await db
+      .select({
       originalAmount: sql<string>`COALESCE(SUM(${massageBookings.originalAmount}), 0)`,
       discountAmount: sql<string>`COALESCE(SUM(${massageBookings.discountAmount}), 0)`,
       finalAmount: sql<string>`COALESCE(SUM(${massageBookings.amountPaid}), 0)`,
       email: sql<string | null>`MAX(${massageBookings.clientEmail})`,
-    }).from(massageBookings).where(eq(massageBookings.getnetRequestId, booking.getnetRequestId));
+      })
+      .from(massageBookings)
+      .where(eq(massageBookings.getnetRequestId, booking.getnetRequestId));
     await recordMassageDiscountUsage(db, {
       discountCodeId: booking.discountCodeId,
       requestId: booking.getnetRequestId,

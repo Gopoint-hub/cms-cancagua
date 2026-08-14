@@ -3,7 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { createGetnetSession, getGetnetSessionInfo } from "./getnet";
-import { sendBookingConfirmations } from "./getnetWebhook";;
+import { sendBookingConfirmations } from "./getnetWebhook";
 import {
   massageTechniques,
   massageTherapists,
@@ -30,6 +30,8 @@ import {
   regularClassPlans,
   regularClassStudents,
   reservationPayments,
+  giftCards,
+  giftCardTransactions,
   type User,
 } from "../drizzle/schema";
 import {
@@ -42,8 +44,25 @@ import {
 import { ENV } from "./_core/env";
 import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
-import { calculateWellnessCartDiscount, recordPaidWellnessDiscountUsage, type WellnessDiscountLine } from "./massageDiscounts";
-import { eq, and, gte, lte, desc, asc, sql, or, inArray, lt, ne, isNull } from "drizzle-orm";
+import {
+  calculateWellnessCartDiscount,
+  recordPaidWellnessDiscountUsage,
+  type WellnessDiscountLine,
+} from "./massageDiscounts";
+import {
+  eq,
+  and,
+  gte,
+  lte,
+  desc,
+  asc,
+  sql,
+  or,
+  inArray,
+  lt,
+  ne,
+  isNull,
+} from "drizzle-orm";
 import {
   hasCmsPermission,
   hasMassageAdminAccess,
@@ -70,7 +89,10 @@ import {
   type MassageClientBookingRecord,
 } from "./massageClients";
 import { calendarMonthRange } from "./regularClassesPeriod";
-import { cancelRegularClassPayment, confirmRegularClassPayment } from "./regularClassesPurchase";
+import {
+  cancelRegularClassPayment,
+  confirmRegularClassPayment,
+} from "./regularClassesPurchase";
 import { calculatedPaymentStatus } from "@shared/reservationPayments";
 import {
   redeemGiftCardPayment,
@@ -84,7 +106,7 @@ import { withMassageResourceLock } from "./massageResourceLock";
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 const massagePaymentInputSchema = reservationPaymentInputSchema.refine(
   payment => MANUAL_MASSAGE_PAYMENT_METHODS.includes(payment.method as any),
-  { message: "Medio de pago no disponible para masajes", path: ["method"] },
+  { message: "Medio de pago no disponible para masajes", path: ["method"] }
 );
 
 const adminOrEditor = async (role: string) => {
@@ -99,8 +121,11 @@ const massageOperations = async (role: string) => {
   }
 };
 
-const massageRead = async (user: string | Pick<User, "role" | "permissions" | "regularClassesTeacher">) => {
-  const allowed = typeof user === "string"
+const massageRead = async (
+  user: string | Pick<User, "role" | "permissions" | "regularClassesTeacher">
+) => {
+  const allowed =
+    typeof user === "string"
     ? hasMassageReadAccess(user)
     : hasCmsPermission(user, "module.massages");
   if (!allowed) {
@@ -109,10 +134,12 @@ const massageRead = async (user: string | Pick<User, "role" | "permissions" | "r
 };
 
 const massageAssignment = async (
-  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">
 ) => {
-  if (!hasCmsPermission(user, "module.massages")
-      || !hasCmsPermission(user, "massages.assign_therapists")) {
+  if (
+    !hasCmsPermission(user, "module.massages") ||
+    !hasCmsPermission(user, "massages.assign_therapists")
+  ) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "No tienes permiso para asignar terapeutas",
@@ -121,19 +148,23 @@ const massageAssignment = async (
 };
 
 const massageAgenda = async (
-  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">
 ) => {
-  if (!hasCmsPermission(user, "module.massages")
-      || !hasCmsPermission(user, "massages.manage_agenda")) {
+  if (
+    !hasCmsPermission(user, "module.massages") ||
+    !hasCmsPermission(user, "massages.manage_agenda")
+  ) {
     throw new TRPCError({ code: "FORBIDDEN" });
   }
 };
 
 const massageClientsAccess = async (
-  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">
 ) => {
-  if (!hasCmsPermission(user, "module.massages")
-      || !hasCmsPermission(user, "massages.view_clients")) {
+  if (
+    !hasCmsPermission(user, "module.massages") ||
+    !hasCmsPermission(user, "massages.view_clients")
+  ) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "No tienes permiso para ver los clientes de masajes",
@@ -142,10 +173,12 @@ const massageClientsAccess = async (
 };
 
 const massageSalesAccess = async (
-  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">,
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">
 ) => {
-  if (!hasCmsPermission(user, "module.massages")
-      || !hasCmsPermission(user, "massages.view_sales")) {
+  if (
+    !hasCmsPermission(user, "module.massages") ||
+    !hasCmsPermission(user, "massages.view_sales")
+  ) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "No tienes permiso para ver las ventas de masajes",
@@ -170,7 +203,13 @@ export const MASSAGE_AGENDA_STATUSES = [
   "cancelled",
   "no_show",
 ] as const;
-export const SKEDU_AGENDA_STATUSES = ["pending", "confirmed", "completed", "cancelled", "no_show"] as const;
+export const SKEDU_AGENDA_STATUSES = [
+  "pending",
+  "confirmed",
+  "completed",
+  "cancelled",
+  "no_show",
+] as const;
 export const MANUAL_ASSIGNMENT_REJECTION_STATUSES = [
   "admin_rejected",
   "therapist_rejected",
@@ -183,18 +222,22 @@ export function isPendingManualMassageAssignment(booking: {
   therapistId: number | null;
   freelanceApprovalStatus: string | null;
 }): boolean {
-  return booking.paymentStatus === "paid"
-    && booking.status === "pending"
-    && (
-      booking.therapistId === null
-      || MANUAL_ASSIGNMENT_REJECTION_STATUSES.some(
-        (status) => status === booking.freelanceApprovalStatus,
-      )
+  return (
+    booking.paymentStatus === "paid" &&
+    booking.status === "pending" &&
+    (booking.therapistId === null ||
+      MANUAL_ASSIGNMENT_REJECTION_STATUSES.some(
+        status => status === booking.freelanceApprovalStatus
+      ))
     );
 }
 
 const cancellationCategorySchema = z.enum(MASSAGE_CANCELLATION_CATEGORIES);
-const cancellationReasonSchema = z.string().trim().min(5, "Escribe el motivo de la cancelación").max(1000);
+const cancellationReasonSchema = z
+  .string()
+  .trim()
+  .min(5, "Escribe el motivo de la cancelación")
+  .max(1000);
 
 export function validateMassageCancellationReason(reason: string): string {
   return cancellationReasonSchema.parse(reason);
@@ -204,7 +247,11 @@ export const SKEDU_MASSAGE_PROGRAMS = [
   { value: "reconecta", label: "Reconecta", durations: [30, 50] },
   { value: "reconecta_detox", label: "Reconecta Detox", durations: [30, 50] },
   { value: "bio_reconecta", label: "Bio Reconecta", durations: [30, 50] },
-  { value: "bio_reconecta_detox", label: "Bio Reconecta Detox", durations: [30, 50] },
+  {
+    value: "bio_reconecta_detox",
+    label: "Bio Reconecta Detox",
+    durations: [30, 50],
+  },
   { value: "reset", label: "Reset", durations: [30] },
 ] as const;
 
@@ -214,7 +261,9 @@ export const SKEDU_MASSAGE_PRICES: Record<30 | 50, number> = {
 };
 
 export function getSkeduMassageUnitPrice(duration: number): number {
-  return duration === 30 || duration === 50 ? SKEDU_MASSAGE_PRICES[duration] : 0;
+  return duration === 30 || duration === 50
+    ? SKEDU_MASSAGE_PRICES[duration]
+    : 0;
 }
 
 export function getSkeduMassageQuantity(modality: "simple" | "double"): number {
@@ -222,48 +271,69 @@ export function getSkeduMassageQuantity(modality: "simple" | "double"): number {
 }
 
 function getSkeduProgramLabel(programValue: string): string {
-  return SKEDU_MASSAGE_PROGRAMS.find((option) => option.value === programValue)?.label
-    ?? programValue.replaceAll("_", " ");
+  return (
+    SKEDU_MASSAGE_PROGRAMS.find(option => option.value === programValue)
+      ?.label ?? programValue.replaceAll("_", " ")
+  );
 }
 
-export function isSkeduProgramDurationAllowed(programValue: string, duration: number): boolean {
-  const program = SKEDU_MASSAGE_PROGRAMS.find((option) => option.value === programValue);
-  return !!program && (program.durations as readonly number[]).includes(duration);
+export function isSkeduProgramDurationAllowed(
+  programValue: string,
+  duration: number
+): boolean {
+  const program = SKEDU_MASSAGE_PROGRAMS.find(
+    option => option.value === programValue
+  );
+  return (
+    !!program && (program.durations as readonly number[]).includes(duration)
+  );
 }
 
 export function validateSkeduTherapistSelection(
   modality: "simple" | "double",
   therapistId: number,
-  secondTherapistId?: number | null,
+  secondTherapistId?: number | null
 ): void {
   if (modality === "double" && !secondTherapistId) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Un masaje doble requiere dos terapeutas" });
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Un masaje doble requiere dos terapeutas",
+    });
   }
   if (secondTherapistId && secondTherapistId === therapistId) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Selecciona dos terapeutas distintos" });
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Selecciona dos terapeutas distintos",
+    });
   }
 }
 
-export function expandSkeduProgramResourceBlocks(programs: Array<{
+export function expandSkeduProgramResourceBlocks(
+  programs: Array<{
   therapistId: number | null;
   secondTherapistId: number | null;
   roomId: number;
   startTime: string;
   endTime: string;
-}>) {
-  return programs.flatMap((booking) => [
+  }>
+) {
+  return programs.flatMap(booking => [
     {
       therapistId: booking.therapistId,
       roomId: booking.roomId,
       startTime: booking.startTime,
       endTime: booking.endTime,
     },
-    ...(booking.secondTherapistId ? [{
+    ...(booking.secondTherapistId
+      ? [
+          {
       therapistId: booking.secondTherapistId,
       roomId: null,
       startTime: booking.startTime,
       endTime: booking.endTime,
-    }] : []),
+          },
+        ]
+      : []),
   ]);
 }
 
@@ -272,45 +342,61 @@ type MassageDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 async function loadBlockingMassageBookings(
   db: MassageDb,
   bookingDate: string,
-  options: { excludeMassageBookingId?: number; excludeProgramBookingId?: number } = {},
+  options: {
+    excludeMassageBookingId?: number;
+    excludeProgramBookingId?: number;
+  } = {}
 ) {
   const standardFilters = [
     eq(massageBookings.bookingDate, bookingDate as any),
     sql`${massageBookings.status} NOT IN ('cancelled')`,
   ];
   if (options.excludeMassageBookingId) {
-    standardFilters.push(ne(massageBookings.id, options.excludeMassageBookingId));
+    standardFilters.push(
+      ne(massageBookings.id, options.excludeMassageBookingId)
+    );
   }
-  const standard = await db.select({
+  const standard = await db
+    .select({
     therapistId: massageBookings.therapistId,
     roomId: massageBookings.roomId,
     startTime: massageBookings.startTime,
     endTime: massageBookings.endTime,
     coupleBookingId: massageBookings.coupleBookingId,
-  }).from(massageBookings).where(and(...standardFilters));
+    })
+    .from(massageBookings)
+    .where(and(...standardFilters));
 
   const programFilters = [
     eq(massageProgramBookings.bookingDate, bookingDate as any),
     sql`${massageProgramBookings.status} NOT IN ('cancelled')`,
   ];
   if (options.excludeProgramBookingId) {
-    programFilters.push(ne(massageProgramBookings.id, options.excludeProgramBookingId));
+    programFilters.push(
+      ne(massageProgramBookings.id, options.excludeProgramBookingId)
+    );
   }
 
-  const programs = await db.select({
+  const programs = await db
+    .select({
     therapistId: massageProgramBookings.therapistId,
     secondTherapistId: massageProgramBookings.secondTherapistId,
     roomId: massageProgramBookings.roomId,
     startTime: massageProgramBookings.startTime,
     endTime: massageProgramBookings.endTime,
-  }).from(massageProgramBookings).where(and(...programFilters));
+    })
+    .from(massageProgramBookings)
+    .where(and(...programFilters));
 
   return [
     ...standard.map(({ coupleBookingId, ...booking }) => ({
       ...booking,
       groupKey: coupleBookingId ? `booking-group:${coupleBookingId}` : null,
     })),
-    ...expandSkeduProgramResourceBlocks(programs).map((booking) => ({ ...booking, groupKey: null })),
+    ...expandSkeduProgramResourceBlocks(programs).map(booking => ({
+      ...booking,
+      groupKey: null,
+    })),
   ];
 }
 
@@ -329,7 +415,10 @@ export const normalizeDecimalInput = (value: string): string => {
   const normalized = value.trim().replace(",", ".");
   const match = normalized.match(/^-?\d+(?:\.\d+)?/);
   if (!match) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa una cantidad valida" });
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Ingresa una cantidad valida",
+    });
   }
   return match[0];
 };
@@ -344,8 +433,8 @@ export const getChileTimeString = (now = new Date()): string => {
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(now);
-  const hour = parts.find((part) => part.type === "hour")?.value ?? "00";
-  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+  const hour = parts.find(part => part.type === "hour")?.value ?? "00";
+  const minute = parts.find(part => part.type === "minute")?.value ?? "00";
   return `${hour}:${minute}`;
 };
 
@@ -354,7 +443,7 @@ export const PUBLIC_MASSAGE_MIN_LEAD_MINUTES = 120;
 export function hasPublicMassageMinimumLeadTime(
   bookingDate: string,
   startTime: string,
-  now = new Date(),
+  now = new Date()
 ): boolean {
   const todayChile = getChileDateString(now);
   if (bookingDate < todayChile) return false;
@@ -363,18 +452,24 @@ export function hasPublicMassageMinimumLeadTime(
 
   const [hour, minute] = startTime.split(":").map(Number);
   const [nowHour, nowMinute] = getChileTimeString(now).split(":").map(Number);
-  return hour * 60 + minute - (nowHour * 60 + nowMinute) >= PUBLIC_MASSAGE_MIN_LEAD_MINUTES;
+  return (
+    hour * 60 + minute - (nowHour * 60 + nowMinute) >=
+    PUBLIC_MASSAGE_MIN_LEAD_MINUTES
+  );
 }
 
 export function validatePublicMassageLeadTime(
   items: Array<{ bookingDate: string; startTime: string }>,
-  now = new Date(),
+  now = new Date()
 ): void {
   for (const item of items) {
-    if (!hasPublicMassageMinimumLeadTime(item.bookingDate, item.startTime, now)) {
+    if (
+      !hasPublicMassageMinimumLeadTime(item.bookingDate, item.startTime, now)
+    ) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Los masajes deben reservarse con al menos 2 horas de anticipación.",
+        message:
+          "Los masajes deben reservarse con al menos 2 horas de anticipación.",
       });
     }
   }
@@ -382,16 +477,19 @@ export function validatePublicMassageLeadTime(
 
 export function validateMassageCartCapacity(
   items: Array<{ bookingDate: string; startTime: string; duration: number }>,
-  maximumSimultaneous = 4,
+  maximumSimultaneous = 4
 ): void {
-  const eventsByDate = new Map<string, Array<{ minute: number; delta: number }>>();
+  const eventsByDate = new Map<
+    string,
+    Array<{ minute: number; delta: number }>
+  >();
   for (const item of items) {
     const [hour, minute] = item.startTime.split(":").map(Number);
     const startMinute = hour * 60 + minute;
     const events = eventsByDate.get(item.bookingDate) ?? [];
     events.push(
       { minute: startMinute, delta: 1 },
-      { minute: startMinute + item.duration, delta: -1 },
+      { minute: startMinute + item.duration, delta: -1 }
     );
     eventsByDate.set(item.bookingDate, events);
   }
@@ -412,29 +510,43 @@ export function validateMassageCartCapacity(
   }
 }
 
-type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & { [P in K]: string | null };
+type SerializedDateFields<T, K extends keyof T> = Omit<T, K> & {
+  [P in K]: string | null;
+};
 
-const serializeDateFields = <T extends Record<string, unknown>, K extends keyof T>(
-  row: T, fields: K[],
+const serializeDateFields = <
+  T extends Record<string, unknown>,
+  K extends keyof T,
+>(
+  row: T,
+  fields: K[]
 ): SerializedDateFields<T, K> => {
   const serialized = { ...row };
   for (const field of fields) {
-    (serialized as Record<keyof T, unknown>)[field] = serializeDateOnly(row[field]);
+    (serialized as Record<keyof T, unknown>)[field] = serializeDateOnly(
+      row[field]
+    );
   }
   return serialized as SerializedDateFields<T, K>;
 };
 
 const sanitizePrice = (v?: string | null): string | null => {
   if (!v) return null;
-  const cleaned = v.toString().replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.');
+  const cleaned = v
+    .toString()
+    .replace(/[$\s]/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : String(Math.round(num));
 };
 
-export const serializePublicMassageTechnique = (t: typeof massageTechniques.$inferSelect) => {
+export const serializePublicMassageTechnique = (
+  t: typeof massageTechniques.$inferSelect
+) => {
   const durations = (t.durations ?? "")
     .split(",")
-    .map((d) => Number(d.trim()))
+    .map(d => Number(d.trim()))
     .filter(Boolean);
   const rawPrices = [t.price50min, t.price80min, t.price110min];
   const prices = durations.map((duration, index) => ({
@@ -463,61 +575,93 @@ const tecnicasRouter = router({
     }
     const db = await getDb();
     if (!db) return [];
-    return db.select().from(massageTechniques).orderBy(asc(massageTechniques.name));
+    return db
+      .select()
+      .from(massageTechniques)
+      .orderBy(asc(massageTechniques.name));
   }),
 
   create: protectedProcedure
-    .input(z.object({
-      name: z.string().min(2), description: z.string().optional(),
+    .input(
+      z.object({
+        name: z.string().min(2),
+        description: z.string().optional(),
       imageUrl: z.string().url().optional(),
       durations: z.string().default("50,80,110"),
-      price50min: z.string().optional(), price80min: z.string().optional(), price110min: z.string().optional(),
-    }))
+        price50min: z.string().optional(),
+        price80min: z.string().optional(),
+        price110min: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(massageTechniques).values({
-        name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, durations: input.durations,
-        price50min: sanitizePrice(input.price50min), price80min: sanitizePrice(input.price80min), price110min: sanitizePrice(input.price110min),
+        name: input.name,
+        description: input.description || null,
+        imageUrl: input.imageUrl || null,
+        durations: input.durations,
+        price50min: sanitizePrice(input.price50min),
+        price80min: sanitizePrice(input.price80min),
+        price110min: sanitizePrice(input.price110min),
       });
       return { success: true };
     }),
 
   update: protectedProcedure
-    .input(z.object({
-      id: z.number(), name: z.string().optional(), description: z.string().optional(),
+    .input(
+      z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        description: z.string().optional(),
       imageUrl: z.string().url().nullable().optional(),
-      durations: z.string().optional(), price50min: z.string().optional(),
-      price80min: z.string().optional(), price110min: z.string().optional(), active: z.number().optional(),
-    }))
+        durations: z.string().optional(),
+        price50min: z.string().optional(),
+        price80min: z.string().optional(),
+        price110min: z.string().optional(),
+        active: z.number().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, price50min, price80min, price110min, ...rest } = input;
-      await db.update(massageTechniques).set({
+      await db
+        .update(massageTechniques)
+        .set({
         ...rest,
-        price50min: price50min !== undefined ? sanitizePrice(price50min) : undefined,
-        price80min: price80min !== undefined ? sanitizePrice(price80min) : undefined,
-        price110min: price110min !== undefined ? sanitizePrice(price110min) : undefined,
-      }).where(eq(massageTechniques.id, id));
+          price50min:
+            price50min !== undefined ? sanitizePrice(price50min) : undefined,
+          price80min:
+            price80min !== undefined ? sanitizePrice(price80min) : undefined,
+          price110min:
+            price110min !== undefined ? sanitizePrice(price110min) : undefined,
+        })
+        .where(eq(massageTechniques.id, id));
       return { success: true };
     }),
 
   uploadImage: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       imageData: z.string(),
       mimeType: z.string().regex(/^image\//),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const { storagePut } = await import("./storage");
       const matches = input.imageData.match(/^data:image\/(\w+);base64,(.+)$/);
       if (!matches) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Formato de imagen inválido" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Formato de imagen inválido",
+        });
       }
-      const extension = matches[1].toLowerCase() === "jpeg" ? "jpg" : matches[1].toLowerCase();
+      const extension =
+        matches[1].toLowerCase() === "jpeg" ? "jpg" : matches[1].toLowerCase();
       const buffer = Buffer.from(matches[2], "base64");
       const fileKey = `massage-techniques/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
       const { url } = await storagePut(fileKey, buffer, input.mimeType);
@@ -530,7 +674,9 @@ const tecnicasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.delete(massageTechniques).where(eq(massageTechniques.id, input.id));
+      await db
+        .delete(massageTechniques)
+        .where(eq(massageTechniques.id, input.id));
       return { success: true };
     }),
 
@@ -540,39 +686,68 @@ const tecnicasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return db.select({
-        id: massageTechniqueRecipes.id, supplyId: massageTechniqueRecipes.supplyId,
-        supplyName: massageSupplies.name, unit: massageSupplies.unit,
+      return db
+        .select({
+          id: massageTechniqueRecipes.id,
+          supplyId: massageTechniqueRecipes.supplyId,
+          supplyName: massageSupplies.name,
+          unit: massageSupplies.unit,
         quantityPer50min: massageTechniqueRecipes.quantityPer50min,
         quantityPer80min: massageTechniqueRecipes.quantityPer80min,
         quantityPer110min: massageTechniqueRecipes.quantityPer110min,
       })
       .from(massageTechniqueRecipes)
-      .innerJoin(massageSupplies, eq(massageTechniqueRecipes.supplyId, massageSupplies.id))
+        .innerJoin(
+          massageSupplies,
+          eq(massageTechniqueRecipes.supplyId, massageSupplies.id)
+        )
       .where(eq(massageTechniqueRecipes.techniqueId, input.techniqueId));
     }),
 
   upsertRecipe: protectedProcedure
-    .input(z.object({
-      techniqueId: z.number(), supplyId: z.number(),
-      quantityPer50min: z.string(), quantityPer80min: z.string().optional(), quantityPer110min: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        techniqueId: z.number(),
+        supplyId: z.number(),
+        quantityPer50min: z.string(),
+        quantityPer80min: z.string().optional(),
+        quantityPer110min: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const values = {
         quantityPer50min: normalizeDecimalInput(input.quantityPer50min),
-        quantityPer80min: input.quantityPer80min ? normalizeDecimalInput(input.quantityPer80min) : null,
-        quantityPer110min: input.quantityPer110min ? normalizeDecimalInput(input.quantityPer110min) : null,
+        quantityPer80min: input.quantityPer80min
+          ? normalizeDecimalInput(input.quantityPer80min)
+          : null,
+        quantityPer110min: input.quantityPer110min
+          ? normalizeDecimalInput(input.quantityPer110min)
+          : null,
       };
-      const existing = await db.select().from(massageTechniqueRecipes)
-        .where(and(eq(massageTechniqueRecipes.techniqueId, input.techniqueId), eq(massageTechniqueRecipes.supplyId, input.supplyId)))
+      const existing = await db
+        .select()
+        .from(massageTechniqueRecipes)
+        .where(
+          and(
+            eq(massageTechniqueRecipes.techniqueId, input.techniqueId),
+            eq(massageTechniqueRecipes.supplyId, input.supplyId)
+          )
+        )
         .limit(1);
       if (existing.length > 0) {
-        await db.update(massageTechniqueRecipes).set(values).where(eq(massageTechniqueRecipes.id, existing[0].id));
+        await db
+          .update(massageTechniqueRecipes)
+          .set(values)
+          .where(eq(massageTechniqueRecipes.id, existing[0].id));
       } else {
-        await db.insert(massageTechniqueRecipes).values({ techniqueId: input.techniqueId, supplyId: input.supplyId, ...values });
+        await db.insert(massageTechniqueRecipes).values({
+          techniqueId: input.techniqueId,
+          supplyId: input.supplyId,
+          ...values,
+        });
       }
       return { success: true };
     }),
@@ -583,7 +758,9 @@ const tecnicasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.delete(massageTechniqueRecipes).where(eq(massageTechniqueRecipes.id, input.id));
+      await db
+        .delete(massageTechniqueRecipes)
+        .where(eq(massageTechniqueRecipes.id, input.id));
       return { success: true };
     }),
 });
@@ -629,7 +806,7 @@ export function getRecurringMassageAvailabilityHorizon(now = new Date()) {
     year,
     month - 1 + RECURRING_MASSAGE_AVAILABILITY_MONTHS + 1,
     0,
-    12,
+    12
   );
   return { from, to: formatLocalDate(lastDay) };
 }
@@ -641,24 +818,39 @@ export function buildRecurringMassageAvailability(input: {
 }): RecurringMassageAvailabilityEntry[] {
   if (input.from > input.to) return [];
 
-  const schedulesByTherapistAndDay = new Map<string, RecurringMassageSchedule>();
+  const schedulesByTherapistAndDay = new Map<
+    string,
+    RecurringMassageSchedule
+  >();
   for (const schedule of input.schedules) {
-    schedulesByTherapistAndDay.set(`${schedule.therapistId}:${schedule.dayOfWeek}`, schedule);
+    schedulesByTherapistAndDay.set(
+      `${schedule.therapistId}:${schedule.dayOfWeek}`,
+      schedule
+    );
   }
-  const therapistIds = Array.from(new Set(input.schedules.map((schedule) => schedule.therapistId)));
+  const therapistIds = Array.from(
+    new Set(input.schedules.map(schedule => schedule.therapistId))
+  );
   const entries: RecurringMassageAvailabilityEntry[] = [];
   const firstDate = new Date(`${input.from}T12:00:00`);
   const lastDate = new Date(`${input.to}T12:00:00`);
 
-  for (let current = new Date(firstDate); current <= lastDate; current.setDate(current.getDate() + 1)) {
+  for (
+    let current = new Date(firstDate);
+    current <= lastDate;
+    current.setDate(current.getDate() + 1)
+  ) {
     const date = formatLocalDate(current);
     for (const therapistId of therapistIds) {
-      const schedule = schedulesByTherapistAndDay.get(`${therapistId}:${current.getDay()}`);
+      const schedule = schedulesByTherapistAndDay.get(
+        `${therapistId}:${current.getDay()}`
+      );
       if (!schedule || schedule.available !== 1) continue;
 
       const blockFrom = serializeDateOnly(schedule.blockFrom);
       const blockTo = serializeDateOnly(schedule.blockTo);
-      const isBlocked = !!blockFrom && !!blockTo && date >= blockFrom && date <= blockTo;
+      const isBlocked =
+        !!blockFrom && !!blockTo && date >= blockFrom && date <= blockTo;
       entries.push({
         therapistId,
         date,
@@ -667,7 +859,9 @@ export function buildRecurringMassageAvailability(input: {
         endTime: isBlocked ? null : schedule.endTime,
         shift: null,
         blockType: isBlocked ? "other" : null,
-        blockNotes: isBlocked ? schedule.blockReason ?? "Ausencia programada" : null,
+        blockNotes: isBlocked
+          ? (schedule.blockReason ?? "Ausencia programada")
+          : null,
         autoGenerated: 1,
         generationSource: WEEKLY_SCHEDULE_GENERATION_SOURCE,
       });
@@ -679,19 +873,18 @@ export function buildRecurringMassageAvailability(input: {
 
 const sameRecurringAvailability = (
   current: typeof massageTherapistAvailability.$inferSelect,
-  desired: RecurringMassageAvailabilityEntry,
-) => (
-  current.isAvailable === desired.isAvailable
-  && current.startTime === desired.startTime
-  && current.endTime === desired.endTime
-  && current.shift === desired.shift
-  && current.blockType === desired.blockType
-  && current.blockNotes === desired.blockNotes
-);
+  desired: RecurringMassageAvailabilityEntry
+) =>
+  current.isAvailable === desired.isAvailable &&
+  current.startTime === desired.startTime &&
+  current.endTime === desired.endTime &&
+  current.shift === desired.shift &&
+  current.blockType === desired.blockType &&
+  current.blockNotes === desired.blockNotes;
 
 async function syncRecurringMassageAvailability(
   db: MassageDb,
-  input: { from: string; to: string; therapistIds?: number[] },
+  input: { from: string; to: string; therapistIds?: number[] }
 ) {
   if (input.from > input.to || input.therapistIds?.length === 0) {
     return { created: 0, updated: 0, removed: 0 };
@@ -700,10 +893,11 @@ async function syncRecurringMassageAvailability(
   const scheduleFilter = input.therapistIds
     ? and(
       eq(massageTherapists.active, 1),
-      inArray(massageTherapistSchedules.therapistId, input.therapistIds),
+        inArray(massageTherapistSchedules.therapistId, input.therapistIds)
     )
     : eq(massageTherapists.active, 1);
-  const schedules = await db.select({
+  const schedules = await db
+    .select({
     therapistId: massageTherapistSchedules.therapistId,
     dayOfWeek: massageTherapistSchedules.dayOfWeek,
     startTime: massageTherapistSchedules.startTime,
@@ -714,72 +908,120 @@ async function syncRecurringMassageAvailability(
     blockReason: massageTherapistSchedules.blockReason,
   })
     .from(massageTherapistSchedules)
-    .innerJoin(massageTherapists, eq(massageTherapistSchedules.therapistId, massageTherapists.id))
+    .innerJoin(
+      massageTherapists,
+      eq(massageTherapistSchedules.therapistId, massageTherapists.id)
+    )
     .where(scheduleFilter);
 
-  const scheduleTherapistIds = Array.from(new Set(schedules.map((schedule) => schedule.therapistId)));
+  const scheduleTherapistIds = Array.from(
+    new Set(schedules.map(schedule => schedule.therapistId))
+  );
   const requestedTherapistIds = input.therapistIds ?? scheduleTherapistIds;
   if (requestedTherapistIds.length === 0) {
     return { created: 0, updated: 0, removed: 0 };
   }
 
-  const existing = await db.select().from(massageTherapistAvailability)
-    .where(and(
-      inArray(massageTherapistAvailability.therapistId, requestedTherapistIds),
+  const existing = await db
+    .select()
+    .from(massageTherapistAvailability)
+    .where(
+      and(
+        inArray(
+          massageTherapistAvailability.therapistId,
+          requestedTherapistIds
+        ),
       gte(massageTherapistAvailability.date, input.from as any),
-      lte(massageTherapistAvailability.date, input.to as any),
-    ));
+        lte(massageTherapistAvailability.date, input.to as any)
+      )
+    );
   const existingByKey = new Map(
-    existing.map((row) => [`${row.therapistId}:${serializeDateOnly(row.date)}`, row]),
+    existing.map(row => [
+      `${row.therapistId}:${serializeDateOnly(row.date)}`,
+      row,
+    ])
   );
-  const desired = buildRecurringMassageAvailability({ schedules, from: input.from, to: input.to });
-  const desiredKeys = new Set(desired.map((entry) => `${entry.therapistId}:${entry.date}`));
+  const desired = buildRecurringMassageAvailability({
+    schedules,
+    from: input.from,
+    to: input.to,
+  });
+  const desiredKeys = new Set(
+    desired.map(entry => `${entry.therapistId}:${entry.date}`)
+  );
   const toCreate: RecurringMassageAvailabilityEntry[] = [];
-  const toUpdate: Array<{ id: number; entry: RecurringMassageAvailabilityEntry }> = [];
+  const toUpdate: Array<{
+    id: number;
+    entry: RecurringMassageAvailabilityEntry;
+  }> = [];
 
   for (const entry of desired) {
     const current = existingByKey.get(`${entry.therapistId}:${entry.date}`);
     if (!current) {
       toCreate.push(entry);
     } else if (
-      current.generationSource === WEEKLY_SCHEDULE_GENERATION_SOURCE
-      && !sameRecurringAvailability(current, entry)
+      current.generationSource === WEEKLY_SCHEDULE_GENERATION_SOURCE &&
+      !sameRecurringAvailability(current, entry)
     ) {
       toUpdate.push({ id: current.id, entry });
     }
   }
 
   const staleIds = existing
-    .filter((row) => (
-      row.generationSource === WEEKLY_SCHEDULE_GENERATION_SOURCE
-      && !desiredKeys.has(`${row.therapistId}:${serializeDateOnly(row.date)}`)
-    ))
-    .map((row) => row.id);
+    .filter(
+      row =>
+        row.generationSource === WEEKLY_SCHEDULE_GENERATION_SOURCE &&
+        !desiredKeys.has(`${row.therapistId}:${serializeDateOnly(row.date)}`)
+    )
+    .map(row => row.id);
 
   for (let index = 0; index < toCreate.length; index += 250) {
     const chunk = toCreate.slice(index, index + 250);
-    await db.insert(massageTherapistAvailability)
-      .values(chunk.map((entry) => ({ ...entry, date: entry.date as any })))
+    await db
+      .insert(massageTherapistAvailability)
+      .values(chunk.map(entry => ({ ...entry, date: entry.date as any })))
       // Un ajuste manual concurrente siempre gana frente a la automatización.
-      .onDuplicateKeyUpdate({ set: { id: sql`${massageTherapistAvailability.id}` } });
+      .onDuplicateKeyUpdate({
+        set: { id: sql`${massageTherapistAvailability.id}` },
+      });
   }
   for (const { id, entry } of toUpdate) {
     const { therapistId: _therapistId, date: _date, ...fields } = entry;
-    await db.update(massageTherapistAvailability)
+    await db
+      .update(massageTherapistAvailability)
       .set(fields)
-      .where(and(
+      .where(
+        and(
         eq(massageTherapistAvailability.id, id),
-        eq(massageTherapistAvailability.generationSource, WEEKLY_SCHEDULE_GENERATION_SOURCE),
-      ));
+          eq(
+            massageTherapistAvailability.generationSource,
+            WEEKLY_SCHEDULE_GENERATION_SOURCE
+          )
+        )
+      );
   }
   for (let index = 0; index < staleIds.length; index += 250) {
-    await db.delete(massageTherapistAvailability).where(and(
-      inArray(massageTherapistAvailability.id, staleIds.slice(index, index + 250)),
-      eq(massageTherapistAvailability.generationSource, WEEKLY_SCHEDULE_GENERATION_SOURCE),
-    ));
+    await db
+      .delete(massageTherapistAvailability)
+      .where(
+        and(
+          inArray(
+            massageTherapistAvailability.id,
+            staleIds.slice(index, index + 250)
+          ),
+          eq(
+            massageTherapistAvailability.generationSource,
+            WEEKLY_SCHEDULE_GENERATION_SOURCE
+          )
+        )
+      );
   }
 
-  return { created: toCreate.length, updated: toUpdate.length, removed: staleIds.length };
+  return {
+    created: toCreate.length,
+    updated: toUpdate.length,
+    removed: staleIds.length,
+  };
 }
 
 // ─── TERAPEUTAS ───────────────────────────────────────────────
@@ -792,15 +1034,26 @@ const terapeutasRouter = router({
     }
     const db = await getDb();
     if (!db) return [];
-    const therapists = await db.select().from(massageTherapists)
-      .orderBy(asc(massageTherapists.callPriority), asc(massageTherapists.name));
-    const withTechniques = await Promise.all(therapists.map(async (t) => {
-      const techniques = await db.select({ id: massageTechniques.id, name: massageTechniques.name })
+    const therapists = await db
+      .select()
+      .from(massageTherapists)
+      .orderBy(
+        asc(massageTherapists.callPriority),
+        asc(massageTherapists.name)
+      );
+    const withTechniques = await Promise.all(
+      therapists.map(async t => {
+        const techniques = await db
+          .select({ id: massageTechniques.id, name: massageTechniques.name })
         .from(massageTherapistTechniques)
-        .innerJoin(massageTechniques, eq(massageTherapistTechniques.techniqueId, massageTechniques.id))
+          .innerJoin(
+            massageTechniques,
+            eq(massageTherapistTechniques.techniqueId, massageTechniques.id)
+          )
         .where(eq(massageTherapistTechniques.therapistId, t.id));
       return { ...t, techniques };
-    }));
+      })
+    );
     return withTechniques;
   }),
 
@@ -808,7 +1061,8 @@ const terapeutasRouter = router({
     await massageRead(ctx.user.role);
     const db = await getDb();
     if (!db) return 0;
-    const [result] = await db.select({ total: sql<number>`count(*)` })
+    const [result] = await db
+      .select({ total: sql<number>`count(*)` })
       .from(massageTherapists)
       .where(eq(massageTherapists.active, 1));
     return Number(result?.total ?? 0);
@@ -820,13 +1074,23 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return null;
-      const [therapist] = await db.select().from(massageTherapists).where(eq(massageTherapists.id, input.id)).limit(1);
+      const [therapist] = await db
+        .select()
+        .from(massageTherapists)
+        .where(eq(massageTherapists.id, input.id))
+        .limit(1);
       if (!therapist) return null;
-      const techniques = await db.select({ id: massageTechniques.id, name: massageTechniques.name })
+      const techniques = await db
+        .select({ id: massageTechniques.id, name: massageTechniques.name })
         .from(massageTherapistTechniques)
-        .innerJoin(massageTechniques, eq(massageTherapistTechniques.techniqueId, massageTechniques.id))
+        .innerJoin(
+          massageTechniques,
+          eq(massageTherapistTechniques.techniqueId, massageTechniques.id)
+        )
         .where(eq(massageTherapistTechniques.therapistId, input.id));
-      const schedules = await db.select().from(massageTherapistSchedules)
+      const schedules = await db
+        .select()
+        .from(massageTherapistSchedules)
         .where(eq(massageTherapistSchedules.therapistId, input.id))
         .orderBy(asc(massageTherapistSchedules.dayOfWeek));
       return { ...therapist, techniques, schedules };
@@ -838,57 +1102,97 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(massageTherapistSchedules)
+      return db
+        .select()
+        .from(massageTherapistSchedules)
         .where(eq(massageTherapistSchedules.therapistId, input.therapistId))
         .orderBy(asc(massageTherapistSchedules.dayOfWeek));
     }),
 
   create: protectedProcedure
-    .input(z.object({
-      name: z.string().min(2), type: z.enum(["inhouse", "freelance"]),
-      phone: z.string().optional(), email: z.string().optional(), contractType: z.string().optional(),
-      leadTimeMinutes: z.number().default(120), currentShift: z.enum(["am", "pm"]).optional(),
-      notes: z.string().optional(), callPriority: z.number().default(99),
+    .input(
+      z.object({
+        name: z.string().min(2),
+        type: z.enum(["inhouse", "freelance"]),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        contractType: z.string().optional(),
+        leadTimeMinutes: z.number().default(120),
+        currentShift: z.enum(["am", "pm"]).optional(),
+        notes: z.string().optional(),
+        callPriority: z.number().default(99),
       techniqueIds: z.array(z.number()).optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { techniqueIds, ...raw } = input;
       const therapistData = {
-        name: raw.name, type: raw.type, phone: raw.phone || null, email: raw.email || null,
-        contractType: raw.contractType || null, leadTimeMinutes: raw.leadTimeMinutes,
-        currentShift: raw.currentShift ?? null, notes: raw.notes || null, callPriority: raw.callPriority,
+        name: raw.name,
+        type: raw.type,
+        phone: raw.phone || null,
+        email: raw.email || null,
+        contractType: raw.contractType || null,
+        leadTimeMinutes: raw.leadTimeMinutes,
+        currentShift: raw.currentShift ?? null,
+        notes: raw.notes || null,
+        callPriority: raw.callPriority,
       };
       const result = await db.insert(massageTherapists).values(therapistData);
       const insertId = (result as any).insertId as number;
       if (techniqueIds && techniqueIds.length > 0) {
-        await db.insert(massageTherapistTechniques).values(techniqueIds.map(tid => ({ therapistId: insertId, techniqueId: tid })));
+        await db.insert(massageTherapistTechniques).values(
+          techniqueIds.map(tid => ({
+            therapistId: insertId,
+            techniqueId: tid,
+          }))
+        );
       }
       return { success: true, id: insertId };
     }),
 
   update: protectedProcedure
-    .input(z.object({
-      id: z.number(), name: z.string().optional(), type: z.enum(["inhouse", "freelance"]).optional(),
-      phone: z.string().optional(), email: z.string().optional(), contractType: z.string().optional(),
-      leadTimeMinutes: z.number().optional(), currentShift: z.enum(["am", "pm"]).optional(),
-      notes: z.string().optional(), callPriority: z.number().optional(), active: z.number().optional(),
+    .input(
+      z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        type: z.enum(["inhouse", "freelance"]).optional(),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        contractType: z.string().optional(),
+        leadTimeMinutes: z.number().optional(),
+        currentShift: z.enum(["am", "pm"]).optional(),
+        notes: z.string().optional(),
+        callPriority: z.number().optional(),
+        active: z.number().optional(),
       techniqueIds: z.array(z.number()).optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, techniqueIds, ...raw } = input;
       const data: Record<string, any> = {};
-      for (const [k, v] of Object.entries(raw)) { data[k] = (typeof v === "string" && v === "") ? null : v; }
-      await db.update(massageTherapists).set(data).where(eq(massageTherapists.id, id));
+      for (const [k, v] of Object.entries(raw)) {
+        data[k] = typeof v === "string" && v === "" ? null : v;
+      }
+      await db
+        .update(massageTherapists)
+        .set(data)
+        .where(eq(massageTherapists.id, id));
       if (techniqueIds !== undefined) {
-        await db.delete(massageTherapistTechniques).where(eq(massageTherapistTechniques.therapistId, id));
+        await db
+          .delete(massageTherapistTechniques)
+          .where(eq(massageTherapistTechniques.therapistId, id));
         if (techniqueIds.length > 0) {
-          await db.insert(massageTherapistTechniques).values(techniqueIds.map(tid => ({ therapistId: id, techniqueId: tid })));
+          await db
+            .insert(massageTherapistTechniques)
+            .values(
+              techniqueIds.map(tid => ({ therapistId: id, techniqueId: tid }))
+            );
         }
       }
       return { success: true };
@@ -900,27 +1204,50 @@ const terapeutasRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.delete(massageTherapistTechniques).where(eq(massageTherapistTechniques.therapistId, input.id));
-      await db.delete(massageTherapistSchedules).where(eq(massageTherapistSchedules.therapistId, input.id));
-      await db.delete(massageTherapists).where(eq(massageTherapists.id, input.id));
+      await db
+        .delete(massageTherapistTechniques)
+        .where(eq(massageTherapistTechniques.therapistId, input.id));
+      await db
+        .delete(massageTherapistSchedules)
+        .where(eq(massageTherapistSchedules.therapistId, input.id));
+      await db
+        .delete(massageTherapists)
+        .where(eq(massageTherapists.id, input.id));
       return { success: true };
     }),
 
   upsertSchedule: protectedProcedure
-    .input(z.object({
-      therapistId: z.number(), dayOfWeek: z.number().min(0).max(6),
-      startTime: z.string(), endTime: z.string(), available: z.number().default(1),
-    }))
+    .input(
+      z.object({
+        therapistId: z.number(),
+        dayOfWeek: z.number().min(0).max(6),
+        startTime: z.string(),
+        endTime: z.string(),
+        available: z.number().default(1),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const existing = await db.select().from(massageTherapistSchedules)
-        .where(and(eq(massageTherapistSchedules.therapistId, input.therapistId), eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek)))
+      const existing = await db
+        .select()
+        .from(massageTherapistSchedules)
+        .where(
+          and(
+            eq(massageTherapistSchedules.therapistId, input.therapistId),
+            eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek)
+          )
+        )
         .limit(1);
       if (existing.length > 0) {
-        await db.update(massageTherapistSchedules)
-          .set({ startTime: input.startTime, endTime: input.endTime, available: input.available })
+        await db
+          .update(massageTherapistSchedules)
+          .set({
+            startTime: input.startTime,
+            endTime: input.endTime,
+            available: input.available,
+          })
           .where(eq(massageTherapistSchedules.id, existing[0].id));
       } else {
         await db.insert(massageTherapistSchedules).values(input);
@@ -929,39 +1256,58 @@ const terapeutasRouter = router({
     }),
 
   saveSchedules: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       therapistId: z.number(),
-      schedules: z.array(z.object({
+        schedules: z
+          .array(
+            z.object({
         dayOfWeek: z.number().min(0).max(6),
         startTime: z.string().regex(/^\d{2}:\d{2}$/),
         endTime: z.string().regex(/^\d{2}:\d{2}$/),
         available: z.number().min(0).max(1),
-      })).min(1).max(7),
-    }))
+            })
+          )
+          .min(1)
+          .max(7),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      if (new Set(input.schedules.map((schedule) => schedule.dayOfWeek)).size !== input.schedules.length) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Hay días repetidos en el horario semanal." });
+      if (
+        new Set(input.schedules.map(schedule => schedule.dayOfWeek)).size !==
+        input.schedules.length
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Hay días repetidos en el horario semanal.",
+        });
       }
       for (const schedule of input.schedules) {
-        if (schedule.available === 1 && schedule.startTime >= schedule.endTime) {
+        if (
+          schedule.available === 1 &&
+          schedule.startTime >= schedule.endTime
+        ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "La hora de término debe ser posterior a la hora de inicio.",
+            message:
+              "La hora de término debe ser posterior a la hora de inicio.",
           });
         }
         const filter = and(
           eq(massageTherapistSchedules.therapistId, input.therapistId),
-          eq(massageTherapistSchedules.dayOfWeek, schedule.dayOfWeek),
+          eq(massageTherapistSchedules.dayOfWeek, schedule.dayOfWeek)
         );
-        const existing = await db.select({ id: massageTherapistSchedules.id })
+        const existing = await db
+          .select({ id: massageTherapistSchedules.id })
           .from(massageTherapistSchedules)
           .where(filter)
           .limit(1);
         if (existing.length > 0) {
-          await db.update(massageTherapistSchedules)
+          await db
+            .update(massageTherapistSchedules)
             .set({
               startTime: schedule.startTime,
               endTime: schedule.endTime,
@@ -975,15 +1321,19 @@ const terapeutasRouter = router({
           });
         }
       }
-      const omittedDays = [0, 1, 2, 3, 4, 5, 6]
-        .filter((day) => !input.schedules.some((schedule) => schedule.dayOfWeek === day));
+      const omittedDays = [0, 1, 2, 3, 4, 5, 6].filter(
+        day => !input.schedules.some(schedule => schedule.dayOfWeek === day)
+      );
       if (omittedDays.length > 0) {
-        await db.update(massageTherapistSchedules)
+        await db
+          .update(massageTherapistSchedules)
           .set({ available: 0 })
-          .where(and(
+          .where(
+            and(
             eq(massageTherapistSchedules.therapistId, input.therapistId),
-            inArray(massageTherapistSchedules.dayOfWeek, omittedDays),
-          ));
+              inArray(massageTherapistSchedules.dayOfWeek, omittedDays)
+            )
+          );
       }
 
       const horizon = getRecurringMassageAvailabilityHorizon();
@@ -995,31 +1345,54 @@ const terapeutasRouter = router({
     }),
 
   blockAvailability: protectedProcedure
-    .input(z.object({
-      therapistId: z.number(), dayOfWeek: z.number().min(0).max(6),
-      blockFrom: z.string(), blockTo: z.string(), blockReason: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        therapistId: z.number(),
+        dayOfWeek: z.number().min(0).max(6),
+        blockFrom: z.string(),
+        blockTo: z.string(),
+        blockReason: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [previousSchedule] = await db.select({
+      const [previousSchedule] = await db
+        .select({
         blockFrom: massageTherapistSchedules.blockFrom,
         blockTo: massageTherapistSchedules.blockTo,
-      }).from(massageTherapistSchedules)
-        .where(and(
+        })
+        .from(massageTherapistSchedules)
+        .where(
+          and(
           eq(massageTherapistSchedules.therapistId, input.therapistId),
-          eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek),
-        ))
+            eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek)
+          )
+        )
         .limit(1);
-      await db.update(massageTherapistSchedules)
-        .set({ blockFrom: input.blockFrom as any, blockTo: input.blockTo as any, blockReason: input.blockReason })
-        .where(and(eq(massageTherapistSchedules.therapistId, input.therapistId), eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek)));
+      await db
+        .update(massageTherapistSchedules)
+        .set({
+          blockFrom: input.blockFrom as any,
+          blockTo: input.blockTo as any,
+          blockReason: input.blockReason,
+        })
+        .where(
+          and(
+            eq(massageTherapistSchedules.therapistId, input.therapistId),
+            eq(massageTherapistSchedules.dayOfWeek, input.dayOfWeek)
+          )
+        );
       const today = getChileDateString();
       const previousFrom = serializeDateOnly(previousSchedule?.blockFrom);
       const previousTo = serializeDateOnly(previousSchedule?.blockTo);
-      const affectedFrom = previousFrom && previousFrom < input.blockFrom ? previousFrom : input.blockFrom;
-      const affectedTo = previousTo && previousTo > input.blockTo ? previousTo : input.blockTo;
+      const affectedFrom =
+        previousFrom && previousFrom < input.blockFrom
+          ? previousFrom
+          : input.blockFrom;
+      const affectedTo =
+        previousTo && previousTo > input.blockTo ? previousTo : input.blockTo;
       if (affectedTo >= today) {
         await syncRecurringMassageAvailability(db, {
           therapistIds: [input.therapistId],
@@ -1045,14 +1418,25 @@ const salasRouter = router({
   }),
 
   seed: protectedProcedure.mutation(async ({ ctx }) => {
-    if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+    if (ctx.user.role !== "super_admin" && ctx.user.role !== "admin")
+      throw new TRPCError({ code: "FORBIDDEN" });
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
     const existing = await db.select().from(massageRooms);
     if (existing.length === 0) {
       await db.insert(massageRooms).values([
-        { name: "Sala Doble 1", type: "double", capacity: 2, allowCoupleBooking: 1 },
-        { name: "Sala Doble 2", type: "double", capacity: 2, allowCoupleBooking: 1 },
+        {
+          name: "Sala Doble 1",
+          type: "double",
+          capacity: 2,
+          allowCoupleBooking: 1,
+        },
+        {
+          name: "Sala Doble 2",
+          type: "double",
+          capacity: 2,
+          allowCoupleBooking: 1,
+        },
         { name: "Sala Individual", type: "individual", capacity: 1 },
       ]);
     }
@@ -1073,11 +1457,16 @@ async function getSkeduProgramResourceAvailability(params: {
 }) {
   const requestedStart = parseTimeMin(params.startTime);
   const requestedEnd = requestedStart + params.duration;
-  const blocks = await loadBlockingMassageBookings(params.db, params.bookingDate, {
+  const blocks = await loadBlockingMassageBookings(
+    params.db,
+    params.bookingDate,
+    {
     excludeProgramBookingId: params.excludeProgramBookingId,
-  });
+    }
+  );
 
-  const therapistRows = await params.db.select({
+  const therapistRows = await params.db
+    .select({
     id: massageTherapists.id,
     name: massageTherapists.name,
     type: massageTherapists.type,
@@ -1088,16 +1477,21 @@ async function getSkeduProgramResourceAvailability(params: {
     scheduleEnd: massageTherapistAvailability.endTime,
   })
     .from(massageTherapists)
-    .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
-    .where(and(
+    .innerJoin(
+      massageTherapistAvailability,
+      eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+    )
+    .where(
+      and(
       eq(massageTherapists.active, 1),
       eq(massageTherapistAvailability.date, params.bookingDate as any),
-      eq(massageTherapistAvailability.isAvailable, 1),
-    ));
+        eq(massageTherapistAvailability.isAvailable, 1)
+      )
+    );
 
   const now = params.now ?? new Date();
   const availableTherapists = therapistRows
-    .filter((therapist) => {
+    .filter(therapist => {
       if (!therapist.scheduleStart || !therapist.scheduleEnd) return false;
       if (requestedStart < parseTimeMin(therapist.scheduleStart)) return false;
       if (requestedEnd > parseTimeMin(therapist.scheduleEnd)) return false;
@@ -1105,43 +1499,63 @@ async function getSkeduProgramResourceAvailability(params: {
       if (params.bookingDate === getChileDateString(now)) {
         const leadMinutes = requestedStart - getChileTimeMinutes(now);
         if (leadMinutes < 0) return false;
-        if (therapist.type === "freelance" && leadMinutes < FREELANCE_MIN_LEAD_MINUTES) return false;
+        if (
+          therapist.type === "freelance" &&
+          leadMinutes < FREELANCE_MIN_LEAD_MINUTES
+        )
+          return false;
       }
 
-      return !blocks.some((booking) =>
-        booking.therapistId === therapist.id && overlaps(
+      return !blocks.some(
+        booking =>
+          booking.therapistId === therapist.id &&
+          overlaps(
           requestedStart,
           requestedEnd + PROGRAM_PREP_MINUTES,
           parseTimeMin(booking.startTime),
-          parseTimeMin(booking.endTime) + PROGRAM_PREP_MINUTES,
+            parseTimeMin(booking.endTime) + PROGRAM_PREP_MINUTES
         )
       );
     })
     .sort((a, b) => {
-      const typeDiff = (a.type === "inhouse" ? 0 : 1) - (b.type === "inhouse" ? 0 : 1);
+      const typeDiff =
+        (a.type === "inhouse" ? 0 : 1) - (b.type === "inhouse" ? 0 : 1);
       if (typeDiff !== 0) return typeDiff;
       if (a.type === "inhouse" && b.type === "inhouse") {
-        const priorityDiff = (INHOUSE_ASSIGNMENT_PRIORITY.get(a.id) ?? 99) - (INHOUSE_ASSIGNMENT_PRIORITY.get(b.id) ?? 99);
+        const priorityDiff =
+          (INHOUSE_ASSIGNMENT_PRIORITY.get(a.id) ?? 99) -
+          (INHOUSE_ASSIGNMENT_PRIORITY.get(b.id) ?? 99);
         if (priorityDiff !== 0) return priorityDiff;
       }
       const priorityDiff = (a.callPriority ?? 99) - (b.callPriority ?? 99);
-      return priorityDiff !== 0 ? priorityDiff : (a.name ?? "").localeCompare(b.name ?? "");
+      return priorityDiff !== 0
+        ? priorityDiff
+        : (a.name ?? "").localeCompare(b.name ?? "");
     });
 
-  const roomRows = await params.db.select().from(massageRooms).where(eq(massageRooms.active, 1));
-  const availableRooms = roomRows.filter((room) => {
+  const roomRows = await params.db
+    .select()
+    .from(massageRooms)
+    .where(eq(massageRooms.active, 1));
+  const availableRooms = roomRows.filter(room => {
     if (params.modality === "double" && room.type !== "double") return false;
-    return !blocks.some((booking) =>
-      booking.roomId === room.id && overlaps(
+    return !blocks.some(
+      booking =>
+        booking.roomId === room.id &&
+        overlaps(
         requestedStart,
         requestedEnd + PROGRAM_PREP_MINUTES,
         parseTimeMin(booking.startTime),
-        parseTimeMin(booking.endTime) + PROGRAM_PREP_MINUTES,
+          parseTimeMin(booking.endTime) + PROGRAM_PREP_MINUTES
       )
     );
   });
 
-  return { availableTherapists, availableRooms, endTime: formatTimeMin(requestedEnd) };
+  return {
+    availableTherapists,
+    availableRooms,
+    endTime: formatTimeMin(requestedEnd),
+  };
 }
 
 // ─── AGENDA / RESERVAS ────────────────────────────────────────
@@ -1152,13 +1566,15 @@ const agendaRouter = router({
   }),
 
   getSkeduProgramResources: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       bookingDate: z.string(),
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       duration: z.union([z.literal(30), z.literal(50)]),
       modality: z.enum(["simple", "double"]),
       excludeBookingId: z.number().int().positive().optional(),
-    }))
+      })
+    )
     .query(async ({ ctx, input }) => {
       await massageAssignment(ctx.user);
       const db = await getDb();
@@ -1170,15 +1586,24 @@ const agendaRouter = router({
         excludeProgramBookingId: excludeBookingId,
       });
       return {
-        therapists: resources.availableTherapists.map(({ phone: _phone, email: _email, ...therapist }) => therapist),
+        therapists: resources.availableTherapists.map(
+          ({ phone: _phone, email: _email, ...therapist }) => therapist
+        ),
         rooms: resources.availableRooms,
         endTime: resources.endTime,
       };
     }),
 
   createSkeduProgramBooking: protectedProcedure
-    .input(z.object({
-      program: z.enum(["reconecta", "reconecta_detox", "bio_reconecta", "bio_reconecta_detox", "reset"]),
+    .input(
+      z.object({
+        program: z.enum([
+          "reconecta",
+          "reconecta_detox",
+          "bio_reconecta",
+          "bio_reconecta_detox",
+          "reset",
+        ]),
       duration: z.union([z.literal(30), z.literal(50)]),
       modality: z.enum(["simple", "double"]),
       clientName: z.string().min(2),
@@ -1192,30 +1617,51 @@ const agendaRouter = router({
       paymentMethod: manualMassagePaymentMethodSchema,
       paymentReference: z.string().max(100).optional(),
       notes: z.string().optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const program = SKEDU_MASSAGE_PROGRAMS.find((option) => option.value === input.program);
-      if (!program || !isSkeduProgramDurationAllowed(input.program, input.duration)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Duración no disponible para este programa" });
+      const program = SKEDU_MASSAGE_PROGRAMS.find(
+        option => option.value === input.program
+      );
+      if (
+        !program ||
+        !isSkeduProgramDurationAllowed(input.program, input.duration)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Duración no disponible para este programa",
+        });
       }
       if (input.modality === "double" && !input.secondClientName?.trim()) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Un masaje doble requiere dos clientes" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Un masaje doble requiere dos clientes",
+        });
       }
 
       if (input.externalReference?.trim()) {
-        const [duplicate] = await db.select({ id: massageProgramBookings.id })
+        const [duplicate] = await db
+          .select({ id: massageProgramBookings.id })
           .from(massageProgramBookings)
-          .where(and(
-            eq(massageProgramBookings.externalReference, input.externalReference.trim()),
-            sql`${massageProgramBookings.status} NOT IN ('cancelled')`,
-          ))
+          .where(
+            and(
+              eq(
+                massageProgramBookings.externalReference,
+                input.externalReference.trim()
+              ),
+              sql`${massageProgramBookings.status} NOT IN ('cancelled')`
+            )
+          )
           .limit(1);
         if (duplicate) {
-          throw new TRPCError({ code: "CONFLICT", message: "Esta referencia de Skedu ya fue registrada" });
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Esta referencia de Skedu ya fue registrada",
+          });
         }
       }
 
@@ -1228,30 +1674,51 @@ const agendaRouter = router({
         duration: input.duration,
         modality: input.modality,
       });
-      const availableTherapistIds = new Set(resources.availableTherapists.map((therapist) => therapist.id));
-      const availableRoomIds = new Set(resources.availableRooms.map((room) => room.id));
-      const selectedTherapists = resources.availableTherapists.slice(0, input.modality === "double" ? 2 : 1);
-      if (selectedTherapists.length < (input.modality === "double" ? 2 : 1)
-          || selectedTherapists.some((therapist) => !availableTherapistIds.has(therapist.id))) {
-        throw new TRPCError({ code: "CONFLICT", message: "No hay suficientes terapeutas disponibles en ese horario" });
+      const availableTherapistIds = new Set(
+        resources.availableTherapists.map(therapist => therapist.id)
+      );
+      const availableRoomIds = new Set(
+        resources.availableRooms.map(room => room.id)
+      );
+      const selectedTherapists = resources.availableTherapists.slice(
+        0,
+        input.modality === "double" ? 2 : 1
+      );
+      if (
+        selectedTherapists.length < (input.modality === "double" ? 2 : 1) ||
+        selectedTherapists.some(
+          therapist => !availableTherapistIds.has(therapist.id)
+        )
+      ) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "No hay suficientes terapeutas disponibles en ese horario",
+        });
       }
       if (!availableRoomIds.has(input.roomId)) {
-        throw new TRPCError({ code: "CONFLICT", message: "La sala ya no está disponible en ese horario" });
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "La sala ya no está disponible en ese horario",
+        });
       }
 
-      const [inserted] = await db.insert(massageProgramBookings).values({
+      const [inserted] = await db
+        .insert(massageProgramBookings)
+        .values({
         program: input.program,
         duration: input.duration,
         modality: input.modality,
         clientName: input.clientName.trim(),
-        secondClientName: input.modality === "double" ? input.secondClientName!.trim() : null,
+          secondClientName:
+            input.modality === "double" ? input.secondClientName!.trim() : null,
         clientPhone: input.clientPhone?.trim() || null,
         clientEmail: input.clientEmail?.trim() || null,
         bookingDate: input.bookingDate as any,
         startTime: input.startTime,
         endTime: resources.endTime,
         therapistId: selectedTherapists[0].id,
-        secondTherapistId: input.modality === "double" ? selectedTherapists[1].id : null,
+          secondTherapistId:
+            input.modality === "double" ? selectedTherapists[1].id : null,
         roomId: input.roomId,
         externalReference: input.externalReference?.trim() || null,
         paymentMethod: input.paymentMethod,
@@ -1259,7 +1726,8 @@ const agendaRouter = router({
         notes: input.notes?.trim() || null,
         status: "pending",
         createdByUserId: ctx.user.id,
-      }).$returningId();
+        })
+        .$returningId();
 
       await startTherapistAssignmentForBooking("skedu_program", inserted.id);
 
@@ -1267,31 +1735,48 @@ const agendaRouter = router({
     }),
 
   updateSkeduProgramTherapists: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       id: z.number().int().positive(),
       therapistId: z.number().int().positive(),
       secondTherapistId: z.number().int().positive().optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAssignment(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const [booking] = await db.select().from(massageProgramBookings)
+      const [booking] = await db
+        .select()
+        .from(massageProgramBookings)
         .where(eq(massageProgramBookings.id, input.id))
         .limit(1);
       if (!booking) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Reserva de programa no encontrada" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Reserva de programa no encontrada",
+        });
       }
       if (booking.status === "cancelled") {
-        throw new TRPCError({ code: "CONFLICT", message: "No puedes reasignar una reserva cancelada" });
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "No puedes reasignar una reserva cancelada",
+        });
       }
 
-      validateSkeduTherapistSelection(booking.modality, input.therapistId, input.secondTherapistId);
+      validateSkeduTherapistSelection(
+        booking.modality,
+        input.therapistId,
+        input.secondTherapistId
+      );
 
       const bookingDate = serializeDateOnly(booking.bookingDate);
       if (!bookingDate) {
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "La reserva no tiene una fecha válida" });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "La reserva no tiene una fecha válida",
+        });
       }
       const resources = await getSkeduProgramResourceAvailability({
         db,
@@ -1301,55 +1786,77 @@ const agendaRouter = router({
         modality: booking.modality,
         excludeProgramBookingId: booking.id,
       });
-      const selectableTherapistIds = new Set(resources.availableTherapists.map((therapist) => therapist.id));
+      const selectableTherapistIds = new Set(
+        resources.availableTherapists.map(therapist => therapist.id)
+      );
       // Los terapeutas actuales siguen siendo seleccionables aunque después se
       // hayan desactivado; conservarlos no agrega un nuevo bloqueo a la agenda.
       if (booking.therapistId) selectableTherapistIds.add(booking.therapistId);
-      if (booking.secondTherapistId) selectableTherapistIds.add(booking.secondTherapistId);
+      if (booking.secondTherapistId)
+        selectableTherapistIds.add(booking.secondTherapistId);
 
-      if (!selectableTherapistIds.has(input.therapistId)
-          || (booking.modality === "double" && !selectableTherapistIds.has(input.secondTherapistId!))) {
+      if (
+        !selectableTherapistIds.has(input.therapistId) ||
+        (booking.modality === "double" &&
+          !selectableTherapistIds.has(input.secondTherapistId!))
+      ) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "Uno de los terapeutas seleccionados no está disponible en ese horario",
+          message:
+            "Uno de los terapeutas seleccionados no está disponible en ese horario",
         });
       }
 
-      await db.update(massageProgramBookings)
+      await db
+        .update(massageProgramBookings)
         .set({
           therapistId: input.therapistId,
-          secondTherapistId: booking.modality === "double" ? input.secondTherapistId! : null,
+          secondTherapistId:
+            booking.modality === "double" ? input.secondTherapistId! : null,
           status: "pending",
         })
         .where(eq(massageProgramBookings.id, input.id));
 
-      await startTherapistAssignmentForBooking("skedu_program", input.id, { force: true });
+      await startTherapistAssignmentForBooking("skedu_program", input.id, {
+        force: true,
+      });
       return { success: true };
     }),
 
   updateSkeduProgramStatus: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       id: z.number(),
       status: z.enum(["confirmed", "completed", "cancelled", "no_show"]),
       cancellationCategory: cancellationCategorySchema.optional(),
       cancellationReason: cancellationReasonSchema.optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Debes indicar por qué se cancela el masaje" });
+      if (
+        input.status === "cancelled" &&
+        (!input.cancellationCategory || !input.cancellationReason)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Debes indicar por qué se cancela el masaje",
+        });
       }
-      await db.update(massageProgramBookings)
+      await db
+        .update(massageProgramBookings)
         .set({
           status: input.status,
-          ...(input.status === "cancelled" ? {
+          ...(input.status === "cancelled"
+            ? {
             cancellationCategory: input.cancellationCategory,
             cancellationReason: input.cancellationReason,
             cancelledAt: new Date(),
             cancelledByUserId: ctx.user.id,
-          } : {}),
+              }
+            : {}),
         })
         .where(eq(massageProgramBookings.id, input.id));
       await stopTherapistAssignmentForBooking("skedu_program", input.id);
@@ -1372,41 +1879,66 @@ const agendaRouter = router({
       // Un terapeuta de solo lectura nunca provoca escrituras al consultar la agenda.
       if (hasMassageOperationsAccess(ctx.user.role)) {
         await Promise.all([
-          db.update(massageBookings)
+          db
+            .update(massageBookings)
             .set({ status: "completed" })
-            .where(and(
+            .where(
+              and(
               eq(massageBookings.status, "confirmed"),
               sql`${massageBookings.therapistId} IS NOT NULL`,
               or(
                 lt(massageBookings.bookingDate, todayChile as any),
-                and(eq(massageBookings.bookingDate, todayChile as any), lte(massageBookings.endTime, timeChile)),
+                  and(
+                    eq(massageBookings.bookingDate, todayChile as any),
+                    lte(massageBookings.endTime, timeChile)
+                  )
+                )
+              )
               ),
-            )),
-          db.update(massageProgramBookings)
+          db
+            .update(massageProgramBookings)
             .set({ status: "completed" })
-            .where(and(
+            .where(
+              and(
               eq(massageProgramBookings.status, "confirmed"),
               or(
                 lt(massageProgramBookings.bookingDate, todayChile as any),
-                and(eq(massageProgramBookings.bookingDate, todayChile as any), lte(massageProgramBookings.endTime, timeChile)),
+                  and(
+                    eq(massageProgramBookings.bookingDate, todayChile as any),
+                    lte(massageProgramBookings.endTime, timeChile)
+                  )
+                )
+              )
               ),
-            )),
         ]);
       }
 
-      const rows = await db.select({
-        id: massageBookings.id, clientName: massageBookings.clientName, clientPhone: massageBookings.clientPhone,
-        techniqueId: massageBookings.techniqueId, techniqueName: massageTechniques.name,
-        therapistId: massageBookings.therapistId, therapistName: massageTherapists.name,
-        roomId: massageBookings.roomId, roomName: massageRooms.name,
-        duration: massageBookings.duration, bookingDate: massageBookings.bookingDate,
-        startTime: massageBookings.startTime, endTime: massageBookings.endTime,
-        status: massageBookings.status, paymentStatus: massageBookings.paymentStatus,
+      const rows = await db
+        .select({
+          id: massageBookings.id,
+          clientName: massageBookings.clientName,
+          clientPhone: massageBookings.clientPhone,
+          techniqueId: massageBookings.techniqueId,
+          techniqueName: massageTechniques.name,
+          therapistId: massageBookings.therapistId,
+          therapistName: massageTherapists.name,
+          roomId: massageBookings.roomId,
+          roomName: massageRooms.name,
+          duration: massageBookings.duration,
+          bookingDate: massageBookings.bookingDate,
+          startTime: massageBookings.startTime,
+          endTime: massageBookings.endTime,
+          status: massageBookings.status,
+          paymentStatus: massageBookings.paymentStatus,
         amountPaid: massageBookings.amountPaid,
         originalAmount: massageBookings.originalAmount,
+          discountAmount: massageBookings.discountAmount,
+          discountCode: massageBookings.discountCode,
+          getnetRequestId: massageBookings.getnetRequestId,
         manualPaymentMethod: massageBookings.manualPaymentMethod,
         notes: massageBookings.notes,
-        crossSellServices: massageBookings.crossSellServices, rescheduleCount: massageBookings.rescheduleCount,
+          crossSellServices: massageBookings.crossSellServices,
+          rescheduleCount: massageBookings.rescheduleCount,
         cancellationCategory: massageBookings.cancellationCategory,
         cancellationReason: massageBookings.cancellationReason,
         cancelledAt: massageBookings.cancelledAt,
@@ -1414,27 +1946,49 @@ const agendaRouter = router({
         createdAt: massageBookings.createdAt,
       })
       .from(massageBookings)
-      .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-      .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
+        .leftJoin(
+          massageTechniques,
+          eq(massageBookings.techniqueId, massageTechniques.id)
+        )
+        .leftJoin(
+          massageTherapists,
+          eq(massageBookings.therapistId, massageTherapists.id)
+        )
       .leftJoin(massageRooms, eq(massageBookings.roomId, massageRooms.id))
-      .where(and(
+        .where(
+          and(
         gte(massageBookings.bookingDate, input.from as any),
         lte(massageBookings.bookingDate, input.to as any),
-        inArray(massageBookings.status, [...MASSAGE_AGENDA_STATUSES]),
-      ))
-      .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
+            inArray(massageBookings.status, [...MASSAGE_AGENDA_STATUSES])
+          )
+        )
+        .orderBy(
+          asc(massageBookings.bookingDate),
+          asc(massageBookings.startTime)
+        );
 
-      const programRows = await db.select().from(massageProgramBookings).where(and(
+      const programRows = await db
+        .select()
+        .from(massageProgramBookings)
+        .where(
+          and(
         gte(massageProgramBookings.bookingDate, input.from as any),
         lte(massageProgramBookings.bookingDate, input.to as any),
-        inArray(massageProgramBookings.status, [...SKEDU_AGENDA_STATUSES]),
-      ));
-      const therapists = await db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists);
-      const rooms = await db.select({ id: massageRooms.id, name: massageRooms.name }).from(massageRooms);
-      const therapistNames = new Map(therapists.map((therapist) => [therapist.id, therapist.name]));
-      const roomNames = new Map(rooms.map((room) => [room.id, room.name]));
+            inArray(massageProgramBookings.status, [...SKEDU_AGENDA_STATUSES])
+          )
+        );
+      const therapists = await db
+        .select({ id: massageTherapists.id, name: massageTherapists.name })
+        .from(massageTherapists);
+      const rooms = await db
+        .select({ id: massageRooms.id, name: massageRooms.name })
+        .from(massageRooms);
+      const therapistNames = new Map(
+        therapists.map(therapist => [therapist.id, therapist.name])
+      );
+      const roomNames = new Map(rooms.map(room => [room.id, room.name]));
 
-      const standardBookings = rows.map((row) => ({
+      const standardBookings = rows.map(row => ({
         ...serializeDateFields(row, ["bookingDate"]),
         bookingKind: "standard" as const,
         modality: "simple" as const,
@@ -1443,17 +1997,23 @@ const agendaRouter = router({
         secondTherapistName: null,
         externalReference: null,
       }));
-      const skeduBookings = programRows.map((row) => ({
+      const skeduBookings = programRows.map(row => ({
         id: row.id,
         bookingKind: "skedu_program" as const,
-        clientName: row.secondClientName ? `${row.clientName} / ${row.secondClientName}` : row.clientName,
+        clientName: row.secondClientName
+          ? `${row.clientName} / ${row.secondClientName}`
+          : row.clientName,
         clientPhone: row.clientPhone,
         techniqueId: null,
-        techniqueName: `Programa ${SKEDU_MASSAGE_PROGRAMS.find((program) => program.value === row.program)?.label ?? row.program}`,
+        techniqueName: `Programa ${SKEDU_MASSAGE_PROGRAMS.find(program => program.value === row.program)?.label ?? row.program}`,
         therapistId: row.therapistId,
-        therapistName: row.therapistId ? therapistNames.get(row.therapistId) ?? null : null,
+        therapistName: row.therapistId
+          ? (therapistNames.get(row.therapistId) ?? null)
+          : null,
         secondTherapistId: row.secondTherapistId,
-        secondTherapistName: row.secondTherapistId ? therapistNames.get(row.secondTherapistId) ?? null : null,
+        secondTherapistName: row.secondTherapistId
+          ? (therapistNames.get(row.secondTherapistId) ?? null)
+          : null,
         roomId: row.roomId,
         roomName: roomNames.get(row.roomId) ?? null,
         duration: row.duration,
@@ -1461,10 +2021,14 @@ const agendaRouter = router({
         startTime: row.startTime,
         endTime: row.endTime,
         status: row.status,
-        paymentStatus: row.status === "cancelled" ? null : "paid" as const,
-        amountPaid: row.status === "cancelled"
+        paymentStatus: row.status === "cancelled" ? null : ("paid" as const),
+        amountPaid:
+          row.status === "cancelled"
           ? null
-          : String(getSkeduMassageUnitPrice(row.duration) * getSkeduMassageQuantity(row.modality)),
+            : String(
+                getSkeduMassageUnitPrice(row.duration) *
+                  getSkeduMassageQuantity(row.modality)
+              ),
         manualPaymentMethod: row.paymentMethod,
         notes: row.notes,
         cancellationCategory: row.cancellationCategory,
@@ -1479,11 +2043,13 @@ const agendaRouter = router({
         externalReference: row.externalReference,
       }));
 
-      const bookings = [...standardBookings, ...skeduBookings].sort((a, b) =>
-        String(a.bookingDate).localeCompare(String(b.bookingDate)) || a.startTime.localeCompare(b.startTime)
+      const bookings = [...standardBookings, ...skeduBookings].sort(
+        (a, b) =>
+          String(a.bookingDate).localeCompare(String(b.bookingDate)) ||
+          a.startTime.localeCompare(b.startTime)
       );
       if (hasMassagePaymentAccess(ctx.user)) return bookings;
-      return bookings.map((booking) => ({
+      return bookings.map(booking => ({
         ...booking,
         paymentStatus: null,
         amountPaid: null,
@@ -1498,7 +2064,8 @@ const agendaRouter = router({
 
     // Esta consulta es deliberadamente de solo lectura. Una asignación vencida
     // permanece visible hasta que Tamara la resuelva o cancele con un motivo.
-    const rows = await db.select({
+    const rows = await db
+      .select({
       id: massageBookings.id,
       clientName: massageBookings.clientName,
       clientPhone: massageBookings.clientPhone,
@@ -1511,32 +2078,43 @@ const agendaRouter = router({
       notes: massageBookings.notes,
     })
     .from(massageBookings)
-    .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
+      .leftJoin(
+        massageTechniques,
+        eq(massageBookings.techniqueId, massageTechniques.id)
+      )
     .where(
       and(
         eq(massageBookings.paymentStatus, "paid"),
         eq(massageBookings.status, "pending"),
         or(
           isNull(massageBookings.therapistId),
-          inArray(massageBookings.freelanceApprovalStatus, [...MANUAL_ASSIGNMENT_REJECTION_STATUSES]),
-        ),
+            inArray(massageBookings.freelanceApprovalStatus, [
+              ...MANUAL_ASSIGNMENT_REJECTION_STATUSES,
+            ])
       )
     )
-    .orderBy(asc(massageBookings.bookingDate), asc(massageBookings.startTime));
+      )
+      .orderBy(
+        asc(massageBookings.bookingDate),
+        asc(massageBookings.startTime)
+      );
     return rows.map(row => serializeDateFields(row, ["bookingDate"]));
   }),
 
   assignPendingManually: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       bookingId: z.number().int().positive(),
       therapistId: z.number().int().positive(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAssignment(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const [booking] = await db.select({
+      const [booking] = await db
+        .select({
         bookingDate: massageBookings.bookingDate,
         paymentStatus: massageBookings.paymentStatus,
         status: massageBookings.status,
@@ -1547,22 +2125,30 @@ const agendaRouter = router({
         .where(eq(massageBookings.id, input.bookingId))
         .limit(1);
       if (!booking) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Reserva no encontrada" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Reserva no encontrada",
+        });
       }
       const bookingDate = serializeDateOnly(booking.bookingDate);
       if (!bookingDate) {
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "La reserva no tiene una fecha válida" });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "La reserva no tiene una fecha válida",
+        });
       }
 
       return withMassageResourceLock(db, bookingDate, async () => {
-        const [current] = await db.select({
+        const [current] = await db
+          .select({
           paymentStatus: massageBookings.paymentStatus,
           status: massageBookings.status,
           therapistId: massageBookings.therapistId,
           freelanceApprovalStatus: massageBookings.freelanceApprovalStatus,
           startTime: massageBookings.startTime,
           endTime: massageBookings.endTime,
-        }).from(massageBookings)
+          })
+          .from(massageBookings)
           .where(eq(massageBookings.id, input.bookingId))
           .limit(1);
         if (!current || !isPendingManualMassageAssignment(current)) {
@@ -1572,14 +2158,18 @@ const agendaRouter = router({
           });
         }
 
-        const [therapist] = await db.select({
+        const [therapist] = await db
+          .select({
           id: massageTherapists.id,
           name: massageTherapists.name,
-        }).from(massageTherapists)
-          .where(and(
+          })
+          .from(massageTherapists)
+          .where(
+            and(
             eq(massageTherapists.id, input.therapistId),
-            eq(massageTherapists.active, 1),
-          ))
+              eq(massageTherapists.active, 1)
+            )
+          )
           .limit(1);
         if (!therapist) {
           throw new TRPCError({
@@ -1593,14 +2183,15 @@ const agendaRouter = router({
         });
         const requestedStart = parseTimeMin(current.startTime);
         const requestedEnd = parseTimeMin(current.endTime) + 10;
-        const therapistIsBusy = blockers.some((blocker) =>
-          blocker.therapistId === therapist.id
-          && overlaps(
+        const therapistIsBusy = blockers.some(
+          blocker =>
+            blocker.therapistId === therapist.id &&
+            overlaps(
             requestedStart,
             requestedEnd,
             parseTimeMin(blocker.startTime),
-            parseTimeMin(blocker.endTime) + 10,
-          ),
+              parseTimeMin(blocker.endTime) + 10
+            )
         );
         if (therapistIsBusy) {
           throw new TRPCError({
@@ -1612,7 +2203,8 @@ const agendaRouter = router({
         // Cierra enlaces y temporizadores anteriores antes de confirmar la
         // decisión humana. La automatización no debe reemplazarla después.
         await stopTherapistAssignmentForBooking("massage", input.bookingId);
-        await db.update(massageBookings)
+        await db
+          .update(massageBookings)
           .set({
             therapistId: therapist.id,
             status: "confirmed",
@@ -1620,27 +2212,37 @@ const agendaRouter = router({
             adminApprovalToken: null,
             therapistConfirmationToken: null,
           })
-          .where(and(
+          .where(
+            and(
             eq(massageBookings.id, input.bookingId),
             eq(massageBookings.paymentStatus, "paid"),
             eq(massageBookings.status, "pending"),
             or(
               isNull(massageBookings.therapistId),
-              inArray(massageBookings.freelanceApprovalStatus, [...MANUAL_ASSIGNMENT_REJECTION_STATUSES]),
-            ),
-          ));
+                inArray(massageBookings.freelanceApprovalStatus, [
+                  ...MANUAL_ASSIGNMENT_REJECTION_STATUSES,
+                ])
+              )
+            )
+          );
         await stopTherapistAssignmentForBooking("massage", input.bookingId);
 
-        const [updated] = await db.select({
+        const [updated] = await db
+          .select({
           therapistId: massageBookings.therapistId,
           status: massageBookings.status,
-        }).from(massageBookings)
+          })
+          .from(massageBookings)
           .where(eq(massageBookings.id, input.bookingId))
           .limit(1);
-        if (updated?.therapistId !== therapist.id || updated.status !== "confirmed") {
+        if (
+          updated?.therapistId !== therapist.id ||
+          updated.status !== "confirmed"
+        ) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "La reserva cambió mientras la estabas asignando. Actualiza e inténtalo nuevamente.",
+            message:
+              "La reserva cambió mientras la estabas asignando. Actualiza e inténtalo nuevamente.",
           });
         }
 
@@ -1649,17 +2251,20 @@ const agendaRouter = router({
     }),
 
   dismissPendingManualAssignment: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       bookingId: z.number(),
       cancellationCategory: cancellationCategorySchema,
       cancellationReason: cancellationReasonSchema,
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const [booking] = await db.select({
+      const [booking] = await db
+        .select({
         status: massageBookings.status,
         paymentStatus: massageBookings.paymentStatus,
       })
@@ -1668,7 +2273,10 @@ const agendaRouter = router({
         .limit(1);
 
       if (!booking) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Reserva no encontrada" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Reserva no encontrada",
+        });
       }
       if (booking.status !== "pending" || booking.paymentStatus !== "paid") {
         throw new TRPCError({
@@ -1677,7 +2285,8 @@ const agendaRouter = router({
         });
       }
 
-      await db.update(massageBookings)
+      await db
+        .update(massageBookings)
         .set({
           status: "cancelled",
           freelanceApprovalStatus: "dismissed",
@@ -1688,11 +2297,13 @@ const agendaRouter = router({
           cancelledAt: new Date(),
           cancelledByUserId: ctx.user.id,
         })
-        .where(and(
+        .where(
+          and(
           eq(massageBookings.id, input.bookingId),
           eq(massageBookings.paymentStatus, "paid"),
-          eq(massageBookings.status, "pending"),
-        ));
+            eq(massageBookings.status, "pending")
+          )
+        );
 
       return { success: true };
     }),
@@ -1704,10 +2315,19 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       // Resetea estado de aprobación Y vuelve a pending para que el flujo sea correcto
-      await db.update(massageBookings)
-        .set({ freelanceApprovalStatus: null, therapistConfirmationToken: null, status: "pending" })
+      await db
+        .update(massageBookings)
+        .set({
+          freelanceApprovalStatus: null,
+          therapistConfirmationToken: null,
+          status: "pending",
+        })
         .where(eq(massageBookings.id, input.bookingId));
-      const assignment = await startTherapistAssignmentForBooking("massage", input.bookingId, { force: true });
+      const assignment = await startTherapistAssignmentForBooking(
+        "massage",
+        input.bookingId,
+        { force: true }
+      );
       return {
         success: true,
         assignmentMode: assignment?.mode ?? "exhausted",
@@ -1716,83 +2336,176 @@ const agendaRouter = router({
     }),
 
   getAvailableSlots: protectedProcedure
-    .input(z.object({ date: z.string(), duration: z.number(), techniqueId: z.number().optional() }))
+    .input(
+      z.object({
+        date: z.string(),
+        duration: z.number(),
+        techniqueId: z.number().optional(),
+      })
+    )
     .query(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) return [];
-      const existingBookings = await loadBlockingMassageBookings(db, input.date);
-      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      const existingBookings = await loadBlockingMassageBookings(
+        db,
+        input.date
+      );
+      const rooms = await db
+        .select()
+        .from(massageRooms)
+        .where(eq(massageRooms.active, 1));
       const slots: { time: string; availableRooms: number[] }[] = [];
-      const start = 10 * 60; const end = 20 * 60 + 30; const prep = 10;
+      const start = 10 * 60;
+      const end = 20 * 60 + 30;
+      const prep = 10;
       for (let t = start; t + input.duration <= end; t += 30) {
         const timeStr = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
         const slotEnd = t + input.duration;
-        const availableRooms = rooms.filter(room => !existingBookings.some(b => {
+        const availableRooms = rooms.filter(
+          room =>
+            !existingBookings.some(b => {
           if (b.roomId !== room.id) return false;
-          const bStart = parseInt(b.startTime.split(":")[0]) * 60 + parseInt(b.startTime.split(":")[1]);
-          const bEnd = parseInt(b.endTime.split(":")[0]) * 60 + parseInt(b.endTime.split(":")[1]) + prep;
+              const bStart =
+                parseInt(b.startTime.split(":")[0]) * 60 +
+                parseInt(b.startTime.split(":")[1]);
+              const bEnd =
+                parseInt(b.endTime.split(":")[0]) * 60 +
+                parseInt(b.endTime.split(":")[1]) +
+                prep;
           return t < bEnd && slotEnd > bStart;
-        }));
-        if (availableRooms.length > 0) slots.push({ time: timeStr, availableRooms: availableRooms.map(r => r.id) });
+            })
+        );
+        if (availableRooms.length > 0)
+          slots.push({
+            time: timeStr,
+            availableRooms: availableRooms.map(r => r.id),
+          });
       }
       return slots;
     }),
 
   create: protectedProcedure
-    .input(z.object({
-      clientName: z.string().min(2), clientEmail: z.string().optional(),
-      clientPhone: z.string().optional(), clientOrigin: z.string().optional(),
-      techniqueId: z.number(), therapistId: z.number().optional(), roomId: z.number(),
-      duration: z.number(), bookingDate: z.string(), startTime: z.string(), endTime: z.string(),
-      paymentStatus: z.enum(["pending", "paid"]).default("pending"), amountPaid: z.string().optional(),
+    .input(
+      z.object({
+        clientName: z.string().min(2),
+        clientEmail: z.string().optional(),
+        clientPhone: z.string().optional(),
+        clientOrigin: z.string().optional(),
+        techniqueId: z.number(),
+        therapistId: z.number().optional(),
+        roomId: z.number(),
+        duration: z.number(),
+        bookingDate: z.string(),
+        startTime: z.string(),
+        endTime: z.string(),
+        paymentStatus: z.enum(["pending", "paid"]).default("pending"),
+        amountPaid: z.string().optional(),
       manualPaymentMethod: manualMassagePaymentMethodSchema.optional(),
       totalAmountClp: z.number().int().positive().optional(),
       payments: z.array(massagePaymentInputSchema).min(1).max(10).optional(),
-      discountCode: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
-    }))
+        discountCode: z.string().optional(),
+        notes: z.string().optional(),
+        crossSellServices: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
-      if ((input.paymentStatus === "paid" || input.amountPaid || input.manualPaymentMethod || input.payments)
-          && !hasMassagePaymentAccess(ctx.user)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+      if (
+        (input.paymentStatus === "paid" ||
+          input.amountPaid ||
+          input.manualPaymentMethod ||
+          input.payments) &&
+        !hasMassagePaymentAccess(ctx.user)
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para actualizar pagos",
+        });
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const payments = input.payments ?? [];
       payments.forEach(validateReservationPayment);
-      if (payments.some(payment => payment.method === "gift_card") && !canRedeemGiftCard(ctx.user)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+      if (
+        payments.some(payment => payment.method === "gift_card") &&
+        !canRedeemGiftCard(ctx.user)
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permisos para canjear Gift Cards",
+        });
       }
-      const totalAmountClp = input.totalAmountClp ?? Number(input.amountPaid || 0);
-      const paidAmountClp = payments.filter(payment => payment.status === "paid").reduce((sum, payment) => sum + payment.amountClp, 0);
-      const plannedAmountClp = payments.reduce((sum, payment) => sum + payment.amountClp, 0);
-      if (payments.length && (!totalAmountClp || plannedAmountClp > totalAmountClp)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos deben respetar el total del masaje" });
+      const totalAmountClp =
+        input.totalAmountClp ?? Number(input.amountPaid || 0);
+      const paidAmountClp = payments
+        .filter(payment => payment.status === "paid")
+        .reduce((sum, payment) => sum + payment.amountClp, 0);
+      const plannedAmountClp = payments.reduce(
+        (sum, payment) => sum + payment.amountClp,
+        0
+      );
+      if (
+        payments.length &&
+        (!totalAmountClp || plannedAmountClp > totalAmountClp)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Los pagos deben respetar el total del masaje",
+        });
       }
-      const derivedPaymentStatus = payments.length ? calculatedPaymentStatus(paidAmountClp, totalAmountClp) : input.paymentStatus;
-      const { payments: _payments, totalAmountClp: _total, ...bookingInput } = input;
+      const derivedPaymentStatus = payments.length
+        ? calculatedPaymentStatus(paidAmountClp, totalAmountClp)
+        : input.paymentStatus;
+      const {
+        payments: _payments,
+        totalAmountClp: _total,
+        ...bookingInput
+      } = input;
       const inserted = await db.transaction(async tx => {
-        const [created] = await tx.insert(massageBookings)
+        const [created] = await tx
+          .insert(massageBookings)
           .values({
             ...bookingInput,
             bookingDate: input.bookingDate as any,
             bookingSource: "cms",
             paymentStatus: derivedPaymentStatus,
-            amountPaid: payments.length ? String(paidAmountClp) : input.amountPaid,
+            amountPaid: payments.length
+              ? String(paidAmountClp)
+              : input.amountPaid,
             originalAmount: totalAmountClp ? String(totalAmountClp) : undefined,
-            manualPaymentMethod: payments.length === 1 ? payments[0].method as any : input.manualPaymentMethod,
+            manualPaymentMethod:
+              payments.length === 1
+                ? (payments[0].method as any)
+                : input.manualPaymentMethod,
           })
           .$returningId();
         for (const payment of payments) {
-          const gift = payment.method === "gift_card"
-            ? await redeemGiftCardPayment({ tx, payment, totalClp: totalAmountClp, module: "massages", reservationId: created.id, note: `Canje en masaje de ${input.clientName}` })
+          const gift =
+            payment.method === "gift_card"
+              ? await redeemGiftCardPayment({
+                  tx,
+                  payment,
+                  totalClp: totalAmountClp,
+                  module: "massages",
+                  reservationId: created.id,
+                  note: `Canje en masaje de ${input.clientName}`,
+                })
             : undefined;
           await tx.insert(reservationPayments).values({
-            module: "massages", reservationId: created.id, method: payment.method, status: payment.status,
-            amountClp: payment.amountClp, paidAt: payment.status === "paid" ? reservationPaymentDate(payment.paidAt) : null,
-            reference: gift?.code ?? payment.reference ?? null, cardType: payment.cardType ?? null,
-            giftCardId: gift?.id ?? null, createdByUserId: ctx.user.id,
+            module: "massages",
+            reservationId: created.id,
+            method: payment.method,
+            status: payment.status,
+            amountClp: payment.amountClp,
+            paidAt:
+              payment.status === "paid"
+                ? reservationPaymentDate(payment.paidAt)
+                : null,
+            reference: gift?.code ?? payment.reference ?? null,
+            cardType: payment.cardType ?? null,
+            giftCardId: gift?.id ?? null,
+            createdByUserId: ctx.user.id,
           });
         }
         return created;
@@ -1810,45 +2523,416 @@ const agendaRouter = router({
       await massageRead(ctx.user);
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(reservationPayments)
-        .where(and(eq(reservationPayments.module, "massages"), eq(reservationPayments.reservationId, input.bookingId)))
+      return db
+        .select()
+        .from(reservationPayments)
+        .where(
+          and(
+            eq(reservationPayments.module, "massages"),
+            eq(reservationPayments.reservationId, input.bookingId)
+          )
+        )
         .orderBy(desc(reservationPayments.createdAt));
     }),
 
-  addPayment: protectedProcedure
-    .input(z.object({ bookingId: z.number(), totalAmountClp: z.number().int().positive(), payment: massagePaymentInputSchema }))
+  updatePayment: protectedProcedure
+    .input(
+      z.object({ paymentId: z.number(), payment: massagePaymentInputSchema })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
-      if (!hasMassagePaymentAccess(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+      if (!hasMassagePaymentAccess(ctx.user))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para actualizar pagos",
+        });
       validateReservationPayment(input.payment);
-      if (input.payment.method === "gift_card" && !canRedeemGiftCard(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
+      if (input.payment.method === "gift_card")
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Para cambiar una Gift Card, elimina el pago y registra uno nuevo",
+        });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const bookingId = await db.transaction(async tx => {
+        const [payment] = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.id, input.paymentId),
+              eq(reservationPayments.module, "massages")
+            )
+          )
+          .limit(1);
+        if (!payment)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Pago no encontrado",
+          });
+        if (payment.giftCardId)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Para cambiar una Gift Card, elimina el pago y registra uno nuevo",
+          });
+        const [booking] = await tx
+          .select()
+          .from(massageBookings)
+          .where(eq(massageBookings.id, payment.reservationId))
+          .limit(1);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        const rowsBefore = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.module, "massages"),
+              eq(reservationPayments.reservationId, booking.id)
+            )
+          );
+        const detailedPaidBefore = rowsBefore
+          .filter(row => row.status === "paid")
+          .reduce((sum, row) => sum + row.amountClp, 0);
+        const legacyPaid = Math.max(
+          0,
+          Number(booking.amountPaid ?? 0) - detailedPaidBefore
+        );
+        const otherPlanned = rowsBefore
+          .filter(row => row.id !== payment.id && row.status !== "refunded")
+          .reduce((sum, row) => sum + row.amountClp, 0);
+        const total = Math.max(
+          0,
+          Number(booking.originalAmount ?? 0) -
+            Number(booking.discountAmount ?? 0)
+        );
+        if (legacyPaid + otherPlanned + input.payment.amountClp > total)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Los pagos superan el total del masaje",
+          });
+        await tx
+          .update(reservationPayments)
+          .set({
+            method: input.payment.method,
+            status: input.payment.status,
+            amountClp: input.payment.amountClp,
+            paidAt:
+              input.payment.status === "paid"
+                ? reservationPaymentDate(input.payment.paidAt)
+                : null,
+            reference: input.payment.reference ?? null,
+            cardType: input.payment.cardType ?? null,
+          })
+          .where(eq(reservationPayments.id, payment.id));
+        const rowsAfter = rowsBefore.map(row =>
+          row.id === payment.id ? { ...row, ...input.payment } : row
+        );
+        const detailedPaidAfter = rowsAfter
+          .filter(row => row.status === "paid")
+          .reduce((sum, row) => sum + row.amountClp, 0);
+        const newPaid = legacyPaid + detailedPaidAfter;
+        const status = calculatedPaymentStatus(newPaid, total);
+        const activeRows = rowsAfter.filter(row => row.status !== "refunded");
+        await tx
+          .update(massageBookings)
+          .set({
+            amountPaid: String(newPaid),
+            paymentStatus: status,
+            manualPaymentMethod:
+              legacyPaid === 0 && activeRows.length === 1
+                ? (activeRows[0].method as any)
+                : null,
+          })
+          .where(eq(massageBookings.id, booking.id));
+        return booking.id;
+      });
+      await syncMassageSale(bookingId);
+      return { success: true };
+    }),
+
+  removePayment: protectedProcedure
+    .input(z.object({ paymentId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await massageAgenda(ctx.user);
+      if (!hasMassagePaymentAccess(ctx.user))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para actualizar pagos",
+        });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const bookingId = await db.transaction(async tx => {
+        const [payment] = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.id, input.paymentId),
+              eq(reservationPayments.module, "massages")
+            )
+          )
+          .limit(1);
+        if (!payment)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Pago no encontrado",
+          });
+        const [booking] = await tx
+          .select()
+          .from(massageBookings)
+          .where(eq(massageBookings.id, payment.reservationId))
+          .limit(1);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        const rows = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.module, "massages"),
+              eq(reservationPayments.reservationId, booking.id)
+            )
+          );
+        const detailedPaid = rows
+          .filter(row => row.status === "paid")
+          .reduce((sum, row) => sum + row.amountClp, 0);
+        const legacyPaid = Math.max(
+          0,
+          Number(booking.amountPaid ?? 0) - detailedPaid
+        );
+        if (payment.giftCardId) {
+          const [card] = await tx
+            .select()
+            .from(giftCards)
+            .where(eq(giftCards.id, payment.giftCardId))
+            .limit(1);
+          if (!card)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Gift Card no encontrada",
+            });
+          const balanceAfter =
+            card.amount === 0
+              ? 0
+              : Math.min(card.amount, card.balance + payment.amountClp);
+          await tx
+            .update(giftCards)
+            .set({ balance: balanceAfter, status: "active", redeemedAt: null })
+            .where(eq(giftCards.id, card.id));
+          await tx.insert(giftCardTransactions).values({
+            giftCardId: card.id,
+            transactionType: "refund",
+            amount: payment.amountClp,
+            balanceBefore: card.balance,
+            balanceAfter,
+            orderType: "massages_booking",
+            orderId: String(booking.id),
+            notes: `Pago eliminado desde CMS por ${ctx.user.name || ctx.user.email || "usuario"}`,
+          });
+        }
+        await tx
+          .delete(reservationPayments)
+          .where(eq(reservationPayments.id, payment.id));
+        const remaining = rows.filter(
+          row => row.id !== payment.id && row.status !== "refunded"
+        );
+        const newPaid =
+          legacyPaid +
+          remaining
+            .filter(row => row.status === "paid")
+            .reduce((sum, row) => sum + row.amountClp, 0);
+        const total = Math.max(
+          0,
+          Number(booking.originalAmount ?? 0) -
+            Number(booking.discountAmount ?? 0)
+        );
+        await tx
+          .update(massageBookings)
+          .set({
+            amountPaid: String(newPaid),
+            paymentStatus: calculatedPaymentStatus(newPaid, total),
+            manualPaymentMethod:
+              legacyPaid === 0 && remaining.length === 1
+                ? (remaining[0].method as any)
+                : null,
+          })
+          .where(eq(massageBookings.id, booking.id));
+        return booking.id;
+      });
+      await syncMassageSale(bookingId);
+      return { success: true };
+    }),
+
+  setDiscount: protectedProcedure
+    .input(
+      z.object({
+        bookingId: z.number(),
+        code: z.string().trim().max(50).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await massageAgenda(ctx.user);
+      if (!hasMassagePaymentAccess(ctx.user))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para actualizar pagos",
+        });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [booking] = await db
+        .select()
+        .from(massageBookings)
+        .where(eq(massageBookings.id, input.bookingId))
+        .limit(1);
+      if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+      const originalAmount = Number(booking.originalAmount ?? 0);
+      if (!originalAmount)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Define primero el valor total del masaje",
+        });
+      let discountCodeId: number | null = null;
+      let discountCode: string | null = null;
+      let discountAmount = 0;
+      if (input.code) {
+        try {
+          const result = await calculateWellnessCartDiscount(db, input.code, [
+            {
+              service: "masajes",
+              serviceId: booking.techniqueId,
+              techniqueId: booking.techniqueId,
+              originalAmount,
+            },
+          ]);
+          discountCodeId = result.discountCodeId;
+          discountCode = result.code;
+          discountAmount = result.discountTotal;
+        } catch (error) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              error instanceof Error ? error.message : "El código no es válido",
+          });
+        }
+      }
+      const finalTotal = originalAmount - discountAmount;
+      await db
+        .update(massageBookings)
+        .set({
+          discountCodeId,
+          discountCode,
+          discountAmount: String(discountAmount),
+          paymentStatus: calculatedPaymentStatus(
+            Number(booking.amountPaid ?? 0),
+            finalTotal
+          ),
+        })
+        .where(eq(massageBookings.id, booking.id));
+      await syncMassageSale(booking.id);
+      return { success: true, discountCode, discountAmount };
+    }),
+
+  addPayment: protectedProcedure
+    .input(
+      z.object({
+        bookingId: z.number(),
+        totalAmountClp: z.number().int().positive(),
+        payment: massagePaymentInputSchema,
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await massageAgenda(ctx.user);
+      if (!hasMassagePaymentAccess(ctx.user))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para actualizar pagos",
+        });
+      validateReservationPayment(input.payment);
+      if (input.payment.method === "gift_card" && !canRedeemGiftCard(ctx.user))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permisos para canjear Gift Cards",
+        });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const result = await db.transaction(async tx => {
-        const [booking] = await tx.select().from(massageBookings).where(eq(massageBookings.id, input.bookingId)).limit(1);
+        const [booking] = await tx
+          .select()
+          .from(massageBookings)
+          .where(eq(massageBookings.id, input.bookingId))
+          .limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-        if (booking.status === "cancelled") throw new TRPCError({ code: "BAD_REQUEST", message: "No se pueden agregar pagos a una reserva cancelada" });
-        const existing = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.module, "massages"), eq(reservationPayments.reservationId, booking.id)));
+        if (booking.status === "cancelled")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No se pueden agregar pagos a una reserva cancelada",
+          });
+        const existing = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.module, "massages"),
+              eq(reservationPayments.reservationId, booking.id)
+            )
+          );
         const currentPaid = Number(booking.amountPaid ?? 0);
         const planned = existing.length
-          ? existing.filter(payment => payment.status !== "refunded").reduce((sum, payment) => sum + payment.amountClp, 0)
+          ? existing
+              .filter(payment => payment.status !== "refunded")
+              .reduce((sum, payment) => sum + payment.amountClp, 0)
           : currentPaid;
-        if (planned + input.payment.amountClp > input.totalAmountClp) throw new TRPCError({ code: "BAD_REQUEST", message: "El abono supera el saldo pendiente del masaje" });
-        const gift = input.payment.method === "gift_card"
-          ? await redeemGiftCardPayment({ tx, payment: input.payment, totalClp: input.totalAmountClp, module: "massages", reservationId: booking.id, note: `Abono Gift Card en masaje #${booking.id}` })
+        if (planned + input.payment.amountClp > input.totalAmountClp)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "El abono supera el saldo pendiente del masaje",
+          });
+        const gift =
+          input.payment.method === "gift_card"
+            ? await redeemGiftCardPayment({
+                tx,
+                payment: input.payment,
+                totalClp: input.totalAmountClp,
+                module: "massages",
+                reservationId: booking.id,
+                note: `Abono Gift Card en masaje #${booking.id}`,
+              })
           : undefined;
-        const [created] = await tx.insert(reservationPayments).values({
-          module: "massages", reservationId: booking.id, method: input.payment.method, status: input.payment.status,
-          amountClp: input.payment.amountClp, paidAt: input.payment.status === "paid" ? reservationPaymentDate(input.payment.paidAt) : null,
-          reference: gift?.code ?? input.payment.reference ?? null, cardType: input.payment.cardType ?? null,
-          giftCardId: gift?.id ?? null, createdByUserId: ctx.user.id,
-        }).$returningId();
-        const newPaid = currentPaid + (input.payment.status === "paid" ? input.payment.amountClp : 0);
+        const [created] = await tx
+          .insert(reservationPayments)
+          .values({
+            module: "massages",
+            reservationId: booking.id,
+            method: input.payment.method,
+            status: input.payment.status,
+            amountClp: input.payment.amountClp,
+            paidAt:
+              input.payment.status === "paid"
+                ? reservationPaymentDate(input.payment.paidAt)
+                : null,
+            reference: gift?.code ?? input.payment.reference ?? null,
+            cardType: input.payment.cardType ?? null,
+            giftCardId: gift?.id ?? null,
+            createdByUserId: ctx.user.id,
+          })
+          .$returningId();
+        const newPaid =
+          currentPaid +
+          (input.payment.status === "paid" ? input.payment.amountClp : 0);
         const status = calculatedPaymentStatus(newPaid, input.totalAmountClp);
-        await tx.update(massageBookings).set({
-          originalAmount: String(input.totalAmountClp), amountPaid: String(newPaid), paymentStatus: status,
-          manualPaymentMethod: existing.length || currentPaid > 0 ? null : input.payment.method as any,
-        }).where(eq(massageBookings.id, booking.id));
+        await tx
+          .update(massageBookings)
+          .set({
+            originalAmount: String(input.totalAmountClp),
+            amountPaid: String(newPaid),
+            paymentStatus: status,
+            manualPaymentMethod:
+              existing.length || currentPaid > 0
+                ? null
+                : (input.payment.method as any),
+          })
+          .where(eq(massageBookings.id, booking.id));
         return { id: created.id, fullyPaid: status === "paid" };
       });
       if (result.fullyPaid) {
@@ -1859,23 +2943,66 @@ const agendaRouter = router({
     }),
 
   completePayment: protectedProcedure
-    .input(z.object({ paymentId: z.number(), paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/), reference: z.string().trim().max(160), cardType: z.enum(["credit", "debit"]).optional() }))
+    .input(
+      z.object({
+        paymentId: z.number(),
+        paidAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
+        reference: z.string().trim().max(160),
+        cardType: z.enum(["credit", "debit"]).optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
-      if (!hasMassagePaymentAccess(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+      if (!hasMassagePaymentAccess(ctx.user))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para actualizar pagos",
+        });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const result = await db.transaction(async tx => {
-        const [payment] = await tx.select().from(reservationPayments).where(and(eq(reservationPayments.id, input.paymentId), eq(reservationPayments.module, "massages"))).limit(1);
-        if (!payment || payment.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "El pago no está pendiente" });
-        const [booking] = await tx.select().from(massageBookings).where(eq(massageBookings.id, payment.reservationId)).limit(1);
+        const [payment] = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.id, input.paymentId),
+              eq(reservationPayments.module, "massages")
+            )
+          )
+          .limit(1);
+        if (!payment || payment.status !== "pending")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "El pago no está pendiente",
+          });
+        const [booking] = await tx
+          .select()
+          .from(massageBookings)
+          .where(eq(massageBookings.id, payment.reservationId))
+          .limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
         const total = Number(booking.originalAmount ?? 0);
-        if (!total) throw new TRPCError({ code: "BAD_REQUEST", message: "Define primero el valor total del masaje" });
+        if (!total)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Define primero el valor total del masaje",
+          });
         const newPaid = Number(booking.amountPaid ?? 0) + payment.amountClp;
         const status = calculatedPaymentStatus(newPaid, total);
-        await tx.update(reservationPayments).set({ status: "paid", paidAt: reservationPaymentDate(input.paidAt), reference: input.reference, cardType: input.cardType ?? null }).where(eq(reservationPayments.id, payment.id));
-        await tx.update(massageBookings).set({ amountPaid: String(newPaid), paymentStatus: status }).where(eq(massageBookings.id, booking.id));
+        await tx
+          .update(reservationPayments)
+          .set({
+            status: "paid",
+            paidAt: reservationPaymentDate(input.paidAt),
+            reference: input.reference,
+            cardType: input.cardType ?? null,
+          })
+          .where(eq(reservationPayments.id, payment.id));
+        await tx
+          .update(massageBookings)
+          .set({ amountPaid: String(newPaid), paymentStatus: status })
+          .where(eq(massageBookings.id, booking.id));
         return { bookingId: booking.id, fullyPaid: status === "paid" };
       });
       if (result.fullyPaid) {
@@ -1886,28 +3013,47 @@ const agendaRouter = router({
     }),
 
   updateStatus: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       id: z.number(),
-      status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]),
+        status: z.enum([
+          "pending",
+          "confirmed",
+          "completed",
+          "cancelled",
+          "no_show",
+        ]),
       cancellationCategory: cancellationCategorySchema.optional(),
       cancellationReason: cancellationReasonSchema.optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Debes indicar por qué se cancela el masaje" });
+      if (
+        input.status === "cancelled" &&
+        (!input.cancellationCategory || !input.cancellationReason)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Debes indicar por qué se cancela el masaje",
+        });
       }
-      await db.update(massageBookings).set({
+      await db
+        .update(massageBookings)
+        .set({
         status: input.status,
-        ...(input.status === "cancelled" ? {
+          ...(input.status === "cancelled"
+            ? {
           cancellationCategory: input.cancellationCategory,
           cancellationReason: input.cancellationReason,
           cancelledAt: new Date(),
           cancelledByUserId: ctx.user.id,
-        } : {}),
-      }).where(eq(massageBookings.id, input.id));
+              }
+            : {}),
+        })
+        .where(eq(massageBookings.id, input.id));
       if (input.status !== "pending") {
         await stopTherapistAssignmentForBooking("massage", input.id);
       }
@@ -1915,23 +3061,37 @@ const agendaRouter = router({
     }),
 
   update: protectedProcedure
-    .input(z.object({
-      id: z.number(), therapistId: z.number().optional(), roomId: z.number().optional(),
-      bookingDate: z.string().optional(), startTime: z.string().optional(), endTime: z.string().optional(),
-      status: z.enum(["pending", "confirmed", "completed", "cancelled", "no_show"]).optional(),
+    .input(
+      z.object({
+        id: z.number(),
+        therapistId: z.number().optional(),
+        roomId: z.number().optional(),
+        bookingDate: z.string().optional(),
+        startTime: z.string().optional(),
+        endTime: z.string().optional(),
+        status: z
+          .enum(["pending", "confirmed", "completed", "cancelled", "no_show"])
+          .optional(),
       paymentStatus: z.enum(["pending", "paid", "refunded"]).optional(),
       manualPaymentMethod: manualMassagePaymentMethodSchema.optional(),
-      amountPaid: z.string().optional(), notes: z.string().optional(), crossSellServices: z.string().optional(),
+        amountPaid: z.string().optional(),
+        notes: z.string().optional(),
+        crossSellServices: z.string().optional(),
       cancellationCategory: cancellationCategorySchema.optional(),
       cancellationReason: cancellationReasonSchema.optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
-      const changesPayment = input.paymentStatus !== undefined
-        || input.amountPaid !== undefined
-        || input.manualPaymentMethod !== undefined;
+      const changesPayment =
+        input.paymentStatus !== undefined ||
+        input.amountPaid !== undefined ||
+        input.manualPaymentMethod !== undefined;
       if (changesPayment && !hasMassagePaymentAccess(ctx.user)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permiso para actualizar pagos" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para actualizar pagos",
+        });
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -1939,26 +3099,45 @@ const agendaRouter = router({
       // Detectar cambio a "paid" para enviar notificaciones
       let sendConfirmation = false;
       if (input.paymentStatus === "paid") {
-        const [current] = await db.select({ paymentStatus: massageBookings.paymentStatus })
-          .from(massageBookings).where(eq(massageBookings.id, input.id)).limit(1);
-        if (current && current.paymentStatus !== "paid") sendConfirmation = true;
+        const [current] = await db
+          .select({ paymentStatus: massageBookings.paymentStatus })
+          .from(massageBookings)
+          .where(eq(massageBookings.id, input.id))
+          .limit(1);
+        if (current && current.paymentStatus !== "paid")
+          sendConfirmation = true;
       }
 
-      if (input.status === "cancelled" && (!input.cancellationCategory || !input.cancellationReason)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Debes indicar por qué se cancela el masaje" });
+      if (
+        input.status === "cancelled" &&
+        (!input.cancellationCategory || !input.cancellationReason)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Debes indicar por qué se cancela el masaje",
+        });
       }
 
-      const { id, bookingDate, cancellationCategory, cancellationReason, ...data } = input;
-      await db.update(massageBookings)
+      const {
+        id,
+        bookingDate,
+        cancellationCategory,
+        cancellationReason,
+        ...data
+      } = input;
+      await db
+        .update(massageBookings)
         .set({
           ...data,
           ...(bookingDate ? { bookingDate: bookingDate as any } : {}),
-          ...(input.status === "cancelled" ? {
+          ...(input.status === "cancelled"
+            ? {
             cancellationCategory,
             cancellationReason,
             cancelledAt: new Date(),
             cancelledByUserId: ctx.user.id,
-          } : {}),
+              }
+            : {}),
         })
         .where(eq(massageBookings.id, id));
       if (input.status && input.status !== "pending") {
@@ -1973,20 +3152,34 @@ const agendaRouter = router({
       if (sendConfirmation) {
         (async () => {
           try {
-            const [booking] = await db.select({
-              clientName: massageBookings.clientName, clientEmail: massageBookings.clientEmail,
-              clientPhone: massageBookings.clientPhone, bookingDate: massageBookings.bookingDate,
-              startTime: massageBookings.startTime, endTime: massageBookings.endTime,
-              duration: massageBookings.duration, amountPaid: massageBookings.amountPaid,
+            const [booking] = await db
+              .select({
+                clientName: massageBookings.clientName,
+                clientEmail: massageBookings.clientEmail,
+                clientPhone: massageBookings.clientPhone,
+                bookingDate: massageBookings.bookingDate,
+                startTime: massageBookings.startTime,
+                endTime: massageBookings.endTime,
+                duration: massageBookings.duration,
+                amountPaid: massageBookings.amountPaid,
               notes: massageBookings.notes,
               techniqueName: massageTechniques.name,
-              therapistName: massageTherapists.name, therapistEmail: massageTherapists.email,
-              therapistPhone: massageTherapists.phone, therapistType: massageTherapists.type,
+                therapistName: massageTherapists.name,
+                therapistEmail: massageTherapists.email,
+                therapistPhone: massageTherapists.phone,
+                therapistType: massageTherapists.type,
             })
             .from(massageBookings)
-            .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-            .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
-            .where(eq(massageBookings.id, id)).limit(1);
+              .leftJoin(
+                massageTechniques,
+                eq(massageBookings.techniqueId, massageTechniques.id)
+              )
+              .leftJoin(
+                massageTherapists,
+                eq(massageBookings.therapistId, massageTherapists.id)
+              )
+              .where(eq(massageBookings.id, id))
+              .limit(1);
 
             if (!booking) return;
             const dateStr = String(booking.bookingDate).slice(0, 10);
@@ -1994,11 +3187,16 @@ const agendaRouter = router({
             // Email al cliente
             if (booking.clientEmail) {
               await sendMassageBookingConfirmationEmail({
-                to: booking.clientEmail, clientName: booking.clientName,
+                to: booking.clientEmail,
+                clientName: booking.clientName,
                 techniqueName: booking.techniqueName ?? "Masaje",
                 therapistName: booking.therapistName ?? undefined,
-                bookingDate: dateStr, startTime: booking.startTime,
-                duration: booking.duration, amountPaid: booking.amountPaid ? String(booking.amountPaid) : undefined,
+                bookingDate: dateStr,
+                startTime: booking.startTime,
+                duration: booking.duration,
+                amountPaid: booking.amountPaid
+                  ? String(booking.amountPaid)
+                  : undefined,
               });
             }
 
@@ -2019,70 +3217,127 @@ const inventarioRouter = router({
     await adminOrEditor(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(massageSupplies).orderBy(asc(massageSupplies.name));
-    return rows.map(row => serializeDateFields(row, ["purchasedAt", "openedAt"]));
+    const rows = await db
+      .select()
+      .from(massageSupplies)
+      .orderBy(asc(massageSupplies.name));
+    return rows.map(row =>
+      serializeDateFields(row, ["purchasedAt", "openedAt"])
+    );
   }),
 
   getLowStock: protectedProcedure.query(async ({ ctx }) => {
     await massageRead(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(massageSupplies).where(and(eq(massageSupplies.active, 1), sql`${massageSupplies.currentStock} <= ${massageSupplies.minimumStock}`));
-    return rows.map(row => serializeDateFields(row, ["purchasedAt", "openedAt"]));
+    const rows = await db
+      .select()
+      .from(massageSupplies)
+      .where(
+        and(
+          eq(massageSupplies.active, 1),
+          sql`${massageSupplies.currentStock} <= ${massageSupplies.minimumStock}`
+        )
+      );
+    return rows.map(row =>
+      serializeDateFields(row, ["purchasedAt", "openedAt"])
+    );
   }),
 
   create: protectedProcedure
-    .input(z.object({
-      name: z.string().min(2), unit: z.string(),
+    .input(
+      z.object({
+        name: z.string().min(2),
+        unit: z.string(),
       categoria: z.enum(["insumo", "herramienta"]).default("insumo"),
-      ubicacion: z.string().optional(), vidaUtilMeses: z.number().optional(),
-      currentStock: z.string().default("0"), minimumStock: z.string().default("0"),
-      purchasedAt: z.string().optional(), openedAt: z.string().optional(), notes: z.string().optional(),
-    }))
+        ubicacion: z.string().optional(),
+        vidaUtilMeses: z.number().optional(),
+        currentStock: z.string().default("0"),
+        minimumStock: z.string().default("0"),
+        purchasedAt: z.string().optional(),
+        openedAt: z.string().optional(),
+        notes: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(massageSupplies).values({
-        name: input.name, unit: input.unit, categoria: input.categoria,
-        ubicacion: input.ubicacion || null, vidaUtilMeses: input.vidaUtilMeses ?? null,
-        currentStock: input.currentStock, minimumStock: input.minimumStock,
-        purchasedAt: (input.purchasedAt || null) as any, openedAt: (input.openedAt || null) as any, notes: input.notes || null,
+        name: input.name,
+        unit: input.unit,
+        categoria: input.categoria,
+        ubicacion: input.ubicacion || null,
+        vidaUtilMeses: input.vidaUtilMeses ?? null,
+        currentStock: input.currentStock,
+        minimumStock: input.minimumStock,
+        purchasedAt: (input.purchasedAt || null) as any,
+        openedAt: (input.openedAt || null) as any,
+        notes: input.notes || null,
       });
       return { success: true };
     }),
 
   receiveStock: protectedProcedure
-    .input(z.object({ id: z.number(), stockReceived: z.string(), purchasedAt: z.string().optional(), openedAt: z.string().optional(), notes: z.string().optional() }))
+    .input(
+      z.object({
+        id: z.number(),
+        stockReceived: z.string(),
+        purchasedAt: z.string().optional(),
+        openedAt: z.string().optional(),
+        notes: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(massageSupplies).set({
+      await db
+        .update(massageSupplies)
+        .set({
         currentStock: sql`${massageSupplies.currentStock} + ${input.stockReceived}`,
-        ...(input.purchasedAt ? { purchasedAt: input.purchasedAt as any } : {}),
+          ...(input.purchasedAt
+            ? { purchasedAt: input.purchasedAt as any }
+            : {}),
         ...(input.openedAt ? { openedAt: input.openedAt as any } : {}),
         ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
-      }).where(eq(massageSupplies.id, input.id));
+        })
+        .where(eq(massageSupplies.id, input.id));
       return { success: true };
     }),
 
   update: protectedProcedure
-    .input(z.object({
-      id: z.number(), name: z.string().optional(), unit: z.string().optional(),
-      categoria: z.enum(["insumo", "herramienta"]).optional(), ubicacion: z.string().optional(),
-      vidaUtilMeses: z.number().optional(), currentStock: z.string().optional(), minimumStock: z.string().optional(),
-      purchasedAt: z.string().optional(), openedAt: z.string().optional(), notes: z.string().optional(), active: z.number().optional(),
-    }))
+    .input(
+      z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        unit: z.string().optional(),
+        categoria: z.enum(["insumo", "herramienta"]).optional(),
+        ubicacion: z.string().optional(),
+        vidaUtilMeses: z.number().optional(),
+        currentStock: z.string().optional(),
+        minimumStock: z.string().optional(),
+        purchasedAt: z.string().optional(),
+        openedAt: z.string().optional(),
+        notes: z.string().optional(),
+        active: z.number().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, purchasedAt, openedAt, notes, ubicacion, ...rest } = input;
-      await db.update(massageSupplies).set({
-        ...rest, ubicacion: ubicacion || null,
-        purchasedAt: (purchasedAt || null) as any, openedAt: (openedAt || null) as any, notes: notes || null,
-      }).where(eq(massageSupplies.id, id));
+      await db
+        .update(massageSupplies)
+        .set({
+          ...rest,
+          ubicacion: ubicacion || null,
+          purchasedAt: (purchasedAt || null) as any,
+          openedAt: (openedAt || null) as any,
+          notes: notes || null,
+        })
+        .where(eq(massageSupplies.id, id));
       return { success: true };
     }),
 
@@ -2092,7 +3347,12 @@ const inventarioRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(massageSupplies).set({ currentStock: sql`${massageSupplies.currentStock} + ${input.delta}` }).where(eq(massageSupplies.id, input.id));
+      await db
+        .update(massageSupplies)
+        .set({
+          currentStock: sql`${massageSupplies.currentStock} + ${input.delta}`,
+        })
+        .where(eq(massageSupplies.id, input.id));
       return { success: true };
     }),
 
@@ -2110,7 +3370,8 @@ const inventarioRouter = router({
 // ─── CLIENTES ─────────────────────────────────────────────────
 async function loadMassageClientDirectory(db: MassageDb) {
   const [standardBookings, programBookings, therapistRows] = await Promise.all([
-    db.select({
+    db
+      .select({
       id: massageBookings.id,
       clientName: massageBookings.clientName,
       clientEmail: massageBookings.clientEmail,
@@ -2130,14 +3391,25 @@ async function loadMassageClientDirectory(db: MassageDb) {
       cancelledAt: massageBookings.cancelledAt,
     })
       .from(massageBookings)
-      .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-      .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id)),
+      .leftJoin(
+        massageTechniques,
+        eq(massageBookings.techniqueId, massageTechniques.id)
+      )
+      .leftJoin(
+        massageTherapists,
+        eq(massageBookings.therapistId, massageTherapists.id)
+      ),
     db.select().from(massageProgramBookings),
-    db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists),
+    db
+      .select({ id: massageTherapists.id, name: massageTherapists.name })
+      .from(massageTherapists),
   ]);
-  const therapistNames = new Map(therapistRows.map((therapist) => [therapist.id, therapist.name]));
+  const therapistNames = new Map(
+    therapistRows.map(therapist => [therapist.id, therapist.name])
+  );
 
-  const records: MassageClientBookingRecord[] = standardBookings.map((booking) => ({
+  const records: MassageClientBookingRecord[] = standardBookings.map(
+    booking => ({
     id: `massage:${booking.id}`,
     clientName: booking.clientName,
     clientEmail: booking.clientEmail,
@@ -2149,17 +3421,20 @@ async function loadMassageClientDirectory(db: MassageDb) {
     serviceName: booking.techniqueName,
     therapistName: booking.therapistName,
     status: booking.status,
-    amountPaid: booking.paymentStatus === "paid" ? Number(booking.amountPaid ?? 0) : 0,
+      amountPaid:
+        booking.paymentStatus === "paid" ? Number(booking.amountPaid ?? 0) : 0,
     crossSellServices: booking.crossSellServices,
     cancellationCategory: booking.cancellationCategory,
     cancellationReason: booking.cancellationReason,
     cancelledAt: booking.cancelledAt,
     source: "massage",
-  }));
+    })
+  );
 
   for (const booking of programBookings) {
     const bookingDate = serializeDateOnly(booking.bookingDate) ?? "";
-    const amountPaid = booking.status === "cancelled"
+    const amountPaid =
+      booking.status === "cancelled"
       ? 0
       : getSkeduMassageUnitPrice(booking.duration);
     const common = {
@@ -2183,7 +3458,7 @@ async function loadMassageClientDirectory(db: MassageDb) {
       clientPhone: booking.clientPhone,
       clientOrigin: "Programa Skedu",
       therapistName: booking.therapistId
-        ? therapistNames.get(booking.therapistId) ?? null
+        ? (therapistNames.get(booking.therapistId) ?? null)
         : null,
     });
     if (booking.modality === "double" && booking.secondClientName) {
@@ -2195,7 +3470,7 @@ async function loadMassageClientDirectory(db: MassageDb) {
         clientPhone: null,
         clientOrigin: "Programa Skedu",
         therapistName: booking.secondTherapistId
-          ? therapistNames.get(booking.secondTherapistId) ?? null
+          ? (therapistNames.get(booking.secondTherapistId) ?? null)
           : null,
       });
     }
@@ -2206,7 +3481,15 @@ async function loadMassageClientDirectory(db: MassageDb) {
 
 const clientesRouter = router({
   getAll: protectedProcedure
-    .input(z.object({ search: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0) }).optional())
+    .input(
+      z
+        .object({
+          search: z.string().optional(),
+          limit: z.number().default(50),
+          offset: z.number().default(0),
+        })
+        .optional()
+    )
     .query(async ({ ctx, input }) => {
       await massageClientsAccess(ctx.user);
       const db = await getDb();
@@ -2214,11 +3497,13 @@ const clientesRouter = router({
       const search = input?.search?.trim().toLowerCase();
       const clients = await loadMassageClientDirectory(db);
       return clients
-        .filter((client) => !search || [
-          client.clientName,
-          client.clientEmail,
-          client.clientPhone,
-        ].some((value) => value?.toLowerCase().includes(search)))
+        .filter(
+          client =>
+            !search ||
+            [client.clientName, client.clientEmail, client.clientPhone].some(
+              value => value?.toLowerCase().includes(search)
+            )
+        )
         .slice(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 50))
         .map(({ history: _history, ...client }) => client);
     }),
@@ -2230,7 +3515,10 @@ const clientesRouter = router({
       const db = await getDb();
       if (!db) return [];
       const clients = await loadMassageClientDirectory(db);
-      return clients.find((client) => client.clientKey === input.clientKey)?.history ?? [];
+      return (
+        clients.find(client => client.clientKey === input.clientKey)?.history ??
+        []
+      );
     }),
 });
 
@@ -2252,7 +3540,8 @@ const discountsRouter = router({
     await adminOrEditor(ctx.user.role);
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select({
+    const rows = await db
+      .select({
       id: discountCodes.id,
       code: discountCodes.code,
       name: discountCodes.name,
@@ -2265,34 +3554,63 @@ const discountsRouter = router({
       currentUses: discountCodes.currentUses,
       createdAt: discountCodes.createdAt,
       totalDiscounted: sql<string>`COALESCE(SUM(${discountCodeUsages.discountAmount}), 0)`,
-    }).from(discountCodes)
-      .leftJoin(discountCodeUsages, eq(discountCodeUsages.discountCodeId, discountCodes.id))
-      .where(sql`JSON_CONTAINS(COALESCE(${discountCodes.applicableServices}, '[]'), '"masajes"')`)
+      })
+      .from(discountCodes)
+      .leftJoin(
+        discountCodeUsages,
+        eq(discountCodeUsages.discountCodeId, discountCodes.id)
+      )
+      .where(
+        sql`JSON_CONTAINS(COALESCE(${discountCodes.applicableServices}, '[]'), '"masajes"')`
+      )
       .groupBy(discountCodes.id)
       .orderBy(asc(discountCodes.code));
     const mappings = await db.select().from(massageDiscountCodeTechniques);
     return rows.map((row: any) => ({
       ...row,
-      techniqueIds: mappings.filter((mapping: any) => mapping.discountCodeId === row.id).map((mapping: any) => mapping.techniqueId),
+      techniqueIds: mappings
+        .filter((mapping: any) => mapping.discountCodeId === row.id)
+        .map((mapping: any) => mapping.techniqueId),
     }));
   }),
 
-  create: protectedProcedure.input(massageDiscountInput).mutation(async ({ ctx, input }) => {
+  create: protectedProcedure
+    .input(massageDiscountInput)
+    .mutation(async ({ ctx, input }) => {
     await adminOrEditor(ctx.user.role);
     if (input.discountType === "percentage" && input.discountValue > 100) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "El porcentaje no puede superar 100%." });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "El porcentaje no puede superar 100%.",
+        });
     }
-    if (input.startsAt && input.expiresAt && input.startsAt >= input.expiresAt) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha de término debe ser posterior al inicio." });
+      if (
+        input.startsAt &&
+        input.expiresAt &&
+        input.startsAt >= input.expiresAt
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "La fecha de término debe ser posterior al inicio.",
+        });
     }
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
     const normalized = input.code.toUpperCase();
-    const [existing] = await db.select({ id: discountCodes.id }).from(discountCodes)
-      .where(eq(discountCodes.code, normalized)).limit(1);
-    if (existing) throw new TRPCError({ code: "CONFLICT", message: "Ese código ya existe." });
-    return db.transaction(async (tx) => {
-      const [created] = await tx.insert(discountCodes).values({
+      const [existing] = await db
+        .select({ id: discountCodes.id })
+        .from(discountCodes)
+        .where(eq(discountCodes.code, normalized))
+        .limit(1);
+      if (existing)
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Ese código ya existe.",
+        });
+      return db.transaction(async tx => {
+        const [created] = await tx
+          .insert(discountCodes)
+          .values({
         code: normalized,
         name: input.name,
         description: input.description,
@@ -2304,57 +3622,102 @@ const discountsRouter = router({
         expiresAt: input.expiresAt ?? null,
         active: input.active,
         createdBy: ctx.user.id,
-      }).$returningId();
+          })
+          .$returningId();
       if (input.techniqueIds.length) {
         await tx.insert(massageDiscountCodeTechniques).values(
-          Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: created.id, techniqueId })),
+            Array.from(new Set(input.techniqueIds)).map(techniqueId => ({
+              discountCodeId: created.id,
+              techniqueId,
+            }))
         );
       }
       return { id: created.id };
     });
   }),
 
-  update: protectedProcedure.input(massageDiscountInput.extend({ id: z.number().int().positive() }))
+  update: protectedProcedure
+    .input(massageDiscountInput.extend({ id: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       if (input.discountType === "percentage" && input.discountValue > 100) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "El porcentaje no puede superar 100%." });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "El porcentaje no puede superar 100%.",
+        });
       }
-      if (input.startsAt && input.expiresAt && input.startsAt >= input.expiresAt) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha de término debe ser posterior al inicio." });
+      if (
+        input.startsAt &&
+        input.expiresAt &&
+        input.startsAt >= input.expiresAt
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "La fecha de término debe ser posterior al inicio.",
+        });
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const normalized = input.code.toUpperCase();
-      const [duplicate] = await db.select({ id: discountCodes.id }).from(discountCodes)
-        .where(and(eq(discountCodes.code, normalized), sql`${discountCodes.id} <> ${input.id}`)).limit(1);
-      if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "Ese código ya existe." });
-      return db.transaction(async (tx) => {
-        await tx.update(discountCodes).set({
-          code: normalized, name: input.name, description: input.description,
-          discountType: input.discountType, discountValue: input.discountValue,
-          startsAt: input.startsAt ?? null, expiresAt: input.expiresAt ?? null, active: input.active,
-        }).where(eq(discountCodes.id, input.id));
-        await tx.delete(massageDiscountCodeTechniques)
+      const [duplicate] = await db
+        .select({ id: discountCodes.id })
+        .from(discountCodes)
+        .where(
+          and(
+            eq(discountCodes.code, normalized),
+            sql`${discountCodes.id} <> ${input.id}`
+          )
+        )
+        .limit(1);
+      if (duplicate)
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Ese código ya existe.",
+        });
+      return db.transaction(async tx => {
+        await tx
+          .update(discountCodes)
+          .set({
+            code: normalized,
+            name: input.name,
+            description: input.description,
+            discountType: input.discountType,
+            discountValue: input.discountValue,
+            startsAt: input.startsAt ?? null,
+            expiresAt: input.expiresAt ?? null,
+            active: input.active,
+          })
+          .where(eq(discountCodes.id, input.id));
+        await tx
+          .delete(massageDiscountCodeTechniques)
           .where(eq(massageDiscountCodeTechniques.discountCodeId, input.id));
         if (input.techniqueIds.length) {
           await tx.insert(massageDiscountCodeTechniques).values(
-            Array.from(new Set(input.techniqueIds)).map((techniqueId) => ({ discountCodeId: input.id, techniqueId })),
+            Array.from(new Set(input.techniqueIds)).map(techniqueId => ({
+              discountCodeId: input.id,
+              techniqueId,
+            }))
           );
         }
         return { success: true };
       });
     }),
 
-  remove: protectedProcedure.input(z.object({ id: z.number().int().positive() }))
+  remove: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [usage] = await db.select({ count: sql<number>`COUNT(*)` }).from(discountCodeUsages)
+      const [usage] = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(discountCodeUsages)
         .where(eq(discountCodeUsages.discountCodeId, input.id));
       if (Number(usage?.count ?? 0) > 0) {
-        await db.update(discountCodes).set({ active: 0 }).where(eq(discountCodes.id, input.id));
+        await db
+          .update(discountCodes)
+          .set({ active: 0 })
+          .where(eq(discountCodes.id, input.id));
         return { archived: true };
       }
       await db.delete(discountCodes).where(eq(discountCodes.id, input.id));
@@ -2365,9 +3728,10 @@ const discountsRouter = router({
 // ─── ANALYTICS ────────────────────────────────────────────────
 async function getMassageSalesRows(
   db: MassageDb,
-  input: { from: string; to: string; limit: number; offset: number },
+  input: { from: string; to: string; limit: number; offset: number }
 ) {
-  const rows = await db.select({
+  const rows = await db
+    .select({
     id: massageSales.id,
     bookingId: massageSales.bookingId,
     soldAt: massageSales.soldAt,
@@ -2391,15 +3755,24 @@ async function getMassageSalesRows(
   })
     .from(massageSales)
     .leftJoin(massageBookings, eq(massageSales.bookingId, massageBookings.id))
-    .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
-    .where(and(
+    .leftJoin(
+      massageTherapists,
+      eq(massageBookings.therapistId, massageTherapists.id)
+    )
+    .where(
+      and(
       gte(massageSales.serviceDate, input.from as any),
-      lte(massageSales.serviceDate, input.to as any),
-    ))
-    .orderBy(desc(massageSales.serviceDate), desc(massageSales.startTime), desc(massageSales.soldAt))
+        lte(massageSales.serviceDate, input.to as any)
+      )
+    )
+    .orderBy(
+      desc(massageSales.serviceDate),
+      desc(massageSales.startTime),
+      desc(massageSales.soldAt)
+    )
     .limit(input.limit)
     .offset(input.offset);
-  return rows.map((row) => ({
+  return rows.map(row => ({
     ...row,
     source: "massage" as const,
     serviceDate: serializeDateOnly(row.serviceDate),
@@ -2408,18 +3781,27 @@ async function getMassageSalesRows(
 
 async function getCombinedMassageSalesRows(
   db: MassageDb,
-  input: { from: string; to: string; limit: number; offset: number },
+  input: { from: string; to: string; limit: number; offset: number }
 ) {
   const [standardRows, programRows, therapistRows] = await Promise.all([
     getMassageSalesRows(db, { ...input, limit: 100_000, offset: 0 }),
-    db.select().from(massageProgramBookings).where(and(
+    db
+      .select()
+      .from(massageProgramBookings)
+      .where(
+        and(
       gte(massageProgramBookings.bookingDate, input.from as any),
-      lte(massageProgramBookings.bookingDate, input.to as any),
-    )),
-    db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists),
+          lte(massageProgramBookings.bookingDate, input.to as any)
+        )
+      ),
+    db
+      .select({ id: massageTherapists.id, name: massageTherapists.name })
+      .from(massageTherapists),
   ]);
-  const therapistNames = new Map(therapistRows.map((therapist) => [therapist.id, therapist.name]));
-  const programSales = programRows.flatMap((booking) => {
+  const therapistNames = new Map(
+    therapistRows.map(therapist => [therapist.id, therapist.name])
+  );
+  const programSales = programRows.flatMap(booking => {
     const serviceDate = serializeDateOnly(booking.bookingDate);
     const unitPrice = getSkeduMassageUnitPrice(booking.duration);
     const programLabel = getSkeduProgramLabel(booking.program);
@@ -2428,10 +3810,14 @@ async function getCombinedMassageSalesRows(
         name: booking.clientName,
         therapistId: booking.therapistId,
       },
-      ...(booking.modality === "double" ? [{
+      ...(booking.modality === "double"
+        ? [
+            {
         name: booking.secondClientName ?? "Segundo cliente",
         therapistId: booking.secondTherapistId,
-      }] : []),
+            },
+          ]
+        : []),
     ];
     return clients.map((client, unitIndex) => ({
       id: `SKEDU-${booking.id}-${unitIndex + 1}`,
@@ -2451,9 +3837,14 @@ async function getCombinedMassageSalesRows(
       discountValue: null,
       paymentMethod: booking.paymentMethod,
       paymentReference: booking.paymentReference ?? booking.externalReference,
-      saleStatus: booking.status === "cancelled" ? "cancelled" as const : "paid" as const,
+      saleStatus:
+        booking.status === "cancelled"
+          ? ("cancelled" as const)
+          : ("paid" as const),
       bookingStatus: booking.status,
-      therapistName: client.therapistId ? therapistNames.get(client.therapistId) ?? null : null,
+      therapistName: client.therapistId
+        ? (therapistNames.get(client.therapistId) ?? null)
+        : null,
       source: "skedu_program" as const,
     }));
   });
@@ -2470,10 +3861,12 @@ async function getCombinedMassageSalesRows(
 
 const analyticsRouter = router({
   checkoutFunnel: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    }))
+      })
+    )
     .query(async ({ ctx, input }) => {
       await massageSalesAccess(ctx.user);
       const db = await getDb();
@@ -2481,21 +3874,36 @@ const analyticsRouter = router({
       const from = chileLocalDateTimeToUtc(input.from, "00:00");
       const nextDay = new Date(`${input.to}T12:00:00Z`);
       nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-      const toExclusive = chileLocalDateTimeToUtc(nextDay.toISOString().slice(0, 10), "00:00");
-      const sessions = await db.select().from(massageCheckoutSessions).where(and(
+      const toExclusive = chileLocalDateTimeToUtc(
+        nextDay.toISOString().slice(0, 10),
+        "00:00"
+      );
+      const sessions = await db
+        .select()
+        .from(massageCheckoutSessions)
+        .where(
+          and(
         gte(massageCheckoutSessions.startedAt, from),
-        lt(massageCheckoutSessions.startedAt, toExclusive),
-      ));
+            lt(massageCheckoutSessions.startedAt, toExclusive)
+          )
+        );
 
       const stages = {
         started: sessions.length,
-        scheduling: sessions.filter((session) => session.schedulingStartedAt).length,
-        scheduleSelected: sessions.filter((session) => session.scheduleSelectedAt).length,
-        detailsCompleted: sessions.filter((session) => session.detailsCompletedAt).length,
-        paymentStarted: sessions.filter((session) => session.paymentStartedAt).length,
-        paid: sessions.filter((session) => session.status === "paid").length,
-        paymentFailed: sessions.filter((session) => session.status === "payment_failed").length,
-        abandoned: sessions.filter((session) => session.status === "abandoned").length,
+        scheduling: sessions.filter(session => session.schedulingStartedAt)
+          .length,
+        scheduleSelected: sessions.filter(session => session.scheduleSelectedAt)
+          .length,
+        detailsCompleted: sessions.filter(session => session.detailsCompletedAt)
+          .length,
+        paymentStarted: sessions.filter(session => session.paymentStartedAt)
+          .length,
+        paid: sessions.filter(session => session.status === "paid").length,
+        paymentFailed: sessions.filter(
+          session => session.status === "payment_failed"
+        ).length,
+        abandoned: sessions.filter(session => session.status === "abandoned")
+          .length,
       };
       const abandonedAt = {
         beforeScheduling: 0,
@@ -2504,7 +3912,9 @@ const analyticsRouter = router({
         afterDetails: 0,
         afterPaymentStart: 0,
       };
-      for (const session of sessions.filter((candidate) => candidate.status === "abandoned")) {
+      for (const session of sessions.filter(
+        candidate => candidate.status === "abandoned"
+      )) {
         if (session.paymentStartedAt) abandonedAt.afterPaymentStart += 1;
         else if (session.detailsCompletedAt) abandonedAt.afterDetails += 1;
         else if (session.scheduleSelectedAt) abandonedAt.afterSchedule += 1;
@@ -2512,22 +3922,25 @@ const analyticsRouter = router({
         else abandonedAt.beforeScheduling += 1;
       }
       const paidRevenue = sessions
-        .filter((session) => session.status === "paid")
+        .filter(session => session.status === "paid")
         .reduce((sum, session) => sum + Number(session.finalTotal), 0);
       return {
         stages,
         abandonedAt,
         paidRevenue,
         conversionRate: stages.started > 0 ? stages.paid / stages.started : 0,
-        paymentApprovalRate: stages.paymentStarted > 0 ? stages.paid / stages.paymentStarted : 0,
+        paymentApprovalRate:
+          stages.paymentStarted > 0 ? stages.paid / stages.paymentStarted : 0,
       };
     }),
 
   summary: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    }))
+      })
+    )
     .query(async ({ ctx, input }) => {
       await massageSalesAccess(ctx.user);
       const db = await getDb();
@@ -2539,13 +3952,19 @@ const analyticsRouter = router({
         return value.toISOString().slice(0, 10);
       };
       const dateDiff = Math.round(
-        (Date.parse(`${input.to}T12:00:00Z`) - Date.parse(`${input.from}T12:00:00Z`)) / 86_400_000,
+        (Date.parse(`${input.to}T12:00:00Z`) -
+          Date.parse(`${input.from}T12:00:00Z`)) /
+          86_400_000
       );
       if (dateDiff < 0 || dateDiff > 730) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "El rango de fechas no es válido." });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "El rango de fechas no es válido.",
+        });
       }
       const previousTo = addDays(input.from, -1);
-      const isCompleteCalendarMonth = input.from.endsWith("-01") && addDays(input.to, 1).endsWith("-01");
+      const isCompleteCalendarMonth =
+        input.from.endsWith("-01") && addDays(input.to, 1).endsWith("-01");
       const previousFrom = isCompleteCalendarMonth
         ? previousTo.slice(0, 8) + "01"
         : addDays(previousTo, -dateDiff);
@@ -2570,43 +3989,68 @@ const analyticsRouter = router({
         npsRows,
         therapistRows,
       ] = await Promise.all([
-        db.select({
+        db
+          .select({
           amount: massageSales.amount,
           originalAmount: massageSales.originalAmount,
           discountAmount: massageSales.discountAmount,
           paymentMethod: massageSales.paymentMethod,
           status: massageSales.status,
-        }).from(massageSales).where(and(
+          })
+          .from(massageSales)
+          .where(
+            and(
           gte(massageSales.serviceDate, input.from as any),
-          lte(massageSales.serviceDate, input.to as any),
-        )),
-        db.select({ amount: massageSales.amount, status: massageSales.status })
-          .from(massageSales).where(and(
+              lte(massageSales.serviceDate, input.to as any)
+            )
+          ),
+        db
+          .select({ amount: massageSales.amount, status: massageSales.status })
+          .from(massageSales)
+          .where(
+            and(
             gte(massageSales.serviceDate, previousFrom as any),
-            lte(massageSales.serviceDate, previousTo as any),
-          )),
-        db.select({
+              lte(massageSales.serviceDate, previousTo as any)
+            )
+          ),
+        db
+          .select({
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           status: massageProgramBookings.status,
-        }).from(massageProgramBookings).where(and(
+          })
+          .from(massageProgramBookings)
+          .where(
+            and(
           gte(massageProgramBookings.bookingDate, previousFrom as any),
-          lte(massageProgramBookings.bookingDate, previousTo as any),
-        )),
-        db.select({ amount: massageSales.amount }).from(massageSales).where(and(
+              lte(massageProgramBookings.bookingDate, previousTo as any)
+            )
+          ),
+        db
+          .select({ amount: massageSales.amount })
+          .from(massageSales)
+          .where(
+            and(
           gte(massageSales.soldAt, todayStart),
           lt(massageSales.soldAt, tomorrowStart),
-          eq(massageSales.status, "paid"),
-        )),
-        db.select({
+              eq(massageSales.status, "paid")
+            )
+          ),
+        db
+          .select({
           status: massageBookings.status,
           startTime: massageBookings.startTime,
           bookingSource: massageBookings.bookingSource,
-        }).from(massageBookings).where(and(
+          })
+          .from(massageBookings)
+          .where(
+            and(
           gte(massageBookings.bookingDate, input.from as any),
-          lte(massageBookings.bookingDate, input.to as any),
-        )),
-        db.select({
+              lte(massageBookings.bookingDate, input.to as any)
+            )
+          ),
+        db
+          .select({
           status: massageProgramBookings.status,
           startTime: massageProgramBookings.startTime,
           duration: massageProgramBookings.duration,
@@ -2615,42 +4059,68 @@ const analyticsRouter = router({
           paymentMethod: massageProgramBookings.paymentMethod,
           therapistId: massageProgramBookings.therapistId,
           secondTherapistId: massageProgramBookings.secondTherapistId,
-        }).from(massageProgramBookings).where(and(
+          })
+          .from(massageProgramBookings)
+          .where(
+            and(
           gte(massageProgramBookings.bookingDate, input.from as any),
-          lte(massageProgramBookings.bookingDate, input.to as any),
-        )),
-        db.select({
+              lte(massageProgramBookings.bookingDate, input.to as any)
+            )
+          ),
+        db
+          .select({
           status: massageBookings.status,
           bookingSource: massageBookings.bookingSource,
-        }).from(massageBookings).where(eq(massageBookings.bookingDate, today as any)),
-        db.select({ status: massageProgramBookings.status })
-          .from(massageProgramBookings).where(eq(massageProgramBookings.bookingDate, today as any)),
-        db.select({ id: massageBookings.id }).from(massageBookings).where(and(
+          })
+          .from(massageBookings)
+          .where(eq(massageBookings.bookingDate, today as any)),
+        db
+          .select({ status: massageProgramBookings.status })
+          .from(massageProgramBookings)
+          .where(eq(massageProgramBookings.bookingDate, today as any)),
+        db
+          .select({ id: massageBookings.id })
+          .from(massageBookings)
+          .where(
+            and(
           gte(massageBookings.createdAt, todayStart),
-          lt(massageBookings.createdAt, tomorrowStart),
-        )),
-        db.select({
+              lt(massageBookings.createdAt, tomorrowStart)
+            )
+          ),
+        db
+          .select({
           id: massageProgramBookings.id,
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           status: massageProgramBookings.status,
-        }).from(massageProgramBookings).where(and(
+          })
+          .from(massageProgramBookings)
+          .where(
+            and(
           gte(massageProgramBookings.createdAt, todayStart),
-          lt(massageProgramBookings.createdAt, tomorrowStart),
-        )),
-        db.select({
+              lt(massageProgramBookings.createdAt, tomorrowStart)
+            )
+          ),
+        db
+          .select({
           email: massageBookings.clientEmail,
           phone: massageBookings.clientPhone,
           name: massageBookings.clientName,
           bookingDate: massageBookings.bookingDate,
-        }).from(massageBookings).where(lte(massageBookings.bookingDate, input.to as any)),
-        db.select({
+          })
+          .from(massageBookings)
+          .where(lte(massageBookings.bookingDate, input.to as any)),
+        db
+          .select({
           email: massageProgramBookings.clientEmail,
           phone: massageProgramBookings.clientPhone,
           name: massageProgramBookings.clientName,
           bookingDate: massageProgramBookings.bookingDate,
-        }).from(massageProgramBookings).where(lte(massageProgramBookings.bookingDate, input.to as any)),
-        db.select({
+          })
+          .from(massageProgramBookings)
+          .where(lte(massageProgramBookings.bookingDate, input.to as any)),
+        db
+          .select({
           id: massageNpsResponses.id,
           clientName: massageNpsResponses.clientName,
           serviceName: massageNpsResponses.serviceName,
@@ -2659,49 +4129,102 @@ const analyticsRouter = router({
           comment: massageNpsResponses.comment,
           deliveryStatus: massageNpsResponses.deliveryStatus,
           respondedAt: massageNpsResponses.respondedAt,
-        }).from(massageNpsResponses).where(and(
+          })
+          .from(massageNpsResponses)
+          .where(
+            and(
           gte(massageNpsResponses.serviceDate, input.from as any),
-          lte(massageNpsResponses.serviceDate, input.to as any),
-        )).orderBy(desc(massageNpsResponses.respondedAt)),
-        db.select({ id: massageTherapists.id, name: massageTherapists.name }).from(massageTherapists),
+              lte(massageNpsResponses.serviceDate, input.to as any)
+            )
+          )
+          .orderBy(desc(massageNpsResponses.respondedAt)),
+        db
+          .select({ id: massageTherapists.id, name: massageTherapists.name })
+          .from(massageTherapists),
       ]);
 
-      const paidSales = salesTotalsRows.filter((sale) => sale.status === "paid");
+      const paidSales = salesTotalsRows.filter(sale => sale.status === "paid");
       const programRevenue = programPeriod
-        .filter((booking) => booking.status !== "cancelled")
-        .reduce((sum, booking) =>
-          sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0);
+        .filter(booking => booking.status !== "cancelled")
+        .reduce(
+          (sum, booking) =>
+            sum +
+            getSkeduMassageUnitPrice(booking.duration) *
+              getSkeduMassageQuantity(booking.modality),
+          0
+        );
       const previousProgramRevenue = previousProgramPeriod
-        .filter((booking) => booking.status !== "cancelled")
-        .reduce((sum, booking) =>
-          sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0);
-      const revenue = paidSales.reduce((sum, sale) => sum + Number(sale.amount), 0) + programRevenue;
-      const previousRevenue = previousSalesRows
-        .filter((sale) => sale.status === "paid")
-        .reduce((sum, sale) => sum + Number(sale.amount), 0) + previousProgramRevenue;
-      const revenueChangePercent = previousRevenue > 0
+        .filter(booking => booking.status !== "cancelled")
+        .reduce(
+          (sum, booking) =>
+            sum +
+            getSkeduMassageUnitPrice(booking.duration) *
+              getSkeduMassageQuantity(booking.modality),
+          0
+        );
+      const revenue =
+        paidSales.reduce((sum, sale) => sum + Number(sale.amount), 0) +
+        programRevenue;
+      const previousRevenue =
+        previousSalesRows
+          .filter(sale => sale.status === "paid")
+          .reduce((sum, sale) => sum + Number(sale.amount), 0) +
+        previousProgramRevenue;
+      const revenueChangePercent =
+        previousRevenue > 0
         ? ((revenue - previousRevenue) / previousRevenue) * 100
-        : revenue > 0 ? 100 : 0;
+          : revenue > 0
+            ? 100
+            : 0;
       const programOnlineRevenue = programPeriod
-        .filter((booking) => booking.status !== "cancelled" && booking.paymentMethod === "getnet_link")
-        .reduce((sum, booking) =>
-          sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0);
-      const onlineRevenue = paidSales
-        .filter((sale) => sale.paymentMethod === "getnet" || sale.paymentMethod === "getnet_link")
-        .reduce((sum, sale) => sum + Number(sale.amount), 0) + programOnlineRevenue;
-      const otherRevenue = paidSales
-        .filter((sale) => sale.paymentMethod !== "getnet" && sale.paymentMethod !== "getnet_link")
-        .reduce((sum, sale) => sum + Number(sale.amount), 0)
-        + programRevenue - programOnlineRevenue;
+        .filter(
+          booking =>
+            booking.status !== "cancelled" &&
+            booking.paymentMethod === "getnet_link"
+        )
+        .reduce(
+          (sum, booking) =>
+            sum +
+            getSkeduMassageUnitPrice(booking.duration) *
+              getSkeduMassageQuantity(booking.modality),
+          0
+        );
+      const onlineRevenue =
+        paidSales
+          .filter(
+            sale =>
+              sale.paymentMethod === "getnet" ||
+              sale.paymentMethod === "getnet_link"
+          )
+          .reduce((sum, sale) => sum + Number(sale.amount), 0) +
+        programOnlineRevenue;
+      const otherRevenue =
+        paidSales
+          .filter(
+            sale =>
+              sale.paymentMethod !== "getnet" &&
+              sale.paymentMethod !== "getnet_link"
+          )
+          .reduce((sum, sale) => sum + Number(sale.amount), 0) +
+        programRevenue -
+        programOnlineRevenue;
       const paidProgramMassages = programPeriod
-        .filter((booking) => booking.status !== "cancelled")
-        .reduce((sum, booking) => sum + getSkeduMassageQuantity(booking.modality), 0);
+        .filter(booking => booking.status !== "cancelled")
+        .reduce(
+          (sum, booking) => sum + getSkeduMassageQuantity(booking.modality),
+          0
+        );
       const allPeriodBookings = [...standardPeriod, ...programPeriod];
       const confirmedBookings = allPeriodBookings.filter(
-        (booking) => booking.status === "confirmed" || booking.status === "completed",
+        booking =>
+          booking.status === "confirmed" || booking.status === "completed"
       ).length;
-      const cancelledBookings = allPeriodBookings.filter((booking) => booking.status === "cancelled").length;
-      const completedBookings = allPeriodBookings.filter((booking) => booking.status === "completed").length;
+      const cancelledBookings = allPeriodBookings.filter(
+        booking => booking.status === "cancelled"
+      ).length;
+      const completedBookings = allPeriodBookings.filter(
+        booking => booking.status === "completed"
+      ).length;
       const hourly = Array.from({ length: 24 }, (_, hour) => ({
         hour,
         label: `${String(hour).padStart(2, "0")}:00`,
@@ -2713,7 +4236,11 @@ const analyticsRouter = router({
         if (hourly[hour]) hourly[hour].reservations += 1;
       }
 
-      const customerKey = (customer: { email: string | null; phone: string | null; name: string }) => {
+      const customerKey = (customer: {
+        email: string | null;
+        phone: string | null;
+        name: string;
+      }) => {
         const email = customer.email?.trim().toLowerCase();
         if (email) return `email:${email}`;
         const phone = customer.phone?.replace(/\D/g, "");
@@ -2721,34 +4248,58 @@ const analyticsRouter = router({
         return `name:${customer.name.trim().toLowerCase()}`;
       };
       const firstBooking = new Map<string, string>();
-      for (const customer of [...allStandardCustomers, ...allProgramCustomers]) {
+      for (const customer of [
+        ...allStandardCustomers,
+        ...allProgramCustomers,
+      ]) {
         const date = serializeDateOnly(customer.bookingDate) ?? "";
         const key = customerKey(customer);
         const current = firstBooking.get(key);
         if (!current || date < current) firstBooking.set(key, date);
       }
-      const newCustomers = Array.from(firstBooking.values())
-        .filter((date) => date >= input.from && date <= input.to).length;
+      const newCustomers = Array.from(firstBooking.values()).filter(
+        date => date >= input.from && date <= input.to
+      ).length;
 
-      const npsAnswers = npsRows.filter((response) => response.score !== null);
-      const promoters = npsAnswers.filter((response) => Number(response.score) >= 9).length;
-      const passives = npsAnswers.filter((response) => Number(response.score) >= 7 && Number(response.score) <= 8).length;
-      const detractors = npsAnswers.filter((response) => Number(response.score) <= 6).length;
+      const npsAnswers = npsRows.filter(response => response.score !== null);
+      const promoters = npsAnswers.filter(
+        response => Number(response.score) >= 9
+      ).length;
+      const passives = npsAnswers.filter(
+        response => Number(response.score) >= 7 && Number(response.score) <= 8
+      ).length;
+      const detractors = npsAnswers.filter(
+        response => Number(response.score) <= 6
+      ).length;
       const npsScore = npsAnswers.length
         ? Math.round(((promoters - detractors) / npsAnswers.length) * 100)
         : null;
       const averageNps = npsAnswers.length
-        ? npsAnswers.reduce((sum, response) => sum + Number(response.score), 0) / npsAnswers.length
+        ? npsAnswers.reduce(
+            (sum, response) => sum + Number(response.score),
+            0
+          ) / npsAnswers.length
         : null;
-      const sentNps = npsRows.filter((response) => response.deliveryStatus === "sent").length;
+      const sentNps = npsRows.filter(
+        response => response.deliveryStatus === "sent"
+      ).length;
 
       const totals = {
         totalBookings: allPeriodBookings.length,
         paidBookings: paidSales.length + paidProgramMassages,
         totalRevenue: revenue,
-        grossRevenue: paidSales.reduce((sum, sale) => sum + Number(sale.originalAmount), 0) + programRevenue,
-        totalDiscounted: paidSales.reduce((sum, sale) => sum + Number(sale.discountAmount), 0),
-        salesWithDiscount: paidSales.filter((sale) => Number(sale.discountAmount) > 0).length,
+        grossRevenue:
+          paidSales.reduce(
+            (sum, sale) => sum + Number(sale.originalAmount),
+            0
+          ) + programRevenue,
+        totalDiscounted: paidSales.reduce(
+          (sum, sale) => sum + Number(sale.discountAmount),
+          0
+        ),
+        salesWithDiscount: paidSales.filter(
+          sale => Number(sale.discountAmount) > 0
+        ).length,
         completedBookings,
         confirmedBookings,
         cancelledBookings,
@@ -2757,19 +4308,35 @@ const analyticsRouter = router({
 
       const daily = {
         date: today,
-        reservationsForToday: [...standardToday, ...programToday]
-          .filter((booking) => booking.status !== "cancelled").length,
-        reservationsCreatedToday: standardCreatedToday.length + programCreatedToday.length,
-        paymentsReceivedToday: todayPaymentsRows.reduce((sum, sale) => sum + Number(sale.amount), 0)
-          + programCreatedToday
-            .filter((booking) => booking.status !== "cancelled")
-            .reduce((sum, booking) =>
-              sum + getSkeduMassageUnitPrice(booking.duration) * getSkeduMassageQuantity(booking.modality), 0),
-        massageServicesToday: standardToday.filter((booking) => booking.status !== "cancelled").length,
-        webMassageServicesToday: standardToday.filter(
-          (booking) => booking.status !== "cancelled" && booking.bookingSource === "web",
+        reservationsForToday: [...standardToday, ...programToday].filter(
+          booking => booking.status !== "cancelled"
         ).length,
-        skeduProgramsToday: programToday.filter((booking) => booking.status !== "cancelled").length,
+        reservationsCreatedToday:
+          standardCreatedToday.length + programCreatedToday.length,
+        paymentsReceivedToday:
+          todayPaymentsRows.reduce(
+            (sum, sale) => sum + Number(sale.amount),
+            0
+          ) +
+          programCreatedToday
+            .filter(booking => booking.status !== "cancelled")
+            .reduce(
+              (sum, booking) =>
+                sum +
+                getSkeduMassageUnitPrice(booking.duration) *
+                  getSkeduMassageQuantity(booking.modality),
+              0
+            ),
+        massageServicesToday: standardToday.filter(
+          booking => booking.status !== "cancelled"
+        ).length,
+        webMassageServicesToday: standardToday.filter(
+          booking =>
+            booking.status !== "cancelled" && booking.bookingSource === "web"
+        ).length,
+        skeduProgramsToday: programToday.filter(
+          booking => booking.status !== "cancelled"
+        ).length,
       };
 
       const period = {
@@ -2782,10 +4349,12 @@ const analyticsRouter = router({
         onlineRevenue,
         otherRevenue,
         massageServices: standardPeriod.length,
-        webMassageServices: standardPeriod.filter((booking) => booking.bookingSource === "web").length,
+        webMassageServices: standardPeriod.filter(
+          booking => booking.bookingSource === "web"
+        ).length,
         skeduPrograms: programPeriod.length,
         skeduRevenue: programRevenue,
-        hourly: hourly.filter((row) => row.reservations > 0),
+        hourly: hourly.filter(row => row.reservations > 0),
       };
 
       const nps = {
@@ -2797,33 +4366,75 @@ const analyticsRouter = router({
         promoters,
         passives,
         detractors,
-        recent: npsAnswers.slice(0, 10).map((response) => ({
+        recent: npsAnswers.slice(0, 10).map(response => ({
           ...response,
           serviceDate: serializeDateOnly(response.serviceDate),
         })),
       };
 
-      const standardByTechnique = await db.select({
-        techniqueName: massageSales.techniqueName, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
-      }).from(massageSales)
-        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
-        .groupBy(massageSales.techniqueName).orderBy(desc(sql`COUNT(*)`));
+      const standardByTechnique = await db
+        .select({
+          techniqueName: massageSales.techniqueName,
+          count: sql<number>`COUNT(*)`,
+          revenue: sql<string>`SUM(${massageSales.amount})`,
+        })
+        .from(massageSales)
+        .where(
+          and(
+            gte(massageSales.serviceDate, input.from as any),
+            lte(massageSales.serviceDate, input.to as any),
+            eq(massageSales.status, "paid")
+          )
+        )
+        .groupBy(massageSales.techniqueName)
+        .orderBy(desc(sql`COUNT(*)`));
 
-      const standardByDuration = await db.select({
-        duration: massageSales.duration, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
-      }).from(massageSales)
-        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
-        .groupBy(massageSales.duration).orderBy(asc(massageSales.duration));
+      const standardByDuration = await db
+        .select({
+          duration: massageSales.duration,
+          count: sql<number>`COUNT(*)`,
+          revenue: sql<string>`SUM(${massageSales.amount})`,
+        })
+        .from(massageSales)
+        .where(
+          and(
+            gte(massageSales.serviceDate, input.from as any),
+            lte(massageSales.serviceDate, input.to as any),
+            eq(massageSales.status, "paid")
+          )
+        )
+        .groupBy(massageSales.duration)
+        .orderBy(asc(massageSales.duration));
 
-      const standardByTherapist = await db.select({
-        therapistName: massageTherapists.name, count: sql<number>`COUNT(*)`, revenue: sql<string>`SUM(${massageSales.amount})`,
-      }).from(massageSales)
-        .leftJoin(massageBookings, eq(massageSales.bookingId, massageBookings.id))
-        .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
-        .where(and(gte(massageSales.serviceDate, input.from as any), lte(massageSales.serviceDate, input.to as any), eq(massageSales.status, "paid")))
-        .groupBy(massageTherapists.name).orderBy(desc(sql`COUNT(*)`));
+      const standardByTherapist = await db
+        .select({
+          therapistName: massageTherapists.name,
+          count: sql<number>`COUNT(*)`,
+          revenue: sql<string>`SUM(${massageSales.amount})`,
+        })
+        .from(massageSales)
+        .leftJoin(
+          massageBookings,
+          eq(massageSales.bookingId, massageBookings.id)
+        )
+        .leftJoin(
+          massageTherapists,
+          eq(massageBookings.therapistId, massageTherapists.id)
+        )
+        .where(
+          and(
+            gte(massageSales.serviceDate, input.from as any),
+            lte(massageSales.serviceDate, input.to as any),
+            eq(massageSales.status, "paid")
+          )
+        )
+        .groupBy(massageTherapists.name)
+        .orderBy(desc(sql`COUNT(*)`));
 
-      const techniqueMap = new Map<string, { techniqueName: string; count: number; revenue: number }>();
+      const techniqueMap = new Map<
+        string,
+        { techniqueName: string; count: number; revenue: number }
+      >();
       for (const row of standardByTechnique) {
         techniqueMap.set(row.techniqueName, {
           techniqueName: row.techniqueName,
@@ -2831,17 +4442,29 @@ const analyticsRouter = router({
           revenue: Number(row.revenue),
         });
       }
-      for (const booking of programPeriod.filter((row) => row.status !== "cancelled")) {
+      for (const booking of programPeriod.filter(
+        row => row.status !== "cancelled"
+      )) {
         const techniqueName = `Programa ${getSkeduProgramLabel(booking.program)}`;
-        const current = techniqueMap.get(techniqueName) ?? { techniqueName, count: 0, revenue: 0 };
+        const current = techniqueMap.get(techniqueName) ?? {
+          techniqueName,
+          count: 0,
+          revenue: 0,
+        };
         const quantity = getSkeduMassageQuantity(booking.modality);
         current.count += quantity;
-        current.revenue += getSkeduMassageUnitPrice(booking.duration) * quantity;
+        current.revenue +=
+          getSkeduMassageUnitPrice(booking.duration) * quantity;
         techniqueMap.set(techniqueName, current);
       }
-      const byTechnique = Array.from(techniqueMap.values()).sort((a, b) => b.count - a.count);
+      const byTechnique = Array.from(techniqueMap.values()).sort(
+        (a, b) => b.count - a.count
+      );
 
-      const durationMap = new Map<number, { duration: number; count: number; revenue: number }>();
+      const durationMap = new Map<
+        number,
+        { duration: number; count: number; revenue: number }
+      >();
       for (const row of standardByDuration) {
         durationMap.set(row.duration, {
           duration: row.duration,
@@ -2849,17 +4472,34 @@ const analyticsRouter = router({
           revenue: Number(row.revenue),
         });
       }
-      for (const booking of programPeriod.filter((row) => row.status !== "cancelled")) {
-        const current = durationMap.get(booking.duration) ?? { duration: booking.duration, count: 0, revenue: 0 };
+      for (const booking of programPeriod.filter(
+        row => row.status !== "cancelled"
+      )) {
+        const current = durationMap.get(booking.duration) ?? {
+          duration: booking.duration,
+          count: 0,
+          revenue: 0,
+        };
         const quantity = getSkeduMassageQuantity(booking.modality);
         current.count += quantity;
-        current.revenue += getSkeduMassageUnitPrice(booking.duration) * quantity;
+        current.revenue +=
+          getSkeduMassageUnitPrice(booking.duration) * quantity;
         durationMap.set(booking.duration, current);
       }
-      const byDuration = Array.from(durationMap.values()).sort((a, b) => a.duration - b.duration);
+      const byDuration = Array.from(durationMap.values()).sort(
+        (a, b) => a.duration - b.duration
+      );
 
-      const therapistNameById = new Map(therapistRows.map((therapist) => [therapist.id, therapist.name ?? "Sin asignar"]));
-      const therapistMap = new Map<string, { therapistName: string; count: number; revenue: number }>();
+      const therapistNameById = new Map(
+        therapistRows.map(therapist => [
+          therapist.id,
+          therapist.name ?? "Sin asignar",
+        ])
+      );
+      const therapistMap = new Map<
+        string,
+        { therapistName: string; count: number; revenue: number }
+      >();
       for (const row of standardByTherapist) {
         const therapistName = row.therapistName ?? "Sin asignar";
         therapistMap.set(therapistName, {
@@ -2868,37 +4508,64 @@ const analyticsRouter = router({
           revenue: Number(row.revenue),
         });
       }
-      for (const booking of programPeriod.filter((row) => row.status !== "cancelled")) {
+      for (const booking of programPeriod.filter(
+        row => row.status !== "cancelled"
+      )) {
         const therapistIds = [
           booking.therapistId,
-          ...(booking.modality === "double" && booking.secondTherapistId ? [booking.secondTherapistId] : []),
+          ...(booking.modality === "double" && booking.secondTherapistId
+            ? [booking.secondTherapistId]
+            : []),
         ];
         for (const therapistId of therapistIds) {
           const therapistName = therapistId
-            ? therapistNameById.get(therapistId) ?? "Sin asignar"
+            ? (therapistNameById.get(therapistId) ?? "Sin asignar")
             : "Sin asignar";
-          const current = therapistMap.get(therapistName) ?? { therapistName, count: 0, revenue: 0 };
+          const current = therapistMap.get(therapistName) ?? {
+            therapistName,
+            count: 0,
+            revenue: 0,
+          };
           current.count += 1;
           current.revenue += getSkeduMassageUnitPrice(booking.duration);
           therapistMap.set(therapistName, current);
         }
       }
-      const byTherapist = Array.from(therapistMap.values()).sort((a, b) => b.count - a.count);
+      const byTherapist = Array.from(therapistMap.values()).sort(
+        (a, b) => b.count - a.count
+      );
 
-      return { totals, daily, period, nps, byTechnique, byDuration, byTherapist };
+      return {
+        totals,
+        daily,
+        period,
+        nps,
+        byTechnique,
+        byDuration,
+        byTherapist,
+      };
     }),
 
   history: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       from: z.string(),
       to: z.string(),
       page: z.number().int().min(1).default(1),
       pageSize: z.literal(25).default(25),
-    }))
+      })
+    )
     .query(async ({ ctx, input }) => {
       await massageSalesAccess(ctx.user);
       const db = await getDb();
-      if (!db) return { records: [], total: 0, page: input.page, pageSize: 25, totalPages: 0 };
+      if (!db)
+        return {
+          records: [],
+          total: 0,
+          page: input.page,
+          pageSize: 25,
+          totalPages: 0,
+        };
       const allRecords = await getCombinedMassageSalesRows(db, {
         from: input.from,
         to: input.to,
@@ -2907,7 +4574,13 @@ const analyticsRouter = router({
       });
       const total = allRecords.length;
       const records = allRecords.slice((input.page - 1) * 25, input.page * 25);
-      return { records, total, page: input.page, pageSize: 25, totalPages: Math.ceil(total / 25) };
+      return {
+        records,
+        total,
+        page: input.page,
+        pageSize: 25,
+        totalPages: Math.ceil(total / 25),
+      };
     }),
 
   exportHistory: protectedProcedure
@@ -2916,7 +4589,11 @@ const analyticsRouter = router({
       await massageSalesAccess(ctx.user);
       const db = await getDb();
       if (!db) return [];
-      return getCombinedMassageSalesRows(db, { ...input, limit: 100_000, offset: 0 });
+      return getCombinedMassageSalesRows(db, {
+        ...input,
+        limit: 100_000,
+        offset: 0,
+      });
     }),
 });
 
@@ -2928,33 +4605,61 @@ const rrhhRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(massageTherapistEvaluations)
+      return db
+        .select()
+        .from(massageTherapistEvaluations)
         .where(eq(massageTherapistEvaluations.therapistId, input.therapistId))
         .orderBy(desc(massageTherapistEvaluations.period));
     }),
 
   upsertEvaluation: protectedProcedure
-    .input(z.object({
-      therapistId: z.number(), period: z.string().regex(/^\d{4}-\d{2}$/),
-      puntualidad: z.number().min(0).max(10), tecnica: z.number().min(0).max(10),
-      satisfaccionCliente: z.number().min(0).max(10), presentacionHigiene: z.number().min(0).max(10),
-      comunicacion: z.number().min(0).max(10), usoInsumos: z.number().min(0).max(10), comentarios: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        therapistId: z.number(),
+        period: z.string().regex(/^\d{4}-\d{2}$/),
+        puntualidad: z.number().min(0).max(10),
+        tecnica: z.number().min(0).max(10),
+        satisfaccionCliente: z.number().min(0).max(10),
+        presentacionHigiene: z.number().min(0).max(10),
+        comunicacion: z.number().min(0).max(10),
+        usoInsumos: z.number().min(0).max(10),
+        comentarios: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { therapistId, period, comentarios, ...scores } = input;
-      const existing = await db.select({ id: massageTherapistEvaluations.id }).from(massageTherapistEvaluations)
-        .where(and(eq(massageTherapistEvaluations.therapistId, therapistId), eq(massageTherapistEvaluations.period, period))).limit(1);
+      const existing = await db
+        .select({ id: massageTherapistEvaluations.id })
+        .from(massageTherapistEvaluations)
+        .where(
+          and(
+            eq(massageTherapistEvaluations.therapistId, therapistId),
+            eq(massageTherapistEvaluations.period, period)
+          )
+        )
+        .limit(1);
       if (existing.length > 0) {
-        await db.update(massageTherapistEvaluations)
-          .set({ ...scores, satisfaccionCliente: scores.satisfaccionCliente, presentacionHigiene: scores.presentacionHigiene, comentarios: comentarios || null })
+        await db
+          .update(massageTherapistEvaluations)
+          .set({
+            ...scores,
+            satisfaccionCliente: scores.satisfaccionCliente,
+            presentacionHigiene: scores.presentacionHigiene,
+            comentarios: comentarios || null,
+          })
           .where(eq(massageTherapistEvaluations.id, existing[0].id));
       } else {
         await db.insert(massageTherapistEvaluations).values({
-          therapistId, period, evaluatedBy: ctx.user.id ?? 0,
-          ...scores, satisfaccionCliente: scores.satisfaccionCliente, presentacionHigiene: scores.presentacionHigiene, comentarios: comentarios || null,
+          therapistId,
+          period,
+          evaluatedBy: ctx.user.id ?? 0,
+          ...scores,
+          satisfaccionCliente: scores.satisfaccionCliente,
+          presentacionHigiene: scores.presentacionHigiene,
+          comentarios: comentarios || null,
         });
       }
       return { success: true };
@@ -2966,7 +4671,9 @@ const rrhhRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.delete(massageTherapistEvaluations).where(eq(massageTherapistEvaluations.id, input.id));
+      await db
+        .delete(massageTherapistEvaluations)
+        .where(eq(massageTherapistEvaluations.id, input.id));
       return { success: true };
     }),
 
@@ -2976,23 +4683,34 @@ const rrhhRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(massageTherapistDocuments)
+      return db
+        .select()
+        .from(massageTherapistDocuments)
         .where(eq(massageTherapistDocuments.therapistId, input.therapistId))
         .orderBy(desc(massageTherapistDocuments.createdAt));
     }),
 
   addDocument: protectedProcedure
-    .input(z.object({
-      therapistId: z.number(), tipo: z.enum(["certificado", "boleta", "contrato", "otro"]),
-      nombre: z.string().min(2), descripcion: z.string().optional(), archivoUrl: z.string().optional(), periodo: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        therapistId: z.number(),
+        tipo: z.enum(["certificado", "boleta", "contrato", "otro"]),
+        nombre: z.string().min(2),
+        descripcion: z.string().optional(),
+        archivoUrl: z.string().optional(),
+        periodo: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.insert(massageTherapistDocuments).values({
-        ...input, descripcion: input.descripcion || null, archivoUrl: input.archivoUrl || null,
-        periodo: input.periodo || null, uploadedBy: ctx.user.id ?? 0,
+        ...input,
+        descripcion: input.descripcion || null,
+        archivoUrl: input.archivoUrl || null,
+        periodo: input.periodo || null,
+        uploadedBy: ctx.user.id ?? 0,
       });
       return { success: true };
     }),
@@ -3003,20 +4721,27 @@ const rrhhRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.delete(massageTherapistDocuments).where(eq(massageTherapistDocuments.id, input.id));
+      await db
+        .delete(massageTherapistDocuments)
+        .where(eq(massageTherapistDocuments.id, input.id));
       return { success: true };
     }),
 });
 
 // ─── CONFIGURACIÓN ────────────────────────────────────────────
-const DEFAULT_DISCLAIMER = "Cancagua no se responsabiliza por lesiones preexistentes ni por reacciones alérgicas a los productos utilizados durante el servicio. El cliente declara estar en condiciones físicas adecuadas para recibir el tratamiento. En caso de condiciones médicas especiales (embarazo, lesiones, enfermedades crónicas), se recomienda consultar con un médico antes de agendar.";
+const DEFAULT_DISCLAIMER =
+  "Cancagua no se responsabiliza por lesiones preexistentes ni por reacciones alérgicas a los productos utilizados durante el servicio. El cliente declara estar en condiciones físicas adecuadas para recibir el tratamiento. En caso de condiciones médicas especiales (embarazo, lesiones, enfermedades crónicas), se recomienda consultar con un médico antes de agendar.";
 
 const configRouter = router({
   getDisclaimer: publicProcedure.query(async () => {
     const db = await getDb();
     if (!db) return DEFAULT_DISCLAIMER;
     try {
-      const [row] = await db.select().from(massageSettings).where(eq(massageSettings.key, "disclaimer")).limit(1);
+      const [row] = await db
+        .select()
+        .from(massageSettings)
+        .where(eq(massageSettings.key, "disclaimer"))
+        .limit(1);
       return row?.value ?? DEFAULT_DISCLAIMER;
     } catch {
       return DEFAULT_DISCLAIMER;
@@ -3031,7 +4756,8 @@ const configRouter = router({
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.insert(massageSettings)
+      await db
+        .insert(massageSettings)
         .values({ key: "disclaimer", value: input.value })
         .onDuplicateKeyUpdate({ set: { value: input.value } });
       return { success: true };
@@ -3039,7 +4765,8 @@ const configRouter = router({
 });
 
 // ─── PÚBLICO (sin autenticación) ──────────────────────────────
-const parseTimeMin = (t: string) => parseInt(t.split(":")[0]) * 60 + parseInt(t.split(":")[1]);
+const parseTimeMin = (t: string) =>
+  parseInt(t.split(":")[0]) * 60 + parseInt(t.split(":")[1]);
 
 const formatTimeMin = (total: number): string =>
   `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
@@ -3080,8 +4807,12 @@ const getChileTimeMinutes = (now: Date): number => {
   return hour * 60 + minute;
 };
 
-const overlaps = (startA: number, endA: number, startB: number, endB: number): boolean =>
-  startA < endB && endA > startB;
+const overlaps = (
+  startA: number,
+  endA: number,
+  startB: number,
+  endB: number
+): boolean => startA < endB && endA > startB;
 
 export function selectAutomaticMassageAssignment(params: {
   therapists: AutomaticMassageTherapist[];
@@ -3093,13 +4824,21 @@ export function selectAutomaticMassageAssignment(params: {
   bookingDate?: string;
   now?: Date;
   groupKey?: string;
-}): { therapist: AutomaticMassageTherapist; room: AutomaticMassageRoom; endTime: string } | null {
+}): {
+  therapist: AutomaticMassageTherapist;
+  room: AutomaticMassageRoom;
+  endTime: string;
+} | null {
   const prep = params.prepMinutes ?? 10;
   const requestedStart = parseTimeMin(params.startTime);
   const requestedEnd = requestedStart + params.duration;
   if (
-    params.bookingDate
-    && !hasPublicMassageMinimumLeadTime(params.bookingDate, params.startTime, params.now)
+    params.bookingDate &&
+    !hasPublicMassageMinimumLeadTime(
+      params.bookingDate,
+      params.startTime,
+      params.now
+    )
   ) {
     return null;
   }
@@ -3111,7 +4850,8 @@ export function selectAutomaticMassageAssignment(params: {
     if (a.type === "inhouse" && b.type === "inhouse") {
       const inhousePriorityA = INHOUSE_ASSIGNMENT_PRIORITY.get(a.id) ?? 99;
       const inhousePriorityB = INHOUSE_ASSIGNMENT_PRIORITY.get(b.id) ?? 99;
-      if (inhousePriorityA !== inhousePriorityB) return inhousePriorityA - inhousePriorityB;
+      if (inhousePriorityA !== inhousePriorityB)
+        return inhousePriorityA - inhousePriorityB;
     }
     const priorityA = a.callPriority ?? 99;
     const priorityB = b.callPriority ?? 99;
@@ -3124,37 +4864,39 @@ export function selectAutomaticMassageAssignment(params: {
     const scheduleEnd = parseTimeMin(therapist.scheduleEnd);
     if (requestedStart < scheduleStart || requestedEnd > scheduleEnd) continue;
 
-    const therapistBusy = params.bookings.some((booking) => {
+    const therapistBusy = params.bookings.some(booking => {
       if (booking.therapistId !== therapist.id) return false;
       return overlaps(
         requestedStart,
         requestedEnd,
         parseTimeMin(booking.startTime),
-        parseTimeMin(booking.endTime) + prep,
+        parseTimeMin(booking.endTime) + prep
       );
     });
     if (therapistBusy) continue;
 
     const requestedEndTime = formatTimeMin(requestedEnd);
-    const room = params.rooms.find((candidateRoom) => {
-      const overlappingBookings = params.bookings.filter((booking) => {
+    const room = params.rooms.find(candidateRoom => {
+      const overlappingBookings = params.bookings.filter(booking => {
         if (booking.roomId !== candidateRoom.id) return false;
         return overlaps(
           requestedStart,
           requestedEnd,
           parseTimeMin(booking.startTime),
-          parseTimeMin(booking.endTime) + prep,
+          parseTimeMin(booking.endTime) + prep
         );
       });
       if (overlappingBookings.length === 0) return true;
 
-      const canShareWithSameCart = Boolean(params.groupKey)
-        && candidateRoom.allowCoupleBooking === 1
-        && (candidateRoom.capacity ?? 1) > overlappingBookings.length
-        && overlappingBookings.every((booking) =>
-          booking.groupKey === params.groupKey
-          && booking.startTime === params.startTime
-          && booking.endTime === requestedEndTime
+      const canShareWithSameCart =
+        Boolean(params.groupKey) &&
+        candidateRoom.allowCoupleBooking === 1 &&
+        (candidateRoom.capacity ?? 1) > overlappingBookings.length &&
+        overlappingBookings.every(
+          booking =>
+            booking.groupKey === params.groupKey &&
+            booking.startTime === params.startTime &&
+            booking.endTime === requestedEndTime
         );
       return canShareWithSameCart;
     });
@@ -3178,12 +4920,20 @@ export function listAutomaticMassageSlots(params: {
 }): Array<{ time: string }> {
   if (params.therapists.length === 0 || params.rooms.length === 0) return [];
 
-  const schedStart = Math.min(...params.therapists.map((therapist) => parseTimeMin(therapist.scheduleStart)));
-  const schedEnd = Math.max(...params.therapists.map((therapist) => parseTimeMin(therapist.scheduleEnd)));
+  const schedStart = Math.min(
+    ...params.therapists.map(therapist => parseTimeMin(therapist.scheduleStart))
+  );
+  const schedEnd = Math.max(
+    ...params.therapists.map(therapist => parseTimeMin(therapist.scheduleEnd))
+  );
   const slots: Array<{ time: string }> = [];
   const previewGroupKey = "public-cart-preview";
 
-  for (let minute = schedStart; minute + params.duration <= schedEnd; minute += 30) {
+  for (
+    let minute = schedStart;
+    minute + params.duration <= schedEnd;
+    minute += 30
+  ) {
     const time = formatTimeMin(minute);
     const candidateBookings = [...params.bookings];
     let groupIsAvailable = true;
@@ -3246,7 +4996,15 @@ export function buildInhouseMonthRotation(input: {
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
     const week1 = new Date(date.getFullYear(), 0, 4);
-    return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+    return (
+      1 +
+      Math.round(
+        ((date.getTime() - week1.getTime()) / 86400000 -
+          3 +
+          ((week1.getDay() + 6) % 7)) /
+          7
+      )
+    );
   };
   const firstWeekNumber = getISOWeekNumber(new Date(year, month - 1, 1));
   const entries: InhouseRotationEntry[] = [];
@@ -3257,12 +5015,18 @@ export function buildInhouseMonthRotation(input: {
     if (dayOfWeek === 0 || dayOfWeek === 1) continue;
 
     const weeksOffset = getISOWeekNumber(date) - firstWeekNumber;
-    const barbaraShift = weeksOffset % 2 === 0
+    const barbaraShift =
+      weeksOffset % 2 === 0
       ? input.barbaraFirstWeekShift
-      : input.barbaraFirstWeekShift === "am" ? "pm" : "am";
+        : input.barbaraFirstWeekShift === "am"
+          ? "pm"
+          : "am";
     const danielaShift = barbaraShift === "am" ? "pm" : "am";
     const dateString = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    const makeEntry = (therapistId: number, shift: "am" | "pm"): InhouseRotationEntry => ({
+    const makeEntry = (
+      therapistId: number,
+      shift: "am" | "pm"
+    ): InhouseRotationEntry => ({
       therapistId,
       date: dateString,
       isAvailable: 1,
@@ -3277,7 +5041,10 @@ export function buildInhouseMonthRotation(input: {
 
     // Martes a viernes trabajan ambas. Los sábados Daniela se suma semana
     // por medio; cuando coinciden, Bárbara queda AM y Daniela PM.
-    if ((dayOfWeek >= 2 && dayOfWeek <= 5) || (dayOfWeek === 6 && barbaraShift === "am")) {
+    if (
+      (dayOfWeek >= 2 && dayOfWeek <= 5) ||
+      (dayOfWeek === 6 && barbaraShift === "am")
+    ) {
       entries.push(makeEntry(input.danielaId, danielaShift));
     }
   }
@@ -3302,8 +5069,12 @@ type PublicMassageBookingNotificationInput = {
 
 type PublicMassageBookingNotifications = {
   clientEmail?: Parameters<typeof sendMassageBookingReceivedEmail>[0];
-  internalEmail: Parameters<typeof sendMassageInternalBookingNotificationEmail>[0];
-  therapistEmail?: Parameters<typeof sendMassageTherapistBookingRequestEmail>[0];
+  internalEmail: Parameters<
+    typeof sendMassageInternalBookingNotificationEmail
+  >[0];
+  therapistEmail?: Parameters<
+    typeof sendMassageTherapistBookingRequestEmail
+  >[0];
   clientWhatsApp?: { phone: string; message: string };
 };
 
@@ -3316,7 +5087,7 @@ const formatMassageBookingHumanDate = (bookingDate: string): string =>
   }).format(new Date(`${bookingDate}T12:00:00`));
 
 export function buildPublicMassageBookingNotifications(
-  params: PublicMassageBookingNotificationInput,
+  params: PublicMassageBookingNotificationInput
 ): PublicMassageBookingNotifications {
   const contactEmail = params.contactEmail.trim() || "contacto@cancagua.cl";
   const clientEmail = params.clientEmail?.trim() || null;
@@ -3372,12 +5143,14 @@ export function buildPublicMassageBookingNotifications(
 
 async function runPublicMassageNotification(
   label: string,
-  run: () => Promise<{ success: boolean; error?: string }>,
+  run: () => Promise<{ success: boolean; error?: string }>
 ): Promise<void> {
   try {
     const result = await run();
     if (!result.success) {
-      console.error(`[Notification] ${label} failed: ${result.error ?? "unknown error"}`);
+      console.error(
+        `[Notification] ${label} failed: ${result.error ?? "unknown error"}`
+      );
     }
   } catch (error) {
     console.error(`[Notification] ${label} error:`, error);
@@ -3385,7 +5158,7 @@ async function runPublicMassageNotification(
 }
 
 async function sendPublicMassageBookingNotifications(
-  notifications: PublicMassageBookingNotifications,
+  notifications: PublicMassageBookingNotifications
 ): Promise<void> {
   const tasks: Promise<void>[] = [
     notifications.clientEmail
@@ -3403,7 +5176,10 @@ async function sendPublicMassageBookingNotifications(
       : undefined,
     notifications.clientWhatsApp
       ? runPublicMassageNotification("massage client WhatsApp", () =>
-          sendWhatsApp(notifications.clientWhatsApp!.phone, notifications.clientWhatsApp!.message)
+          sendWhatsApp(
+            notifications.clientWhatsApp!.phone,
+            notifications.clientWhatsApp!.message
+          )
         )
       : undefined,
   ].filter((task): task is Promise<void> => Boolean(task));
@@ -3417,16 +5193,22 @@ const masajesPublicRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [survey] = await db.select({
+      const [survey] = await db
+        .select({
         clientName: massageNpsResponses.clientName,
         serviceName: massageNpsResponses.serviceName,
         serviceDate: massageNpsResponses.serviceDate,
         score: massageNpsResponses.score,
         respondedAt: massageNpsResponses.respondedAt,
-      }).from(massageNpsResponses)
+        })
+        .from(massageNpsResponses)
         .where(eq(massageNpsResponses.surveyToken, input.token))
         .limit(1);
-      if (!survey) throw new TRPCError({ code: "NOT_FOUND", message: "Esta encuesta no existe o ya no está disponible." });
+      if (!survey)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Esta encuesta no existe o ya no está disponible.",
+        });
       return {
         ...survey,
         serviceDate: serializeDateOnly(survey.serviceDate),
@@ -3435,32 +5217,48 @@ const masajesPublicRouter = router({
     }),
 
   submitNps: publicProcedure
-    .input(z.object({
+    .input(
+      z.object({
       token: z.string().regex(/^[a-f0-9]{48}$/),
       score: z.number().int().min(0).max(10),
       comment: z.string().trim().max(1500).optional(),
-    }))
+      })
+    )
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [survey] = await db.select({
+      const [survey] = await db
+        .select({
         id: massageNpsResponses.id,
         respondedAt: massageNpsResponses.respondedAt,
-      }).from(massageNpsResponses)
+        })
+        .from(massageNpsResponses)
         .where(eq(massageNpsResponses.surveyToken, input.token))
         .limit(1);
-      if (!survey) throw new TRPCError({ code: "NOT_FOUND", message: "Esta encuesta no existe o ya no está disponible." });
+      if (!survey)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Esta encuesta no existe o ya no está disponible.",
+        });
       if (survey.respondedAt) {
-        throw new TRPCError({ code: "CONFLICT", message: "Esta encuesta ya fue respondida. ¡Muchas gracias!" });
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Esta encuesta ya fue respondida. ¡Muchas gracias!",
+        });
       }
-      await db.update(massageNpsResponses).set({
+      await db
+        .update(massageNpsResponses)
+        .set({
         score: input.score,
         comment: input.comment || null,
         respondedAt: new Date(),
-      }).where(and(
+        })
+        .where(
+          and(
         eq(massageNpsResponses.id, survey.id),
-        sql`${massageNpsResponses.respondedAt} IS NULL`,
-      ));
+            sql`${massageNpsResponses.respondedAt} IS NULL`
+          )
+        );
       return { success: true };
     }),
 
@@ -3480,54 +5278,122 @@ const masajesPublicRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return null;
-      const [t] = await db.select().from(massageTechniques)
-        .where(and(eq(massageTechniques.id, input.id), eq(massageTechniques.active, 1))).limit(1);
+      const [t] = await db
+        .select()
+        .from(massageTechniques)
+        .where(
+          and(
+            eq(massageTechniques.id, input.id),
+            eq(massageTechniques.active, 1)
+          )
+        )
+        .limit(1);
       return t ?? null;
     }),
 
   validateDiscount: publicProcedure
-    .input(z.object({
+    .input(
+      z
+        .object({
       code: z.string().max(50),
-      items: z.array(z.object({
+          items: z
+            .array(
+              z.object({
         techniqueId: z.number().int().positive(),
         duration: z.number().int().positive(),
         quantity: z.number().int().min(1).max(4).default(1),
-      })).max(40),
+              })
+            )
+            .max(40),
       classPlanId: z.number().int().positive().optional(),
-    }).superRefine((value, ctx) => {
+        })
+        .superRefine((value, ctx) => {
       if (value.items.length === 0 && !value.classPlanId) {
-        ctx.addIssue({ code: "custom", message: "Agrega al menos un producto." });
+            ctx.addIssue({
+              code: "custom",
+              message: "Agrega al menos un producto.",
+            });
       }
-    }))
+        })
+    )
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const lines: WellnessDiscountLine[] = [];
       for (const item of input.items) {
-        const [technique] = await db.select().from(massageTechniques)
-          .where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1))).limit(1);
-        if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes ya no está disponible." });
-        const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
+        const [technique] = await db
+          .select()
+          .from(massageTechniques)
+          .where(
+            and(
+              eq(massageTechniques.id, item.techniqueId),
+              eq(massageTechniques.active, 1)
+            )
+          )
+          .limit(1);
+        if (!technique)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Uno de los masajes ya no está disponible.",
+          });
+        const durations = (technique.durations ?? "")
+          .split(",")
+          .map(Number)
+          .filter(Boolean)
+          .sort((a, b) => a - b);
         const index = durations.indexOf(item.duration);
-        const configuredPrices = [technique.price50min, technique.price80min, technique.price110min];
-        const price = index >= 0 && configuredPrices[index] ? Number(configuredPrices[index]) : 0;
-        if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}.` });
+        const configuredPrices = [
+          technique.price50min,
+          technique.price80min,
+          technique.price110min,
+        ];
+        const price =
+          index >= 0 && configuredPrices[index]
+            ? Number(configuredPrices[index])
+            : 0;
+        if (!price)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Precio no configurado para ${technique.name}.`,
+          });
         for (let quantity = 0; quantity < item.quantity; quantity += 1) {
-          lines.push({ service: "masajes", serviceId: item.techniqueId, techniqueId: item.techniqueId, originalAmount: price });
+          lines.push({
+            service: "masajes",
+            serviceId: item.techniqueId,
+            techniqueId: item.techniqueId,
+            originalAmount: price,
+          });
         }
       }
       if (input.classPlanId) {
-        const [plan] = await db.select().from(regularClassPlans)
-          .where(and(eq(regularClassPlans.id, input.classPlanId), eq(regularClassPlans.active, 1))).limit(1);
-        if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "El plan de clases ya no está disponible." });
-        lines.push({ service: "clases", serviceId: plan.id, originalAmount: plan.priceClp });
+        const [plan] = await db
+          .select()
+          .from(regularClassPlans)
+          .where(
+            and(
+              eq(regularClassPlans.id, input.classPlanId),
+              eq(regularClassPlans.active, 1)
+            )
+          )
+          .limit(1);
+        if (!plan)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "El plan de clases ya no está disponible.",
+          });
+        lines.push({
+          service: "clases",
+          serviceId: plan.id,
+          originalAmount: plan.priceClp,
+        });
       }
       try {
         return await calculateWellnessCartDiscount(db, input.code, lines);
       } catch (error) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: error instanceof Error ? error.message : "El código no es válido.",
+          message:
+            error instanceof Error ? error.message : "El código no es válido.",
         });
       }
     }),
@@ -3537,37 +5403,57 @@ const masajesPublicRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
-      return db.select({
-        id: massageTherapists.id, name: massageTherapists.name,
-        type: massageTherapists.type, contractType: massageTherapists.contractType,
+      return (
+        db
+          .select({
+            id: massageTherapists.id,
+            name: massageTherapists.name,
+            type: massageTherapists.type,
+            contractType: massageTherapists.contractType,
       })
       .from(massageTherapistTechniques)
-      .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-      .where(and(eq(massageTherapistTechniques.techniqueId, input.techniqueId), eq(massageTherapists.active, 1)))
+          .innerJoin(
+            massageTherapists,
+            eq(massageTherapistTechniques.therapistId, massageTherapists.id)
+          )
+          .where(
+            and(
+              eq(massageTherapistTechniques.techniqueId, input.techniqueId),
+              eq(massageTherapists.active, 1)
+            )
+          )
       // Inhouse primero, luego freelance; dentro de cada grupo, por prioridad de llamado
       .orderBy(
         sql`CASE WHEN ${massageTherapists.type} = 'inhouse' THEN 0 ELSE 1 END`,
         asc(massageTherapists.callPriority),
         asc(massageTherapists.name)
+          )
       );
     }),
 
   getAvailableDates: publicProcedure
-    .input(z.object({
+    .input(
+      z.object({
       from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       duration: z.number().positive(),
       techniqueId: z.number(),
       quantity: z.number().int().min(1).max(4).default(1),
-    }))
+      })
+    )
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       const rangeDays = Math.round(
-        (Date.parse(`${input.to}T00:00:00Z`) - Date.parse(`${input.from}T00:00:00Z`)) / 86_400_000,
+        (Date.parse(`${input.to}T00:00:00Z`) -
+          Date.parse(`${input.from}T00:00:00Z`)) /
+          86_400_000
       );
       if (!Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > 62) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "El rango del calendario no es válido." });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "El rango del calendario no es válido.",
+        });
       }
 
       const today = getChileDateString();
@@ -3578,7 +5464,8 @@ const masajesPublicRouter = router({
         });
       }
 
-      const availabilityRows = await db.select({
+      const availabilityRows = await db
+        .select({
         date: massageTherapistAvailability.date,
         id: massageTherapists.id,
         name: massageTherapists.name,
@@ -3588,50 +5475,76 @@ const masajesPublicRouter = router({
         scheduleEnd: massageTherapistAvailability.endTime,
       })
         .from(massageTherapistTechniques)
-        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
-        .where(and(
+        .innerJoin(
+          massageTherapists,
+          eq(massageTherapistTechniques.therapistId, massageTherapists.id)
+        )
+        .innerJoin(
+          massageTherapistAvailability,
+          eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+        )
+        .where(
+          and(
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
           eq(massageTherapistAvailability.isAvailable, 1),
           gte(massageTherapistAvailability.date, input.from as any),
-          lte(massageTherapistAvailability.date, input.to as any),
-        ));
+            lte(massageTherapistAvailability.date, input.to as any)
+          )
+        );
 
-      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      const rooms = await db
+        .select()
+        .from(massageRooms)
+        .where(eq(massageRooms.active, 1));
       if (availabilityRows.length === 0 || rooms.length === 0) return [];
 
-      const standardBookings = await db.select({
+      const standardBookings = await db
+        .select({
         bookingDate: massageBookings.bookingDate,
         therapistId: massageBookings.therapistId,
         roomId: massageBookings.roomId,
         startTime: massageBookings.startTime,
         endTime: massageBookings.endTime,
         coupleBookingId: massageBookings.coupleBookingId,
-      }).from(massageBookings).where(and(
+        })
+        .from(massageBookings)
+        .where(
+          and(
         gte(massageBookings.bookingDate, input.from as any),
         lte(massageBookings.bookingDate, input.to as any),
-        sql`${massageBookings.status} NOT IN ('cancelled')`,
-      ));
+            sql`${massageBookings.status} NOT IN ('cancelled')`
+          )
+        );
 
-      const programBookings = await db.select({
+      const programBookings = await db
+        .select({
         bookingDate: massageProgramBookings.bookingDate,
         therapistId: massageProgramBookings.therapistId,
         secondTherapistId: massageProgramBookings.secondTherapistId,
         roomId: massageProgramBookings.roomId,
         startTime: massageProgramBookings.startTime,
         endTime: massageProgramBookings.endTime,
-      }).from(massageProgramBookings).where(and(
+        })
+        .from(massageProgramBookings)
+        .where(
+          and(
         gte(massageProgramBookings.bookingDate, input.from as any),
         lte(massageProgramBookings.bookingDate, input.to as any),
-        sql`${massageProgramBookings.status} NOT IN ('cancelled')`,
-      ));
+            sql`${massageProgramBookings.status} NOT IN ('cancelled')`
+          )
+        );
 
-      const therapistsByDate = new Map<string, Map<number, AutomaticMassageTherapist>>();
+      const therapistsByDate = new Map<
+        string,
+        Map<number, AutomaticMassageTherapist>
+      >();
       for (const row of availabilityRows) {
         const bookingDate = serializeDateOnly(row.date);
         if (!bookingDate || !row.scheduleStart || !row.scheduleEnd) continue;
-        const therapists = therapistsByDate.get(bookingDate) ?? new Map<number, AutomaticMassageTherapist>();
+        const therapists =
+          therapistsByDate.get(bookingDate) ??
+          new Map<number, AutomaticMassageTherapist>();
         therapists.set(row.id, {
           id: row.id,
           name: row.name,
@@ -3644,7 +5557,10 @@ const masajesPublicRouter = router({
       }
 
       const bookingsByDate = new Map<string, AutomaticMassageBooking[]>();
-      const appendBooking = (bookingDate: string, booking: AutomaticMassageBooking) => {
+      const appendBooking = (
+        bookingDate: string,
+        booking: AutomaticMassageBooking
+      ) => {
         const bookings = bookingsByDate.get(bookingDate) ?? [];
         bookings.push(booking);
         bookingsByDate.set(bookingDate, bookings);
@@ -3657,28 +5573,34 @@ const masajesPublicRouter = router({
           roomId: row.roomId,
           startTime: row.startTime,
           endTime: row.endTime,
-          groupKey: row.coupleBookingId ? `booking-group:${row.coupleBookingId}` : null,
+          groupKey: row.coupleBookingId
+            ? `booking-group:${row.coupleBookingId}`
+            : null,
         });
       }
       for (const row of programBookings) {
         const bookingDate = serializeDateOnly(row.bookingDate);
         if (!bookingDate) continue;
-        const blocks = expandSkeduProgramResourceBlocks([{
+        const blocks = expandSkeduProgramResourceBlocks([
+          {
           therapistId: row.therapistId,
           secondTherapistId: row.secondTherapistId,
           roomId: row.roomId,
           startTime: row.startTime,
           endTime: row.endTime,
-        }]);
-        for (const block of blocks) appendBooking(bookingDate, { ...block, groupKey: null });
+          },
+        ]);
+        for (const block of blocks)
+          appendBooking(bookingDate, { ...block, groupKey: null });
       }
 
       const todayChile = getChileDateString();
       return Array.from(therapistsByDate.entries())
         .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
-        .filter(([bookingDate, therapists]) =>
-          bookingDate >= todayChile
-          && listAutomaticMassageSlots({
+        .filter(
+          ([bookingDate, therapists]) =>
+            bookingDate >= todayChile &&
+            listAutomaticMassageSlots({
             therapists: Array.from(therapists.values()),
             bookings: bookingsByDate.get(bookingDate) ?? [],
             rooms,
@@ -3691,18 +5613,21 @@ const masajesPublicRouter = router({
     }),
 
   getSlots: publicProcedure
-    .input(z.object({
+    .input(
+      z.object({
       date: z.string(),
       duration: z.number().positive(),
       techniqueId: z.number(),
       quantity: z.number().int().min(1).max(4).default(1),
-    }))
+      })
+    )
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
 
       // Solo terapeutas con disponibilidad explícita para este día.
-      let therapists = await db.select({
+      let therapists = (await db
+        .select({
         id: massageTherapists.id,
         name: massageTherapists.name,
         type: massageTherapists.type,
@@ -3711,22 +5636,49 @@ const masajesPublicRouter = router({
         scheduleEnd: massageTherapistAvailability.endTime,
       })
         .from(massageTherapistTechniques)
-        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
-        .where(and(
+        .innerJoin(
+          massageTherapists,
+          eq(massageTherapistTechniques.therapistId, massageTherapists.id)
+        )
+        .innerJoin(
+          massageTherapistAvailability,
+          eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+        )
+        .where(
+          and(
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
           eq(massageTherapistAvailability.date, input.date as any),
-          eq(massageTherapistAvailability.isAvailable, 1),
-        )) as Array<{ id: number; name: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string | null; scheduleEnd: string | null }>;
+            eq(massageTherapistAvailability.isAvailable, 1)
+          )
+        )) as Array<{
+        id: number;
+        name: string | null;
+        type: "inhouse" | "freelance";
+        callPriority: number | null;
+        scheduleStart: string | null;
+        scheduleEnd: string | null;
+      }>;
 
       // Filtrar therapists con horario válido
-      const validTherapists = therapists.filter(t => t.scheduleStart && t.scheduleEnd) as Array<{ id: number; name: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string; scheduleEnd: string }>;
+      const validTherapists = therapists.filter(
+        t => t.scheduleStart && t.scheduleEnd
+      ) as Array<{
+        id: number;
+        name: string | null;
+        type: "inhouse" | "freelance";
+        callPriority: number | null;
+        scheduleStart: string;
+        scheduleEnd: string;
+      }>;
 
       if (validTherapists.length === 0) return [];
 
       const allBookings = await loadBlockingMassageBookings(db, input.date);
-      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      const rooms = await db
+        .select()
+        .from(massageRooms)
+        .where(eq(massageRooms.active, 1));
       return listAutomaticMassageSlots({
         therapists: validTherapists,
         bookings: allBookings,
@@ -3738,13 +5690,19 @@ const masajesPublicRouter = router({
     }),
 
   book: publicProcedure
-    .input(z.object({
-      techniqueId: z.number(), duration: z.number().positive(),
-      bookingDate: z.string(), startTime: z.string(),
-      clientName: z.string().min(2), clientPhone: z.string().optional(),
-      clientEmail: z.string().optional(), notes: z.string().optional(),
+    .input(
+      z.object({
+        techniqueId: z.number(),
+        duration: z.number().positive(),
+        bookingDate: z.string(),
+        startTime: z.string(),
+        clientName: z.string().min(2),
+        clientPhone: z.string().optional(),
+        clientEmail: z.string().optional(),
+        notes: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
-    }))
+      })
+    )
     .mutation(async ({ input }) => {
       validatePublicMassageLeadTime([input]);
       const db = await getDb();
@@ -3752,7 +5710,8 @@ const masajesPublicRouter = router({
       const { subscribeNewsletter, ...bookingData } = input;
 
       // Solo terapeutas con disponibilidad explícita para este día.
-      let therapists = await db.select({
+      let therapists = (await db
+        .select({
         id: massageTherapists.id,
         name: massageTherapists.name,
         email: massageTherapists.email,
@@ -3762,20 +5721,55 @@ const masajesPublicRouter = router({
         scheduleEnd: massageTherapistAvailability.endTime,
       })
         .from(massageTherapistTechniques)
-        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
-        .where(and(
+        .innerJoin(
+          massageTherapists,
+          eq(massageTherapistTechniques.therapistId, massageTherapists.id)
+        )
+        .innerJoin(
+          massageTherapistAvailability,
+          eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+        )
+        .where(
+          and(
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
           eq(massageTherapistAvailability.date, input.bookingDate as any),
-          eq(massageTherapistAvailability.isAvailable, 1),
-        )) as Array<{ id: number; name: string | null; email: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string | null; scheduleEnd: string | null }>;
+            eq(massageTherapistAvailability.isAvailable, 1)
+          )
+        )) as Array<{
+        id: number;
+        name: string | null;
+        email: string | null;
+        type: "inhouse" | "freelance";
+        callPriority: number | null;
+        scheduleStart: string | null;
+        scheduleEnd: string | null;
+      }>;
 
       // Filtrar therapists con horario válido
-      const validTherapists = therapists.filter(t => t.scheduleStart && t.scheduleEnd) as Array<{ id: number; name: string | null; email: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string; scheduleEnd: string }>;
-      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
-      const assignment = await withMassageResourceLock(db, input.bookingDate, async () => {
-        const allBookings = await loadBlockingMassageBookings(db, input.bookingDate);
+      const validTherapists = therapists.filter(
+        t => t.scheduleStart && t.scheduleEnd
+      ) as Array<{
+        id: number;
+        name: string | null;
+        email: string | null;
+        type: "inhouse" | "freelance";
+        callPriority: number | null;
+        scheduleStart: string;
+        scheduleEnd: string;
+      }>;
+      const rooms = await db
+        .select()
+        .from(massageRooms)
+        .where(eq(massageRooms.active, 1));
+      const assignment = await withMassageResourceLock(
+        db,
+        input.bookingDate,
+        async () => {
+          const allBookings = await loadBlockingMassageBookings(
+            db,
+            input.bookingDate
+          );
         const selected = selectAutomaticMassageAssignment({
           therapists: validTherapists,
           bookings: allBookings,
@@ -3787,7 +5781,8 @@ const masajesPublicRouter = router({
         if (!selected) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
+              message:
+                "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
           });
         }
         await db.insert(massageBookings).values({
@@ -3797,12 +5792,15 @@ const masajesPublicRouter = router({
           roomId: selected.room.id,
           endTime: selected.endTime,
           bookingDate: input.bookingDate as any,
-          paymentStatus: "pending", status: "pending",
+            paymentStatus: "pending",
+            status: "pending",
         });
         return selected;
-      });
+        }
+      );
 
-      const [technique] = await db.select({ name: massageTechniques.name })
+      const [technique] = await db
+        .select({ name: massageTechniques.name })
         .from(massageTechniques)
         .where(eq(massageTechniques.id, input.techniqueId))
         .limit(1);
@@ -3826,16 +5824,21 @@ const masajesPublicRouter = router({
       if (subscribeNewsletter && input.clientEmail) {
         try {
           await db.insert(newsletterSubscribers).values({
-            email: input.clientEmail, name: input.clientName,
-            source: "masajes_booking", status: "active",
+            email: input.clientEmail,
+            name: input.clientName,
+            source: "masajes_booking",
+            status: "active",
           });
-        } catch { /* email duplicado */ }
+        } catch {
+          /* email duplicado */
+        }
       }
       return { success: true };
     }),
 
   initPayment: publicProcedure
-    .input(z.object({
+    .input(
+      z.object({
       techniqueId: z.number(),
       duration: z.number().positive(),
       bookingDate: z.string(),
@@ -3845,26 +5848,52 @@ const masajesPublicRouter = router({
       clientEmail: z.string().optional(),
       notes: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
-    }))
+      })
+    )
     .mutation(async ({ input }) => {
       validatePublicMassageLeadTime([input]);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const [technique] = await db.select().from(massageTechniques)
-        .where(and(eq(massageTechniques.id, input.techniqueId), eq(massageTechniques.active, 1)))
+      const [technique] = await db
+        .select()
+        .from(massageTechniques)
+        .where(
+          and(
+            eq(massageTechniques.id, input.techniqueId),
+            eq(massageTechniques.active, 1)
+          )
+        )
         .limit(1);
-      if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Técnica no encontrada" });
+      if (!technique)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Técnica no encontrada",
+        });
 
-      const durations = (technique.durations ?? "").split(",").map((d: string) => Number(d.trim())).filter(Boolean).sort((a: number, b: number) => a - b);
+      const durations = (technique.durations ?? "")
+        .split(",")
+        .map((d: string) => Number(d.trim()))
+        .filter(Boolean)
+        .sort((a: number, b: number) => a - b);
       const durIdx = durations.indexOf(input.duration);
-      const priceFields = [technique.price50min, technique.price80min, technique.price110min];
-      const price = durIdx >= 0 && priceFields[durIdx] ? Number(priceFields[durIdx]) : null;
-      if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: "Precio no configurado para esta duración" });
+      const priceFields = [
+        technique.price50min,
+        technique.price80min,
+        technique.price110min,
+      ];
+      const price =
+        durIdx >= 0 && priceFields[durIdx] ? Number(priceFields[durIdx]) : null;
+      if (!price)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Precio no configurado para esta duración",
+        });
 
       // Usar exclusivamente la disponibilidad específica del día. Esta debe
       // coincidir con los bloques que se mostraron al cliente en getSlots.
-      let therapists = await db.select({
+      let therapists = (await db
+        .select({
         id: massageTherapists.id,
         name: massageTherapists.name,
         email: massageTherapists.email,
@@ -3874,13 +5903,21 @@ const masajesPublicRouter = router({
         scheduleEnd: massageTherapistAvailability.endTime,
       })
         .from(massageTherapistTechniques)
-        .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-        .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
-        .where(and(
+        .innerJoin(
+          massageTherapists,
+          eq(massageTherapistTechniques.therapistId, massageTherapists.id)
+        )
+        .innerJoin(
+          massageTherapistAvailability,
+          eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+        )
+        .where(
+          and(
           eq(massageTherapistTechniques.techniqueId, input.techniqueId),
           eq(massageTherapists.active, 1),
           eq(massageTherapistAvailability.date, input.bookingDate as any),
-          eq(massageTherapistAvailability.isAvailable, 1),
+            eq(massageTherapistAvailability.isAvailable, 1)
+          )
         )) as Array<{
           id: number;
           name: string | null;
@@ -3892,7 +5929,7 @@ const masajesPublicRouter = router({
         }>;
 
       const validTherapists = therapists.filter(
-        (therapist) => therapist.scheduleStart && therapist.scheduleEnd,
+        therapist => therapist.scheduleStart && therapist.scheduleEnd
       ) as Array<{
         id: number;
         name: string | null;
@@ -3903,10 +5940,19 @@ const masajesPublicRouter = router({
         scheduleEnd: string;
       }>;
 
-      const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
+      const rooms = await db
+        .select()
+        .from(massageRooms)
+        .where(eq(massageRooms.active, 1));
       const { subscribeNewsletter, ...bookingData } = input;
-      const bookingId = await withMassageResourceLock(db, input.bookingDate, async () => {
-        const allBookings = await loadBlockingMassageBookings(db, input.bookingDate);
+      const bookingId = await withMassageResourceLock(
+        db,
+        input.bookingDate,
+        async () => {
+          const allBookings = await loadBlockingMassageBookings(
+            db,
+            input.bookingDate
+          );
         const assignment = selectAutomaticMassageAssignment({
           therapists: validTherapists,
           bookings: allBookings,
@@ -3918,10 +5964,13 @@ const masajesPublicRouter = router({
         if (!assignment) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
+              message:
+                "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
           });
         }
-        const [inserted] = await db.insert(massageBookings).values({
+          const [inserted] = await db
+            .insert(massageBookings)
+            .values({
           ...bookingData,
           bookingSource: "web",
           therapistId: assignment.therapist.id,
@@ -3931,17 +5980,23 @@ const masajesPublicRouter = router({
           paymentStatus: "pending",
           amountPaid: String(price),
           status: "pending",
-        }).$returningId();
+            })
+            .$returningId();
         return inserted.id;
-      });
+        }
+      );
 
       if (subscribeNewsletter && input.clientEmail) {
         try {
           await db.insert(newsletterSubscribers).values({
-            email: input.clientEmail, name: input.clientName,
-            source: "masajes_booking", status: "active",
+            email: input.clientEmail,
+            name: input.clientName,
+            source: "masajes_booking",
+            status: "active",
           });
-        } catch { /* email duplicado */ }
+        } catch {
+          /* email duplicado */
+        }
       }
 
       let processUrl: string;
@@ -3949,7 +6004,11 @@ const masajesPublicRouter = router({
       try {
         const session = await createGetnetSession({
           bookingId,
-          description: technique.name.replace(/[^\x20-\x7E]/g, "").trim().slice(0, 80) || "Reserva de masaje",
+          description:
+            technique.name
+              .replace(/[^\x20-\x7E]/g, "")
+              .trim()
+              .slice(0, 80) || "Reserva de masaje",
           amountCLP: price,
           clientName: input.clientName,
           clientEmail: input.clientEmail,
@@ -3959,7 +6018,8 @@ const masajesPublicRouter = router({
         requestId = session.requestId;
       } catch (err) {
         console.error("[initPayment] Getnet session error:", err);
-        await db.update(massageBookings)
+        await db
+          .update(massageBookings)
           .set({
             status: "cancelled",
             paymentStatus: "pending",
@@ -3968,10 +6028,14 @@ const masajesPublicRouter = router({
             cancelledAt: new Date(),
           })
           .where(eq(massageBookings.id, bookingId));
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo iniciar el pago. Intenta más tarde." });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "No se pudo iniciar el pago. Intenta más tarde.",
+        });
       }
 
-      await db.update(massageBookings)
+      await db
+        .update(massageBookings)
         .set({ getnetRequestId: requestId })
         .where(eq(massageBookings.id, bookingId));
 
@@ -3979,29 +6043,50 @@ const masajesPublicRouter = router({
     }),
 
   initCartPayment: publicProcedure
-    .input(z.object({
-      items: z.array(z.object({
+    .input(
+      z
+        .object({
+          items: z
+            .array(
+              z.object({
         techniqueId: z.number(),
         duration: z.number().positive(),
         bookingDate: z.string(),
         startTime: z.string().regex(/^\d{2}:\d{2}$/),
         notes: z.string().optional(),
-      })).max(40),
+              })
+            )
+            .max(40),
       classPlanId: z.number().int().positive().optional(),
       clientName: z.string().min(2),
       clientPhone: z.string().optional(),
       clientEmail: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
       discountCode: z.string().trim().max(50).optional(),
-      checkoutId: z.string().trim().min(8).max(64).regex(/^[A-Za-z0-9-]+$/).optional(),
-    }).superRefine((value, ctx) => {
+          checkoutId: z
+            .string()
+            .trim()
+            .min(8)
+            .max(64)
+            .regex(/^[A-Za-z0-9-]+$/)
+            .optional(),
+        })
+        .superRefine((value, ctx) => {
       if (value.items.length === 0 && !value.classPlanId) {
-        ctx.addIssue({ code: "custom", message: "Agrega un plan o un masaje." });
+            ctx.addIssue({
+              code: "custom",
+              message: "Agrega un plan o un masaje.",
+            });
       }
       if (value.classPlanId && !value.clientEmail?.trim()) {
-        ctx.addIssue({ code: "custom", path: ["clientEmail"], message: "El email es obligatorio para comprar un plan." });
+            ctx.addIssue({
+              code: "custom",
+              path: ["clientEmail"],
+              message: "El email es obligatorio para comprar un plan.",
+            });
       }
-    }))
+        })
+    )
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -4009,18 +6094,38 @@ const masajesPublicRouter = router({
       validatePublicMassageLeadTime(input.items);
       validateMassageCartCapacity(input.items);
 
-      const classPlan = input.classPlanId ? (await db.select().from(regularClassPlans)
-        .where(and(eq(regularClassPlans.id, input.classPlanId), eq(regularClassPlans.active, 1)))
-        .limit(1))[0] : null;
+      const classPlan = input.classPlanId
+        ? (
+            await db
+              .select()
+              .from(regularClassPlans)
+              .where(
+                and(
+                  eq(regularClassPlans.id, input.classPlanId),
+                  eq(regularClassPlans.active, 1)
+                )
+              )
+              .limit(1)
+          )[0]
+        : null;
       if (input.classPlanId && !classPlan) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "El plan seleccionado ya no está disponible." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "El plan seleccionado ya no está disponible.",
+        });
       }
 
-      const blockingByDate = new Map<string, Awaited<ReturnType<typeof loadBlockingMassageBookings>>>();
-      const roomsByDate = new Map<string, Array<{ id: number; capacity: number; allowCoupleBooking: number }>>();
+      const blockingByDate = new Map<
+        string,
+        Awaited<ReturnType<typeof loadBlockingMassageBookings>>
+      >();
+      const roomsByDate = new Map<
+        string,
+        Array<{ id: number; capacity: number; allowCoupleBooking: number }>
+      >();
       const cartGroupKey = "public-cart";
       const prepared: Array<{
-        item: typeof input.items[number];
+        item: (typeof input.items)[number];
         techniqueName: string;
         price: number;
         therapistId: number;
@@ -4029,18 +6134,45 @@ const masajesPublicRouter = router({
       }> = [];
 
       for (const item of input.items) {
-        const [technique] = await db.select().from(massageTechniques)
-          .where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1)))
+        const [technique] = await db
+          .select()
+          .from(massageTechniques)
+          .where(
+            and(
+              eq(massageTechniques.id, item.techniqueId),
+              eq(massageTechniques.active, 1)
+            )
+          )
           .limit(1);
-        if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes ya no está disponible." });
+        if (!technique)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Uno de los masajes ya no está disponible.",
+          });
 
-        const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
+        const durations = (technique.durations ?? "")
+          .split(",")
+          .map(Number)
+          .filter(Boolean)
+          .sort((a, b) => a - b);
         const durationIndex = durations.indexOf(item.duration);
-        const prices = [technique.price50min, technique.price80min, technique.price110min];
-        const price = durationIndex >= 0 && prices[durationIndex] ? Number(prices[durationIndex]) : 0;
-        if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}.` });
+        const prices = [
+          technique.price50min,
+          technique.price80min,
+          technique.price110min,
+        ];
+        const price =
+          durationIndex >= 0 && prices[durationIndex]
+            ? Number(prices[durationIndex])
+            : 0;
+        if (!price)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Precio no configurado para ${technique.name}.`,
+          });
 
-        const therapists = await db.select({
+        const therapists = await db
+          .select({
           id: massageTherapists.id,
           name: massageTherapists.name,
           email: massageTherapists.email,
@@ -4050,17 +6182,32 @@ const masajesPublicRouter = router({
           scheduleEnd: massageTherapistAvailability.endTime,
         })
           .from(massageTherapistTechniques)
-          .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
-          .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
-          .where(and(
+          .innerJoin(
+            massageTherapists,
+            eq(massageTherapistTechniques.therapistId, massageTherapists.id)
+          )
+          .innerJoin(
+            massageTherapistAvailability,
+            eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+          )
+          .where(
+            and(
             eq(massageTherapistTechniques.techniqueId, item.techniqueId),
             eq(massageTherapists.active, 1),
             eq(massageTherapistAvailability.date, item.bookingDate as any),
-            eq(massageTherapistAvailability.isAvailable, 1),
-          ));
-        const validTherapists = therapists.filter((therapist) => therapist.scheduleStart && therapist.scheduleEnd) as Array<{
-          id: number; name: string | null; email: string | null; type: "inhouse" | "freelance";
-          callPriority: number | null; scheduleStart: string; scheduleEnd: string;
+              eq(massageTherapistAvailability.isAvailable, 1)
+            )
+          );
+        const validTherapists = therapists.filter(
+          therapist => therapist.scheduleStart && therapist.scheduleEnd
+        ) as Array<{
+          id: number;
+          name: string | null;
+          email: string | null;
+          type: "inhouse" | "freelance";
+          callPriority: number | null;
+          scheduleStart: string;
+          scheduleEnd: string;
         }>;
 
         let blocking = blockingByDate.get(item.bookingDate);
@@ -4070,11 +6217,14 @@ const masajesPublicRouter = router({
         }
         let rooms = roomsByDate.get(item.bookingDate);
         if (!rooms) {
-          rooms = await db.select({
+          rooms = await db
+            .select({
             id: massageRooms.id,
             capacity: massageRooms.capacity,
             allowCoupleBooking: massageRooms.allowCoupleBooking,
-          }).from(massageRooms).where(eq(massageRooms.active, 1));
+            })
+            .from(massageRooms)
+            .where(eq(massageRooms.active, 1));
           roomsByDate.set(item.bookingDate, rooms);
         }
 
@@ -4111,36 +6261,62 @@ const masajesPublicRouter = router({
         });
       }
 
-      let discountResult: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
+      let discountResult: Awaited<
+        ReturnType<typeof calculateWellnessCartDiscount>
+      > | null = null;
       if (input.discountCode) {
         try {
           discountResult = await calculateWellnessCartDiscount(
             db,
             input.discountCode,
             [
-              ...prepared.map((item) => ({ service: "masajes" as const, serviceId: item.item.techniqueId, techniqueId: item.item.techniqueId, originalAmount: item.price })),
-              ...(classPlan ? [{ service: "clases" as const, serviceId: classPlan.id, originalAmount: classPlan.priceClp }] : []),
-            ],
+              ...prepared.map(item => ({
+                service: "masajes" as const,
+                serviceId: item.item.techniqueId,
+                techniqueId: item.item.techniqueId,
+                originalAmount: item.price,
+              })),
+              ...(classPlan
+                ? [
+                    {
+                      service: "clases" as const,
+                      serviceId: classPlan.id,
+                      originalAmount: classPlan.priceClp,
+                    },
+                  ]
+                : []),
+            ]
           );
         } catch (error) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: error instanceof Error ? error.message : "El código ya no es válido.",
+            message:
+              error instanceof Error
+                ? error.message
+                : "El código ya no es válido.",
           });
         }
       }
 
       let bookingIds: number[];
       try {
-        bookingIds = await db.transaction(async (tx) => {
+        bookingIds = await db.transaction(async tx => {
           const insertedIds: number[] = [];
           for (let index = 0; index < prepared.length; index += 1) {
             const preparedItem = prepared[index];
             const lineDiscount = discountResult?.lineDiscounts[index] ?? 0;
-            if (!Number.isFinite(lineDiscount) || lineDiscount < 0 || lineDiscount > preparedItem.price) {
-              throw new Error(`Invalid line discount ${lineDiscount} for price ${preparedItem.price}`);
+            if (
+              !Number.isFinite(lineDiscount) ||
+              lineDiscount < 0 ||
+              lineDiscount > preparedItem.price
+            ) {
+              throw new Error(
+                `Invalid line discount ${lineDiscount} for price ${preparedItem.price}`
+              );
             }
-            const [inserted] = await tx.insert(massageBookings).values({
+            const [inserted] = await tx
+              .insert(massageBookings)
+              .values({
               techniqueId: preparedItem.item.techniqueId,
               duration: preparedItem.item.duration,
               bookingDate: preparedItem.item.bookingDate as any,
@@ -4160,40 +6336,54 @@ const masajesPublicRouter = router({
               discountCode: discountResult?.code,
               status: "pending",
               bookingSource: "web",
-            }).$returningId();
+              })
+              .$returningId();
             insertedIds.push(inserted.id);
           }
           if (insertedIds.length > 1) {
-            await tx.update(massageBookings)
+            await tx
+              .update(massageBookings)
               .set({ coupleBookingId: insertedIds[0] })
               .where(inArray(massageBookings.id, insertedIds));
           }
           return insertedIds;
         });
       } catch (error) {
-        const cause = error instanceof Error && "cause" in error ? error.cause : undefined;
-        console.error("[initCartPayment] Booking insert failed:", cause ?? error);
+        const cause =
+          error instanceof Error && "cause" in error ? error.cause : undefined;
+        console.error(
+          "[initCartPayment] Booking insert failed:",
+          cause ?? error
+        );
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "No pudimos crear la reserva para iniciar el pago. Intenta nuevamente.",
+          message:
+            "No pudimos crear la reserva para iniciar el pago. Intenta nuevamente.",
         });
       }
 
       let membershipId: number | undefined;
       try {
         if (classPlan) {
-        const classDiscount = discountResult?.lineDiscounts[prepared.length] ?? 0;
+          const classDiscount =
+            discountResult?.lineDiscounts[prepared.length] ?? 0;
         const email = input.clientEmail!.trim().toLowerCase();
         const phone = input.clientPhone?.trim() || undefined;
         const nameParts = input.clientName.trim().split(/\s+/);
         const firstName = nameParts.shift() || input.clientName.trim();
         const lastName = nameParts.join(" ") || null;
         const duplicateConditions = [eq(regularClassStudents.email, email)];
-        if (phone) duplicateConditions.push(eq(regularClassStudents.phone, phone));
-        let [student] = await db.select().from(regularClassStudents)
-          .where(or(...duplicateConditions)).limit(1);
+          if (phone)
+            duplicateConditions.push(eq(regularClassStudents.phone, phone));
+          let [student] = await db
+            .select()
+            .from(regularClassStudents)
+            .where(or(...duplicateConditions))
+            .limit(1);
         if (!student) {
-          const [createdStudent] = await db.insert(regularClassStudents).values({
+            const [createdStudent] = await db
+              .insert(regularClassStudents)
+              .values({
             firstName,
             lastName,
             email,
@@ -4201,26 +6391,37 @@ const masajesPublicRouter = router({
             status: "prospect",
             source: "web",
             communicationsConsent: input.subscribeNewsletter ? 1 : 0,
-          }).$returningId();
-          [student] = await db.select().from(regularClassStudents)
-            .where(eq(regularClassStudents.id, createdStudent.id)).limit(1);
+              })
+              .$returningId();
+            [student] = await db
+              .select()
+              .from(regularClassStudents)
+              .where(eq(regularClassStudents.id, createdStudent.id))
+              .limit(1);
         } else {
-          await db.update(regularClassStudents).set({
+            await db
+              .update(regularClassStudents)
+              .set({
             firstName,
             lastName,
             email,
             phone: phone ?? student.phone,
-            communicationsConsent: input.subscribeNewsletter ? 1 : student.communicationsConsent,
-          }).where(eq(regularClassStudents.id, student.id));
+                communicationsConsent: input.subscribeNewsletter
+                  ? 1
+                  : student.communicationsConsent,
+              })
+              .where(eq(regularClassStudents.id, student.id));
         }
         const chileDateParts = new Intl.DateTimeFormat("en-US", {
           timeZone: "America/Santiago",
           year: "numeric",
           month: "2-digit",
         }).formatToParts(new Date());
-        const chileMonth = `${chileDateParts.find((part) => part.type === "year")?.value}-${chileDateParts.find((part) => part.type === "month")?.value}`;
+          const chileMonth = `${chileDateParts.find(part => part.type === "year")?.value}-${chileDateParts.find(part => part.type === "month")?.value}`;
         const period = calendarMonthRange(chileMonth);
-        const [createdMembership] = await db.insert(regularClassMemberships).values({
+          const [createdMembership] = await db
+            .insert(regularClassMemberships)
+            .values({
           studentId: student.id,
           planId: classPlan.id,
           periodStart: period.start,
@@ -4235,29 +6436,43 @@ const masajesPublicRouter = router({
           paymentStatus: "pending",
           paymentMethod: "getnet_web",
           paymentReference: input.checkoutId,
-        }).$returningId();
+            })
+            .$returningId();
           membershipId = createdMembership.id;
         }
       } catch (error) {
         console.error("[initCartPayment] Membership insert failed:", error);
         if (bookingIds.length > 0) {
-          await db.update(massageBookings).set({
+          await db
+            .update(massageBookings)
+            .set({
             status: "cancelled",
             cancellationCategory: "system",
-            cancellationReason: "No se pudo crear el plan asociado a la compra.",
+              cancellationReason:
+                "No se pudo crear el plan asociado a la compra.",
             cancelledAt: new Date(),
-          }).where(inArray(massageBookings.id, bookingIds));
+            })
+            .where(inArray(massageBookings.id, bookingIds));
         }
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "No pudimos crear el plan para iniciar el pago. Intenta nuevamente.",
+          message:
+            "No pudimos crear el plan para iniciar el pago. Intenta nuevamente.",
         });
       }
 
-      const massageOriginalTotal = prepared.reduce((sum, item) => sum + item.price, 0);
-      const massageTotal = prepared.reduce((sum, item, index) => sum + item.price - (discountResult?.lineDiscounts[index] ?? 0), 0);
+      const massageOriginalTotal = prepared.reduce(
+        (sum, item) => sum + item.price,
+        0
+      );
+      const massageTotal = prepared.reduce(
+        (sum, item, index) =>
+          sum + item.price - (discountResult?.lineDiscounts[index] ?? 0),
+        0
+      );
       const classTotal = classPlan
-        ? classPlan.priceClp - (discountResult?.lineDiscounts[prepared.length] ?? 0)
+        ? classPlan.priceClp -
+          (discountResult?.lineDiscounts[prepared.length] ?? 0)
         : 0;
       const originalTotal = massageOriginalTotal + (classPlan?.priceClp ?? 0);
       const total = massageTotal + classTotal;
@@ -4265,18 +6480,26 @@ const masajesPublicRouter = router({
         const session = await createGetnetSession({
           bookingId: bookingIds[0],
           reference: bookingIds[0] ? undefined : `clases-${membershipId}`,
-          description: classPlan && prepared.length > 0
-            ? `Plan de clases y ${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(0, 80)
+          description:
+            classPlan && prepared.length > 0
+              ? `Plan de clases y ${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(
+                  0,
+                  80
+                )
             : classPlan
               ? `${classPlan.name} Clases Regulares Cancagua`.slice(0, 80)
-              : `${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(0, 80),
+                : `${prepared.length} masaje${prepared.length === 1 ? "" : "s"} Cancagua`.slice(
+                    0,
+                    80
+                  ),
           amountCLP: total,
           clientName: input.clientName,
           clientEmail: input.clientEmail,
           clientPhone: input.clientPhone,
         });
         if (bookingIds.length > 0) {
-          await db.update(massageBookings)
+          await db
+            .update(massageBookings)
             .set({ getnetRequestId: session.requestId })
             .where(inArray(massageBookings.id, bookingIds));
           await attachCheckoutPayment({
@@ -4286,22 +6509,31 @@ const masajesPublicRouter = router({
             originalTotal,
             discountTotal: discountResult?.discountTotal ?? 0,
             finalTotal: total,
-          }).catch((trackingError) =>
-            console.error("[initCartPayment] No se pudo asociar el checkout analítico:", trackingError)
+          }).catch(trackingError =>
+            console.error(
+              "[initCartPayment] No se pudo asociar el checkout analítico:",
+              trackingError
+            )
           );
         }
         if (membershipId) {
-          await db.update(regularClassMemberships).set({ paymentReference: session.requestId })
+          await db
+            .update(regularClassMemberships)
+            .set({ paymentReference: session.requestId })
             .where(eq(regularClassMemberships.id, membershipId));
         }
 
         if (input.subscribeNewsletter && input.clientEmail) {
           try {
             await db.insert(newsletterSubscribers).values({
-              email: input.clientEmail, name: input.clientName,
-              source: "masajes_booking", status: "active",
+              email: input.clientEmail,
+              name: input.clientName,
+              source: "masajes_booking",
+              status: "active",
             });
-          } catch { /* email duplicado */ }
+          } catch {
+            /* email duplicado */
+          }
         }
 
         return {
@@ -4314,30 +6546,43 @@ const masajesPublicRouter = router({
         };
       } catch (error) {
         console.error("[initCartPayment] Getnet session error:", error);
-        await markCheckoutInitializationFailed(input.checkoutId).catch((trackingError) =>
-          console.error("[initCartPayment] No se pudo registrar la falla del checkout:", trackingError)
+        await markCheckoutInitializationFailed(input.checkoutId).catch(
+          trackingError =>
+            console.error(
+              "[initCartPayment] No se pudo registrar la falla del checkout:",
+              trackingError
+            )
         );
         if (bookingIds.length > 0) {
-          await db.update(massageBookings)
+          await db
+            .update(massageBookings)
             .set({
               status: "cancelled",
               paymentStatus: "pending",
               cancellationCategory: "system",
-              cancellationReason: "No se pudo iniciar la sesión de pago del carrito.",
+              cancellationReason:
+                "No se pudo iniciar la sesión de pago del carrito.",
               cancelledAt: new Date(),
             })
             .where(inArray(massageBookings.id, bookingIds));
         }
         if (membershipId) {
-          await db.update(regularClassMemberships).set({ status: "cancelled" })
+          await db
+            .update(regularClassMemberships)
+            .set({ status: "cancelled" })
             .where(eq(regularClassMemberships.id, membershipId));
         }
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No se pudo iniciar el pago. Intenta más tarde." });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "No se pudo iniciar el pago. Intenta más tarde.",
+        });
       }
     }),
 
   checkPaymentStatus: publicProcedure
-    .input(z.object({ requestId: z.string().optional(), ref: z.string().optional() }))
+    .input(
+      z.object({ requestId: z.string().optional(), ref: z.string().optional() })
+    )
     .query(async ({ input }) => {
       let resolvedRequestId = input.requestId;
 
@@ -4358,7 +6603,10 @@ const masajesPublicRouter = router({
         if (!resolvedRequestId && classMatch) {
           const db = await getDb();
           if (db) {
-            const [membership] = await db.select({ paymentReference: regularClassMemberships.paymentReference })
+            const [membership] = await db
+              .select({
+                paymentReference: regularClassMemberships.paymentReference,
+              })
               .from(regularClassMemberships)
               .where(eq(regularClassMemberships.id, parseInt(classMatch[1])))
               .limit(1);
@@ -4367,7 +6615,11 @@ const masajesPublicRouter = router({
         }
       }
 
-      if (!resolvedRequestId) throw new TRPCError({ code: "BAD_REQUEST", message: "requestId requerido" });
+      if (!resolvedRequestId)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "requestId requerido",
+        });
       const result = await getGetnetSessionInfo(resolvedRequestId);
 
       // Fallback: si el webhook no llegó, confirmar la reserva aquí
@@ -4375,46 +6627,72 @@ const masajesPublicRouter = router({
         const db = await getDb();
         if (db) {
           const existingBookings = await db
-            .select({ id: massageBookings.id, paymentStatus: massageBookings.paymentStatus })
+            .select({
+              id: massageBookings.id,
+              paymentStatus: massageBookings.paymentStatus,
+            })
             .from(massageBookings)
             .where(eq(massageBookings.getnetRequestId, resolvedRequestId));
-          const existingMemberships = await db.select({
+          const existingMemberships = await db
+            .select({
             id: regularClassMemberships.id,
             paymentStatus: regularClassMemberships.paymentStatus,
-          }).from(regularClassMemberships)
-            .where(eq(regularClassMemberships.paymentReference, resolvedRequestId));
+            })
+            .from(regularClassMemberships)
+            .where(
+              eq(regularClassMemberships.paymentReference, resolvedRequestId)
+            );
           if (existingBookings.length > 0) {
-            const unpaidBookings = existingBookings.filter((booking) => booking.paymentStatus !== "paid");
+            const unpaidBookings = existingBookings.filter(
+              booking => booking.paymentStatus !== "paid"
+            );
             if (unpaidBookings.length > 0) {
-              await db.update(massageBookings)
+              await db
+                .update(massageBookings)
                 .set({
                   paymentStatus: "paid",
                   status: "pending",
                 })
-                .where(inArray(massageBookings.id, unpaidBookings.map((booking) => booking.id)));
+                .where(
+                  inArray(
+                    massageBookings.id,
+                    unpaidBookings.map(booking => booking.id)
+                  )
+                );
               for (const booking of unpaidBookings) {
-                sendBookingConfirmations(booking.id).catch((e) =>
-                  console.error("[checkPaymentStatus] Error en notificaciones:", e)
+                sendBookingConfirmations(booking.id).catch(e =>
+                  console.error(
+                    "[checkPaymentStatus] Error en notificaciones:",
+                    e
+                  )
                 );
               }
             }
             for (const booking of existingBookings) {
               await syncMassageSale(booking.id);
             }
-            await markCheckoutPaid(resolvedRequestId).catch((trackingError) =>
-              console.error("[checkPaymentStatus] No se pudo marcar el checkout pagado:", trackingError)
+            await markCheckoutPaid(resolvedRequestId).catch(trackingError =>
+              console.error(
+                "[checkPaymentStatus] No se pudo marcar el checkout pagado:",
+                trackingError
+              )
             );
-            await emitMassagePurchase(resolvedRequestId).catch((trackingError) =>
-              console.error("[checkPaymentStatus] No se pudo emitir purchase:", trackingError)
+            await emitMassagePurchase(resolvedRequestId).catch(trackingError =>
+              console.error(
+                "[checkPaymentStatus] No se pudo emitir purchase:",
+                trackingError
+              )
             );
           }
-          if (existingMemberships.length > 0) await confirmRegularClassPayment(resolvedRequestId);
+          if (existingMemberships.length > 0)
+            await confirmRegularClassPayment(resolvedRequestId);
           await recordPaidWellnessDiscountUsage(db, resolvedRequestId);
         }
       } else if (result.status === "REJECTED" || result.status === "FAILED") {
         const db = await getDb();
         if (db) {
-          await db.update(massageBookings)
+          await db
+            .update(massageBookings)
             .set({
               paymentStatus: "pending",
               status: "cancelled",
@@ -4424,17 +6702,26 @@ const masajesPublicRouter = router({
             })
             .where(eq(massageBookings.getnetRequestId, resolvedRequestId));
           await cancelRegularClassPayment(resolvedRequestId);
-          await markCheckoutPaymentFailed(resolvedRequestId).catch((trackingError) =>
-            console.error("[checkPaymentStatus] No se pudo marcar la falla del checkout:", trackingError)
+          await markCheckoutPaymentFailed(resolvedRequestId).catch(
+            trackingError =>
+              console.error(
+                "[checkPaymentStatus] No se pudo marcar la falla del checkout:",
+                trackingError
+              )
           );
         }
       }
 
       const resultDb = await getDb();
-      const [classPurchase] = resultDb ? await resultDb.select({ id: regularClassMemberships.id })
+      const [classPurchase] = resultDb
+        ? await resultDb
+            .select({ id: regularClassMemberships.id })
         .from(regularClassMemberships)
-        .where(eq(regularClassMemberships.paymentReference, resolvedRequestId))
-        .limit(1) : [];
+            .where(
+              eq(regularClassMemberships.paymentReference, resolvedRequestId)
+            )
+            .limit(1)
+        : [];
       return {
         status: result.status,
         amount: result.amount,
@@ -4464,12 +6751,16 @@ const disponibilidadRouter = router({
           to: lastDay,
         });
       }
-      const rows = await db.select().from(massageTherapistAvailability)
-        .where(and(
+      const rows = await db
+        .select()
+        .from(massageTherapistAvailability)
+        .where(
+          and(
           eq(massageTherapistAvailability.therapistId, input.therapistId),
           gte(massageTherapistAvailability.date, firstDay as any),
-          lte(massageTherapistAvailability.date, lastDay as any),
-        ))
+            lte(massageTherapistAvailability.date, lastDay as any)
+          )
+        )
         .orderBy(asc(massageTherapistAvailability.date));
       return rows.map(r => serializeDateFields(r, ["date"]));
     }),
@@ -4491,7 +6782,8 @@ const disponibilidadRouter = router({
           to: lastDay,
         });
       }
-      const rows = await db.select({
+      const rows = await db
+        .select({
         id: massageTherapistAvailability.id,
         therapistId: massageTherapistAvailability.therapistId,
         therapistName: massageTherapists.name,
@@ -4505,38 +6797,62 @@ const disponibilidadRouter = router({
         blockNotes: massageTherapistAvailability.blockNotes,
       })
         .from(massageTherapistAvailability)
-        .innerJoin(massageTherapists, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
-        .where(and(
+        .innerJoin(
+          massageTherapists,
+          eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+        )
+        .where(
+          and(
           gte(massageTherapistAvailability.date, firstDay as any),
           lte(massageTherapistAvailability.date, lastDay as any),
-          eq(massageTherapists.active, 1),
-        ))
-        .orderBy(asc(massageTherapistAvailability.date), asc(massageTherapists.callPriority));
+            eq(massageTherapists.active, 1)
+          )
+        )
+        .orderBy(
+          asc(massageTherapistAvailability.date),
+          asc(massageTherapists.callPriority)
+        );
       return rows.map(r => serializeDateFields(r, ["date"]));
     }),
 
   // Crea o actualiza disponibilidad de un día específico
   upsertDay: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       therapistId: z.number(),
       date: z.string(), // YYYY-MM-DD
       isAvailable: z.number().default(1),
       startTime: z.string().optional(),
       endTime: z.string().optional(),
       shift: z.enum(["am", "pm"]).optional(),
-      blockType: z.enum(["vacation", "sick_leave", "personal", "other"]).optional(),
+        blockType: z
+          .enum(["vacation", "sick_leave", "personal", "other"])
+          .optional(),
       blockNotes: z.string().optional(),
       autoGenerated: z.number().default(0),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { therapistId, date, ...rest } = input;
-      await db.insert(massageTherapistAvailability)
-        .values({ therapistId, date: date as any, ...rest, autoGenerated: 0, generationSource: null })
+      await db
+        .insert(massageTherapistAvailability)
+        .values({
+          therapistId,
+          date: date as any,
+          ...rest,
+          autoGenerated: 0,
+          generationSource: null,
+        })
         .onDuplicateKeyUpdate({
-          set: { ...rest, autoGenerated: 0, generationSource: null, updatedAt: new Date() },
+          set: {
+            ...rest,
+            autoGenerated: 0,
+            generationSource: null,
+            updatedAt: new Date(),
+          },
         });
       return { success: true };
     }),
@@ -4548,17 +6864,21 @@ const disponibilidadRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.delete(massageTherapistAvailability)
-        .where(and(
+      await db
+        .delete(massageTherapistAvailability)
+        .where(
+          and(
           eq(massageTherapistAvailability.therapistId, input.therapistId),
-          eq(massageTherapistAvailability.date, input.date as any),
-        ));
+            eq(massageTherapistAvailability.date, input.date as any)
+          )
+        );
       return { success: true };
     }),
 
   // Genera un mes completo para inhouse con rotación de turnos (Barbara/Daniela)
   generateMonthRotation: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       month: z.string(), // "2026-07"
       // Qué turno trabaja Barbara la primera semana de ese mes
       barbaraFirstWeekShift: z.enum(["am", "pm"]),
@@ -4570,7 +6890,8 @@ const disponibilidadRouter = router({
       amEnd: z.string().default("18:00"),
       pmStart: z.string().default("14:00"),
       pmEnd: z.string().default("22:00"),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
@@ -4582,26 +6903,37 @@ const disponibilidadRouter = router({
 
       // Regenerar solo la base automática del mes; ajustes manuales,
       // vacaciones y licencias (autoGenerated=0) se conservan.
-      await db.delete(massageTherapistAvailability).where(and(
-        inArray(massageTherapistAvailability.therapistId, [input.barbaraId, input.danielaId]),
+      await db
+        .delete(massageTherapistAvailability)
+        .where(
+          and(
+            inArray(massageTherapistAvailability.therapistId, [
+              input.barbaraId,
+              input.danielaId,
+            ]),
         gte(massageTherapistAvailability.date, firstDate as any),
         lte(massageTherapistAvailability.date, lastDate as any),
-        eq(massageTherapistAvailability.autoGenerated, 1),
-      ));
+            eq(massageTherapistAvailability.autoGenerated, 1)
+          )
+        );
 
       // Inserta o actualiza (no sobreescribe registros manuales si autoGenerated=0)
       for (const entry of entries) {
-        const existing = await db.select({ autoGenerated: massageTherapistAvailability.autoGenerated })
+        const existing = await db
+          .select({ autoGenerated: massageTherapistAvailability.autoGenerated })
           .from(massageTherapistAvailability)
-          .where(and(
+          .where(
+            and(
             eq(massageTherapistAvailability.therapistId, entry.therapistId),
-            eq(massageTherapistAvailability.date, entry.date as any),
-          ))
+              eq(massageTherapistAvailability.date, entry.date as any)
+            )
+          )
           .limit(1);
         // Solo sobreescribir si no existe o si el registro previo también era auto-generado
         if (existing.length === 0 || existing[0].autoGenerated === 1) {
           const { date: _d, therapistId: _t, ...updateFields } = entry;
-          await db.insert(massageTherapistAvailability)
+          await db
+            .insert(massageTherapistAvailability)
             .values({ ...entry, date: entry.date as any })
             .onDuplicateKeyUpdate({ set: updateFields });
         }
@@ -4617,22 +6949,32 @@ const disponibilidadRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const [year, mon] = input.month.split("-").map(Number);
-      const prevMonth = mon === 1
+      const prevMonth =
+        mon === 1
         ? `${year - 1}-12`
         : `${year}-${String(mon - 1).padStart(2, "0")}`;
       const [prevYear, prevMon] = prevMonth.split("-").map(Number);
       const prevFirst = `${prevMonth}-01`;
-      const prevLast = new Date(prevYear, prevMon, 0).toISOString().slice(0, 10);
+      const prevLast = new Date(prevYear, prevMon, 0)
+        .toISOString()
+        .slice(0, 10);
 
-      const prevRows = await db.select().from(massageTherapistAvailability)
-        .where(and(
+      const prevRows = await db
+        .select()
+        .from(massageTherapistAvailability)
+        .where(
+          and(
           eq(massageTherapistAvailability.therapistId, input.therapistId),
           gte(massageTherapistAvailability.date, prevFirst as any),
-          lte(massageTherapistAvailability.date, prevLast as any),
-        ));
+            lte(massageTherapistAvailability.date, prevLast as any)
+          )
+        );
 
       if (prevRows.length === 0) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "El mes anterior no tiene horarios registrados" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "El mes anterior no tiene horarios registrados",
+        });
       }
 
       const daysInCurrentMonth = new Date(year, mon, 0).getDate();
@@ -4643,12 +6985,15 @@ const disponibilidadRouter = router({
         if (prevDayNum > daysInCurrentMonth) continue; // febrero tiene menos días
 
         const newDate = `${input.month}-${String(prevDayNum).padStart(2, "0")}`;
-        const existing = await db.select({ id: massageTherapistAvailability.id })
+        const existing = await db
+          .select({ id: massageTherapistAvailability.id })
           .from(massageTherapistAvailability)
-          .where(and(
+          .where(
+            and(
             eq(massageTherapistAvailability.therapistId, input.therapistId),
-            eq(massageTherapistAvailability.date, newDate as any),
-          ))
+              eq(massageTherapistAvailability.date, newDate as any)
+            )
+          )
           .limit(1);
         if (existing.length > 0) continue; // no sobreescribir días ya editados
 
@@ -4676,7 +7021,8 @@ const disponibilidadRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(massageTherapists)
+      await db
+        .update(massageTherapists)
         .set({ autoFillMonth: input.autoFillMonth })
         .where(eq(massageTherapists.id, input.therapistId));
       return { success: true };
@@ -4684,13 +7030,21 @@ const disponibilidadRouter = router({
 
   // Agrega vacación/licencia: crea registro RRHH y bloquea días en disponibilidad
   addLeave: protectedProcedure
-    .input(z.object({
+    .input(
+      z.object({
       therapistId: z.number(),
       startDate: z.string(),
       endDate: z.string(),
-      type: z.enum(["vacation", "sick_leave", "maternity", "personal", "other"]),
+        type: z.enum([
+          "vacation",
+          "sick_leave",
+          "maternity",
+          "personal",
+          "other",
+        ]),
       notes: z.string().optional(),
-    }))
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
@@ -4713,7 +7067,8 @@ const disponibilidadRouter = router({
       let blocked = 0;
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dateStr = d.toISOString().slice(0, 10);
-        await db.insert(massageTherapistAvailability)
+        await db
+          .insert(massageTherapistAvailability)
           .values({
             therapistId: input.therapistId,
             date: dateStr as any,
@@ -4750,7 +7105,9 @@ const disponibilidadRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) return [];
-      const rows = await db.select().from(massageHrLeaves)
+      const rows = await db
+        .select()
+        .from(massageHrLeaves)
         .where(eq(massageHrLeaves.therapistId, input.therapistId))
         .orderBy(desc(massageHrLeaves.startDate));
       return rows.map(r => serializeDateFields(r, ["startDate", "endDate"]));
@@ -4763,21 +7120,29 @@ const disponibilidadRouter = router({
       await adminOrEditor(ctx.user.role);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [leave] = await db.select().from(massageHrLeaves)
-        .where(eq(massageHrLeaves.id, input.leaveId)).limit(1);
+      const [leave] = await db
+        .select()
+        .from(massageHrLeaves)
+        .where(eq(massageHrLeaves.id, input.leaveId))
+        .limit(1);
       if (!leave) throw new TRPCError({ code: "NOT_FOUND" });
       const start = new Date(serializeDateOnly(leave.startDate) + "T12:00:00");
       const end = new Date(serializeDateOnly(leave.endDate) + "T12:00:00");
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dateStr = d.toISOString().slice(0, 10);
-        await db.delete(massageTherapistAvailability)
-          .where(and(
+        await db
+          .delete(massageTherapistAvailability)
+          .where(
+            and(
             eq(massageTherapistAvailability.therapistId, leave.therapistId),
             eq(massageTherapistAvailability.date, dateStr as any),
-            eq(massageTherapistAvailability.autoGenerated, 0),
-          ));
+              eq(massageTherapistAvailability.autoGenerated, 0)
+            )
+          );
       }
-      await db.delete(massageHrLeaves).where(eq(massageHrLeaves.id, input.leaveId));
+      await db
+        .delete(massageHrLeaves)
+        .where(eq(massageHrLeaves.id, input.leaveId));
       return { success: true };
     }),
 });
