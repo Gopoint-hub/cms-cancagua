@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildClientKey, buildPaymentDetail } from "./operations360Router";
+import {
+  buildClientKey,
+  buildPaymentDetail,
+  isVisibleCalendarReservation,
+} from "./operations360Router";
 import { canAccessCmsPath } from "../shared/permissions";
 
 describe("Cliente 360", () => {
@@ -31,6 +35,15 @@ describe("acceso a vistas 360", () => {
     const permissions = JSON.stringify(["module.b2c", "biopools.view_clients"]);
     expect(canAccessCmsPath("admin", "/cms/clientes-360/dashboard-bi", false, permissions)).toBe(false);
     expect(canAccessCmsPath("super_admin", "/cms/clientes-360/dashboard-bi", false, permissions)).toBe(true);
+  });
+});
+
+describe("visibilidad de reservas en Calendario 360", () => {
+  it("oculta todas las reservas canceladas", () => {
+    expect(isVisibleCalendarReservation("cancelled")).toBe(false);
+    expect(isVisibleCalendarReservation("confirmed")).toBe(true);
+    expect(isVisibleCalendarReservation("pending")).toBe(true);
+    expect(isVisibleCalendarReservation("completed")).toBe(true);
   });
 });
 

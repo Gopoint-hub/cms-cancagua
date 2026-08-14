@@ -89,6 +89,10 @@ export function buildClientKey(input: {
   return `name:${(input.name ?? "sin nombre").trim().toLocaleLowerCase()}`;
 }
 
+export function isVisibleCalendarReservation(status?: string | null): boolean {
+  return status !== "cancelled";
+}
+
 function money(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? Math.round(parsed) : 0;
@@ -604,9 +608,11 @@ export const operations360Router = router({
         }
       }
 
-      return events.sort((left: any, right: any) =>
-        `${left.date} ${left.startTime}`.localeCompare(`${right.date} ${right.startTime}`)
-      );
+      return events
+        .filter(event => isVisibleCalendarReservation(String(event.status ?? "")))
+        .sort((left: any, right: any) =>
+          `${left.date} ${left.startTime}`.localeCompare(`${right.date} ${right.startTime}`)
+        );
     }),
 
   detail: protectedProcedure
