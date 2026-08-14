@@ -181,6 +181,8 @@ export const biopoolBookings = mysqlTable("biopool_bookings", {
   cancellationReason: text("cancellation_reason"),
   cancelledAt: timestamp("cancelled_at"),
   cancelledByUserId: int("cancelled_by_user_id"),
+  agendaHiddenAt: timestamp("agenda_hidden_at"),
+  agendaHiddenByUserId: int("agenda_hidden_by_user_id"),
   createdByUserId: int("created_by_user_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

@@ -232,6 +232,7 @@ const CREATE_STATEMENTS = [
     refund_fee_percent decimal(5,2) NOT NULL DEFAULT 0.25,
     source enum('cms','web','skedu_import','b2b') NOT NULL DEFAULT 'cms', reschedule_count int NOT NULL DEFAULT 0,
     notes text NULL, cancellation_reason text NULL, cancelled_at timestamp NULL, cancelled_by_user_id int NULL,
+    agenda_hidden_at timestamp NULL, agenda_hidden_by_user_id int NULL,
     created_by_user_id int NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX biopool_bookings_date_status_idx (service_id, booking_date, status),
@@ -324,6 +325,16 @@ export async function ensureBiopoolsSchema(): Promise<void> {
   if (!existingBookingColumns.has("refund_status")) {
     await db.execute(
       sql`ALTER TABLE biopool_bookings ADD COLUMN refund_status enum('none','pending','processed','rejected') NOT NULL DEFAULT 'none' AFTER refund_fee_amount_clp`
+    );
+  }
+  if (!existingBookingColumns.has("agenda_hidden_at")) {
+    await db.execute(
+      sql`ALTER TABLE biopool_bookings ADD COLUMN agenda_hidden_at timestamp NULL AFTER cancelled_by_user_id`
+    );
+  }
+  if (!existingBookingColumns.has("agenda_hidden_by_user_id")) {
+    await db.execute(
+      sql`ALTER TABLE biopool_bookings ADD COLUMN agenda_hidden_by_user_id int NULL AFTER agenda_hidden_at`
     );
   }
 

@@ -1569,6 +1569,87 @@ export const biopoolsRouter = router({
           return { success: true };
         });
       }),
+    hideCancelledFromAgenda: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "biopools.manage_agenda");
+        const db = await database();
+        return db.transaction(async tx => {
+          const [booking] = await tx.select().from(biopoolBookings).where(eq(biopoolBookings.id, input.id)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          if (booking.status !== "cancelled") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "Solo se pueden eliminar de la agenda las reservas canceladas",
+            });
+          }
+          await tx.update(biopoolBookings).set({
+            agendaHiddenAt: new Date(),
+            agendaHiddenByUserId: ctx.user.id,
+          }).where(eq(biopoolBookings.id, input.id));
+          await addActivity(tx, input.id, "removed_from_agenda", null, ctx.user.id);
+          return { success: true };
+        });
+      }),
+    reactivate: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "biopools.manage_agenda");
+        const db = await database();
+        return db.transaction(async tx => {
+          const [booking] = await tx.select().from(biopoolBookings).where(eq(biopoolBookings.id, input.id)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          if (booking.status !== "cancelled") {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La reserva no está cancelada" });
+          }
+          if (booking.refundStatus === "processed" || booking.paymentStatus === "refunded" || booking.paymentStatus === "partially_refunded") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "La reserva ya tiene un reembolso procesado y requiere revisión de Operaciones",
+            });
+          }
+
+          const bookingDay = serializeDate(booking.bookingDate);
+          const lockName = `biopool:shared:${bookingDay}`;
+          await acquireCapacityLock(tx, lockName);
+          try {
+            const availability = await availabilityForDay(tx, booking.serviceId, bookingDay, booking.id);
+            const slot = availability.slots.find((item: any) => item.startTime === booking.startTime);
+            if (!slot) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "El horario original ya no está habilitado" });
+            }
+            if (slot.availableSeats < booking.totalGuests) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `Solo quedan ${slot.availableSeats} cupos para reactivar esta reserva`,
+              });
+            }
+            await tx.update(biopoolBookings).set({
+              status: "confirmed",
+              cancellationReason: null,
+              cancelledAt: null,
+              cancelledByUserId: null,
+              agendaHiddenAt: null,
+              agendaHiddenByUserId: null,
+              refundAmountClp: 0,
+              refundFeeAmountClp: 0,
+              refundStatus: "none",
+            }).where(eq(biopoolBookings.id, input.id));
+            await tx.update(biopoolNotifications).set({ status: "pending", error: null }).where(and(
+              eq(biopoolNotifications.bookingId, input.id),
+              eq(biopoolNotifications.type, "reminder"),
+              eq(biopoolNotifications.status, "skipped"),
+              gt(biopoolNotifications.scheduledAt, new Date())
+            ));
+            await addActivity(tx, input.id, "booking_reactivated", {
+              restoredToAgenda: Boolean(booking.agendaHiddenAt),
+            }, ctx.user.id);
+            return { success: true };
+          } finally {
+            await releaseCapacityLock(tx, lockName);
+          }
+        });
+      }),
     updateStatus: protectedProcedure
       .input(
         z.object({

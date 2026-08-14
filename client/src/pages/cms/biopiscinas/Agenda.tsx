@@ -47,7 +47,9 @@ import {
   Clock,
   AlertTriangle,
   Plus,
+  RotateCcw,
   RotateCw,
+  Trash2,
   UsersRound,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -261,6 +263,20 @@ export default function BiopiscinasAgenda() {
     },
     onError: error => toast.error(error.message),
   });
+  const hideCancelled = trpc.biopools.bookings.hideCancelledFromAgenda.useMutation({
+    onSuccess: () => {
+      toast.success("Reserva eliminada de la agenda; el historial quedó guardado");
+      utils.biopools.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const reactivate = trpc.biopools.bookings.reactivate.useMutation({
+    onSuccess: () => {
+      toast.success("Reserva reactivada y cupos restaurados");
+      utils.biopools.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
   const markRefund = trpc.biopools.bookings.markRefundProcessed.useMutation({
     onSuccess: () => {
       toast.success("Reembolso registrado como procesado");
@@ -419,6 +435,14 @@ export default function BiopiscinasAgenda() {
     if (reference?.trim())
       markRefund.mutate({ id, reference: reference.trim() });
   };
+  const removeCancelledFromAgenda = (id: number, clientName: string) => {
+    if (window.confirm(`¿Eliminar de la agenda la reserva cancelada de ${clientName}? El historial y los pagos se conservarán.`))
+      hideCancelled.mutate({ id });
+  };
+  const reactivateBooking = (id: number, clientName: string) => {
+    if (window.confirm(`¿Reactivar la reserva de ${clientName}? Se comprobarán nuevamente los cupos antes de confirmarla.`))
+      reactivate.mutate({ id });
+  };
   const openReschedule = (booking: {
     id: number;
     serviceId: number;
@@ -492,7 +516,14 @@ export default function BiopiscinasAgenda() {
     : view === "week"
       ? `${format(parseISO(range.from), "d MMM", { locale: es })} – ${format(parseISO(range.to), "d MMM yyyy", { locale: es })}`
       : format(selected, "MMMM yyyy", { locale: es });
-  const bookingsForDate = (value: string) => (bookings ?? []).filter(item => bookingDate(item.bookingDate) === value);
+  const bookingsForDate = (value: string) => (bookings ?? []).filter(
+    item => bookingDate(item.bookingDate) === value && occupancyStatuses.has(item.status)
+  );
+  const cancelledBookings = (bookings ?? []).filter(
+    item => bookingDate(item.bookingDate) === date && item.status === "cancelled"
+  );
+  const cancelledInAgenda = cancelledBookings.filter(item => !item.agendaHiddenAt);
+  const removedFromAgenda = cancelledBookings.filter(item => Boolean(item.agendaHiddenAt));
   const serviceName = (serviceId: number) =>
     activeServices.find(item => item.id === serviceId)?.name ?? "Biopiscinas";
 
@@ -638,7 +669,7 @@ export default function BiopiscinasAgenda() {
                     <CardTitle className="flex items-center gap-2 text-lg">
                       <Clock className="h-5 w-5 text-cyan-700" />
                       {selectedServiceId === "all"
-                        ? <span>{slot.startTime} · Ocupación compartida</span>
+                        ? <span>{slot.startTime} · Ocupación Biopiscinas</span>
                         : <span>{groupService.name} · {slot.startTime}–{slot.endTime}</span>}
                     </CardTitle>
                     <div className="flex items-center gap-2">
@@ -822,6 +853,58 @@ export default function BiopiscinasAgenda() {
               </Card>
             ))}
           </div>
+        )}
+
+        {view === "day" && cancelledInAgenda.length > 0 && (
+          <Card className="border-amber-200 bg-amber-50/40">
+            <CardHeader><CardTitle className="text-lg">Reservas canceladas</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              {cancelledInAgenda.map(booking => (
+                <div key={`cancelled-${booking.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <strong>{booking.clientName}</strong>
+                      <Badge variant="outline">{serviceName(booking.serviceId)}</Badge>
+                      <Badge variant="outline">Cancelada</Badge>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">{booking.startTime}–{booking.endTime} · {booking.totalGuests} persona(s)</p>
+                    {booking.cancellationReason && <p className="mt-1 text-xs text-muted-foreground">Motivo: {booking.cancellationReason}</p>}
+                  </div>
+                  {canManage && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => reactivateBooking(booking.id, booking.clientName)} disabled={reactivate.isPending}>
+                        <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => removeCancelledFromAgenda(booking.id, booking.clientName)} disabled={hideCancelled.isPending}>
+                        <Trash2 className="mr-1 h-4 w-4" /> Eliminar de la agenda
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {view === "day" && removedFromAgenda.length > 0 && (
+          <Card className="border-dashed bg-muted/30">
+            <CardHeader><CardTitle className="text-base text-muted-foreground">Eliminadas de la agenda</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              {removedFromAgenda.map(booking => (
+                <div key={`removed-${booking.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2">
+                  <div className="text-sm">
+                    <span className="font-semibold">{booking.clientName}</span>
+                    <span className="text-muted-foreground"> · {booking.startTime} · {booking.totalGuests} persona(s) · {serviceName(booking.serviceId)}</span>
+                  </div>
+                  {canManage && (
+                    <Button size="sm" variant="outline" onClick={() => reactivateBooking(booking.id, booking.clientName)} disabled={reactivate.isPending}>
+                      <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         )}
 
         <Dialog open={open} onOpenChange={setOpen}>
