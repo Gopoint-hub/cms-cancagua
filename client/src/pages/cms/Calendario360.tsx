@@ -318,7 +318,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[92vh] min-w-0 overflow-y-auto sm:max-w-3xl">
         <DialogHeader className="pr-8">
           <div className="flex flex-wrap items-center gap-2">
             {meta && <Badge className={cn("border-0 text-white", meta.solid)}>{meta.label}</Badge>}
@@ -331,7 +331,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
           <p className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive">No se pudo cargar el detalle: {query.error.message}</p>
         ) : detail ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-3">
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Fecha y hora</p><p className="mt-1 font-semibold capitalize">{format(new Date(`${detail.schedule.date}T12:00:00`), "EEE d MMM", { locale: es })}</p><p className="text-sm">{detail.schedule.startTime.slice(0, 5)} – {detail.schedule.endTime.slice(0, 5)}</p></CardContent></Card>
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Cliente / responsable</p><p className="mt-1 font-semibold">{detail.client.name}</p><p className="text-xs text-muted-foreground">{detail.detail}</p></CardContent></Card>
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Estado de pago</p><p className="mt-1 font-semibold">{detail.payment ? paymentLabel(detail.payment.status) : "No corresponde"}</p><p className="text-sm text-muted-foreground">{detail.payment ? money(detail.payment.amountClp) : "Clase programada"}</p></CardContent></Card>
@@ -353,7 +353,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                   <div className="space-y-4">
                     <div className="grid gap-3 rounded-xl bg-muted/40 p-4 sm:grid-cols-2 lg:grid-cols-5">
                       <div><p className="text-xs text-muted-foreground">Precio original</p><p className="font-semibold">{money(detail.payment.originalAmountClp)}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Descuento</p><p className={cn("font-semibold", detail.payment.discountAmountClp > 0 && "text-emerald-700")}>{detail.payment.discountAmountClp > 0 ? `−${money(detail.payment.discountAmountClp)}` : money(0)}</p>{detail.payment.discountCode && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-violet-700">{detail.payment.discountCode}</p>}</div>
+                      <div className="min-w-0"><p className="text-xs text-muted-foreground">Descuento</p><p className={cn("font-semibold", detail.payment.discountAmountClp > 0 && "text-emerald-700")}>{detail.payment.discountAmountClp > 0 ? `−${money(detail.payment.discountAmountClp)}` : money(0)}</p>{detail.payment.discountCode && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-violet-700">{detail.payment.discountCode}</p>}</div>
                       <div><p className="text-xs text-muted-foreground">Total final</p><p className="font-semibold">{money(detail.payment.totalAmountClp)}</p></div>
                       <div><p className="text-xs text-muted-foreground">Pagado</p><p className="font-semibold text-emerald-700">{money(detail.payment.amountClp)}</p></div>
                       <div><p className="text-xs text-muted-foreground">Saldo</p><p className="font-semibold">{money(detail.payment.balanceAmountClp)}</p></div>
@@ -361,7 +361,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
 
                     <div className="overflow-hidden rounded-xl border">
                       {detail.payment.lines.map(line => (
-                        <div key={line.id} className="grid gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[1.2fr_1fr_auto] sm:items-center">
+                        <div key={line.id} className="grid min-w-0 gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] sm:items-center">
                           <div>
                             <p className="font-semibold">{paymentLabel(line.method)}</p>
                             <p className={cn("text-xs", line.type === "discount" ? "text-emerald-700" : "text-muted-foreground")}>{paymentLabel(line.status)}</p>
@@ -385,7 +385,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                 {detail.activity.length ? <div className="space-y-4">{detail.activity.map(item => <div key={item.id} className="relative border-l-2 border-primary/30 pl-4"><span className="absolute -left-[5px] top-1 h-2 w-2 rounded-full bg-primary" /><p className="font-medium">{item.label}</p>{item.detail && <p className="text-sm text-muted-foreground">{item.detail}</p>}<p className="mt-1 text-xs text-muted-foreground">{item.at ? new Date(item.at).toLocaleString("es-CL") : "Sin fecha"}</p></div>)}</div> : <p className="py-6 text-center text-sm text-muted-foreground">Aún no hay actividad adicional registrada.</p>}
               </TabsContent>
             </Tabs>
-            <div className="flex justify-end"><Button asChild><a href={detail.href}>Abrir agenda del módulo <ExternalLink className="ml-2 h-4 w-4" /></a></Button></div>
+            <div className="flex min-w-0 justify-end"><Button className="h-auto max-w-full whitespace-normal py-2 text-center" asChild><a href={detail.href}>Abrir agenda del módulo <ExternalLink className="ml-2 h-4 w-4" /></a></Button></div>
           </>
         ) : null}
       </DialogContent>

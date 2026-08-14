@@ -268,7 +268,29 @@
     max-height: calc(100dvh - 1rem);
     max-width: calc(100% - 1rem);
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 1rem;
+  }
+
+  body:has(.cms-shell) [data-slot="button"] {
+    height: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+    text-align: center;
+  }
+
+  body:has(.cms-shell) [data-slot="badge"] {
+    max-width: 100%;
+    flex-shrink: 1;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+
+  body:has(.cms-shell) [data-slot="select-trigger"] {
+    max-width: 100%;
+    min-width: 0;
   }
 
   body:has(.cms-shell) [data-slot="dialog-close"] {
@@ -305,5 +327,39 @@
   body:has(.cms-shell) [data-slot="dialog-footer"] > [data-slot="button"],
   body:has(.cms-shell) [data-slot="alert-dialog-footer"] > button {
     width: 100%;
+  }
+}
+
+/* Los paneles del CMS deben ceder ancho a su contenedor. Esto evita que un
+   correo, código, referencia o nombre largo ensanche tarjetas y diálogos. */
+body:has(.cms-shell) .cms-main,
+body:has(.cms-shell) .cms-main > *,
+body:has(.cms-shell) [data-slot="dialog-content"] > *,
+body:has(.cms-shell) [data-slot="alert-dialog-content"] > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+body:has(.cms-shell) .cms-main :where(h1, h2, h3, h4, p, a),
+body:has(.cms-shell) [data-slot="dialog-content"] :where(h1, h2, h3, h4, p, a),
+body:has(.cms-shell) [data-slot="alert-dialog-content"] :where(h1, h2, h3, h4, p, a) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+body:has(.cms-shell) .cms-main :where(pre, code),
+body:has(.cms-shell) [data-slot="dialog-content"] :where(pre, code) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 767px) {
+  body:has(.cms-shell) .cms-main h1 {
+    font-size: clamp(1.45rem, 7vw, 1.875rem);
+    line-height: 1.15;
+  }
+
+  body:has(.cms-shell) .cms-main h2 {
+    line-height: 1.2;
   }
 }
