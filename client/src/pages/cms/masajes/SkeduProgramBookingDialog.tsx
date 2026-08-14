@@ -184,8 +184,8 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
           <div className="sm:col-span-2 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
             <p className="font-medium">Asignación automática de terapeutas</p>
             <p className="mt-1 text-xs leading-relaxed">
-              Se ofrecerá el masaje al primer terapeuta disponible. Tendrá 30 minutos para responder;
-              si rechaza o el enlace expira, el sistema consultará inmediatamente al siguiente.
+              Si corresponde a una terapeuta inhouse, quedará asignada automáticamente y recibirá un aviso.
+              Solo las terapeutas freelance tendrán 60 minutos para confirmar antes de avisar a la siguiente.
             </p>
           </div>
           <div className="sm:col-span-2">

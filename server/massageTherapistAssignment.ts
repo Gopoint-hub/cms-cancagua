@@ -14,8 +14,9 @@ import { sendWhatsApp } from "./_core/whapi";
 import { getDb } from "./db";
 import { affectedRows } from "./massageCheckout";
 import { TAMARA_MUNOZ_PHONE } from "./massageContacts";
+import { withMassageResourceLock } from "./massageResourceLock";
 
-export const THERAPIST_RESPONSE_WINDOW_MS = 30 * 60 * 1000;
+export const THERAPIST_RESPONSE_WINDOW_MS = 60 * 60 * 1000;
 const PREPARATION_MINUTES = 10;
 const INHOUSE_PRIORITY = new Map<number, number>([
   [3, 0], // Bárbara Frías
@@ -70,6 +71,12 @@ export type AssignmentRequestView = {
   expiresAt?: Date;
 };
 
+export type TherapistAssignmentOutcome = {
+  offered: boolean;
+  mode: "inhouse_assigned" | "freelance_requested" | "exhausted";
+  therapistName?: string;
+};
+
 const parseTimeMinutes = (value: string) => {
   const [hour, minute] = value.split(":").map(Number);
   return hour * 60 + minute;
@@ -87,6 +94,35 @@ const humanDate = (value: string) => new Intl.DateTimeFormat("es-CL", {
   month: "long",
   timeZone: "America/Santiago",
 }).format(new Date(`${value}T12:00:00`));
+
+type TherapistMessageInput = {
+  therapistName: string | null;
+  clientName: string;
+  serviceName: string;
+  duration: number;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+};
+
+export function buildInhouseAssignmentMessage(input: TherapistMessageInput) {
+  return `📅 *Nuevo masaje asignado* — Cancagua Spa\n\nHola ${input.therapistName ?? "Terapeuta"}. Te informamos que este masaje quedó asignado automáticamente según tu disponibilidad registrada. No necesitas confirmarlo.\n\n💆 ${input.serviceName} · ${input.duration} min\n👤 ${input.clientName}\n📅 ${humanDate(input.bookingDate)}\n🕐 ${input.startTime} – ${input.endTime} hrs`;
+}
+
+export function buildFreelanceAssignmentMessage(
+  input: TherapistMessageInput & { actionUrl: string },
+) {
+  return `📅 *Nueva solicitud de masaje* — Cancagua Spa\n\nHola ${input.therapistName ?? "Terapeuta"}. ¿Puedes realizar este masaje?\n\n💆 ${input.serviceName} · ${input.duration} min\n👤 ${input.clientName}\n📅 ${humanDate(input.bookingDate)}\n🕐 ${input.startTime} – ${input.endTime} hrs\n\n⏳ Tienes 60 minutos para responder. Después de ese plazo el enlace expirará y se consultará automáticamente a otro terapeuta.\n\nResponde aquí 👉 ${input.actionUrl}`;
+}
+
+export function buildFreelanceExpirationMessage(input: {
+  therapistName: string | null;
+  serviceName: string;
+  bookingDate: string;
+  startTime: string;
+}) {
+  return `⏳ *Expiró tu tiempo de confirmación* — Cancagua Spa\n\nHola ${input.therapistName ?? "Terapeuta"}. Venció el plazo de 60 minutos para confirmar ${input.serviceName} del ${humanDate(input.bookingDate)} a las ${input.startTime} hrs. Estamos asignando a otro terapeuta y tu enlace ya no está disponible.`;
+}
 
 const chileNow = (now = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -115,7 +151,6 @@ export function selectNextTherapistCandidate(input: {
   blockers: BlockingBooking[];
   attemptedTherapistIds: Set<number>;
   excludedTherapistIds?: Set<number>;
-  preferredTherapistId?: number | null;
   startTime: string;
   endTime: string;
 }): Candidate | null {
@@ -123,8 +158,6 @@ export function selectNextTherapistCandidate(input: {
   const requestedEnd = parseTimeMinutes(input.endTime);
   const excluded = input.excludedTherapistIds ?? new Set<number>();
   const ordered = [...input.candidates].sort((left, right) => {
-    if (left.id === input.preferredTherapistId) return -1;
-    if (right.id === input.preferredTherapistId) return 1;
     const typeDifference = (left.type === "inhouse" ? 0 : 1) - (right.type === "inhouse" ? 0 : 1);
     if (typeDifference !== 0) return typeDifference;
     if (left.type === "inhouse" && right.type === "inhouse") {
@@ -136,7 +169,9 @@ export function selectNextTherapistCandidate(input: {
   });
 
   return ordered.find((candidate) => {
-    if (!candidate.phone || input.attemptedTherapistIds.has(candidate.id) || excluded.has(candidate.id)) {
+    if ((candidate.type === "freelance" && !candidate.phone)
+        || input.attemptedTherapistIds.has(candidate.id)
+        || excluded.has(candidate.id)) {
       return false;
     }
     const scheduleStart = parseTimeMinutes(candidate.scheduleStart);
@@ -338,27 +373,36 @@ async function notifyNoCandidate(booking: AssignmentBooking, slotIndex: number) 
   ).catch((error) => console.error("[TherapistAssignment] WhatsApp sin candidato:", error));
 }
 
-async function offerNextTherapist(
+async function offerNextTherapistUnlocked(
   bookingType: AssignmentBookingType,
   bookingId: number,
   slotIndex: number,
   allowRetryPreferred = false,
-): Promise<{ offered: boolean; therapistName?: string }> {
+): Promise<TherapistAssignmentOutcome> {
   const db = await getDb();
-  if (!db) return { offered: false };
+  if (!db) return { offered: false, mode: "exhausted" };
   const booking = await getAssignmentBooking(bookingType, bookingId);
   if (!booking || ["confirmed", "cancelled", "completed", "no_show"].includes(booking.status)) {
-    return { offered: false };
+    return { offered: false, mode: "exhausted" };
   }
 
   const attempts = await db.select({
     therapistId: massageTherapistAssignmentRequests.therapistId,
-  }).from(massageTherapistAssignmentRequests).where(and(
-    eq(massageTherapistAssignmentRequests.bookingType, bookingType),
-    eq(massageTherapistAssignmentRequests.bookingId, bookingId),
-    eq(massageTherapistAssignmentRequests.slotIndex, slotIndex),
-  ));
-  const attemptedTherapistIds = new Set(attempts.map((attempt) => attempt.therapistId));
+    therapistType: massageTherapists.type,
+  }).from(massageTherapistAssignmentRequests)
+    .innerJoin(massageTherapists, eq(massageTherapistAssignmentRequests.therapistId, massageTherapists.id))
+    .where(and(
+      eq(massageTherapistAssignmentRequests.bookingType, bookingType),
+      eq(massageTherapistAssignmentRequests.bookingId, bookingId),
+      eq(massageTherapistAssignmentRequests.slotIndex, slotIndex),
+    ));
+  // Las inhouse nunca quedan descartadas por solicitudes históricas: si están
+  // presentes y libres, vuelven a ser la primera opción obligatoria.
+  const attemptedTherapistIds = new Set(
+    attempts
+      .filter((attempt) => attempt.therapistType === "freelance")
+      .map((attempt) => attempt.therapistId),
+  );
   const preferredTherapistId = slotIndex === 2 ? booking.secondTherapistId : booking.therapistId;
   if (allowRetryPreferred && preferredTherapistId) {
     attemptedTherapistIds.delete(preferredTherapistId);
@@ -372,7 +416,6 @@ async function offerNextTherapist(
     blockers: await loadBlockers(booking),
     attemptedTherapistIds,
     excludedTherapistIds,
-    preferredTherapistId,
     startTime: booking.startTime,
     endTime: booking.endTime,
   });
@@ -393,7 +436,7 @@ async function offerNextTherapist(
         .where(eq(massageProgramBookings.id, bookingId));
     }
     await notifyNoCandidate(booking, slotIndex);
-    return { offered: false };
+    return { offered: false, mode: "exhausted" };
   }
 
   await db.update(massageTherapistAssignmentRequests).set({
@@ -406,8 +449,11 @@ async function offerNextTherapist(
     eq(massageTherapistAssignmentRequests.status, "pending"),
   ));
 
+  const now = new Date();
   const token = randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + THERAPIST_RESPONSE_WINDOW_MS);
+  const expiresAt = candidate.type === "inhouse"
+    ? now
+    : new Date(now.getTime() + THERAPIST_RESPONSE_WINDOW_MS);
   const [insertedRequest] = await db.insert(massageTherapistAssignmentRequests).values({
     bookingType,
     bookingId,
@@ -415,16 +461,19 @@ async function offerNextTherapist(
     therapistId: candidate.id,
     token,
     expiresAt,
+    status: candidate.type === "inhouse" ? "confirmed" : "pending",
+    respondedAt: candidate.type === "inhouse" ? now : null,
     attemptNumber: attempts.length + 1,
   }).$returningId();
-  scheduleAssignmentExpiration(insertedRequest.id, expiresAt);
 
   if (bookingType === "massage") {
     const assignmentUpdate = await db.update(massageBookings).set({
       therapistId: candidate.id,
-      status: "pending",
-      freelanceApprovalStatus: "awaiting_therapist",
-      therapistConfirmationToken: token,
+      status: candidate.type === "inhouse" ? "confirmed" : "pending",
+      freelanceApprovalStatus: candidate.type === "inhouse"
+        ? "inhouse_assigned"
+        : "awaiting_therapist",
+      therapistConfirmationToken: candidate.type === "inhouse" ? null : token,
     }).where(and(
       eq(massageBookings.id, bookingId),
       eq(massageBookings.status, "pending"),
@@ -432,23 +481,67 @@ async function offerNextTherapist(
     if (affectedRows(assignmentUpdate) !== 1) {
       await db.update(massageTherapistAssignmentRequests).set({
         status: "superseded",
-        respondedAt: new Date(),
+        respondedAt: now,
       }).where(eq(massageTherapistAssignmentRequests.id, insertedRequest.id));
-      return { offered: false };
+      return { offered: false, mode: "exhausted" };
     }
   } else {
-    await db.update(massageProgramBookings).set({
+    const assignmentUpdate = await db.update(massageProgramBookings).set({
       ...(slotIndex === 1
         ? { therapistId: candidate.id }
         : { secondTherapistId: candidate.id }),
       status: "pending",
-    }).where(eq(massageProgramBookings.id, bookingId));
+    }).where(and(
+      eq(massageProgramBookings.id, bookingId),
+      eq(massageProgramBookings.status, "pending"),
+    ));
+    if (affectedRows(assignmentUpdate) !== 1) {
+      await db.update(massageTherapistAssignmentRequests).set({
+        status: "superseded",
+        respondedAt: now,
+      }).where(eq(massageTherapistAssignmentRequests.id, insertedRequest.id));
+      return { offered: false, mode: "exhausted" };
+    }
   }
 
+  const messageInput = {
+    therapistName: candidate.name,
+    clientName: booking.clientName,
+    serviceName: booking.serviceName,
+    duration: booking.duration,
+    bookingDate: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+  };
+
+  if (candidate.type === "inhouse") {
+    if (bookingType === "skedu_program" && await allRequiredSlotsConfirmed(booking)) {
+      await db.update(massageProgramBookings).set({ status: "confirmed" })
+        .where(eq(massageProgramBookings.id, bookingId));
+    }
+    if (candidate.phone) {
+      const result = await sendWhatsApp(
+        candidate.phone,
+        buildInhouseAssignmentMessage(messageInput),
+      );
+      if (!result.success) {
+        console.error("[TherapistAssignment] No se pudo informar asignación inhouse:", result.error);
+      }
+    } else {
+      console.error(`[TherapistAssignment] Terapeuta inhouse ${candidate.id} sin teléfono; asignación conservada`);
+    }
+    return {
+      offered: true,
+      mode: "inhouse_assigned",
+      therapistName: candidate.name ?? "Terapeuta",
+    };
+  }
+
+  scheduleAssignmentExpiration(insertedRequest.id, expiresAt);
   const actionUrl = `${ENV.appUrl}/api/masajes/freelance-confirmation?token=${token}`;
   const result = await sendWhatsApp(
     candidate.phone!,
-    `📅 *Nueva reserva asignada* — Cancagua Spa\n\nHola ${candidate.name ?? "Terapeuta"}! ¿Puedes realizar este masaje?\n\n💆 ${booking.serviceName} · ${booking.duration} min\n👤 ${booking.clientName}\n📅 ${humanDate(booking.bookingDate)}\n🕐 ${booking.startTime} – ${booking.endTime} hrs\n\n⏳ Tienes 30 minutos para responder. Después de ese plazo el enlace expirará y se consultará automáticamente a otro terapeuta.\n\nResponde aquí 👉 ${actionUrl}`,
+    buildFreelanceAssignmentMessage({ ...messageInput, actionUrl }),
   );
   if (!result.success) {
     console.error("[TherapistAssignment] WhatsApp falló, rotando:", result.error);
@@ -459,47 +552,79 @@ async function offerNextTherapist(
       eq(massageTherapistAssignmentRequests.token, token),
       eq(massageTherapistAssignmentRequests.status, "pending"),
     ));
-    return offerNextTherapist(bookingType, bookingId, slotIndex);
+    return offerNextTherapistUnlocked(bookingType, bookingId, slotIndex);
   }
-  return { offered: true, therapistName: candidate.name ?? "Terapeuta" };
+  return {
+    offered: true,
+    mode: "freelance_requested",
+    therapistName: candidate.name ?? "Terapeuta",
+  };
+}
+
+async function offerNextTherapist(
+  bookingType: AssignmentBookingType,
+  bookingId: number,
+  slotIndex: number,
+  allowRetryPreferred = false,
+): Promise<TherapistAssignmentOutcome> {
+  const db = await getDb();
+  if (!db) return { offered: false, mode: "exhausted" };
+  const booking = await getAssignmentBooking(bookingType, bookingId);
+  if (!booking) return { offered: false, mode: "exhausted" };
+  return withMassageResourceLock(db, booking.bookingDate, () =>
+    offerNextTherapistUnlocked(bookingType, bookingId, slotIndex, allowRetryPreferred),
+  );
 }
 
 export async function startTherapistAssignmentForBooking(
   bookingType: AssignmentBookingType,
   bookingId: number,
   options: { force?: boolean } = {},
-): Promise<void> {
-  const booking = await getAssignmentBooking(bookingType, bookingId);
-  if (!booking) return;
+): Promise<TherapistAssignmentOutcome | null> {
   const db = await getDb();
-  if (!db) return;
-  const pending = await db.select({ id: massageTherapistAssignmentRequests.id })
-    .from(massageTherapistAssignmentRequests).where(and(
+  if (!db) return null;
+  const initialBooking = await getAssignmentBooking(bookingType, bookingId);
+  if (!initialBooking) return null;
+
+  return withMassageResourceLock(db, initialBooking.bookingDate, async () => {
+    const booking = await getAssignmentBooking(bookingType, bookingId);
+    if (!booking || ["cancelled", "completed", "no_show"].includes(booking.status)) return null;
+    const pending = await db.select({ id: massageTherapistAssignmentRequests.id })
+      .from(massageTherapistAssignmentRequests).where(and(
+        eq(massageTherapistAssignmentRequests.bookingType, bookingType),
+        eq(massageTherapistAssignmentRequests.bookingId, bookingId),
+        eq(massageTherapistAssignmentRequests.status, "pending"),
+      )).limit(1);
+    if (!options.force && (pending.length > 0 || booking.status === "confirmed")) return null;
+    await db.update(massageTherapistAssignmentRequests).set({
+      status: "superseded",
+      respondedAt: new Date(),
+    }).where(and(
       eq(massageTherapistAssignmentRequests.bookingType, bookingType),
       eq(massageTherapistAssignmentRequests.bookingId, bookingId),
-      eq(massageTherapistAssignmentRequests.status, "pending"),
-    )).limit(1);
-  if (!options.force && (pending.length > 0 || booking.status === "confirmed")) return;
-  await db.update(massageTherapistAssignmentRequests).set({
-    status: "superseded",
-    respondedAt: new Date(),
-  }).where(and(
-    eq(massageTherapistAssignmentRequests.bookingType, bookingType),
-    eq(massageTherapistAssignmentRequests.bookingId, bookingId),
-    ...(options.force
-      ? [inArray(massageTherapistAssignmentRequests.status, ["pending", "confirmed"])]
-      : [eq(massageTherapistAssignmentRequests.status, "pending")]),
-  ));
-  if (bookingType === "massage") {
-    await db.update(massageBookings).set({ status: "pending" })
-      .where(eq(massageBookings.id, bookingId));
-  } else {
-    await db.update(massageProgramBookings).set({ status: "pending" })
-      .where(eq(massageProgramBookings.id, bookingId));
-  }
-  for (let slotIndex = 1; slotIndex <= booking.slotCount; slotIndex += 1) {
-    await offerNextTherapist(bookingType, bookingId, slotIndex, options.force);
-  }
+      ...(options.force
+        ? [inArray(massageTherapistAssignmentRequests.status, ["pending", "confirmed"])]
+        : [eq(massageTherapistAssignmentRequests.status, "pending")]),
+    ));
+    if (bookingType === "massage") {
+      await db.update(massageBookings).set({ status: "pending" })
+        .where(eq(massageBookings.id, bookingId));
+    } else {
+      await db.update(massageProgramBookings).set({ status: "pending" })
+        .where(eq(massageProgramBookings.id, bookingId));
+    }
+    let firstOutcome: TherapistAssignmentOutcome | null = null;
+    for (let slotIndex = 1; slotIndex <= booking.slotCount; slotIndex += 1) {
+      const outcome = await offerNextTherapistUnlocked(
+        bookingType,
+        bookingId,
+        slotIndex,
+        options.force,
+      );
+      firstOutcome ??= outcome;
+    }
+    return firstOutcome;
+  });
 }
 
 export async function stopTherapistAssignmentForBooking(
@@ -542,6 +667,29 @@ async function expireAndRotate(request: typeof massageTherapistAssignmentRequest
     eq(massageTherapistAssignmentRequests.status, "pending"),
   ));
   if (affectedRows(claim) !== 1) return false;
+
+  const [therapist] = await db.select({
+    name: massageTherapists.name,
+    phone: massageTherapists.phone,
+    type: massageTherapists.type,
+  }).from(massageTherapists)
+    .where(eq(massageTherapists.id, request.therapistId))
+    .limit(1);
+  const booking = await getAssignmentBooking(request.bookingType, request.bookingId);
+  if (therapist?.type === "freelance" && therapist.phone && booking) {
+    const notification = await sendWhatsApp(
+      therapist.phone,
+      buildFreelanceExpirationMessage({
+        therapistName: therapist.name,
+        serviceName: booking.serviceName,
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+      }),
+    );
+    if (!notification.success) {
+      console.error("[TherapistAssignment] WhatsApp de expiración falló:", notification.error);
+    }
+  }
   await offerNextTherapist(request.bookingType, request.bookingId, request.slotIndex);
   return true;
 }

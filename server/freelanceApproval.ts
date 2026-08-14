@@ -76,7 +76,7 @@ function confirmationPage(input: {
   <div class="info"><strong>${escapeHtml(input.serviceName)}</strong><br>
     👤 ${escapeHtml(input.clientName)}<br>📅 ${escapeHtml(input.bookingDate)}<br>
     🕐 ${escapeHtml(input.startTime)} – ${escapeHtml(input.endTime)} hrs</div>
-  <div class="notice">Este enlace vence 30 minutos después de ser enviado.</div>
+  <div class="notice">Este enlace vence 60 minutos después de ser enviado.</div>
   <div class="btns">
     <form method="POST" action="/api/masajes/freelance-confirmation">
       <input type="hidden" name="token" value="${escapeHtml(input.token)}">
@@ -114,7 +114,7 @@ router.get("/freelance-confirmation", async (req: Request, res: Response) => {
       await startTherapistAssignmentForBooking("massage", legacy.id);
       return res.send(htmlPage(
         "Enlace reemplazado",
-        "Por seguridad se envió un enlace nuevo con vigencia de 30 minutos. Revisa el último mensaje de WhatsApp.",
+        "Por seguridad se envió un enlace nuevo con vigencia de 60 minutos. Revisa el último mensaje de WhatsApp.",
         "🔄",
       ));
     }
@@ -124,7 +124,7 @@ router.get("/freelance-confirmation", async (req: Request, res: Response) => {
     return res.send(htmlPage("Enlace inválido", "Este enlace no existe o ya no corresponde a una asignación.", "⚠️"));
   }
   if (view.state === "expired") {
-    return res.send(htmlPage("Enlace expirado", "Pasaron los 30 minutos. La reserva ya fue ofrecida a otro terapeuta.", "⏳"));
+    return res.send(htmlPage("Enlace expirado", "Pasaron los 60 minutos. La reserva ya fue ofrecida a otro terapeuta.", "⏳"));
   }
   if (view.state !== "pending") {
     return res.send(htmlPage("Solicitud procesada", "Esta respuesta ya fue registrada anteriormente.", "ℹ️"));

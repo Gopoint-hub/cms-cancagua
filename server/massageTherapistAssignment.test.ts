@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFreelanceAssignmentMessage,
+  buildFreelanceExpirationMessage,
+  buildInhouseAssignmentMessage,
   isTherapistAssignmentExpired,
   selectNextTherapistCandidate,
   THERAPIST_RESPONSE_WINDOW_MS,
@@ -29,6 +32,15 @@ const candidates = [
     scheduleEnd: "18:00",
   },
   {
+    id: 2,
+    name: "Tamara Muñoz",
+    phone: "+56944444444",
+    type: "inhouse" as const,
+    callPriority: 30,
+    scheduleStart: "10:00",
+    scheduleEnd: "18:00",
+  },
+  {
     id: 8,
     name: "Terapeuta freelance",
     phone: "+56933333333",
@@ -40,17 +52,17 @@ const candidates = [
 ];
 
 describe("therapist assignment rotation", () => {
-  it("expires each response link exactly after the 30-minute window", () => {
+  it("expires each freelance response link exactly after the 60-minute window", () => {
     const sentAt = new Date("2026-07-29T15:00:00.000Z");
     const expiresAt = new Date(sentAt.getTime() + THERAPIST_RESPONSE_WINDOW_MS);
-    expect(THERAPIST_RESPONSE_WINDOW_MS).toBe(30 * 60 * 1000);
-    expect(isTherapistAssignmentExpired(expiresAt, new Date("2026-07-29T15:29:59.999Z"))).toBe(false);
-    expect(isTherapistAssignmentExpired(expiresAt, new Date("2026-07-29T15:30:00.000Z"))).toBe(true);
+    expect(THERAPIST_RESPONSE_WINDOW_MS).toBe(60 * 60 * 1000);
+    expect(isTherapistAssignmentExpired(expiresAt, new Date("2026-07-29T15:59:59.999Z"))).toBe(false);
+    expect(isTherapistAssignmentExpired(expiresAt, new Date("2026-07-29T16:00:00.000Z"))).toBe(true);
   });
 
   it("moves immediately to the next available therapist after an attempted therapist", () => {
     const selected = selectNextTherapistCandidate({
-      candidates,
+      candidates: [candidates[3], ...candidates.slice(0, 3)],
       blockers: [],
       attemptedTherapistIds: new Set([3]),
       startTime: "12:00",
@@ -64,7 +76,7 @@ describe("therapist assignment rotation", () => {
       candidates,
       blockers: [{ therapistId: 1, startTime: "11:30", endTime: "13:00" }],
       attemptedTherapistIds: new Set([3]),
-      excludedTherapistIds: new Set([8]),
+      excludedTherapistIds: new Set([2, 8]),
       startTime: "12:00",
       endTime: "12:50",
     });
@@ -82,16 +94,62 @@ describe("therapist assignment rotation", () => {
     expect(selected).toBeNull();
   });
 
-  it("keeps the already selected therapist first when the offer starts", () => {
+  it("never lets a preselected freelance therapist jump over available inhouse staff", () => {
     const selected = selectNextTherapistCandidate({
-      candidates,
+      candidates: [candidates[3], ...candidates.slice(0, 3)],
       blockers: [],
       attemptedTherapistIds: new Set(),
-      preferredTherapistId: 8,
       startTime: "12:00",
       endTime: "12:50",
     });
-    expect(selected?.id).toBe(8);
+    expect(selected?.id).toBe(3);
+  });
+
+  it("uses Tamara before any freelance therapist when Barbara and Daniela are busy", () => {
+    const selected = selectNextTherapistCandidate({
+      candidates,
+      blockers: [
+        { therapistId: 3, startTime: "12:00", endTime: "12:50" },
+        { therapistId: 1, startTime: "12:00", endTime: "12:50" },
+      ],
+      attemptedTherapistIds: new Set(),
+      startTime: "12:00",
+      endTime: "12:50",
+    });
+    expect(selected?.id).toBe(2);
+  });
+
+  it("can assign an inhouse therapist even if the notification phone is missing", () => {
+    const selected = selectNextTherapistCandidate({
+      candidates: [{ ...candidates[0], phone: null }],
+      blockers: [],
+      attemptedTherapistIds: new Set(),
+      startTime: "12:00",
+      endTime: "12:50",
+    });
+    expect(selected?.id).toBe(3);
+  });
+
+  it("uses informational copy for inhouse and 60-minute confirmation copy for freelance", () => {
+    const base = {
+      therapistName: "Bárbara Frías",
+      clientName: "Cliente",
+      serviceName: "Masaje relajante",
+      duration: 50,
+      bookingDate: "2026-08-20",
+      startTime: "12:00",
+      endTime: "12:50",
+    };
+    const inhouse = buildInhouseAssignmentMessage(base);
+    const freelance = buildFreelanceAssignmentMessage({ ...base, actionUrl: "https://example.com/token" });
+    const expired = buildFreelanceExpirationMessage(base);
+
+    expect(inhouse).toContain("No necesitas confirmarlo");
+    expect(inhouse).not.toContain("Responde aquí");
+    expect(freelance).toContain("60 minutos");
+    expect(freelance).toContain("Responde aquí");
+    expect(expired).toContain("Expiró tu tiempo de confirmación");
+    expect(expired).toContain("Estamos asignando a otro terapeuta");
   });
 });
 

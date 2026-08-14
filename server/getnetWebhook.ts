@@ -241,8 +241,8 @@ export async function sendBookingConfirmations(bookingId: number) {
     ).catch((e) => console.error("[Confirmaciones] WhatsApp cliente:", e));
   }
 
-  // Todos los terapeutas —inhouse o freelance— confirman mediante un enlace
-  // de 30 minutos. Si rechazan o no responden, el motor rota automáticamente.
+  // Las terapeutas inhouse quedan asignadas y reciben un aviso informativo.
+  // Solo las freelance confirman mediante un enlace de 60 minutos.
   await sendFreelanceApprovalRequest(bookingId);
 }
 

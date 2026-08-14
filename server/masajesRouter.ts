@@ -79,6 +79,7 @@ import {
   validateReservationPayment,
 } from "./reservationPayments";
 import { canRedeemGiftCard } from "./giftCardRedemption";
+import { withMassageResourceLock } from "./massageResourceLock";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 const massagePaymentInputSchema = reservationPaymentInputSchema.refine(
@@ -271,18 +272,22 @@ type MassageDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 async function loadBlockingMassageBookings(
   db: MassageDb,
   bookingDate: string,
-  options: { excludeProgramBookingId?: number } = {},
+  options: { excludeMassageBookingId?: number; excludeProgramBookingId?: number } = {},
 ) {
+  const standardFilters = [
+    eq(massageBookings.bookingDate, bookingDate as any),
+    sql`${massageBookings.status} NOT IN ('cancelled')`,
+  ];
+  if (options.excludeMassageBookingId) {
+    standardFilters.push(ne(massageBookings.id, options.excludeMassageBookingId));
+  }
   const standard = await db.select({
     therapistId: massageBookings.therapistId,
     roomId: massageBookings.roomId,
     startTime: massageBookings.startTime,
     endTime: massageBookings.endTime,
     coupleBookingId: massageBookings.coupleBookingId,
-  }).from(massageBookings).where(and(
-    eq(massageBookings.bookingDate, bookingDate as any),
-    sql`${massageBookings.status} NOT IN ('cancelled')`,
-  ));
+  }).from(massageBookings).where(and(...standardFilters));
 
   const programFilters = [
     eq(massageProgramBookings.bookingDate, bookingDate as any),
@@ -1532,6 +1537,7 @@ const agendaRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
       const [booking] = await db.select({
+        bookingDate: massageBookings.bookingDate,
         paymentStatus: massageBookings.paymentStatus,
         status: massageBookings.status,
         therapistId: massageBookings.therapistId,
@@ -1543,70 +1549,103 @@ const agendaRouter = router({
       if (!booking) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Reserva no encontrada" });
       }
-      if (!isPendingManualMassageAssignment(booking)) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "La reserva ya no está pendiente de asignación manual",
-        });
+      const bookingDate = serializeDateOnly(booking.bookingDate);
+      if (!bookingDate) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "La reserva no tiene una fecha válida" });
       }
 
-      // Esta es la única excepción al filtro de disponibilidad: recepción ya
-      // coordinó directamente un horario extraordinario con el terapeuta.
-      // Solo exigimos que el terapeuta continúe activo en el CMS.
-      const [therapist] = await db.select({
-        id: massageTherapists.id,
-        name: massageTherapists.name,
-      })
-        .from(massageTherapists)
-        .where(and(
-          eq(massageTherapists.id, input.therapistId),
-          eq(massageTherapists.active, 1),
-        ))
-        .limit(1);
-      if (!therapist) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Selecciona un terapeuta activo",
-        });
-      }
+      return withMassageResourceLock(db, bookingDate, async () => {
+        const [current] = await db.select({
+          paymentStatus: massageBookings.paymentStatus,
+          status: massageBookings.status,
+          therapistId: massageBookings.therapistId,
+          freelanceApprovalStatus: massageBookings.freelanceApprovalStatus,
+          startTime: massageBookings.startTime,
+          endTime: massageBookings.endTime,
+        }).from(massageBookings)
+          .where(eq(massageBookings.id, input.bookingId))
+          .limit(1);
+        if (!current || !isPendingManualMassageAssignment(current)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "La reserva ya no está pendiente de asignación manual",
+          });
+        }
 
-      // Cierra enlaces y temporizadores anteriores antes de confirmar la
-      // decisión humana. La automatización no debe reemplazarla después.
-      await stopTherapistAssignmentForBooking("massage", input.bookingId);
-      await db.update(massageBookings)
-        .set({
-          therapistId: therapist.id,
-          status: "confirmed",
-          freelanceApprovalStatus: "manual_assigned",
-          adminApprovalToken: null,
-          therapistConfirmationToken: null,
-        })
-        .where(and(
-          eq(massageBookings.id, input.bookingId),
-          eq(massageBookings.paymentStatus, "paid"),
-          eq(massageBookings.status, "pending"),
-          or(
-            isNull(massageBookings.therapistId),
-            inArray(massageBookings.freelanceApprovalStatus, [...MANUAL_ASSIGNMENT_REJECTION_STATUSES]),
+        const [therapist] = await db.select({
+          id: massageTherapists.id,
+          name: massageTherapists.name,
+        }).from(massageTherapists)
+          .where(and(
+            eq(massageTherapists.id, input.therapistId),
+            eq(massageTherapists.active, 1),
+          ))
+          .limit(1);
+        if (!therapist) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Selecciona un terapeuta activo",
+          });
+        }
+
+        const blockers = await loadBlockingMassageBookings(db, bookingDate, {
+          excludeMassageBookingId: input.bookingId,
+        });
+        const requestedStart = parseTimeMin(current.startTime);
+        const requestedEnd = parseTimeMin(current.endTime) + 10;
+        const therapistIsBusy = blockers.some((blocker) =>
+          blocker.therapistId === therapist.id
+          && overlaps(
+            requestedStart,
+            requestedEnd,
+            parseTimeMin(blocker.startTime),
+            parseTimeMin(blocker.endTime) + 10,
           ),
-        ));
-      await stopTherapistAssignmentForBooking("massage", input.bookingId);
+        );
+        if (therapistIsBusy) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `${therapist.name ?? "El terapeuta"} ya tiene otro masaje en ese horario`,
+          });
+        }
 
-      const [updated] = await db.select({
-        therapistId: massageBookings.therapistId,
-        status: massageBookings.status,
-      })
-        .from(massageBookings)
-        .where(eq(massageBookings.id, input.bookingId))
-        .limit(1);
-      if (updated?.therapistId !== therapist.id || updated.status !== "confirmed") {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "La reserva cambió mientras la estabas asignando. Actualiza e inténtalo nuevamente.",
-        });
-      }
+        // Cierra enlaces y temporizadores anteriores antes de confirmar la
+        // decisión humana. La automatización no debe reemplazarla después.
+        await stopTherapistAssignmentForBooking("massage", input.bookingId);
+        await db.update(massageBookings)
+          .set({
+            therapistId: therapist.id,
+            status: "confirmed",
+            freelanceApprovalStatus: "manual_assigned",
+            adminApprovalToken: null,
+            therapistConfirmationToken: null,
+          })
+          .where(and(
+            eq(massageBookings.id, input.bookingId),
+            eq(massageBookings.paymentStatus, "paid"),
+            eq(massageBookings.status, "pending"),
+            or(
+              isNull(massageBookings.therapistId),
+              inArray(massageBookings.freelanceApprovalStatus, [...MANUAL_ASSIGNMENT_REJECTION_STATUSES]),
+            ),
+          ));
+        await stopTherapistAssignmentForBooking("massage", input.bookingId);
 
-      return { success: true, therapistName: therapist.name ?? "Terapeuta" };
+        const [updated] = await db.select({
+          therapistId: massageBookings.therapistId,
+          status: massageBookings.status,
+        }).from(massageBookings)
+          .where(eq(massageBookings.id, input.bookingId))
+          .limit(1);
+        if (updated?.therapistId !== therapist.id || updated.status !== "confirmed") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "La reserva cambió mientras la estabas asignando. Actualiza e inténtalo nuevamente.",
+          });
+        }
+
+        return { success: true, therapistName: therapist.name ?? "Terapeuta" };
+      });
     }),
 
   dismissPendingManualAssignment: protectedProcedure
@@ -1668,8 +1707,12 @@ const agendaRouter = router({
       await db.update(massageBookings)
         .set({ freelanceApprovalStatus: null, therapistConfirmationToken: null, status: "pending" })
         .where(eq(massageBookings.id, input.bookingId));
-      await startTherapistAssignmentForBooking("massage", input.bookingId, { force: true });
-      return { success: true };
+      const assignment = await startTherapistAssignmentForBooking("massage", input.bookingId, { force: true });
+      return {
+        success: true,
+        assignmentMode: assignment?.mode ?? "exhausted",
+        therapistName: assignment?.therapistName,
+      };
     }),
 
   getAvailableSlots: protectedProcedure
@@ -3730,32 +3773,33 @@ const masajesPublicRouter = router({
 
       // Filtrar therapists con horario válido
       const validTherapists = therapists.filter(t => t.scheduleStart && t.scheduleEnd) as Array<{ id: number; name: string | null; email: string | null; type: "inhouse" | "freelance"; callPriority: number | null; scheduleStart: string; scheduleEnd: string }>;
-      const allBookings = await loadBlockingMassageBookings(db, input.bookingDate);
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
-      const assignment = selectAutomaticMassageAssignment({
-        therapists: validTherapists,
-        bookings: allBookings,
-        rooms,
-        startTime: input.startTime,
-        duration: input.duration,
-        bookingDate: input.bookingDate,
-      });
-
-      if (!assignment) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
+      const assignment = await withMassageResourceLock(db, input.bookingDate, async () => {
+        const allBookings = await loadBlockingMassageBookings(db, input.bookingDate);
+        const selected = selectAutomaticMassageAssignment({
+          therapists: validTherapists,
+          bookings: allBookings,
+          rooms,
+          startTime: input.startTime,
+          duration: input.duration,
+          bookingDate: input.bookingDate,
         });
-      }
-
-      await db.insert(massageBookings).values({
-        ...bookingData,
-        bookingSource: "web",
-        therapistId: assignment.therapist.id,
-        roomId: assignment.room.id,
-        endTime: assignment.endTime,
-        bookingDate: input.bookingDate as any,
-        paymentStatus: "pending", status: "pending",
+        if (!selected) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
+          });
+        }
+        await db.insert(massageBookings).values({
+          ...bookingData,
+          bookingSource: "web",
+          therapistId: selected.therapist.id,
+          roomId: selected.room.id,
+          endTime: selected.endTime,
+          bookingDate: input.bookingDate as any,
+          paymentStatus: "pending", status: "pending",
+        });
+        return selected;
       });
 
       const [technique] = await db.select({ name: massageTechniques.name })
@@ -3859,38 +3903,37 @@ const masajesPublicRouter = router({
         scheduleEnd: string;
       }>;
 
-      const allBookings = await loadBlockingMassageBookings(db, input.bookingDate);
       const rooms = await db.select().from(massageRooms).where(eq(massageRooms.active, 1));
-
-      const assignment = selectAutomaticMassageAssignment({
-        therapists: validTherapists,
-        bookings: allBookings,
-        rooms,
-        startTime: input.startTime,
-        duration: input.duration,
-        bookingDate: input.bookingDate,
-      });
-
-      if (!assignment) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
-        });
-      }
-
       const { subscribeNewsletter, ...bookingData } = input;
-      const [inserted] = await db.insert(massageBookings).values({
-        ...bookingData,
-        bookingSource: "web",
-        therapistId: assignment.therapist.id,
-        roomId: assignment.room.id,
-        endTime: assignment.endTime,
-        bookingDate: input.bookingDate as any,
-        paymentStatus: "pending",
-        amountPaid: String(price),
-        status: "pending",
-      }).$returningId();
-      const bookingId = inserted.id;
+      const bookingId = await withMassageResourceLock(db, input.bookingDate, async () => {
+        const allBookings = await loadBlockingMassageBookings(db, input.bookingDate);
+        const assignment = selectAutomaticMassageAssignment({
+          therapists: validTherapists,
+          bookings: allBookings,
+          rooms,
+          startTime: input.startTime,
+          duration: input.duration,
+          bookingDate: input.bookingDate,
+        });
+        if (!assignment) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No hay terapeutas disponibles para ese horario. Elige otro bloque.",
+          });
+        }
+        const [inserted] = await db.insert(massageBookings).values({
+          ...bookingData,
+          bookingSource: "web",
+          therapistId: assignment.therapist.id,
+          roomId: assignment.room.id,
+          endTime: assignment.endTime,
+          bookingDate: input.bookingDate as any,
+          paymentStatus: "pending",
+          amountPaid: String(price),
+          status: "pending",
+        }).$returningId();
+        return inserted.id;
+      });
 
       if (subscribeNewsletter && input.clientEmail) {
         try {

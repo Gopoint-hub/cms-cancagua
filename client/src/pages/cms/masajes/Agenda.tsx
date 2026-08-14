@@ -448,10 +448,16 @@ export default function MasajesAgenda() {
     onError: e => toast.error(e.message),
   });
   const notifyMut = trpc.masajes.agenda.notifyFreelanceTherapist.useMutation({
-    onSuccess: () => {
+    onSuccess: ({ assignmentMode, therapistName }) => {
       utils.masajes.agenda.getByDateRange.invalidate();
       utils.masajes.agenda.getPendingManualAssignment.invalidate();
-      toast.success("WhatsApp enviado al terapeuta — reserva en espera de confirmación");
+      if (assignmentMode === "inhouse_assigned") {
+        toast.success(`Masaje asignado a ${therapistName ?? "terapeuta inhouse"}; se envió el aviso informativo`);
+      } else if (assignmentMode === "freelance_requested") {
+        toast.success(`Solicitud enviada a ${therapistName ?? "terapeuta freelance"}; tiene 60 minutos para confirmar`);
+      } else {
+        toast.warning("No se encontró un terapeuta disponible; la reserva quedó para revisión manual");
+      }
       setOpen(false);
     },
     onError: e => toast.error(e.message),
@@ -834,7 +840,7 @@ export default function MasajesAgenda() {
                 className="border-amber-400 text-amber-700 hover:bg-amber-50 gap-2"
                 onClick={() => notifyMut.mutate({ bookingId: editingId })}
                 disabled={notifyMut.isPending}
-                title="Enviar WhatsApp de confirmación al terapeuta asignado y poner reserva en espera"
+                title="Revisar la prioridad automática y notificar al terapeuta asignado"
               >
                 📲 Notificar terapeuta
               </Button>
