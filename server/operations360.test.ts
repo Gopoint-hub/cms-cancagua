@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildClientKey } from "./operations360Router";
+import { buildClientKey, buildPaymentDetail } from "./operations360Router";
 import { canAccessCmsPath } from "../shared/permissions";
 
 describe("Cliente 360", () => {
@@ -31,5 +31,49 @@ describe("acceso a vistas 360", () => {
     const permissions = JSON.stringify(["module.b2c", "biopools.view_clients"]);
     expect(canAccessCmsPath("admin", "/cms/clientes-360/dashboard-bi", false, permissions)).toBe(false);
     expect(canAccessCmsPath("super_admin", "/cms/clientes-360/dashboard-bi", false, permissions)).toBe(true);
+  });
+});
+
+describe("pagos diferenciados del Calendario 360", () => {
+  it("separa código de descuento y pago Webpay", () => {
+    const payment = buildPaymentDetail({
+      status: "paid",
+      method: "webpay_plus",
+      reference: "003122",
+      originalAmountClp: 72_000,
+      discountAmountClp: 36_000,
+      discountCode: "BIOPISCINA2X1",
+      amountPaidClp: 36_000,
+    });
+
+    expect(payment).toMatchObject({
+      originalAmountClp: 72_000,
+      discountAmountClp: 36_000,
+      totalAmountClp: 36_000,
+      amountClp: 36_000,
+      balanceAmountClp: 0,
+    });
+    expect(payment.lines).toEqual([
+      expect.objectContaining({ type: "discount", reference: "BIOPISCINA2X1", amountClp: 36_000 }),
+      expect.objectContaining({ type: "payment", method: "webpay_plus", reference: "003122", amountClp: 36_000 }),
+    ]);
+  });
+
+  it("conserva cada abono futuro como una línea independiente", () => {
+    const payment = buildPaymentDetail({
+      status: "partially_paid",
+      originalAmountClp: 80_000,
+      amountPaidClp: 50_000,
+      rows: [
+        { id: 1, method: "bank_transfer", status: "paid", amountClp: 30_000, reference: "TR-1" },
+        { id: 2, method: "cash", status: "paid", amountClp: 20_000 },
+      ],
+    });
+
+    expect(payment.balanceAmountClp).toBe(30_000);
+    expect(payment.lines.map(line => [line.method, line.amountClp])).toEqual([
+      ["bank_transfer", 30_000],
+      ["cash", 20_000],
+    ]);
   });
 });

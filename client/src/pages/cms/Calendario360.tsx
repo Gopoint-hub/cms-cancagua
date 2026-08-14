@@ -162,12 +162,20 @@ function paymentLabel(value?: string | null) {
   const labels: Record<string, string> = {
     paid: "Pagado",
     pending: "Pendiente",
+    partially_paid: "Pago parcial",
+    partially_refunded: "Reembolso parcial",
     refunded: "Reembolsado",
+    unknown: "Sin registrar",
+    applied: "Aplicado",
     transbank: "Transbank Webpay",
+    webpay_plus: "Webpay",
     webpay: "Transbank Webpay",
     getnet: "Getnet",
     getnet_link: "Link de pago Getnet",
     getnet_pos: "Máquina Getnet",
+    payment_link: "Link de pago",
+    transbank_machine: "Máquina Transbank",
+    discount_code: "Código de descuento",
     bank_transfer: "Transferencia",
     transfer: "Transferencia",
     cash: "Efectivo",
@@ -341,7 +349,37 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                 </div>
               </TabsContent>
               <TabsContent value="payments" className="rounded-xl border p-4">
-                {detail.payment ? <div className="grid gap-4 sm:grid-cols-2"><div><p className="text-xs text-muted-foreground">Método</p><p className="font-semibold">{paymentLabel(detail.payment.method)}</p></div><div><p className="text-xs text-muted-foreground">Monto</p><p className="font-semibold text-emerald-700">{money(detail.payment.amountClp)}</p></div><div><p className="text-xs text-muted-foreground">Estado</p><p className="font-semibold">{paymentLabel(detail.payment.status)}</p></div><div><p className="text-xs text-muted-foreground">Referencia</p><p className="break-all text-sm">{detail.payment.reference || "Sin referencia"}</p></div>{detail.payment.refundAmountClp ? <div><p className="text-xs text-muted-foreground">Reembolso</p><p className="font-semibold">{money(detail.payment.refundAmountClp)}</p></div> : null}</div> : <p className="py-6 text-center text-sm text-muted-foreground">Esta actividad no registra un pago individual.</p>}
+                {detail.payment ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 rounded-xl bg-muted/40 p-4 sm:grid-cols-2 lg:grid-cols-5">
+                      <div><p className="text-xs text-muted-foreground">Precio original</p><p className="font-semibold">{money(detail.payment.originalAmountClp)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Descuento</p><p className={cn("font-semibold", detail.payment.discountAmountClp > 0 && "text-emerald-700")}>{detail.payment.discountAmountClp > 0 ? `−${money(detail.payment.discountAmountClp)}` : money(0)}</p>{detail.payment.discountCode && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-violet-700">{detail.payment.discountCode}</p>}</div>
+                      <div><p className="text-xs text-muted-foreground">Total final</p><p className="font-semibold">{money(detail.payment.totalAmountClp)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Pagado</p><p className="font-semibold text-emerald-700">{money(detail.payment.amountClp)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Saldo</p><p className="font-semibold">{money(detail.payment.balanceAmountClp)}</p></div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border">
+                      {detail.payment.lines.map(line => (
+                        <div key={line.id} className="grid gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[1.2fr_1fr_auto] sm:items-center">
+                          <div>
+                            <p className="font-semibold">{paymentLabel(line.method)}</p>
+                            <p className={cn("text-xs", line.type === "discount" ? "text-emerald-700" : "text-muted-foreground")}>{paymentLabel(line.status)}</p>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            <p className={cn("break-all", line.type === "discount" && "font-mono font-semibold text-violet-700")}>{line.reference || "Sin referencia"}</p>
+                            {line.cardType && <p>{line.cardType === "credit" ? "Crédito" : line.cardType === "debit" ? "Débito" : line.cardType}</p>}
+                            {line.at && <p>{new Date(line.at).toLocaleString("es-CL")}</p>}
+                          </div>
+                          <p className={cn("font-semibold sm:text-right", line.type === "discount" && "text-emerald-700")}>{line.type === "discount" ? "−" : ""}{money(line.amountClp)}</p>
+                        </div>
+                      ))}
+                      {!detail.payment.lines.length && <p className="p-4 text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
+                    </div>
+
+                    {detail.payment.refundAmountClp > 0 && <div className="flex justify-between rounded-xl bg-amber-50 p-4 text-sm"><span>Reembolso registrado</span><strong>{money(detail.payment.refundAmountClp)}</strong></div>}
+                  </div>
+                ) : <p className="py-6 text-center text-sm text-muted-foreground">Esta actividad no registra un pago individual.</p>}
               </TabsContent>
               <TabsContent value="activity" className="rounded-xl border p-4">
                 {detail.activity.length ? <div className="space-y-4">{detail.activity.map(item => <div key={item.id} className="relative border-l-2 border-primary/30 pl-4"><span className="absolute -left-[5px] top-1 h-2 w-2 rounded-full bg-primary" /><p className="font-medium">{item.label}</p>{item.detail && <p className="text-sm text-muted-foreground">{item.detail}</p>}<p className="mt-1 text-xs text-muted-foreground">{item.at ? new Date(item.at).toLocaleString("es-CL") : "Sin fecha"}</p></div>)}</div> : <p className="py-6 text-center text-sm text-muted-foreground">Aún no hay actividad adicional registrada.</p>}

@@ -20,6 +20,7 @@ import {
   regularClassSessions,
   regularClassStudents,
   regularClassTeachers,
+  reservationPayments,
   saunaBookings,
 } from "../drizzle/schema";
 import {
@@ -91,6 +92,96 @@ export function buildClientKey(input: {
 function money(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+}
+
+type PaymentDetailRow = {
+  id?: number;
+  method: string;
+  status: string;
+  amountClp: number;
+  reference?: string | null;
+  cardType?: string | null;
+  paidAt?: Date | string | null;
+  createdAt?: Date | string | null;
+};
+
+export function buildPaymentDetail(input: {
+  status?: string | null;
+  method?: string | null;
+  reference?: string | null;
+  originalAmountClp?: unknown;
+  discountAmountClp?: unknown;
+  discountCode?: string | null;
+  amountPaidClp?: unknown;
+  refundAmountClp?: unknown;
+  createdAt?: Date | string | null;
+  rows?: PaymentDetailRow[];
+}) {
+  const discountAmountClp = money(input.discountAmountClp);
+  const amountPaidClp = money(input.amountPaidClp);
+  const originalAmountClp = input.originalAmountClp == null
+    ? Math.max(0, amountPaidClp + discountAmountClp)
+    : money(input.originalAmountClp);
+  const totalAmountClp = Math.max(0, originalAmountClp - discountAmountClp);
+  const rows = input.rows ?? [];
+  const lines: Array<{
+    id: string;
+    type: "discount" | "payment";
+    method: string;
+    status: string;
+    amountClp: number;
+    reference: string | null;
+    cardType: string | null;
+    at: Date | string | null;
+  }> = [];
+  if (discountAmountClp > 0) {
+    lines.push({
+      id: "discount",
+      type: "discount",
+      method: "Código de descuento",
+      status: "applied",
+      amountClp: discountAmountClp,
+      reference: input.discountCode ?? null,
+      cardType: null,
+      at: input.createdAt ?? null,
+    });
+  }
+  if (rows.length) {
+    lines.push(...rows.map((row, index) => ({
+      id: `payment:${row.id ?? index}`,
+      type: "payment" as const,
+      method: row.method,
+      status: row.status,
+      amountClp: money(row.amountClp),
+      reference: row.reference ?? null,
+      cardType: row.cardType ?? null,
+      at: row.paidAt ?? row.createdAt ?? null,
+    })));
+  } else if (amountPaidClp > 0 || input.method) {
+    lines.push({
+      id: "payment:summary",
+      type: "payment",
+      method: input.method ?? "Sin registrar",
+      status: input.status ?? "paid",
+      amountClp: amountPaidClp,
+      reference: input.reference ?? null,
+      cardType: null,
+      at: input.createdAt ?? null,
+    });
+  }
+  return {
+    status: input.status ?? null,
+    method: input.method ?? null,
+    reference: input.reference ?? null,
+    amountClp: amountPaidClp,
+    refundAmountClp: money(input.refundAmountClp),
+    originalAmountClp,
+    discountAmountClp,
+    discountCode: input.discountCode ?? null,
+    totalAmountClp,
+    balanceAmountClp: Math.max(0, totalAmountClp - amountPaidClp),
+    lines,
+  };
 }
 
 async function database() {
@@ -533,11 +624,16 @@ export const operations360Router = router({
           .where(eq(biopoolBookings.id, input.entityId))
           .limit(1);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-        const [activity, notifications] = await Promise.all([
+        const [activity, notifications, paymentRows] = await Promise.all([
           db.select().from(biopoolBookingActivity)
             .where(eq(biopoolBookingActivity.bookingId, input.entityId)),
           db.select().from(biopoolNotifications)
             .where(eq(biopoolNotifications.bookingId, input.entityId)),
+          db.select().from(reservationPayments)
+            .where(and(
+              eq(reservationPayments.module, "biopools"),
+              eq(reservationPayments.reservationId, input.entityId),
+            )),
         ]);
         const booking = row.booking;
         return {
@@ -546,13 +642,18 @@ export const operations360Router = router({
           client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
           schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
           status: booking.status,
-          payment: {
+          payment: buildPaymentDetail({
             status: booking.paymentStatus,
             method: booking.paymentMethod,
             reference: booking.paymentReference,
-            amountClp: booking.amountPaidClp,
+            originalAmountClp: booking.originalAmountClp,
+            discountAmountClp: booking.discountAmountClp,
+            discountCode: booking.discountCode,
+            amountPaidClp: booking.amountPaidClp,
             refundAmountClp: booking.refundAmountClp,
-          },
+            createdAt: booking.createdAt,
+            rows: paymentRows,
+          }),
           notes: booking.notes,
           detail: `${booking.adultQuantity} adulto(s) · ${booking.childQuantity} niño(s) · ${booking.totalGuests} personas`,
           activity: [
@@ -592,11 +693,18 @@ export const operations360Router = router({
             .where(eq(massageBookings.id, input.entityId))
             .limit(1);
           if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-          const [nps] = await db.select().from(massageNpsResponses)
-            .where(and(
-              eq(massageNpsResponses.bookingType, "massage"),
-              eq(massageNpsResponses.bookingId, input.entityId),
-            )).limit(1);
+          const [[nps], paymentRows] = await Promise.all([
+            db.select().from(massageNpsResponses)
+              .where(and(
+                eq(massageNpsResponses.bookingType, "massage"),
+                eq(massageNpsResponses.bookingId, input.entityId),
+              )).limit(1),
+            db.select().from(reservationPayments)
+              .where(and(
+                eq(reservationPayments.module, "massages"),
+                eq(reservationPayments.reservationId, input.entityId),
+              )),
+          ]);
           const booking = row.booking;
           return {
             service: "massages" as const,
@@ -604,13 +712,18 @@ export const operations360Router = router({
             client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
             schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
             status: booking.status,
-            payment: {
+            payment: buildPaymentDetail({
               status: booking.paymentStatus,
               method: booking.manualPaymentMethod ?? (booking.getnetRequestId ? "getnet" : null),
               reference: booking.getnetRequestId,
-              amountClp: money(booking.amountPaid),
+              originalAmountClp: booking.originalAmount,
+              discountAmountClp: booking.discountAmount,
+              discountCode: booking.discountCode,
+              amountPaidClp: booking.amountPaid,
               refundAmountClp: booking.paymentStatus === "refunded" ? money(booking.amountPaid) : 0,
-            },
+              createdAt: booking.createdAt,
+              rows: paymentRows,
+            }),
             notes: booking.notes,
             detail: [row.therapistName, row.roomName, `${booking.duration} min`].filter(Boolean).join(" · "),
             activity: [
@@ -636,7 +749,14 @@ export const operations360Router = router({
           client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
           schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
           status: booking.status,
-          payment: { status: booking.status === "cancelled" ? null : "paid", method: booking.paymentMethod, reference: booking.paymentReference, amountClp: 0, refundAmountClp: 0 },
+          payment: buildPaymentDetail({
+            status: booking.status === "cancelled" ? null : "paid",
+            method: booking.paymentMethod,
+            reference: booking.paymentReference,
+            amountPaidClp: 0,
+            refundAmountClp: 0,
+            createdAt: booking.createdAt,
+          }),
           notes: booking.notes,
           detail: `${booking.modality === "double" ? "Doble" : "Simple"} · ${booking.duration} min`,
           activity: [
@@ -650,11 +770,17 @@ export const operations360Router = router({
 
       if (input.kind === "sauna") {
         if (!allowed.includes("sauna")) throw new TRPCError({ code: "FORBIDDEN" });
-        const [booking] = await db
-          .select()
-          .from(saunaBookings)
-          .where(eq(saunaBookings.id, input.entityId))
-          .limit(1);
+        const [[booking], paymentRows] = await Promise.all([
+          db.select()
+            .from(saunaBookings)
+            .where(eq(saunaBookings.id, input.entityId))
+            .limit(1),
+          db.select().from(reservationPayments)
+            .where(and(
+              eq(reservationPayments.module, "sauna"),
+              eq(reservationPayments.reservationId, input.entityId),
+            )),
+        ]);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
         return {
           service: "sauna" as const,
@@ -670,13 +796,16 @@ export const operations360Router = router({
             endTime: booking.endTime,
           },
           status: booking.status,
-          payment: {
+          payment: buildPaymentDetail({
             status: booking.paymentStatus,
             method: booking.paymentMethod,
             reference: booking.paymentReference,
-            amountClp: booking.amountPaidClp,
+            originalAmountClp: booking.amountClp,
+            amountPaidClp: booking.amountPaidClp,
             refundAmountClp: booking.paymentStatus === "refunded" ? booking.amountPaidClp : 0,
-          },
+            createdAt: booking.createdAt,
+            rows: paymentRows,
+          }),
           notes: booking.notes,
           detail: `${booking.guests} persona(s) · ${booking.source === "skedu" ? "Skedu" : "CMS"}`,
           activity: [
