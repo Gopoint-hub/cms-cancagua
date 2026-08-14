@@ -114,6 +114,17 @@ function bookingDate(value: unknown) {
   return String(value ?? "").slice(0, 10);
 }
 
+function paymentDateLabel(value: unknown) {
+  if (!value) return "—";
+  const date = new Date(value as string | number | Date);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("es-CL", {
+    timeZone: "America/Santiago",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 export default function BiopiscinasAgenda() {
   const search = useSearch();
   const { user } = useAuth();
@@ -149,6 +160,12 @@ export default function BiopiscinasAgenda() {
     childQuantity: 0,
     notes: "",
   });
+  const [manualDiscountCode, setManualDiscountCode] = useState("");
+  const [appliedManualDiscount, setAppliedManualDiscount] = useState<{
+    code: string;
+    discountTotal: number;
+    finalTotal: number;
+  } | null>(null);
   const utils = trpc.useUtils();
   const { data: services } = trpc.biopools.services.list.useQuery();
   const activeServices = useMemo(
@@ -223,13 +240,73 @@ export default function BiopiscinasAgenda() {
     { id: paymentBooking?.id ?? 0 },
     { enabled: Boolean(paymentBooking) }
   );
+  const paymentRows = useMemo(() => {
+    if (!paymentDetail) return [];
+    const rows: Array<{
+      id: string;
+      method: string;
+      date: unknown;
+      detail: string;
+      amountClp: number;
+      status: string;
+      paymentId?: number;
+      paymentMethod?: string;
+    }> = [];
+    if (paymentDetail.booking.discountCode && paymentDetail.booking.discountAmountClp > 0) {
+      rows.push({
+        id: "discount",
+        method: "Código de descuento",
+        date: paymentDetail.checkoutOrder?.createdAt ?? paymentDetail.booking.createdAt,
+        detail: paymentDetail.booking.discountCode,
+        amountClp: paymentDetail.booking.discountAmountClp,
+        status: "discount",
+      });
+    }
+    if (paymentDetail.checkoutOrder && paymentDetail.checkoutOrder.totalClp > 0) {
+      rows.push({
+        id: `webpay-${paymentDetail.checkoutOrder.id}`,
+        method: "Webpay",
+        date: paymentDetail.checkoutOrder.paidAt ?? paymentDetail.checkoutOrder.transactionDate ?? paymentDetail.checkoutOrder.createdAt,
+        detail: paymentDetail.checkoutOrder.authorizationCode ?? paymentDetail.checkoutOrder.buyOrder ?? "—",
+        amountClp: paymentDetail.checkoutOrder.totalClp,
+        status: paymentDetail.checkoutOrder.status === "paid" ? "paid" : "pending",
+      });
+    }
+    for (const payment of paymentDetail.payments) {
+      rows.push({
+        id: `payment-${payment.id}`,
+        method: paymentMethodLabel[payment.method] ?? payment.method,
+        date: payment.paidAt ?? payment.createdAt,
+        detail: payment.reference ?? (payment.cardType ? payment.cardType === "credit" ? "Crédito" : "Débito" : "—"),
+        amountClp: payment.amountClp,
+        status: payment.status,
+        paymentId: payment.id,
+        paymentMethod: payment.method,
+      });
+    }
+    return rows;
+  }, [paymentDetail]);
   const create = trpc.biopools.bookings.create.useMutation({
     onSuccess: () => {
       toast.success("Reserva creada y comunicaciones programadas");
       setOpen(false);
+      setManualDiscountCode("");
+      setAppliedManualDiscount(null);
       utils.biopools.invalidate();
     },
     onError: error => toast.error(error.message),
+  });
+  const validateManualDiscount = trpc.biopools.public.validateDiscount.useMutation({
+    onSuccess: result => {
+      setAppliedManualDiscount(result);
+      setManualDiscountCode(result.code);
+      setPayments(result.finalTotal === 0 ? [] : [emptyPayment(String(result.finalTotal))]);
+      toast.success(`Código ${result.code} aplicado`);
+    },
+    onError: error => {
+      setAppliedManualDiscount(null);
+      toast.error(error.message);
+    },
   });
   const addPayment = trpc.biopools.bookings.addPayment.useMutation({
     onSuccess: () => {
@@ -305,9 +382,14 @@ export default function BiopiscinasAgenda() {
         : { ...current, childQuantity: 0 });
     }
   }, [detail]);
-  const total =
+  const subtotal =
     form.adultQuantity * adultPrice + form.childQuantity * childPrice;
+  const total = appliedManualDiscount?.finalTotal ?? subtotal;
   const plannedPayments = payments.reduce((sum, payment) => sum + (Number(payment.amountClp) || 0), 0);
+  useEffect(() => {
+    setAppliedManualDiscount(null);
+    setPayments(current => current.length ? current : [emptyPayment(String(subtotal))]);
+  }, [manualService?.id, form.adultQuantity, form.childQuantity, subtotal]);
   const selectedSlot = manualAvailability?.slots.find(
     slot => slot.startTime === startTime
   );
@@ -371,7 +453,9 @@ export default function BiopiscinasAgenda() {
   const openCreate = (serviceId: number, slot: string) => {
     setManualServiceId(serviceId);
     setStartTime(slot);
-    setPayments([emptyPayment(String(total))]);
+    setPayments([emptyPayment(String(subtotal))]);
+    setManualDiscountCode("");
+    setAppliedManualDiscount(null);
     setOpen(true);
   };
   const updatePayment = (index: number, changes: Partial<PaymentDraft>) => {
@@ -488,7 +572,8 @@ export default function BiopiscinasAgenda() {
       bookingDate: date,
       startTime,
       source: "cms",
-      discountAmountClp: 0,
+      discountCode: appliedManualDiscount?.code,
+      discountAmountClp: appliedManualDiscount?.discountTotal ?? 0,
       payments: payments.map(payment => ({
         method: payment.method as PaymentMethod,
         status: payment.status,
@@ -998,14 +1083,50 @@ export default function BiopiscinasAgenda() {
                   Todo niño debe asistir con un adulto.
                 </p>
               </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Código de descuento</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={manualDiscountCode}
+                    onChange={event => {
+                      setManualDiscountCode(event.target.value.toUpperCase());
+                      setAppliedManualDiscount(null);
+                    }}
+                    placeholder="Ingresa el código"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!manualDiscountCode.trim() || validateManualDiscount.isPending || !manualService}
+                    onClick={() => manualService && validateManualDiscount.mutate({
+                      serviceId: manualService.id,
+                      adultQuantity: form.adultQuantity,
+                      childQuantity: form.childQuantity,
+                      code: manualDiscountCode,
+                    })}
+                  >
+                    {validateManualDiscount.isPending ? "Validando…" : "Aplicar"}
+                  </Button>
+                </div>
+                {appliedManualDiscount && (
+                  <p className="text-sm font-medium text-emerald-700">
+                    {appliedManualDiscount.code} aplicado · descuento {clp.format(appliedManualDiscount.discountTotal)}
+                  </p>
+                )}
+              </div>
               <div className="space-y-3 sm:col-span-2">
                 <div className="flex items-center justify-between">
                   <Label>Pagos y abonos</Label>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setPayments(current => [...current, emptyPayment()])}>
+                  {total > 0 && <Button type="button" size="sm" variant="outline" onClick={() => setPayments(current => [...current, emptyPayment()])}>
                     <Plus className="mr-1 h-4 w-4" /> Agregar otro pago
-                  </Button>
+                  </Button>}
                 </div>
-                {payments.map((payment, index) => (
+                {total === 0 && appliedManualDiscount && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-800">
+                    El código cubre el 100% de la reserva. No se requiere medio de pago.
+                  </div>
+                )}
+                {total > 0 && payments.map((payment, index) => (
                   <div key={index} className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Medio de pago</Label>
@@ -1079,9 +1200,10 @@ export default function BiopiscinasAgenda() {
                 Disponibilidad:{" "}
                 <strong>{selectedSlot?.availableSeats ?? 0} cupos</strong>
               </span>
-              <span>
-                Total: <strong>{clp.format(total)}</strong>
-              </span>
+              <div className="text-right">
+                {appliedManualDiscount && <p className="text-xs text-emerald-700">Subtotal {clp.format(subtotal)} · {appliedManualDiscount.code}: −{clp.format(appliedManualDiscount.discountTotal)}</p>}
+                <span>Total: <strong>{clp.format(total)}</strong></span>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>
@@ -1094,6 +1216,8 @@ export default function BiopiscinasAgenda() {
                   !form.clientName ||
                   !form.clientEmail ||
                   !form.clientPhone ||
+                  (Boolean(manualDiscountCode.trim()) && !appliedManualDiscount) ||
+                  (total > 0 && payments.length === 0) ||
                   payments.some(payment => !paymentIsComplete(payment)) ||
                   plannedPayments > total ||
                   form.adultQuantity + form.childQuantity < 1 ||
@@ -1112,27 +1236,48 @@ export default function BiopiscinasAgenda() {
           <DialogContent className="max-w-2xl">
             <DialogHeader><DialogTitle>Pagos · {paymentBooking?.clientName}</DialogTitle></DialogHeader>
             <div className="space-y-4">
-              <div className="rounded-xl bg-cyan-50 p-3 text-sm flex justify-between">
+              <div className="rounded-xl bg-cyan-50 p-3 text-sm flex flex-wrap justify-between gap-3">
+                <span>Subtotal: <strong>{clp.format(paymentDetail?.booking.originalAmountClp ?? paymentBooking?.totalClp ?? 0)}</strong></span>
+                {(paymentDetail?.booking.discountAmountClp ?? 0) > 0 && (
+                  <span className="text-emerald-700">
+                    Descuento{paymentDetail?.booking.discountCode ? ` · ${paymentDetail.booking.discountCode}` : ""}: <strong>−{clp.format(paymentDetail?.booking.discountAmountClp ?? 0)}</strong>
+                  </span>
+                )}
                 <span>Total: <strong>{clp.format(paymentBooking?.totalClp ?? 0)}</strong></span>
                 <span>Abonado: <strong>{clp.format(paymentDetail?.booking.amountPaidClp ?? paymentBooking?.amountPaidClp ?? 0)}</strong></span>
                 <span>Saldo: <strong>{clp.format(Math.max(0, (paymentBooking?.totalClp ?? 0) - (paymentDetail?.booking.amountPaidClp ?? paymentBooking?.amountPaidClp ?? 0)))}</strong></span>
               </div>
-              <div className="space-y-2">
-                {(paymentDetail?.payments ?? []).map(payment => (
-                  <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
-                    <div>
-                      <strong>{paymentMethodLabel[payment.method] ?? payment.method} · {clp.format(payment.amountClp)}</strong>
-                      <p className="text-xs text-muted-foreground">
-                        {payment.status === "paid" ? "Pagado" : "Pendiente"}
-                        {payment.paidAt ? ` · ${new Date(payment.paidAt).toLocaleString("es-CL", { timeZone: "America/Santiago" })}` : ""}
-                        {payment.reference ? ` · Código: ${payment.reference}` : ""}
-                        {payment.cardType ? ` · ${payment.cardType === "credit" ? "Crédito" : "Débito"}` : ""}
-                      </p>
-                    </div>
-                    {payment.status === "pending" && <Button size="sm" variant="outline" onClick={() => confirmPendingPayment(payment)} disabled={completePayment.isPending}>Marcar pagado</Button>}
+              <div className="overflow-x-auto rounded-xl border">
+                <div className="min-w-[680px]">
+                  <div className="grid grid-cols-[1.3fr_1fr_1.2fr_.8fr] gap-3 border-b bg-muted/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>Método</span><span>Fecha</span><span>Detalle</span><span className="text-right">Monto</span>
                   </div>
-                ))}
-                {!paymentDetail?.payments.length && <p className="text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
+                  {paymentRows.map(row => (
+                    <div key={row.id} className="grid grid-cols-[1.3fr_1fr_1.2fr_.8fr] items-center gap-3 border-b px-4 py-3 text-sm last:border-b-0">
+                      <div>
+                        <strong>{row.method}</strong>
+                        <p className={`text-xs ${row.status === "discount" ? "text-emerald-700" : "text-muted-foreground"}`}>
+                          {row.status === "discount" ? "Aplicado" : row.status === "paid" ? "Pagado" : "Pendiente"}
+                        </p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">{paymentDateLabel(row.date)}</span>
+                      <span className={row.status === "discount" ? "font-mono text-xs font-semibold text-violet-700" : "text-xs"}>{row.detail}</span>
+                      <div className="text-right">
+                        <strong className={row.status === "discount" ? "text-emerald-700" : ""}>
+                          {row.status === "discount" ? "−" : ""}{clp.format(row.amountClp)}
+                        </strong>
+                        {row.status === "pending" && row.paymentId && row.paymentMethod && (
+                          <Button className="mt-1" size="sm" variant="outline" onClick={() => confirmPendingPayment({ id: row.paymentId!, method: row.paymentMethod! })} disabled={completePayment.isPending}>Marcar pagado</Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {!paymentRows.length && <p className="p-4 text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
+                </div>
+              </div>
+              <div className="flex justify-between border-t pt-3 text-sm">
+                <span>Monto pendiente</span>
+                <strong>{clp.format(Math.max(0, (paymentBooking?.totalClp ?? 0) - (paymentDetail?.booking.amountPaidClp ?? paymentBooking?.amountPaidClp ?? 0)))}</strong>
               </div>
               <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
                 <div className="space-y-2">

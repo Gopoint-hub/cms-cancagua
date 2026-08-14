@@ -170,6 +170,8 @@ export const biopoolBookings = mysqlTable("biopool_bookings", {
   paymentReference: varchar("payment_reference", { length: 160 }),
   originalAmountClp: int("original_amount_clp").notNull(),
   discountAmountClp: int("discount_amount_clp").default(0).notNull(),
+  discountCodeId: int("discount_code_id"),
+  discountCode: varchar("discount_code", { length: 50 }),
   amountPaidClp: int("amount_paid_clp").default(0).notNull(),
   refundAmountClp: int("refund_amount_clp").default(0).notNull(),
   refundFeeAmountClp: int("refund_fee_amount_clp").default(0).notNull(),

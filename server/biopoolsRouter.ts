@@ -51,7 +51,7 @@ import {
   refundTransaction,
 } from "./webpay";
 import { ENV } from "./_core/env";
-import { calculateWellnessCartDiscount } from "./massageDiscounts";
+import { calculateWellnessCartDiscount, recordMassageDiscountUsage } from "./massageDiscounts";
 import {
   biopoolResultUrl,
   finalizeApprovedBiopoolOrder,
@@ -1136,7 +1136,7 @@ export const biopoolsRouter = router({
           .where(eq(biopoolBookings.id, input.id))
           .limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-        const [activity, notifications, payments] = await Promise.all([
+        const [activity, notifications, payments, checkoutOrders] = await Promise.all([
           db
             .select()
             .from(biopoolBookingActivity)
@@ -1152,8 +1152,14 @@ export const biopoolsRouter = router({
             .from(reservationPayments)
             .where(and(eq(reservationPayments.module, "biopools"), eq(reservationPayments.reservationId, input.id)))
             .orderBy(desc(reservationPayments.createdAt)),
+          db
+            .select()
+            .from(biopoolCheckoutOrders)
+            .where(eq(biopoolCheckoutOrders.bookingId, input.id))
+            .orderBy(desc(biopoolCheckoutOrders.createdAt))
+            .limit(1),
         ]);
-        return { booking, activity, notifications, payments };
+        return { booking, activity, notifications, payments, checkoutOrder: checkoutOrders[0] ?? null };
       }),
     create: protectedProcedure
       .input(
@@ -1166,7 +1172,8 @@ export const biopoolsRouter = router({
           startTime: timeSchema,
           adultQuantity: z.number().int().min(0).max(40),
           childQuantity: z.number().int().min(0).max(40),
-          payments: z.array(manualPaymentSchema).min(1).max(10),
+          payments: z.array(manualPaymentSchema).max(10),
+          discountCode: z.string().trim().max(50).optional(),
           discountAmountClp: z.number().int().min(0).default(0),
           notes: z.string().optional(),
           source: z.enum(["cms", "web", "skedu_import", "b2b"]).default("cms"),
@@ -1231,7 +1238,23 @@ export const biopoolsRouter = router({
             const originalAmountClp =
               adult.priceClp * input.adultQuantity +
               (child?.priceClp ?? 0) * input.childQuantity;
-            if (input.discountAmountClp > originalAmountClp)
+            let appliedDiscount: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
+            if (input.discountCode) {
+              try {
+                appliedDiscount = await calculateWellnessCartDiscount(tx, input.discountCode, [{
+                  service: "biopiscinas",
+                  serviceId: input.serviceId,
+                  originalAmount: originalAmountClp,
+                }]);
+              } catch (error) {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: error instanceof Error ? error.message : "El código no es válido",
+                });
+              }
+            }
+            const discountAmountClp = appliedDiscount?.discountTotal ?? input.discountAmountClp;
+            if (discountAmountClp > originalAmountClp)
               throw new TRPCError({
                 code: "BAD_REQUEST",
                 message: "El descuento supera el total",
@@ -1274,7 +1297,10 @@ export const biopoolsRouter = router({
                 .limit(1);
             }
 
-            const totalClp = originalAmountClp - input.discountAmountClp;
+            const totalClp = originalAmountClp - discountAmountClp;
+            if (!appliedDiscount && input.payments.length === 0) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa al menos un medio de pago" });
+            }
             const plannedTotalClp = input.payments.reduce((sum, payment) => sum + payment.amountClp, 0);
             const amountPaidClp = input.payments
               .filter(payment => payment.status === "paid")
@@ -1282,7 +1308,9 @@ export const biopoolsRouter = router({
             if (plannedTotalClp > totalClp) {
               throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos ingresados superan el total de la reserva" });
             }
-            const paymentStatus = bookingPaymentStatus(amountPaidClp, totalClp);
+            const paymentStatus = totalClp === 0 && appliedDiscount
+              ? "paid"
+              : bookingPaymentStatus(amountPaidClp, totalClp);
             const giftCardPayments: Array<{
               payment: z.infer<typeof manualPaymentSchema>;
               card: typeof giftCards.$inferSelect;
@@ -1338,12 +1366,18 @@ export const biopoolsRouter = router({
                 status: "confirmed",
                 attendanceToken: nanoid(48),
                 paymentStatus,
-                paymentMethod: input.payments.length === 1 ? input.payments[0].method : "mixed",
-                paymentReference: input.payments.length === 1
+                paymentMethod: totalClp === 0 && appliedDiscount
+                  ? "discount_code"
+                  : input.payments.length === 1 ? input.payments[0].method : "mixed",
+                paymentReference: totalClp === 0 && appliedDiscount
+                  ? appliedDiscount.code
+                  : input.payments.length === 1
                   ? (input.payments[0].giftCardCode?.trim().toUpperCase() ?? input.payments[0].reference ?? null)
                   : null,
                 originalAmountClp,
-                discountAmountClp: input.discountAmountClp,
+                discountAmountClp,
+                discountCodeId: appliedDiscount?.discountCodeId ?? null,
+                discountCode: appliedDiscount?.code ?? null,
                 amountPaidClp,
                 refundFeePercent: availability.service.refundFeePercent,
                 source: input.source,
@@ -1410,9 +1444,25 @@ export const biopoolsRouter = router({
               tx,
               created.id,
               "booking_created",
-              { source: input.source, totalGuests, originalAmountClp },
+              {
+                source: input.source,
+                totalGuests,
+                originalAmountClp,
+                discountAmountClp,
+                discountCode: appliedDiscount?.code ?? null,
+              },
               ctx.user.id
             );
+            if (appliedDiscount && discountAmountClp > 0) {
+              await recordMassageDiscountUsage(tx, {
+                discountCodeId: appliedDiscount.discountCodeId,
+                requestId: `biopool-manual-${created.id}`,
+                email: normalizedEmail,
+                originalAmount: originalAmountClp,
+                discountAmount: discountAmountClp,
+                finalAmount: totalClp,
+              });
+            }
 
             const paidAmount = amountPaidClp;
             const servicesUsed = Array.from(new Set([

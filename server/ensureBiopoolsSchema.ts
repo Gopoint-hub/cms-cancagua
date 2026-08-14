@@ -226,6 +226,7 @@ const CREATE_STATEMENTS = [
     payment_status enum('pending','partially_paid','paid','partially_refunded','refunded') NOT NULL DEFAULT 'pending',
     payment_method varchar(60) NULL, payment_reference varchar(160) NULL,
     original_amount_clp int NOT NULL, discount_amount_clp int NOT NULL DEFAULT 0,
+    discount_code_id int NULL, discount_code varchar(50) NULL,
     amount_paid_clp int NOT NULL DEFAULT 0, refund_amount_clp int NOT NULL DEFAULT 0,
     refund_fee_amount_clp int NOT NULL DEFAULT 0,
     refund_status enum('none','pending','processed','rejected') NOT NULL DEFAULT 'none',
@@ -337,6 +338,24 @@ export async function ensureBiopoolsSchema(): Promise<void> {
       sql`ALTER TABLE biopool_bookings ADD COLUMN agenda_hidden_by_user_id int NULL AFTER agenda_hidden_at`
     );
   }
+  if (!existingBookingColumns.has("discount_code_id")) {
+    await db.execute(
+      sql`ALTER TABLE biopool_bookings ADD COLUMN discount_code_id int NULL AFTER discount_amount_clp`
+    );
+  }
+  if (!existingBookingColumns.has("discount_code")) {
+    await db.execute(
+      sql`ALTER TABLE biopool_bookings ADD COLUMN discount_code varchar(50) NULL AFTER discount_code_id`
+    );
+  }
+  await db.execute(sql`
+    UPDATE biopool_bookings booking
+    INNER JOIN biopool_checkout_orders checkout ON checkout.booking_id = booking.id
+    SET booking.discount_code_id = checkout.discount_code_id,
+        booking.discount_code = checkout.discount_code
+    WHERE booking.discount_code IS NULL
+      AND checkout.discount_code IS NOT NULL
+  `);
 
   let [service] = await db
     .select()

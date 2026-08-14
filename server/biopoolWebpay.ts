@@ -157,6 +157,8 @@ export async function finalizeApprovedBiopoolOrder(
         : order.discountCode || order.publicToken,
       originalAmountClp: order.subtotalClp,
       discountAmountClp: order.discountClp,
+      discountCodeId: order.discountCodeId,
+      discountCode: order.discountCode,
       amountPaidClp: order.totalClp,
       refundFeePercent: service.refundFeePercent,
       source: "web",
