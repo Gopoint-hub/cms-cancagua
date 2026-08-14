@@ -39,6 +39,10 @@ import {
 } from "../shared/biopoolsCapacity";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import {
+  evaluateReschedulePolicy,
+  validOverrideReason,
+} from "./biopoolReschedulePolicy";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import {
   createTransaction,
@@ -1742,11 +1746,29 @@ export const biopoolsRouter = router({
               .from(biopoolServices)
               .where(eq(biopoolServices.id, booking.serviceId))
               .limit(1);
-            const canOverride =
-              input.overridePolicy && ctx.user.role === "super_admin";
+            const {
+              exceedsMaximum,
+              violatesNotice,
+              canOverride,
+            } = evaluateReschedulePolicy({
+              rescheduleCount: booking.rescheduleCount,
+              maxReschedules: service.maxStaffReschedules,
+              hoursUntilStart: hoursUntil(
+                serializeDate(booking.bookingDate),
+                booking.startTime
+              ),
+              noticeHours: service.rescheduleNoticeHours,
+              overrideRequested: input.overridePolicy,
+            });
+            if (input.overridePolicy && !validOverrideReason(input.reason)) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "La excepción requiere un motivo de al menos 10 caracteres",
+              });
+            }
             if (
               !canOverride &&
-              booking.rescheduleCount >= service.maxStaffReschedules
+              exceedsMaximum
             )
               throw new TRPCError({
                 code: "PRECONDITION_FAILED",
@@ -1754,10 +1776,7 @@ export const biopoolsRouter = router({
               });
             if (
               !canOverride &&
-              hoursUntil(
-                serializeDate(booking.bookingDate),
-                booking.startTime
-              ) < service.rescheduleNoticeHours
+              violatesNotice
             )
               throw new TRPCError({
                 code: "PRECONDITION_FAILED",
@@ -1797,6 +1816,10 @@ export const biopoolsRouter = router({
                 to: `${input.bookingDate} ${input.startTime}`,
                 reason: input.reason,
                 policyOverride: canOverride,
+                policyViolations: {
+                  noticeHours: violatesNotice,
+                  maximumReschedules: exceedsMaximum,
+                },
               },
               ctx.user.id
             );
@@ -1819,14 +1842,15 @@ export const biopoolsRouter = router({
             );
             const reminders: Array<typeof biopoolNotifications.$inferInsert> =
               [];
-            if (service.reminderEmailEnabled)
+            const reminderIsStillUseful = reminderAt.getTime() > Date.now();
+            if (service.reminderEmailEnabled && reminderIsStillUseful)
               reminders.push({
                 bookingId: input.id,
                 type: "reminder",
                 channel: "email",
                 scheduledAt: reminderAt,
               });
-            if (service.reminderWhatsappEnabled)
+            if (service.reminderWhatsappEnabled && reminderIsStillUseful)
               reminders.push({
                 bookingId: input.id,
                 type: "reminder",

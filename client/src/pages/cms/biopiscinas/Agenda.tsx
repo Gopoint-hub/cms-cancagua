@@ -45,6 +45,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  AlertTriangle,
   Plus,
   RotateCw,
   UsersRound,
@@ -120,10 +121,14 @@ export default function BiopiscinasAgenda() {
     serviceId: number;
     totalGuests: number;
     clientName: string;
+    bookingDate: string;
+    startTime: string;
+    rescheduleCount: number;
   } | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState(localDate());
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
+  const [rescheduleOverride, setRescheduleOverride] = useState(false);
   const [payments, setPayments] = useState<PaymentDraft[]>([emptyPayment()]);
   const [paymentBooking, setPaymentBooking] = useState<{ id: number; clientName: string; totalClp: number; amountPaidClp: number } | null>(null);
   const [additionalPayment, setAdditionalPayment] = useState<PaymentDraft>(emptyPayment());
@@ -258,8 +263,9 @@ export default function BiopiscinasAgenda() {
   });
   const reschedule = trpc.biopools.bookings.reschedule.useMutation({
     onSuccess: () => {
-      toast.success("Reserva reagendada y recordatorios actualizados");
+      toast.success("Reserva reagendada correctamente");
       setRescheduleBooking(null);
+      setRescheduleOverride(false);
       utils.biopools.invalidate();
     },
     onError: error => toast.error(error.message),
@@ -383,16 +389,21 @@ export default function BiopiscinasAgenda() {
     clientName: string;
     bookingDate: unknown;
     startTime: string;
+    rescheduleCount: number;
   }) => {
     setRescheduleBooking({
       id: booking.id,
       serviceId: booking.serviceId,
       totalGuests: booking.totalGuests,
       clientName: booking.clientName,
+      bookingDate: String(booking.bookingDate).slice(0, 10),
+      startTime: booking.startTime,
+      rescheduleCount: booking.rescheduleCount,
     });
     setRescheduleDate(String(booking.bookingDate).slice(0, 10));
     setRescheduleTime(booking.startTime);
     setRescheduleReason("");
+    setRescheduleOverride(false);
   };
   useEffect(() => {
     if (!rescheduleBooking || !rescheduleAvailability?.slots.length) return;
@@ -993,7 +1004,12 @@ export default function BiopiscinasAgenda() {
 
         <Dialog
           open={Boolean(rescheduleBooking)}
-          onOpenChange={next => !next && setRescheduleBooking(null)}
+          onOpenChange={next => {
+            if (!next) {
+              setRescheduleBooking(null);
+              setRescheduleOverride(false);
+            }
+          }}
         >
           <DialogContent>
             <DialogHeader>
@@ -1043,10 +1059,39 @@ export default function BiopiscinasAgenda() {
                   placeholder="Motivo informado por el cliente"
                 />
               </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                <div className="flex gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="font-medium">Recuerda la política de reagendamiento</p>
+                    <p className="mt-1 text-xs">
+                      Debe solicitarse con al menos{" "}
+                      {rescheduleAvailability?.service.rescheduleNoticeHours ?? 48} horas
+                      de anticipación y admite un máximo de{" "}
+                      {rescheduleAvailability?.service.maxStaffReschedules ?? 2} cambios.
+                      Esta reserva lleva {rescheduleBooking?.rescheduleCount ?? 0}.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4"
+                  checked={rescheduleOverride}
+                  onChange={event => setRescheduleOverride(event.target.checked)}
+                />
+                <span>
+                  <span className="font-medium">Aplicar excepción autorizada</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Úsala solo con autorización de Operaciones. El motivo, la persona
+                    responsable y el incumplimiento de la política quedarán registrados.
+                  </span>
+                </span>
+              </label>
               <p className="text-xs text-muted-foreground">
-                Se respetan el máximo de 2 reagendamientos y las 48 horas de
-                anticipación. Los recordatorios pendientes se reemplazarán por
-                los de la nueva fecha.
+                Los recordatorios pendientes se reemplazarán solo si todavía corresponde
+                enviarlos para la nueva fecha.
               </p>
             </div>
             <DialogFooter>
@@ -1059,7 +1104,7 @@ export default function BiopiscinasAgenda() {
               <Button
                 disabled={
                   !rescheduleTime ||
-                  rescheduleReason.trim().length < 3 ||
+                  rescheduleReason.trim().length < (rescheduleOverride ? 10 : 3) ||
                   reschedule.isPending
                 }
                 onClick={() =>
@@ -1069,7 +1114,7 @@ export default function BiopiscinasAgenda() {
                     bookingDate: rescheduleDate,
                     startTime: rescheduleTime,
                     reason: rescheduleReason,
-                    overridePolicy: false,
+                    overridePolicy: rescheduleOverride,
                   })
                 }
               >
