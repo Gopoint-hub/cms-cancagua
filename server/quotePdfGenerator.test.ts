@@ -20,7 +20,10 @@ describe("branded quotation PDF", () => {
           description: "Incluye café americano, agua saborizada, fruta de estación y alternativas dulces y saladas.",
           quantity: 40,
           unitPrice: 12000,
-          total: 480000,
+          discountType: "percentage",
+          discountValue: 15,
+          subtotal: 480000,
+          total: 408000,
           sortOrder: 1,
         },
         {

@@ -8,6 +8,9 @@ interface QuoteItem {
   quantity: number;
   unitPrice: number;
   total: number;
+  discountType?: "percentage" | "fixed";
+  discountValue?: number;
+  subtotal?: number;
   scheduleTime?: string;
   sortOrder?: number;
 }
@@ -240,9 +243,21 @@ export async function generateQuotePDF(data: QuoteData): Promise<Buffer> {
         const scheduleHeight = item.scheduleTime
           ? doc.heightOfString(`Horario: ${item.scheduleTime}`, { width: textWidth })
           : 0;
+        const discountValue = item.discountValue || 0;
+        const baseSubtotal = item.subtotal ?? item.quantity * item.unitPrice;
+        const savings = Math.max(0, baseSubtotal - item.total);
+        const discountText = discountValue > 0
+          ? item.discountType === "fixed"
+            ? `Descuento aplicado: ${money(discountValue)} · Ahorro: ${money(savings)}`
+            : `Descuento aplicado: ${discountValue}% · Ahorro: ${money(savings)}`
+          : "";
+        const discountHeight = discountText
+          ? doc.heightOfString(discountText, { width: textWidth })
+          : 0;
         const rowHeight = 18 + nameHeight
           + (descriptionHeight ? descriptionHeight + 4 : 0)
-          + (scheduleHeight ? scheduleHeight + 4 : 0);
+          + (scheduleHeight ? scheduleHeight + 4 : 0)
+          + (discountHeight ? discountHeight + 4 : 0);
 
         if (y + rowHeight > contentBottom) {
           y = addPage();
@@ -268,6 +283,12 @@ export async function generateQuotePDF(data: QuoteData): Promise<Buffer> {
           textY += 4;
           doc.font(fonts.body).fontSize(8).fillColor(COLORS.sage)
             .text(`Horario: ${item.scheduleTime}`, left + 10, textY, { width: textWidth });
+          textY += scheduleHeight;
+        }
+        if (discountText) {
+          textY += 4;
+          doc.font(fonts.medium).fontSize(8).fillColor(COLORS.sage)
+            .text(discountText, left + 10, textY, { width: textWidth });
         }
         doc.font(fonts.body).fontSize(8.7).fillColor(COLORS.ink)
           .text(String(item.quantity), left + columns.name, rowTop, { width: columns.qty, align: "center" });
