@@ -519,6 +519,7 @@ export default function BiopiscinasAgenda() {
     setDate(format(next, "yyyy-MM-dd"));
   };
   const calendarTitle = format(selected, "EEEE d 'de' MMMM yyyy", { locale: es });
+  const mobileCalendarTitle = format(selected, "EEE d MMM", { locale: es });
   const cancelledBookings = (bookings ?? []).filter(
     item => bookingDate(item.bookingDate) === date && item.status === "cancelled"
   );
@@ -529,15 +530,15 @@ export default function BiopiscinasAgenda() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="space-y-3 p-3 sm:space-y-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3 sm:items-center sm:gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.25em] text-cyan-700">
+            <p className="hidden text-xs uppercase tracking-[0.25em] text-cyan-700 sm:block">
               Agenda y cupos
             </p>
-            <h1 className="text-3xl font-semibold">Biopiscinas</h1>
+            <h1 className="text-2xl font-semibold sm:text-3xl">Biopiscinas</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:w-auto">
             <Select
               value={String(selectedServiceId)}
               onValueChange={value => {
@@ -545,7 +546,7 @@ export default function BiopiscinasAgenda() {
                 setManualServiceId(value === "all" ? null : Number(value));
               }}
             >
-              <SelectTrigger className="w-64">
+              <SelectTrigger className="col-span-3 w-full sm:w-64">
                 <SelectValue placeholder="Selecciona modalidad" />
               </SelectTrigger>
               <SelectContent>
@@ -568,7 +569,7 @@ export default function BiopiscinasAgenda() {
               type="date"
               value={date}
               onChange={event => setDate(event.target.value)}
-              className="w-40"
+              className="w-full min-w-0 sm:w-40"
             />
             <Button
               variant="outline"
@@ -579,6 +580,7 @@ export default function BiopiscinasAgenda() {
             </Button>
             {canManage && (
               <Button
+                className="col-span-3 w-full sm:w-auto"
                 disabled={!manualService}
                 onClick={() => {
                   const target = availabilityRows.find(
@@ -594,9 +596,13 @@ export default function BiopiscinasAgenda() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-background p-3">
+        <div className="flex items-center justify-between gap-2 rounded-xl border bg-background p-2 sm:justify-start sm:gap-3 sm:p-3">
           <Button variant="outline" size="sm" onClick={() => setDate(localDate())}>Hoy</Button>
-          <p className="min-w-52 text-sm font-semibold capitalize">{calendarTitle}</p>
+          <p className="min-w-0 flex-1 text-right text-sm font-semibold capitalize sm:hidden">{mobileCalendarTitle}</p>
+          <p className="hidden min-w-52 text-sm font-semibold capitalize sm:block">{calendarTitle}</p>
+          <Badge variant="secondary" className="shrink-0 sm:hidden">
+            {activeDayBookings.length} reserva{activeDayBookings.length === 1 ? "" : "s"}
+          </Badge>
         </div>
         {isLoading ? (
           <p>Cargando reservas…</p>
@@ -607,19 +613,19 @@ export default function BiopiscinasAgenda() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2 sm:space-y-3">
             {activeDayBookings.map(booking => (
               <Card key={booking.id} className={serviceTone(serviceName(booking.serviceId)).card}>
-                <CardContent className="p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
+                <CardContent className="p-3 sm:p-4">
+                  <div className="flex flex-wrap items-stretch justify-between gap-3 sm:items-center sm:gap-4">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-lg">{booking.startTime}–{booking.endTime}</span>
-                        <Badge variant="outline" className={serviceTone(serviceName(booking.serviceId)).badge}>
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        <span className="text-base font-semibold sm:text-lg">{booking.startTime}–{booking.endTime}</span>
+                        <Badge variant="outline" className={`text-[11px] sm:text-xs ${serviceTone(serviceName(booking.serviceId)).badge}`}>
                           {serviceName(booking.serviceId)}
                         </Badge>
-                        <Badge variant="outline">{statusLabel[booking.status]}</Badge>
-                        <Badge variant={booking.paymentStatus === "paid" ? "secondary" : "outline"}>
+                        <Badge variant="outline" className="text-[11px] sm:text-xs">{statusLabel[booking.status]}</Badge>
+                        <Badge variant={booking.paymentStatus === "paid" ? "secondary" : "outline"} className="text-[11px] sm:text-xs">
                           {booking.paymentStatus === "paid"
                             ? "Pagada"
                             : booking.paymentStatus === "partially_paid"
@@ -634,8 +640,8 @@ export default function BiopiscinasAgenda() {
                           </Badge>
                         )}
                       </div>
-                      <p className="mt-1 font-medium">{booking.clientName}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                      <p className="mt-1 truncate font-medium">{booking.clientName}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1 sm:text-sm">
                         {booking.adultQuantity} adulto(s) · {booking.childQuantity} niño(s) · {clp.format(booking.originalAmountClp - booking.discountAmountClp)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -647,9 +653,9 @@ export default function BiopiscinasAgenda() {
                         </p>
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="grid w-full grid-cols-3 items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
                             {canManage && booking.status !== "cancelled" && (
-                              <Button size="sm" variant="outline" onClick={() => {
+                              <Button className="w-full" size="sm" variant="outline" onClick={() => {
                                 const totalClp = booking.originalAmountClp - booking.discountAmountClp;
                                 setPaymentBooking({ id: booking.id, clientName: booking.clientName, totalClp, amountPaidClp: booking.amountPaidClp });
                                 setAdditionalPayment(emptyPayment(String(Math.max(0, totalClp - booking.amountPaidClp))));
@@ -660,6 +666,7 @@ export default function BiopiscinasAgenda() {
                             {canManage &&
                               booking.refundStatus === "pending" && (
                                 <Button
+                                  className="col-span-3 w-full sm:w-auto"
                                   size="sm"
                                   variant="outline"
                                   onClick={() => processRefund(booking.id)}
@@ -670,6 +677,7 @@ export default function BiopiscinasAgenda() {
                               )}
                             {canManage && booking.status !== "cancelled" && (
                               <Button
+                                className="w-full"
                                 size="sm"
                                 variant="outline"
                                 onClick={() => openReschedule(booking)}
@@ -685,7 +693,7 @@ export default function BiopiscinasAgenda() {
                                   changeStatus(booking.id, status)
                                 }
                               >
-                                <SelectTrigger className="w-36">
+                                <SelectTrigger className="w-full sm:w-36">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -714,11 +722,11 @@ export default function BiopiscinasAgenda() {
 
         {cancelledInAgenda.length > 0 && (
           <Card className="border-amber-200 bg-amber-50/40">
-            <CardHeader><CardTitle className="text-lg">Reservas canceladas</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
+            <CardHeader className="p-3 pb-2 sm:p-6 sm:pb-3"><CardTitle className="text-base sm:text-lg">Reservas canceladas</CardTitle></CardHeader>
+            <CardContent className="space-y-2 p-3 pt-0 sm:p-6 sm:pt-0">
               {cancelledInAgenda.map(booking => (
                 <div key={`cancelled-${booking.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-3">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <strong>{booking.clientName}</strong>
                       <Badge variant="outline">{serviceName(booking.serviceId)}</Badge>
@@ -728,11 +736,11 @@ export default function BiopiscinasAgenda() {
                     {booking.cancellationReason && <p className="mt-1 text-xs text-muted-foreground">Motivo: {booking.cancellationReason}</p>}
                   </div>
                   {canManage && (
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="outline" onClick={() => reactivateBooking(booking.id, booking.clientName)} disabled={reactivate.isPending}>
+                    <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+                      <Button className="w-full" size="sm" variant="outline" onClick={() => reactivateBooking(booking.id, booking.clientName)} disabled={reactivate.isPending}>
                         <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => removeCancelledFromAgenda(booking.id, booking.clientName)} disabled={hideCancelled.isPending}>
+                      <Button className="w-full" size="sm" variant="destructive" onClick={() => removeCancelledFromAgenda(booking.id, booking.clientName)} disabled={hideCancelled.isPending}>
                         <Trash2 className="mr-1 h-4 w-4" /> Eliminar de la agenda
                       </Button>
                     </div>
@@ -745,16 +753,16 @@ export default function BiopiscinasAgenda() {
 
         {removedFromAgenda.length > 0 && (
           <Card className="border-dashed bg-muted/30">
-            <CardHeader><CardTitle className="text-base text-muted-foreground">Eliminadas de la agenda</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
+            <CardHeader className="p-3 pb-2 sm:p-6 sm:pb-3"><CardTitle className="text-base text-muted-foreground">Eliminadas de la agenda</CardTitle></CardHeader>
+            <CardContent className="space-y-2 p-3 pt-0 sm:p-6 sm:pt-0">
               {removedFromAgenda.map(booking => (
                 <div key={`removed-${booking.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2">
-                  <div className="text-sm">
+                  <div className="min-w-0 flex-1 text-sm">
                     <span className="font-semibold">{booking.clientName}</span>
                     <span className="text-muted-foreground"> · {booking.startTime} · {booking.totalGuests} persona(s) · {serviceName(booking.serviceId)}</span>
                   </div>
                   {canManage && (
-                    <Button size="sm" variant="outline" onClick={() => reactivateBooking(booking.id, booking.clientName)} disabled={reactivate.isPending}>
+                    <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={() => reactivateBooking(booking.id, booking.clientName)} disabled={reactivate.isPending}>
                       <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
                     </Button>
                   )}
