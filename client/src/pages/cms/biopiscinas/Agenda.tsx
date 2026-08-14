@@ -897,7 +897,7 @@ export default function BiopiscinasAgenda() {
                     <div className="grid w-full grid-cols-3 items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
                             {canManage && booking.status !== "cancelled" && (
                         <Button
-                          className="w-full"
+                          className="w-full gap-1 whitespace-nowrap px-2"
                           size="sm"
                           variant="outline"
                           onClick={() => {
@@ -921,7 +921,7 @@ export default function BiopiscinasAgenda() {
                             );
                           }}
                         >
-                                <Plus className="mr-1 h-4 w-4" /> Pagos
+                                <Plus className="h-4 w-4" /> Pagos
                               </Button>
                             )}
                       {canManage && booking.refundStatus === "pending" && (
@@ -937,12 +937,12 @@ export default function BiopiscinasAgenda() {
                               )}
                             {canManage && booking.status !== "cancelled" && (
                               <Button
-                                className="w-full"
+                                className="w-full gap-1 whitespace-nowrap px-2"
                                 size="sm"
                                 variant="outline"
                                 onClick={() => openReschedule(booking)}
                               >
-                                <RotateCw className="h-4 w-4 mr-1" />
+                                <RotateCw className="h-4 w-4" />
                                 Reagendar
                               </Button>
                             )}

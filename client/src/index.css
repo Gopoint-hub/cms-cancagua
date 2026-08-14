@@ -275,7 +275,8 @@
   body:has(.cms-shell) [data-slot="button"] {
     height: auto;
     white-space: normal;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
+    word-break: normal;
     line-height: 1.25;
     text-align: center;
   }
@@ -284,7 +285,8 @@
     max-width: 100%;
     flex-shrink: 1;
     white-space: normal;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
+    word-break: normal;
     text-align: center;
   }
 
