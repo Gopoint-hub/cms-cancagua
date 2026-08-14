@@ -2,19 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearch } from "wouter";
 import {
   addDays,
-  addMonths,
-  addWeeks,
-  eachDayOfInterval,
-  endOfMonth,
-  endOfWeek,
   format,
-  isSameMonth,
   parseISO,
-  startOfMonth,
-  startOfWeek,
   subDays,
-  subMonths,
-  subWeeks,
 } from "date-fns";
 import { es } from "date-fns/locale";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -44,13 +34,11 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import {
   ChevronLeft,
   ChevronRight,
-  Clock,
   AlertTriangle,
   Plus,
   RotateCcw,
   RotateCw,
   Trash2,
-  UsersRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -83,7 +71,6 @@ function serviceTone(name: string) {
     ? { card: "border-amber-200 bg-amber-50/60", badge: "border-amber-300 bg-amber-100 text-amber-900" }
     : { card: "border-cyan-200 bg-cyan-50/60", badge: "border-cyan-300 bg-cyan-100 text-cyan-900" };
 }
-type ViewMode = "day" | "week" | "month";
 type PaymentMethod = "payment_link" | "bank_transfer" | "cash" | "transbank_machine" | "gift_card";
 type PaymentDraft = {
   method: PaymentMethod | "";
@@ -131,7 +118,6 @@ export default function BiopiscinasAgenda() {
   const canManage = hasCmsPermission(user ?? {}, "biopools.manage_agenda");
   const initialDate = new URLSearchParams(search).get("date") ?? localDate();
   const [date, setDate] = useState(initialDate);
-  const [view, setView] = useState<ViewMode>("day");
   const [selectedServiceId, setSelectedServiceId] = useState<number | "all">("all");
   const [manualServiceId, setManualServiceId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
@@ -185,20 +171,7 @@ export default function BiopiscinasAgenda() {
     { enabled: Boolean(manualService) }
   );
   const selected = parseISO(date);
-  const range = useMemo(() => {
-    if (view === "day") return { from: date, to: date };
-    if (view === "week") {
-      return {
-        from: format(startOfWeek(selected, { weekStartsOn: 1 }), "yyyy-MM-dd"),
-        to: format(endOfWeek(selected, { weekStartsOn: 1 }), "yyyy-MM-dd"),
-      };
-    }
-    return {
-      from: format(startOfWeek(startOfMonth(selected), { weekStartsOn: 1 }), "yyyy-MM-dd"),
-      to: format(endOfWeek(endOfMonth(selected), { weekStartsOn: 1 }), "yyyy-MM-dd"),
-    };
-  }, [date, selected, view]);
-  const { data: availability, isLoading: isSingleAvailabilityLoading } =
+  const { data: availability } =
     trpc.biopools.availability.day.useQuery(
       { serviceId: selectedService?.id ?? 0, date },
       {
@@ -206,7 +179,7 @@ export default function BiopiscinasAgenda() {
         refetchInterval: 30_000,
       }
     );
-  const { data: allAvailability, isLoading: isAllAvailabilityLoading } =
+  const { data: allAvailability } =
     trpc.biopools.availability.all.useQuery(
       { date },
       { enabled: selectedServiceId === "all", refetchInterval: 30_000 }
@@ -220,19 +193,16 @@ export default function BiopiscinasAgenda() {
   const manualAvailability = availabilityRows.find(
     item => item.service.id === manualService?.id
   );
-  const isLoading = selectedServiceId === "all"
-    ? isAllAvailabilityLoading
-    : isSingleAvailabilityLoading;
   const { data: rescheduleAvailability } =
     trpc.biopools.availability.day.useQuery(
       { serviceId: rescheduleBooking?.serviceId ?? 0, date: rescheduleDate },
       { enabled: Boolean(rescheduleBooking) }
     );
-  const { data: bookings } = trpc.biopools.bookings.list.useQuery(
+  const { data: bookings, isLoading } = trpc.biopools.bookings.list.useQuery(
     {
       serviceId: selectedServiceId === "all" ? undefined : selectedServiceId,
-      from: range.from,
-      to: range.to,
+      from: date,
+      to: date,
     },
     { enabled: activeServices.length > 0, refetchInterval: 30_000 }
   );
@@ -401,54 +371,11 @@ export default function BiopiscinasAgenda() {
       setStartTime(manualAvailability.slots[0].startTime);
   }, [manualAvailability, startTime]);
 
-  const groups = useMemo(
-    () => {
-      const dayBookings = (bookings ?? []).filter(
-        booking => bookingDate(booking.bookingDate) === date && occupancyStatuses.has(booking.status)
-      );
-      if (selectedServiceId !== "all") {
-        return availabilityRows
-          .flatMap(row => row.slots.map(slot => ({
-            key: `${row.service.id}-${slot.startTime}`,
-            service: row.service,
-            slot,
-            serviceSlots: [{ service: row.service, slot }],
-            bookings: dayBookings.filter(
-              booking => booking.serviceId === row.service.id && booking.startTime === slot.startTime
-            ),
-            continuingBookings: dayBookings.filter(
-              booking =>
-                booking.serviceId === row.service.id &&
-                booking.startTime < slot.startTime &&
-                booking.endTime > slot.startTime
-            ),
-          })))
-          .sort((a, b) => a.slot.startTime.localeCompare(b.slot.startTime));
-      }
-
-      const startTimes = [...new Set(
-        availabilityRows.flatMap(row => row.slots.map(slot => slot.startTime))
-      )].sort();
-      return startTimes.map(startTime => {
-        const serviceSlots = availabilityRows.flatMap(row => {
-          const slot = row.slots.find(candidate => candidate.startTime === startTime);
-          return slot ? [{ service: row.service, slot }] : [];
-        });
-        const capacity = serviceSlots[0]!.service.capacity;
-        const primarySlot = serviceSlots[0]!.slot;
-        return {
-          key: `shared-${startTime}`,
-          service: serviceSlots[0]!.service,
-          slot: { ...primarySlot, occupiedSeats: capacity - primarySlot.availableSeats },
-          serviceSlots,
-          bookings: dayBookings.filter(booking => booking.startTime === startTime),
-          continuingBookings: dayBookings.filter(
-            booking => booking.startTime < startTime && booking.endTime > startTime
-          ),
-        };
-      });
-    },
-    [availabilityRows, bookings, date, selectedServiceId]
+  const activeDayBookings = useMemo(
+    () => (bookings ?? [])
+      .filter(booking => bookingDate(booking.bookingDate) === date && occupancyStatuses.has(booking.status))
+      .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.clientName.localeCompare(b.clientName)),
+    [bookings, date]
   );
   const openCreate = (serviceId: number, slot: string) => {
     setManualServiceId(serviceId);
@@ -588,22 +515,10 @@ export default function BiopiscinasAgenda() {
   };
   const move = (direction: -1 | 1) => {
     const current = parseISO(date);
-    const next = view === "day"
-      ? (direction < 0 ? subDays(current, 1) : addDays(current, 1))
-      : view === "week"
-        ? (direction < 0 ? subWeeks(current, 1) : addWeeks(current, 1))
-        : (direction < 0 ? subMonths(current, 1) : addMonths(current, 1));
+    const next = direction < 0 ? subDays(current, 1) : addDays(current, 1);
     setDate(format(next, "yyyy-MM-dd"));
   };
-  const calendarDays = eachDayOfInterval({ start: parseISO(range.from), end: parseISO(range.to) });
-  const calendarTitle = view === "day"
-    ? format(selected, "EEEE d 'de' MMMM yyyy", { locale: es })
-    : view === "week"
-      ? `${format(parseISO(range.from), "d MMM", { locale: es })} – ${format(parseISO(range.to), "d MMM yyyy", { locale: es })}`
-      : format(selected, "MMMM yyyy", { locale: es });
-  const bookingsForDate = (value: string) => (bookings ?? []).filter(
-    item => bookingDate(item.bookingDate) === value && occupancyStatuses.has(item.status)
-  );
+  const calendarTitle = format(selected, "EEEE d 'de' MMMM yyyy", { locale: es });
   const cancelledBookings = (bookings ?? []).filter(
     item => bookingDate(item.bookingDate) === date && item.status === "cancelled"
   );
@@ -679,174 +594,60 @@ export default function BiopiscinasAgenda() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-3">
-          <div className="flex rounded-lg border p-1">
-            {(["day", "week", "month"] as ViewMode[]).map(mode => (
-              <Button
-                key={mode}
-                size="sm"
-                variant={view === mode ? "default" : "ghost"}
-                onClick={() => setView(mode)}
-              >
-                {mode === "day" ? "Día" : mode === "week" ? "Semana" : "Mes"}
-              </Button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setDate(localDate())}>Hoy</Button>
-            <p className="min-w-52 text-center text-sm font-semibold capitalize">{calendarTitle}</p>
-          </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-background p-3">
+          <Button variant="outline" size="sm" onClick={() => setDate(localDate())}>Hoy</Button>
+          <p className="min-w-52 text-sm font-semibold capitalize">{calendarTitle}</p>
         </div>
         {isLoading ? (
-          <p>Cargando disponibilidad…</p>
-        ) : view !== "day" ? (
-          <div className={view === "week" ? "grid gap-3 md:grid-cols-7" : "grid grid-cols-7 gap-px overflow-hidden rounded-xl border bg-border"}>
-            {calendarDays.map(day => {
-              const key = format(day, "yyyy-MM-dd");
-              const dayBookings = bookingsForDate(key);
-              return (
-                <button
-                  type="button"
-                  key={key}
-                  className={view === "week"
-                    ? "min-h-[24rem] rounded-xl border bg-background p-3 text-left hover:bg-muted/30"
-                    : `min-h-32 bg-background p-2 text-left hover:bg-muted/30 ${!isSameMonth(day, selected) ? "bg-muted/40 text-muted-foreground" : ""}`}
-                  onClick={() => { setDate(key); setView("day"); }}
-                >
-                  <p className="mb-3 text-xs font-semibold capitalize">
-                    {format(day, view === "week" ? "EEE d" : "d", { locale: es })}
-                  </p>
-                  <div className="space-y-1.5">
-                    {dayBookings.slice(0, view === "week" ? 10 : 3).map(booking => (
-                      <div key={booking.id} className={`rounded-lg border p-2 ${serviceTone(serviceName(booking.serviceId)).card}`}>
-                        <p className="text-xs font-semibold">{booking.startTime} · {booking.clientName}</p>
-                        {selectedServiceId === "all" && (
-                          <p className="mt-1 text-[11px] font-medium text-cyan-800">
-                            {serviceName(booking.serviceId)}
-                          </p>
-                        )}
-                        {view === "week" && <p className="mt-1 text-[11px] text-muted-foreground">{booking.totalGuests} persona(s) · {statusLabel[booking.status]}</p>}
-                      </div>
-                    ))}
-                    {dayBookings.length > (view === "week" ? 10 : 3) && (
-                      <p className="text-xs font-medium text-cyan-700">+{dayBookings.length - (view === "week" ? 10 : 3)} más</p>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : !groups.length ? (
+          <p>Cargando reservas…</p>
+        ) : !activeDayBookings.length ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
-              No existen ingresos habilitados para este día.
+              Sin reservas para este día.
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-4">
-            {groups.map(({ key, service: groupService, slot, serviceSlots, bookings: slotBookings, continuingBookings }) => (
-              <Card
-                key={key}
-                className={slot.availableSeats === 0 ? "border-red-200" : ""}
-              >
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <CardTitle className="flex items-center gap-2 text-lg">
-                      <Clock className="h-5 w-5 text-cyan-700" />
-                      {selectedServiceId === "all"
-                        ? <span>{slot.startTime} · Ocupación Biopiscinas</span>
-                        : <span>{groupService.name} · {slot.startTime}–{slot.endTime}</span>}
-                    </CardTitle>
-                    <div className="flex items-center gap-2">
-                      {selectedServiceId === "all" && (slotBookings.length > 0 || continuingBookings.length > 0) && (
-                        <Badge variant="outline">
-                          { [...slotBookings, ...continuingBookings].reduce((sum, booking) => sum + booking.totalGuests, 0) } personas dentro
+          <div className="space-y-3">
+            {activeDayBookings.map(booking => (
+              <Card key={booking.id} className={serviceTone(serviceName(booking.serviceId)).card}>
+                <CardContent className="p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-lg">{booking.startTime}–{booking.endTime}</span>
+                        <Badge variant="outline" className={serviceTone(serviceName(booking.serviceId)).badge}>
+                          {serviceName(booking.serviceId)}
                         </Badge>
-                      )}
-                      <Badge
-                        variant={
-                          slot.availableSeats > 10
-                            ? "secondary"
-                            : slot.availableSeats > 0
-                              ? "outline"
-                              : "destructive"
-                        }
-                      >
-                        <UsersRound className="h-3.5 w-3.5 mr-1" />
-                        {slot.availableSeats} de {groupService.capacity} disponibles para ingresar
-                      </Badge>
-                      {canManage && slot.availableSeats > 0 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openCreate(serviceSlots[0]!.service.id, slot.startTime)}
-                        >
-                          Agregar
-                        </Button>
+                        <Badge variant="outline">{statusLabel[booking.status]}</Badge>
+                        <Badge variant={booking.paymentStatus === "paid" ? "secondary" : "outline"}>
+                          {booking.paymentStatus === "paid"
+                            ? "Pagada"
+                            : booking.paymentStatus === "partially_paid"
+                              ? "Pago parcial"
+                              : booking.paymentStatus === "refunded"
+                                ? "Reembolsada"
+                                : "Pago pendiente"}
+                        </Badge>
+                        {booking.refundStatus === "pending" && (
+                          <Badge variant="destructive">
+                            Reembolso pendiente · {clp.format(booking.refundAmountClp)}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 font-medium">{booking.clientName}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {booking.adultQuantity} adulto(s) · {booking.childQuantity} niño(s) · {clp.format(booking.originalAmountClp - booking.discountAmountClp)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Abonado: {clp.format(booking.amountPaidClp)} · Saldo: {clp.format(Math.max(0, booking.originalAmountClp - booking.discountAmountClp - booking.amountPaidClp))}
+                      </p>
+                      {booking.refundStatus === "pending" && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Descuento transacción: {clp.format(booking.refundFeeAmountClp)}
+                        </p>
                       )}
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {slotBookings.length ? (
-                    <div className="space-y-2">
-                      {slotBookings.map(booking => (
-                        <div
-                          key={booking.id}
-                          className={`rounded-xl border p-3 flex flex-wrap items-center justify-between gap-3 ${serviceTone(serviceName(booking.serviceId)).card}`}
-                        >
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <strong>{booking.clientName}</strong>
-                              {selectedServiceId === "all" && (
-                                <Badge variant="outline" className={serviceTone(serviceName(booking.serviceId)).badge}>
-                                  {serviceName(booking.serviceId)}
-                                </Badge>
-                              )}
-                              <Badge variant="outline">
-                                {statusLabel[booking.status]}
-                              </Badge>
-                              <Badge
-                                variant={
-                                  booking.paymentStatus === "paid"
-                                    ? "secondary"
-                                    : "outline"
-                                }
-                              >
-                                {booking.paymentStatus === "paid"
-                                  ? "Pagada"
-                                  : booking.paymentStatus === "partially_paid"
-                                    ? "Pago parcial"
-                                  : booking.paymentStatus === "refunded"
-                                    ? "Reembolsada"
-                                    : "Pago pendiente"}
-                              </Badge>
-                              {booking.refundStatus === "pending" && (
-                                <Badge variant="destructive">
-                                  Reembolso pendiente ·{" "}
-                                  {clp.format(booking.refundAmountClp)}
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {booking.adultQuantity} adulto(s) ·{" "}
-                              {booking.childQuantity} niño(s) ·{" "}
-                              {clp.format(
-                                booking.originalAmountClp -
-                                  booking.discountAmountClp
-                              )}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Abonado: {clp.format(booking.amountPaidClp)} · Saldo: {clp.format(Math.max(0, booking.originalAmountClp - booking.discountAmountClp - booking.amountPaidClp))}
-                            </p>
-                            {booking.refundStatus === "pending" && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Descuento transacción:{" "}
-                                {clp.format(booking.refundFeeAmountClp)}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                             {canManage && booking.status !== "cancelled" && (
                               <Button size="sm" variant="outline" onClick={() => {
                                 const totalClp = booking.originalAmountClp - booking.discountAmountClp;
@@ -903,44 +704,15 @@ export default function BiopiscinasAgenda() {
                                 </SelectContent>
                               </Select>
                             )}
-                          </div>
-                        </div>
-                      ))}
                     </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Sin reservas que comiencen a esta hora. La disponibilidad
-                      ya considera las estadías iniciadas en horas anteriores.
-                    </p>
-                  )}
-                  {continuingBookings.length > 0 && (
-                    <div className={slotBookings.length ? "mt-4 border-t pt-4" : "mt-3"}>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Continúan en la piscina
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {continuingBookings.map(booking => (
-                          <div
-                            key={`continuing-${booking.id}`}
-                            className={`rounded-lg border px-3 py-2 text-sm ${serviceTone(serviceName(booking.serviceId)).card}`}
-                          >
-                            <span className="font-semibold">{booking.clientName}</span>
-                            <span className="text-muted-foreground"> · {booking.totalGuests} persona(s) · hasta {booking.endTime}</span>
-                            {selectedServiceId === "all" && (
-                              <span className="ml-2 text-xs font-medium">{serviceName(booking.serviceId)}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
 
-        {view === "day" && cancelledInAgenda.length > 0 && (
+        {cancelledInAgenda.length > 0 && (
           <Card className="border-amber-200 bg-amber-50/40">
             <CardHeader><CardTitle className="text-lg">Reservas canceladas</CardTitle></CardHeader>
             <CardContent className="space-y-2">
@@ -971,7 +743,7 @@ export default function BiopiscinasAgenda() {
           </Card>
         )}
 
-        {view === "day" && removedFromAgenda.length > 0 && (
+        {removedFromAgenda.length > 0 && (
           <Card className="border-dashed bg-muted/30">
             <CardHeader><CardTitle className="text-base text-muted-foreground">Eliminadas de la agenda</CardTitle></CardHeader>
             <CardContent className="space-y-2">
