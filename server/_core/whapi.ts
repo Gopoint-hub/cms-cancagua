@@ -3,6 +3,17 @@ import { ENV } from "./env";
 const WHAPI_URL = "https://gate.whapi.cloud/messages/text";
 const WHAPI_HEALTH_URL = "https://gate.whapi.cloud/health";
 const WHAPI_GROUPS_URL = "https://gate.whapi.cloud/groups";
+const WHAPI_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+
+function whapiHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    "Authorization": `Bearer ${ENV.whapiToken}`,
+    "Accept": "application/json",
+    "User-Agent": WHAPI_USER_AGENT,
+    ...extra,
+  };
+}
 
 export type WhatsAppResult = {
   success: boolean;
@@ -25,7 +36,7 @@ export async function findWhatsAppGroupId(name: string): Promise<string | null> 
   if (groupCache?.name === name && groupCache.expiresAt > Date.now()) return groupCache.id;
   try {
     const response = await fetch(WHAPI_GROUPS_URL, {
-      headers: { "Authorization": `Bearer ${ENV.whapiToken}`, "Accept": "application/json" },
+      headers: whapiHeaders(),
     });
     if (!response.ok) return null;
     const payload: any = await response.json();
@@ -54,10 +65,7 @@ export async function checkWhatsAppHealth(): Promise<WhatsAppHealthResult> {
   try {
     const response = await fetch(WHAPI_HEALTH_URL, {
       method: "GET",
-      headers: {
-        "Authorization": `Bearer ${ENV.whapiToken}`,
-        "Accept": "application/json",
-      },
+      headers: whapiHeaders(),
     });
 
     if (!response.ok) {
@@ -106,10 +114,7 @@ export async function sendWhatsApp(phone: string, message: string): Promise<What
     const to = normalizePhone(phone);
     const response = await fetch(WHAPI_URL, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${ENV.whapiToken}`,
-        "Content-Type": "application/json",
-      },
+      headers: whapiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ to, body: message }),
     });
 

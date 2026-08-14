@@ -18,6 +18,9 @@ describe("findWhatsAppGroupId", () => {
     const { findWhatsAppGroupId } = await import("./_core/whapi");
 
     await expect(findWhatsAppGroupId("Cafe Cancagua 🍓")).resolves.toBe("120363000000000000@g.us");
+    expect(vi.mocked(fetch).mock.calls[0][1]).toMatchObject({
+      headers: expect.objectContaining({ "User-Agent": expect.stringContaining("Mozilla/5.0") }),
+    });
   });
 });
 
@@ -35,6 +38,9 @@ describe("sendWhatsApp", () => {
     expect(result.success).toBe(true);
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(requestBody.to).toBe("56912345678@s.whatsapp.net");
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      "User-Agent": expect.stringContaining("Mozilla/5.0"),
+    });
   });
 
   it("normalizes Chilean local mobile numbers with only +56 country code", async () => {
@@ -117,7 +123,10 @@ describe("checkWhatsAppHealth", () => {
     expect(result).toEqual({ success: true, configured: true, status: 200 });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://gate.whapi.cloud/health",
-      expect.objectContaining({ method: "GET" }),
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ "User-Agent": expect.stringContaining("Mozilla/5.0") }),
+      }),
     );
   });
 
