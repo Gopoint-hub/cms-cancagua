@@ -10,6 +10,7 @@ import {
   biopoolTicketTypes,
   clients,
 } from "../drizzle/schema";
+import { minimumAvailableSeats } from "../shared/biopoolsCapacity";
 import { getDb } from "./db";
 
 type Header = { name?: string; value?: string };
@@ -135,22 +136,30 @@ export async function createBandurriaBooking(data: BandurriaReservation) {
       }
       const [tickets, bookings, blocks, holds] = await Promise.all([
         tx.select().from(biopoolTicketTypes).where(and(eq(biopoolTicketTypes.serviceId, service.id), eq(biopoolTicketTypes.active, 1))),
-        tx.select({ guests: biopoolBookings.totalGuests }).from(biopoolBookings).where(and(
+        tx.select({ startTime: biopoolBookings.startTime, endTime: biopoolBookings.endTime, guests: biopoolBookings.totalGuests }).from(biopoolBookings).where(and(
           eq(biopoolBookings.bookingDate, data.bookingDate), inArray(biopoolBookings.status, ["pending", "confirmed", "completed"]),
           lt(biopoolBookings.startTime, endTime), sql`${biopoolBookings.endTime} > ${data.startTime}`,
         )),
-        tx.select({ capacity: biopoolBlocks.blockedCapacity }).from(biopoolBlocks).where(and(
+        tx.select({ startTime: biopoolBlocks.startTime, endTime: biopoolBlocks.endTime, capacity: biopoolBlocks.blockedCapacity }).from(biopoolBlocks).where(and(
           eq(biopoolBlocks.active, 1), sql`${biopoolBlocks.startDate} <= ${data.bookingDate}`, sql`${biopoolBlocks.endDate} >= ${data.bookingDate}`,
           lt(biopoolBlocks.startTime, endTime), sql`${biopoolBlocks.endTime} > ${data.startTime}`,
         )),
-        tx.select({ guests: biopoolCheckoutOrders.totalGuests }).from(biopoolCheckoutOrders).where(and(
+        tx.select({ startTime: biopoolCheckoutOrders.startTime, endTime: biopoolCheckoutOrders.endTime, guests: biopoolCheckoutOrders.totalGuests }).from(biopoolCheckoutOrders).where(and(
           eq(biopoolCheckoutOrders.bookingDate, data.bookingDate),
           inArray(biopoolCheckoutOrders.status, ["initiating", "payment_pending"]), sql`${biopoolCheckoutOrders.expiresAt} > NOW()`,
           lt(biopoolCheckoutOrders.startTime, endTime), sql`${biopoolCheckoutOrders.endTime} > ${data.startTime}`,
         )),
       ]);
-      const used = bookings.reduce((sum, row) => sum + row.guests, 0) + blocks.reduce((sum, row) => sum + row.capacity, 0) + holds.reduce((sum, row) => sum + row.guests, 0);
-      if (used + data.totalGuests > service.capacity) throw new Error(`No hay cupos suficientes para ${data.reference}`);
+      const availableSeats = minimumAvailableSeats(
+        service.capacity,
+        { startTime: data.startTime, endTime },
+        [
+          ...bookings.map(row => ({ startTime: row.startTime, endTime: row.endTime, seats: row.guests })),
+          ...blocks.map(row => ({ startTime: row.startTime, endTime: row.endTime, seats: row.capacity, kind: "block" as const })),
+          ...holds.map(row => ({ startTime: row.startTime, endTime: row.endTime, seats: row.guests })),
+        ]
+      );
+      if (data.totalGuests > availableSeats) throw new Error(`No hay cupos suficientes para ${data.reference}`);
       const adult = tickets.find(ticket => ticket.code === "adult");
       const child = tickets.find(ticket => ticket.code === "child");
       if (!adult || !child) throw new Error("Faltan tarifas de Navega Relax");

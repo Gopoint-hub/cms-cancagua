@@ -242,7 +242,6 @@ async function availabilityForDay(
       startTime: booking.startTime,
       endTime: booking.endTime,
       seats: booking.totalGuests,
-      kind: "entry" as const,
     })),
     ...blocks.map((block: any) => ({
       startTime: block.startTime,
@@ -254,7 +253,6 @@ async function availabilityForDay(
       startTime: hold.startTime,
       endTime: hold.endTime,
       seats: hold.totalGuests,
-      kind: "entry" as const,
     })),
   ];
   const slots = buildEntrySlots({
@@ -822,13 +820,13 @@ export const biopoolsRouter = router({
           const occupancy = [
             ...bookings
               .filter(booking => serializeDate(booking.bookingDate) === date)
-              .map(booking => ({ startTime: booking.startTime, endTime: booking.endTime, seats: booking.totalGuests, kind: "entry" as const })),
+              .map(booking => ({ startTime: booking.startTime, endTime: booking.endTime, seats: booking.totalGuests })),
             ...blocks
               .filter(block => serializeDate(block.startDate) <= date && serializeDate(block.endDate) >= date)
               .map(block => ({ startTime: block.startTime, endTime: block.endTime, seats: block.blockedCapacity, kind: "block" as const })),
             ...checkoutHolds
               .filter(hold => serializeDate(hold.bookingDate) === date)
-              .map(hold => ({ startTime: hold.startTime, endTime: hold.endTime, seats: hold.totalGuests, kind: "entry" as const })),
+              .map(hold => ({ startTime: hold.startTime, endTime: hold.endTime, seats: hold.totalGuests })),
           ];
           return buildEntrySlots({
             firstEntryTime: schedule.firstEntryTime,

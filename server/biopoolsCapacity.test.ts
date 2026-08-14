@@ -28,7 +28,7 @@ describe("Biopiscinas capacity", () => {
     });
   });
 
-  it("deducts reservations only from their own entry time", () => {
+  it("deducts reservations for every hour of their stay", () => {
     const occupancy = [
       { startTime: "10:00", endTime: "14:00", seats: 25 },
       { startTime: "11:00", endTime: "15:00", seats: 10 },
@@ -40,24 +40,24 @@ describe("Biopiscinas capacity", () => {
         { startTime: "12:00", endTime: "16:00" },
         occupancy
       )
-    ).toBe(40);
+    ).toBe(5);
     expect(
       minimumAvailableSeats(
         40,
         { startTime: "15:00", endTime: "19:00" },
         occupancy
       )
-    ).toBe(40);
+    ).toBe(28);
     expect(
       minimumAvailableSeats(
         40,
         { startTime: "11:00", endTime: "15:00" },
         occupancy
       )
-    ).toBe(30);
+    ).toBe(5);
   });
 
-  it("keeps Full Day and four-hour entry quotas independent by start time", () => {
+  it("shares capacity between Full Day and four-hour stays", () => {
     const fullDaySlots = buildEntrySlots({
       firstEntryTime: "10:00",
       lastEntryTime: "13:00",
@@ -79,6 +79,39 @@ describe("Biopiscinas capacity", () => {
           { startTime: "10:00", endTime: "18:00", seats: 18 },
           { startTime: "11:00", endTime: "15:00", seats: 12 },
         ]
+      )
+    ).toBe(10);
+  });
+
+  it("uses peak concurrent occupancy instead of summing separate overlaps", () => {
+    expect(
+      minimumAvailableSeats(
+        40,
+        { startTime: "16:00", endTime: "20:00" },
+        [
+          { startTime: "14:00", endTime: "18:00", seats: 20 },
+          { startTime: "18:00", endTime: "22:00", seats: 20 },
+        ]
+      )
+    ).toBe(20);
+  });
+
+  it("releases a four-hour reservation exactly at its end time", () => {
+    const occupancy = [
+      { startTime: "16:00", endTime: "20:00", seats: 15 },
+    ];
+    expect(
+      minimumAvailableSeats(
+        40,
+        { startTime: "17:00", endTime: "21:00" },
+        occupancy
+      )
+    ).toBe(25);
+    expect(
+      minimumAvailableSeats(
+        40,
+        { startTime: "20:00", endTime: "23:00" },
+        occupancy
       )
     ).toBe(40);
   });

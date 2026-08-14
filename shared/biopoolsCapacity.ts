@@ -2,7 +2,7 @@ export type BiopoolOccupancyInterval = {
   startTime: string;
   endTime: string;
   seats: number;
-  /** Reservations/holds consume only their entry slot; blocks cover every overlapping slot. */
+  /** Kept for backwards compatibility; every interval consumes capacity for its full duration. */
   kind?: "entry" | "block";
 };
 
@@ -36,20 +36,39 @@ export function intervalsOverlap(
   );
 }
 
-/** Returns available tickets for an entry time, while honoring time-range blocks. */
+/**
+ * Returns the minimum capacity available throughout a candidate stay.
+ *
+ * A guest admitted at 16:00 for four hours occupies a seat until 20:00, so a
+ * new stay may only use the lowest remaining capacity found anywhere in its
+ * interval. Intervals that merely touch at their boundaries do not overlap.
+ */
 export function minimumAvailableSeats(
   capacity: number,
   candidate: Pick<BiopoolOccupancyInterval, "startTime" | "endTime">,
   occupancy: BiopoolOccupancyInterval[]
 ): number {
-  const used = occupancy.reduce((sum, interval) => {
-    const consumesSlot = interval.kind === "block"
-      ? intervalsOverlap(candidate, interval)
-      : interval.startTime === candidate.startTime;
-    return consumesSlot ? sum + interval.seats : sum;
-  }, 0);
+  const candidateStart = timeToMinutes(candidate.startTime);
+  const candidateEnd = timeToMinutes(candidate.endTime);
+  if (candidateEnd <= candidateStart) return 0;
 
-  return Math.max(0, capacity - used);
+  const events = new Map<number, number>();
+  for (const interval of occupancy) {
+    if (interval.seats <= 0 || !intervalsOverlap(candidate, interval)) continue;
+    const start = Math.max(candidateStart, timeToMinutes(interval.startTime));
+    const end = Math.min(candidateEnd, timeToMinutes(interval.endTime));
+    events.set(start, (events.get(start) ?? 0) + interval.seats);
+    events.set(end, (events.get(end) ?? 0) - interval.seats);
+  }
+
+  let used = 0;
+  let maximumUsed = 0;
+  for (const [, delta] of [...events.entries()].sort(([left], [right]) => left - right)) {
+    used += delta;
+    maximumUsed = Math.max(maximumUsed, used);
+  }
+
+  return Math.max(0, capacity - maximumUsed);
 }
 
 export function buildEntrySlots(input: {

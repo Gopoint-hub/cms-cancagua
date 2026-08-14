@@ -74,6 +74,13 @@ const paymentMethodLabel: Record<string, string> = {
   transbank_machine: "Máquina Transbank",
   gift_card: "Gift Card",
 };
+const occupancyStatuses = new Set(["pending", "confirmed", "completed"]);
+
+function serviceTone(name: string) {
+  return name.toLowerCase().includes("navega")
+    ? { card: "border-amber-200 bg-amber-50/60", badge: "border-amber-300 bg-amber-100 text-amber-900" }
+    : { card: "border-cyan-200 bg-cyan-50/60", badge: "border-cyan-300 bg-cyan-100 text-cyan-900" };
+}
 type ViewMode = "day" | "week" | "month";
 type PaymentMethod = "payment_link" | "bank_transfer" | "cash" | "transbank_machine" | "gift_card";
 type PaymentDraft = {
@@ -297,23 +304,53 @@ export default function BiopiscinasAgenda() {
   }, [manualAvailability, startTime]);
 
   const groups = useMemo(
-    () =>
-      availabilityRows
-        .flatMap(row => row.slots.map(slot => ({
-          service: row.service,
-          slot,
-          bookings: (bookings ?? []).filter(
-            booking =>
-              booking.serviceId === row.service.id &&
-              bookingDate(booking.bookingDate) === date &&
-              booking.startTime === slot.startTime
+    () => {
+      const dayBookings = (bookings ?? []).filter(
+        booking => bookingDate(booking.bookingDate) === date && occupancyStatuses.has(booking.status)
+      );
+      if (selectedServiceId !== "all") {
+        return availabilityRows
+          .flatMap(row => row.slots.map(slot => ({
+            key: `${row.service.id}-${slot.startTime}`,
+            service: row.service,
+            slot,
+            serviceSlots: [{ service: row.service, slot }],
+            bookings: dayBookings.filter(
+              booking => booking.serviceId === row.service.id && booking.startTime === slot.startTime
+            ),
+            continuingBookings: dayBookings.filter(
+              booking =>
+                booking.serviceId === row.service.id &&
+                booking.startTime < slot.startTime &&
+                booking.endTime > slot.startTime
+            ),
+          })))
+          .sort((a, b) => a.slot.startTime.localeCompare(b.slot.startTime));
+      }
+
+      const startTimes = [...new Set(
+        availabilityRows.flatMap(row => row.slots.map(slot => slot.startTime))
+      )].sort();
+      return startTimes.map(startTime => {
+        const serviceSlots = availabilityRows.flatMap(row => {
+          const slot = row.slots.find(candidate => candidate.startTime === startTime);
+          return slot ? [{ service: row.service, slot }] : [];
+        });
+        const capacity = serviceSlots[0]!.service.capacity;
+        const primarySlot = serviceSlots[0]!.slot;
+        return {
+          key: `shared-${startTime}`,
+          service: serviceSlots[0]!.service,
+          slot: { ...primarySlot, occupiedSeats: capacity - primarySlot.availableSeats },
+          serviceSlots,
+          bookings: dayBookings.filter(booking => booking.startTime === startTime),
+          continuingBookings: dayBookings.filter(
+            booking => booking.startTime < startTime && booking.endTime > startTime
           ),
-        })))
-        .sort((a, b) =>
-          a.slot.startTime.localeCompare(b.slot.startTime) ||
-          a.service.name.localeCompare(b.service.name, "es")
-        ),
-    [availabilityRows, bookings, date]
+        };
+      });
+    },
+    [availabilityRows, bookings, date, selectedServiceId]
   );
   const openCreate = (serviceId: number, slot: string) => {
     setManualServiceId(serviceId);
@@ -565,7 +602,7 @@ export default function BiopiscinasAgenda() {
                   </p>
                   <div className="space-y-1.5">
                     {dayBookings.slice(0, view === "week" ? 10 : 3).map(booking => (
-                      <div key={booking.id} className="rounded-lg border border-cyan-200 bg-cyan-50 p-2">
+                      <div key={booking.id} className={`rounded-lg border p-2 ${serviceTone(serviceName(booking.serviceId)).card}`}>
                         <p className="text-xs font-semibold">{booking.startTime} · {booking.clientName}</p>
                         {selectedServiceId === "all" && (
                           <p className="mt-1 text-[11px] font-medium text-cyan-800">
@@ -591,21 +628,25 @@ export default function BiopiscinasAgenda() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {groups.map(({ service: groupService, slot, bookings: slotBookings }) => (
+            {groups.map(({ key, service: groupService, slot, serviceSlots, bookings: slotBookings, continuingBookings }) => (
               <Card
-                key={`${groupService.id}-${slot.startTime}`}
+                key={key}
                 className={slot.availableSeats === 0 ? "border-red-200" : ""}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between gap-4">
                     <CardTitle className="flex items-center gap-2 text-lg">
                       <Clock className="h-5 w-5 text-cyan-700" />
-                      {selectedServiceId === "all" && (
-                        <span>{groupService.name} ·</span>
-                      )}
-                      {slot.startTime}–{slot.endTime}
+                      {selectedServiceId === "all"
+                        ? <span>{slot.startTime} · Ocupación compartida</span>
+                        : <span>{groupService.name} · {slot.startTime}–{slot.endTime}</span>}
                     </CardTitle>
                     <div className="flex items-center gap-2">
+                      {selectedServiceId === "all" && (slotBookings.length > 0 || continuingBookings.length > 0) && (
+                        <Badge variant="outline">
+                          { [...slotBookings, ...continuingBookings].reduce((sum, booking) => sum + booking.totalGuests, 0) } personas dentro
+                        </Badge>
+                      )}
                       <Badge
                         variant={
                           slot.availableSeats > 10
@@ -616,14 +657,13 @@ export default function BiopiscinasAgenda() {
                         }
                       >
                         <UsersRound className="h-3.5 w-3.5 mr-1" />
-                        {slot.availableSeats} de{" "}
-                        {groupService.capacity} disponibles
+                        {slot.availableSeats} de {groupService.capacity} disponibles para ingresar
                       </Badge>
                       {canManage && slot.availableSeats > 0 && (
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => openCreate(groupService.id, slot.startTime)}
+                          onClick={() => openCreate(serviceSlots[0]!.service.id, slot.startTime)}
                         >
                           Agregar
                         </Button>
@@ -637,11 +677,16 @@ export default function BiopiscinasAgenda() {
                       {slotBookings.map(booking => (
                         <div
                           key={booking.id}
-                          className="rounded-xl border p-3 flex flex-wrap items-center justify-between gap-3"
+                          className={`rounded-xl border p-3 flex flex-wrap items-center justify-between gap-3 ${serviceTone(serviceName(booking.serviceId)).card}`}
                         >
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
                               <strong>{booking.clientName}</strong>
+                              {selectedServiceId === "all" && (
+                                <Badge variant="outline" className={serviceTone(serviceName(booking.serviceId)).badge}>
+                                  {serviceName(booking.serviceId)}
+                                </Badge>
+                              )}
                               <Badge variant="outline">
                                 {statusLabel[booking.status]}
                               </Badge>
@@ -752,6 +797,27 @@ export default function BiopiscinasAgenda() {
                       ya considera las estadías iniciadas en horas anteriores.
                     </p>
                   )}
+                  {continuingBookings.length > 0 && (
+                    <div className={slotBookings.length ? "mt-4 border-t pt-4" : "mt-3"}>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Continúan en la piscina
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {continuingBookings.map(booking => (
+                          <div
+                            key={`continuing-${booking.id}`}
+                            className={`rounded-lg border px-3 py-2 text-sm ${serviceTone(serviceName(booking.serviceId)).card}`}
+                          >
+                            <span className="font-semibold">{booking.clientName}</span>
+                            <span className="text-muted-foreground"> · {booking.totalGuests} persona(s) · hasta {booking.endTime}</span>
+                            {selectedServiceId === "all" && (
+                              <span className="ml-2 text-xs font-medium">{serviceName(booking.serviceId)}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
@@ -777,7 +843,11 @@ export default function BiopiscinasAgenda() {
                         item => item.service.id === serviceId
                       );
                       setManualServiceId(serviceId);
-                      setStartTime(target?.slots[0]?.startTime ?? "");
+                      setStartTime(current =>
+                        target?.slots.some(slot => slot.startTime === current)
+                          ? current
+                          : target?.slots[0]?.startTime ?? ""
+                      );
                     }}
                   >
                     <SelectTrigger><SelectValue placeholder="Selecciona servicio" /></SelectTrigger>
