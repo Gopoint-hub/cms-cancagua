@@ -381,6 +381,11 @@ export const operations360Router = router({
   access: protectedProcedure.query(({ ctx }) => ({
     calendarServices: calendarServices(ctx.user),
     clientServices: clientServices(ctx.user),
+    manualBookingServices: ([
+      hasCmsPermission(ctx.user, "massages.manage_agenda") ? "massages" : null,
+      hasCmsPermission(ctx.user, "biopools.manage_agenda") ? "biopools" : null,
+      hasCmsPermission(ctx.user, "sauna.manage_agenda") ? "sauna" : null,
+    ].filter(Boolean) as Array<"massages" | "biopools" | "sauna">),
   })),
 
   calendar: protectedProcedure

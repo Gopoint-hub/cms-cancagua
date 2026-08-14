@@ -2456,7 +2456,7 @@ const agendaRouter = router({
           message: "Los pagos deben respetar el total del masaje",
         });
       }
-      const derivedPaymentStatus = payments.length
+      let derivedPaymentStatus = payments.length
         ? calculatedPaymentStatus(paidAmountClp, totalAmountClp)
         : input.paymentStatus;
       const {
@@ -2465,6 +2465,28 @@ const agendaRouter = router({
         ...bookingInput
       } = input;
       const inserted = await db.transaction(async tx => {
+        let appliedDiscount: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
+        if (input.discountCode) {
+          try {
+            appliedDiscount = await calculateWellnessCartDiscount(tx, input.discountCode, [{
+              service: "masajes",
+              serviceId: input.techniqueId,
+              techniqueId: input.techniqueId,
+              originalAmount: totalAmountClp,
+            }]);
+          } catch (error) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "El código no es válido" });
+          }
+        }
+        const finalTotalClp = Math.max(0, totalAmountClp - (appliedDiscount?.discountTotal ?? 0));
+        if (plannedAmountClp > finalTotalClp) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos superan el total del masaje después del descuento" });
+        }
+        derivedPaymentStatus = finalTotalClp === 0 && appliedDiscount
+          ? "paid"
+          : payments.length
+            ? calculatedPaymentStatus(paidAmountClp, finalTotalClp)
+            : input.paymentStatus;
         const [created] = await tx
           .insert(massageBookings)
           .values({
@@ -2476,6 +2498,9 @@ const agendaRouter = router({
               ? String(paidAmountClp)
               : input.amountPaid,
             originalAmount: totalAmountClp ? String(totalAmountClp) : undefined,
+            discountCodeId: appliedDiscount?.discountCodeId ?? null,
+            discountCode: appliedDiscount?.code ?? null,
+            discountAmount: String(appliedDiscount?.discountTotal ?? 0),
             manualPaymentMethod:
               payments.length === 1
                 ? (payments[0].method as any)
@@ -2488,7 +2513,7 @@ const agendaRouter = router({
               ? await redeemGiftCardPayment({
                   tx,
                   payment,
-                  totalClp: totalAmountClp,
+                  totalClp: finalTotalClp,
                   module: "massages",
                   reservationId: created.id,
                   note: `Canje en masaje de ${input.clientName}`,
@@ -2511,13 +2536,23 @@ const agendaRouter = router({
             createdByUserId: ctx.user.id,
           });
         }
+        if (appliedDiscount && appliedDiscount.discountTotal > 0) {
+          await recordMassageDiscountUsage(tx, {
+            discountCodeId: appliedDiscount.discountCodeId,
+            requestId: `massage-manual-${created.id}`,
+            email: input.clientEmail,
+            originalAmount: totalAmountClp,
+            discountAmount: appliedDiscount.discountTotal,
+            finalAmount: finalTotalClp,
+          });
+        }
         return created;
       });
       if (derivedPaymentStatus === "paid") {
         await syncMassageSale(inserted.id);
         await startTherapistAssignmentForBooking("massage", inserted.id);
       }
-      return { success: true };
+      return { success: true, id: inserted.id };
     }),
 
   getPayments: protectedProcedure
