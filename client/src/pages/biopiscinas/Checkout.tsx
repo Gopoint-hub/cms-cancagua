@@ -45,8 +45,11 @@ export default function BiopoolCheckout() {
   const total = appliedDiscount?.finalTotal ?? subtotal;
   const slots = useMemo(() => availability.data?.slots ?? [], [availability.data]);
   useEffect(() => {
+    // Mantener la selección durante los refrescos de cupos. Un estado vacío
+    // transitorio no debe reemplazar el horario elegido por el primer slot.
+    if (!availability.isSuccess || availability.isFetching) return;
     if (!slots.some(slot => slot.startTime === startTime)) setStartTime(slots[0]?.startTime ?? "");
-  }, [slots, startTime]);
+  }, [availability.isFetching, availability.isSuccess, slots, startTime]);
   const startPayment = trpc.biopools.public.startPayment.useMutation({
     onSuccess: result => {
       if (!result.paymentRequired) {
@@ -82,6 +85,7 @@ export default function BiopoolCheckout() {
   }, [service?.id, adults, children]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
+    if (availability.isFetching) return toast.error("Estamos confirmando la disponibilidad del horario elegido");
     if (!service || !startTime) return toast.error("Selecciona una fecha y un horario disponible");
     if (!accepted) return toast.error("Debes aceptar las condiciones del servicio");
     const params = new URLSearchParams(window.location.search);
@@ -131,6 +135,7 @@ export default function BiopoolCheckout() {
         </div>
         <aside><Card className="sticky top-5 overflow-hidden border-0 shadow-xl"><div className="bg-[#314d57] p-6 text-white"><p className="text-xs uppercase tracking-[.25em] text-white/70">Tu reserva</p><h2 className="mt-2 font-serif text-2xl">Biopiscinas</h2></div><CardContent className="space-y-5 p-6">
           <div className="space-y-3 text-sm"><div className="flex justify-between"><span>{adults} × Adulto</span><span>{clp.format(adults * (adultTicket?.priceClp ?? 0))}</span></div>{children > 0 && <div className="flex justify-between"><span>{children} × Niño</span><span>{clp.format(children * (childTicket?.priceClp ?? 0))}</span></div>}
+            {date && startTime && <div className="flex justify-between rounded-lg bg-stone-100 px-3 py-2"><span>Fecha y hora elegidas</span><strong>{date} · {startTime}</strong></div>}
             <div className="border-t pt-3 space-y-2">
               <Label htmlFor="biopool-discount">Aplicar código de descuento</Label>
               <div className="flex gap-2">
@@ -146,7 +151,7 @@ export default function BiopoolCheckout() {
           </div>
           <ul className="space-y-2 text-sm text-stone-600"><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Estadía de 4 horas (3,5 h al ingresar a las 18:00)</li><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Bata o toalla, gorra y locker</li><li className="flex gap-2"><ShieldCheck className="h-4 w-4 text-emerald-700" /> {total === 0 ? "Reserva liberada con código de descuento" : "Pago seguro con Transbank Webpay Plus"}</li></ul>
           <label className="flex cursor-pointer items-start gap-3 text-sm"><Checkbox checked={accepted} onCheckedChange={value => setAccepted(value === true)} /><span>Acepto las <a className="underline" href={service.rulesUrl || "#"} target="_blank" rel="noreferrer">condiciones y reglamento</a>. Entiendo que los niños deben asistir con un adulto.</span></label>
-          <Button type="submit" size="lg" className="w-full bg-[#536481] hover:bg-[#43526a]" disabled={startPayment.isPending || !startTime}>{startPayment.isPending ? (total === 0 ? "Confirmando reserva…" : "Conectando con Webpay…") : (total === 0 ? "Confirmar reserva por $0" : `Pagar ${clp.format(total)}`)}</Button>
+          <Button type="submit" size="lg" className="w-full bg-[#536481] hover:bg-[#43526a]" disabled={availability.isFetching || startPayment.isPending || !startTime}>{availability.isFetching ? "Confirmando horario…" : startPayment.isPending ? (total === 0 ? "Confirmando reserva…" : "Conectando con Webpay…") : (total === 0 ? "Confirmar reserva por $0" : `Pagar ${clp.format(total)}`)}</Button>
           <p className="text-center text-xs text-stone-500">{total === 0 ? "No se abrirá Transbank ni se realizará ningún cobro." : "Tus cupos se reservarán por 30 minutos mientras completas el pago."}</p>
         </CardContent></Card></aside>
       </form>
