@@ -5,6 +5,7 @@ import { chileLocalDateTimeToUtc } from "./massageNps";
 import { and, eq } from "drizzle-orm";
 import { giftCards, giftCardTransactions } from "../drizzle/schema";
 import { validateGiftCardRedemption, validateServiceGiftCardRedemption } from "./giftCardRedemption";
+import { inferGiftCardServiceKey, type GiftCardServiceKey } from "@shared/giftCardServices";
 
 export const reservationPaymentInputSchema = z.object({
   method: z.enum(RESERVATION_PAYMENT_METHODS),
@@ -49,14 +50,15 @@ export async function redeemGiftCardPayment(params: {
   module: string;
   reservationId: number;
   note: string;
+  serviceKey: GiftCardServiceKey;
 }) {
-  const { tx, payment, totalClp, module, reservationId, note } = params;
+  const { tx, payment, totalClp, module, reservationId, note, serviceKey } = params;
   const code = payment.giftCardCode!.trim().toUpperCase();
   const [card] = await tx.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
   if (!card) throw new TRPCError({ code: "BAD_REQUEST", message: `Gift Card ${code} no encontrada` });
   try {
     if (card.amount === 0) {
-      validateServiceGiftCardRedemption({ status: card.status, purchaseStatus: card.purchaseStatus, amount: card.amount, expiresAt: card.expiresAt });
+      validateServiceGiftCardRedemption({ status: card.status, purchaseStatus: card.purchaseStatus, amount: card.amount, expiresAt: card.expiresAt, serviceKey: card.serviceKey ?? inferGiftCardServiceKey(card.personalMessage), requestedServiceKey: serviceKey });
       if (payment.amountClp !== totalClp) throw new Error("Una Gift Card de servicio debe cubrir el total completo de la reserva");
     } else {
       validateGiftCardRedemption({ status: card.status, purchaseStatus: card.purchaseStatus, balance: card.balance, amount: payment.amountClp, expiresAt: card.expiresAt });

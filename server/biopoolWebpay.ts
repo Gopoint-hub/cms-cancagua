@@ -8,6 +8,7 @@ import {
   biopoolNotifications,
   biopoolServices,
   clients,
+  reservationPayments,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { commitTransaction, isTransactionApproved } from "./webpay";
@@ -15,6 +16,7 @@ import { chileLocalDateTimeToUtc } from "./massageNps";
 import { ENV } from "./_core/env";
 import { recordMassageDiscountUsage } from "./massageDiscounts";
 import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
+import { redeemGiftCardPayment } from "./reservationPayments";
 
 export type BiopoolPaymentOrderCheck = {
   buyOrder: string | null;
@@ -86,7 +88,8 @@ export function isFullyDiscountedBiopoolOrder(order: {
 
 type BiopoolOrderCompletion =
   | { kind: "webpay"; result: any }
-  | { kind: "discount" };
+  | { kind: "discount" }
+  | { kind: "gift_card"; code: string };
 
 export async function finalizeApprovedBiopoolOrder(
   orderId: number,
@@ -151,10 +154,10 @@ export async function finalizeApprovedBiopoolOrder(
       status: "confirmed",
       attendanceToken: nanoid(48),
       paymentStatus: "paid",
-      paymentMethod: completion.kind === "webpay" ? "webpay_plus" : "discount_code",
+      paymentMethod: completion.kind === "webpay" ? "webpay_plus" : completion.kind === "gift_card" ? "gift_card" : "discount_code",
       paymentReference: completion.kind === "webpay"
         ? completion.result.authorizationCode || order.buyOrder
-        : order.discountCode || order.publicToken,
+        : completion.kind === "gift_card" ? completion.code : order.discountCode || order.publicToken,
       originalAmountClp: order.subtotalClp,
       discountAmountClp: order.discountClp,
       discountCodeId: order.discountCodeId,
@@ -163,6 +166,12 @@ export async function finalizeApprovedBiopoolOrder(
       refundFeePercent: service.refundFeePercent,
       source: "web",
     }).$returningId();
+
+    if (completion.kind === "gift_card") {
+      const paidAt = new Date();
+      const gift = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt: paidAt.toISOString().slice(0, 16), giftCardCode: completion.code }, totalClp: order.totalClp, module: "biopools", reservationId: createdBooking.id, note: `Canje web en Biopiscinas ${createdBooking.id}`, serviceKey: "biopools" });
+      await tx.insert(reservationPayments).values({ module: "biopools", reservationId: createdBooking.id, method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt, reference: gift.code, giftCardId: gift.id });
+    }
 
     await tx.update(biopoolCheckoutOrders).set({
       bookingId: createdBooking.id,
@@ -175,7 +184,7 @@ export async function finalizeApprovedBiopoolOrder(
       transactionDate: completion.kind === "webpay" ? completion.result.transactionDate : null,
       rawResponse: JSON.stringify(completion.kind === "webpay"
         ? completion.result
-        : { paymentRequired: false, reason: "fully_discounted", discountCode: order.discountCode }),
+        : completion.kind === "gift_card" ? { paymentRequired: false, reason: "gift_card", giftCardCode: completion.code } : { paymentRequired: false, reason: "fully_discounted", discountCode: order.discountCode }),
       paidAt: new Date(),
       completedAt: new Date(),
       error: null,
@@ -198,14 +207,20 @@ export async function finalizeApprovedBiopoolOrder(
   try {
     await db.insert(biopoolBookingActivity).values({
       bookingId: completed.bookingId,
-      action: completion.kind === "webpay" ? "booking_created_webpay" : "booking_created_discount_code",
+      action: completion.kind === "webpay" ? "booking_created_webpay" : completion.kind === "gift_card" ? "booking_created_gift_card" : "booking_created_discount_code",
       detail: JSON.stringify(completion.kind === "webpay"
         ? {
             orderId: completed.order.id,
             buyOrder: completed.order.buyOrder,
             authorizationCode: completion.result.authorizationCode,
           }
-        : {
+        : completion.kind === "gift_card" ? {
+            orderId: completed.order.id,
+            giftCardCode: completion.code,
+            originalAmountClp: completed.order.subtotalClp,
+            discountAmountClp: completed.order.discountClp,
+            amountPaidClp: completed.order.totalClp,
+          } : {
             orderId: completed.order.id,
             discountCodeId: completed.order.discountCodeId,
             discountCode: completed.order.discountCode,

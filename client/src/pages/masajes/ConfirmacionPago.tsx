@@ -14,11 +14,15 @@ export default function ConfirmacionPago() {
   // Getnet también puede agregar ?requestId=... directamente
   const requestId = getQueryParam("requestId") || getQueryParam("request_id");
   const ref = getQueryParam("ref");
+  const giftCardApplied = getQueryParam("gift") === "1";
+  const giftCardAmount = Number(getQueryParam("amount")) || undefined;
+  const giftCardIncludesClasses = getQueryParam("classes") === "1";
 
-  const [ready, setReady] = useState(!!requestId || !!ref);
+  const [ready, setReady] = useState(giftCardApplied || !!requestId || !!ref);
   const statusTracked = useRef("");
 
   useEffect(() => {
+    if (giftCardApplied) return;
     if (!requestId && !ref) {
       setLocation("/");
     } else if (!requestId && ref) {
@@ -29,7 +33,7 @@ export default function ConfirmacionPago() {
 
   const { data, isLoading, isError } = trpc.masajes.public.checkPaymentStatus.useQuery(
     { requestId: requestId || undefined, ref: ref || undefined },
-    { enabled: ready && (!!requestId || !!ref), retry: 3, retryDelay: 2000 }
+    { enabled: !giftCardApplied && ready && (!!requestId || !!ref), retry: 3, retryDelay: 2000 }
   );
 
   useEffect(() => {
@@ -48,6 +52,8 @@ export default function ConfirmacionPago() {
       });
     }
   }, [data, ref, requestId]);
+
+  if (giftCardApplied) return <ApprovedView amount={giftCardAmount} includesClassPlan={giftCardIncludesClasses} />;
 
   if (!ready || isLoading) return <LoadingView />;
   if (isError || !data) return <PendingView onRetry={() => window.location.reload()} />;

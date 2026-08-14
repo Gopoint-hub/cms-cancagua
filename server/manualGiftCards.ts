@@ -1,3 +1,5 @@
+import { inferGiftCardServiceKey } from "@shared/giftCardServices";
+
 export type ManualGiftCardType = "amount" | "service";
 export type GiftCardBackgroundId = "spa-green" | "spa-pink" | "wellness-nature" | "spa-stones" | "spa-elegant";
 
@@ -58,6 +60,11 @@ export function buildManualGiftCardData(
   }
 
   const amount = input.type === "amount" ? input.amount! : 0;
+  const serviceKey = input.type === "service"
+    ? inferGiftCardServiceKey(`${input.serviceName ?? ""} ${input.serviceDetails ?? ""}`)
+    : null;
+  if (input.type === "service" && !serviceKey) throw new Error("Selecciona un servicio reconocido por el CMS");
+  if (serviceKey === "mixed_program") throw new Error("Las Gift Cards de programas mixtos se habilitarán cuando el programa esté disponible en el CMS");
   const timestamp = now.getTime().toString(36).toUpperCase();
   const randomPart = Math.random().toString(36).substring(2, 5).toUpperCase();
 
@@ -65,6 +72,10 @@ export function buildManualGiftCardData(
     code: `GC-M-${timestamp}-${randomPart}`,
     amount,
     balance: amount,
+    redemptionMode: input.type,
+    serviceKey,
+    serviceName: input.type === "service" ? input.serviceName!.trim() : null,
+    servicePayload: input.type === "service" ? JSON.stringify({ details: input.serviceDetails?.trim() || null }) : null,
     backgroundImage: GIFT_CARD_BACKGROUNDS[input.backgroundImageId],
     recipientName: input.recipientName.trim(),
     recipientEmail: input.recipientEmail?.trim() || null,

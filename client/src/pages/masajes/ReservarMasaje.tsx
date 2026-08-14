@@ -131,6 +131,8 @@ export default function ReservarMasaje() {
   const [pendingSelections, setPendingSelections] = useState<CartSelection[]>(initialSelections);
   const initialDiscountCode = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("discount") ?? "";
   const [discountCode, setDiscountCode] = useState(initialDiscountCode);
+  const [giftCardCode, setGiftCardCode] = useState("");
+  const [appliedGiftCard, setAppliedGiftCard] = useState<{ code: string; mode: "amount" | "service"; balanceAfter: number } | null>(null);
   const [appliedDiscount, setAppliedDiscount] = useState<{
     code: string; originalTotal: number; discountTotal: number; finalTotal: number;
   } | null>(null);
@@ -229,10 +231,15 @@ export default function ReservarMasaje() {
   const validateDiscountMut = trpc.masajes.public.validateDiscount.useMutation({
     onSuccess: (data) => {
       setAppliedDiscount(data);
+      setAppliedGiftCard(null);
       setDiscountCode(data.code);
       toast.success(`Código ${data.code} aplicado`);
     },
     onError: (error) => { setAppliedDiscount(null); toast.error(error.message); },
+  });
+  const validateGiftCardMut = trpc.giftCards.validateForService.useMutation({
+    onSuccess: data => { setAppliedGiftCard(data); setGiftCardCode(data.code); toast.success(`Gift Card ${data.code} aplicada`); },
+    onError: error => { setAppliedGiftCard(null); toast.error(error.message); },
   });
 
   useEffect(() => {
@@ -258,6 +265,10 @@ export default function ReservarMasaje() {
       classPlanId: classPlan?.id,
     });
   };
+  const checkoutTotal = appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0);
+  const giftCardServiceKey = cart.length > 0 && !classPlan ? "massages" as const : cart.length === 0 && classPlan ? "regular_classes" as const : "mixed_program" as const;
+  useEffect(() => setAppliedGiftCard(null), [checkoutTotal, giftCardServiceKey]);
+  const validateGiftCard = () => validateGiftCardMut.mutate({ code: giftCardCode, serviceKey: giftCardServiceKey, totalClp: checkoutTotal });
 
   const handleAddToCart = () => {
     if (!duration || !date || !slot || !selectedTechnique) {
@@ -318,8 +329,7 @@ export default function ReservarMasaje() {
     if (cart.length > 0 && !disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
 
-    const value = appliedDiscount?.finalTotal
-      ?? cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0);
+    const value = checkoutTotal;
     pushMassageEvent("add_payment_info", {
       currency: "CLP",
       value,
@@ -343,6 +353,7 @@ export default function ReservarMasaje() {
       clientEmail: email.trim() || undefined,
       subscribeNewsletter: subscribeNewsletter || undefined,
       discountCode: appliedDiscount?.code,
+      giftCardCode: appliedGiftCard?.code,
       checkoutId: checkoutId || undefined,
     });
   };
@@ -724,18 +735,19 @@ export default function ReservarMasaje() {
               {(cart.length > 0 || classPlan) && <div className="pt-2 space-y-2">
                 <Label htmlFor="massage-discount-code" className="text-teal-800">Aplicar código de descuento</Label>
                 <div className="flex gap-2">
-                  <Input id="massage-discount-code" value={discountCode} onChange={(event) => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); }} placeholder="Ingresa tu código" className="bg-white" />
+                  <Input id="massage-discount-code" value={discountCode} onChange={(event) => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); setAppliedGiftCard(null); }} placeholder="Ingresa tu código" className="bg-white" />
                   <Button type="button" variant="outline" onClick={validateDiscount} disabled={!discountCode.trim() || validateDiscountMut.isPending}>
                     {validateDiscountMut.isPending ? "Validando…" : "Aplicar"}
                   </Button>
                 </div>
               </div>}
+              {(cart.length > 0 || classPlan) && <div className="pt-2 space-y-2 border-t border-teal-200"><Label htmlFor="massage-gift-card" className="text-teal-800">Pagar con Gift Card</Label><div className="flex gap-2"><Input id="massage-gift-card" value={giftCardCode} onChange={(event) => { setGiftCardCode(event.target.value.toUpperCase()); setAppliedGiftCard(null); }} placeholder="Código de Gift Card" className="bg-white" /><Button type="button" variant="outline" onClick={validateGiftCard} disabled={!giftCardCode.trim() || checkoutTotal <= 0 || validateGiftCardMut.isPending}>{validateGiftCardMut.isPending ? "Validando…" : "Aplicar"}</Button></div>{appliedGiftCard && <p className="text-xs text-green-700">Gift Card aplicada{appliedGiftCard.mode === "amount" ? ` · saldo restante $${appliedGiftCard.balanceAfter.toLocaleString("es-CL")}` : " · servicio cubierto"}</p>}</div>}
               <div className="flex justify-between pt-1">
                 <span className="text-teal-700">Subtotal</span>
                 <span className={appliedDiscount ? "line-through text-teal-700" : "font-medium text-teal-900"}>${(cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span>
               </div>
               {appliedDiscount && <div className="flex justify-between text-green-700"><span>Descuento {appliedDiscount.code}</span><span>−${appliedDiscount.discountTotal.toLocaleString("es-CL")}</span></div>}
-              <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${(appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span></div>
+              <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${checkoutTotal.toLocaleString("es-CL")}</span></div>
             </div>
 
             <Button
@@ -743,7 +755,7 @@ export default function ReservarMasaje() {
               onClick={handleSubmit}
               disabled={initPaymentMut.isPending || !termsAccepted}
             >
-              {initPaymentMut.isPending ? "Preparando pago..." : "Ir a pagar →"}
+              {initPaymentMut.isPending ? "Preparando pago..." : appliedGiftCard ? "Confirmar con Gift Card →" : "Ir a pagar →"}
             </Button>
             {!termsAccepted && (
               <p className="text-xs text-center text-red-500">Debes aceptar los Términos y Condiciones para continuar.</p>

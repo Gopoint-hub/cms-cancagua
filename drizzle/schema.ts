@@ -248,6 +248,7 @@ export const biopoolCheckoutOrders = mysqlTable("biopool_checkout_orders", {
   discountClp: int("discount_clp").default(0).notNull(),
   discountCodeId: int("discount_code_id"),
   discountCode: varchar("discount_code", { length: 50 }),
+  giftCardCode: varchar("gift_card_code", { length: 20 }),
   totalClp: int("total_clp").notNull(),
   status: mysqlEnum("status", [
     "initiating",
@@ -431,6 +432,7 @@ export const saunaCheckoutOrders = mysqlTable("sauna_checkout_orders", {
   capacityUsed: int("capacity_used").notNull(),
   isPrivate: int("is_private").default(0).notNull(),
   totalClp: int("total_clp").notNull(),
+  giftCardCode: varchar("gift_card_code", { length: 20 }),
   status: mysqlEnum("status", ["initiating", "payment_pending", "paid", "rejected", "aborted", "expired", "failed"]).default("initiating").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   webpayToken: varchar("webpay_token", { length: 180 }).unique(),
@@ -1003,6 +1005,10 @@ export const giftCards = mysqlTable("gift_cards", {
   code: varchar("code", { length: 20 }).notNull().unique(), // Código único de la gift card
   amount: int("amount").notNull(), // Monto en CLP
   balance: int("balance").notNull(), // Saldo restante
+  redemptionMode: varchar("redemption_mode", { length: 20 }).default("amount").notNull(),
+  serviceKey: varchar("service_key", { length: 80 }),
+  serviceName: varchar("service_name", { length: 200 }),
+  servicePayload: text("service_payload"),
   backgroundImage: varchar("background_image", { length: 255 }).default("default").notNull(), // Imagen de fondo seleccionada
   recipientName: text("recipient_name"), // Nombre del destinatario
   recipientEmail: varchar("recipient_email", { length: 320 }), // Email del destinatario

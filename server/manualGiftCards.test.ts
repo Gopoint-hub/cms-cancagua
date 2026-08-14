@@ -35,6 +35,9 @@ describe("buildManualGiftCardData", () => {
 
     expect(result.amount).toBe(0);
     expect(result.balance).toBe(0);
+    expect(result.redemptionMode).toBe("service");
+    expect(result.serviceKey).toBe("biopools");
+    expect(result.serviceName).toBe("Biopiscinas");
     expect(result.personalMessage).toBe("Servicio: Biopiscinas para 3 adultos y 2 niños. Gracias por tu comprensión.");
     expect(result.deliveredAt).toBeNull();
   });
@@ -63,5 +66,9 @@ describe("buildManualGiftCardData", () => {
       backgroundImageId: "spa-green",
       recipientName: "Cliente",
     }, actor)).toThrow("entero");
+  });
+
+  it("rejects mixed programs until their CMS module is available", () => {
+    expect(() => buildManualGiftCardData({ type: "service", serviceName: "Bio Reconecta Detox", serviceDetails: "Biopiscinas, Masaje y Sauna", backgroundImageId: "spa-green", recipientName: "Cliente" }, actor)).toThrow("programas mixtos");
   });
 });

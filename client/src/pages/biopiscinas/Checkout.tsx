@@ -26,6 +26,8 @@ export default function BiopoolCheckout() {
   const [children, setChildren] = useState(0);
   const [accepted, setAccepted] = useState(false);
   const [discountCode, setDiscountCode] = useState("");
+  const [giftCardCode, setGiftCardCode] = useState("");
+  const [appliedGiftCard, setAppliedGiftCard] = useState<{ code: string; mode: "amount" | "service"; balanceAfter: number } | null>(null);
   const [appliedDiscount, setAppliedDiscount] = useState<{
     code: string;
     discountTotal: number;
@@ -72,6 +74,7 @@ export default function BiopoolCheckout() {
   const validateDiscount = trpc.biopools.public.validateDiscount.useMutation({
     onSuccess: result => {
       setAppliedDiscount(result);
+      setAppliedGiftCard(null);
       setDiscountCode(result.code);
       toast.success(`Código ${result.code} aplicado`);
     },
@@ -80,8 +83,13 @@ export default function BiopoolCheckout() {
       toast.error(error.message);
     },
   });
+  const validateGiftCard = trpc.giftCards.validateForService.useMutation({
+    onSuccess: result => { setAppliedGiftCard(result); setGiftCardCode(result.code); toast.success(`Gift Card ${result.code} aplicada`); },
+    onError: error => { setAppliedGiftCard(null); toast.error(error.message); },
+  });
   useEffect(() => {
     setAppliedDiscount(null);
+    setAppliedGiftCard(null);
   }, [service?.id, adults, children]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -99,6 +107,7 @@ export default function BiopoolCheckout() {
       adultQuantity: adults,
       childQuantity: children,
       discountCode: appliedDiscount?.code,
+      giftCardCode: appliedGiftCard?.code,
       acceptedTerms: true,
       utmSource: params.get("utm_source") || undefined,
       utmMedium: params.get("utm_medium") || undefined,
@@ -139,20 +148,21 @@ export default function BiopoolCheckout() {
             <div className="border-t pt-3 space-y-2">
               <Label htmlFor="biopool-discount">Aplicar código de descuento</Label>
               <div className="flex gap-2">
-                <Input id="biopool-discount" value={discountCode} onChange={event => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); }} placeholder="Ingresa tu código" />
+                <Input id="biopool-discount" value={discountCode} onChange={event => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); setAppliedGiftCard(null); }} placeholder="Ingresa tu código" />
                 <Button type="button" variant="outline" disabled={!discountCode.trim() || validateDiscount.isPending} onClick={() => service && validateDiscount.mutate({ serviceId: service.id, adultQuantity: adults, childQuantity: children, code: discountCode })}>
                   {validateDiscount.isPending ? "Validando…" : "Aplicar"}
                 </Button>
               </div>
             </div>
+            <div className="border-t pt-3 space-y-2"><Label htmlFor="biopool-gift-card">Pagar con Gift Card</Label><div className="flex gap-2"><Input id="biopool-gift-card" value={giftCardCode} onChange={event => { setGiftCardCode(event.target.value.toUpperCase()); setAppliedGiftCard(null); }} placeholder="Código de Gift Card" /><Button type="button" variant="outline" disabled={!giftCardCode.trim() || total <= 0 || validateGiftCard.isPending} onClick={() => validateGiftCard.mutate({ code: giftCardCode, serviceKey: "biopools", totalClp: total })}>{validateGiftCard.isPending ? "Validando…" : "Aplicar"}</Button></div>{appliedGiftCard && <p className="text-xs text-emerald-700">Gift Card aplicada{appliedGiftCard.mode === "amount" ? ` · saldo restante ${clp.format(appliedGiftCard.balanceAfter)}` : " · servicio cubierto"}</p>}</div>
             <div className="border-t pt-3 flex justify-between"><span>Subtotal</span><span className={appliedDiscount ? "line-through text-stone-500" : ""}>{clp.format(subtotal)}</span></div>
             {appliedDiscount && <div className="flex justify-between text-emerald-700"><span>Descuento {appliedDiscount.code}</span><span>−{clp.format(appliedDiscount.discountTotal)}</span></div>}
             <div className="text-base font-semibold flex justify-between"><span>Total</span><span>{clp.format(total)}</span></div>
           </div>
-          <ul className="space-y-2 text-sm text-stone-600"><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Estadía de 4 horas (3,5 h al ingresar a las 18:00)</li><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Bata o toalla, gorra y locker</li><li className="flex gap-2"><ShieldCheck className="h-4 w-4 text-emerald-700" /> {total === 0 ? "Reserva liberada con código de descuento" : "Pago seguro con Transbank Webpay Plus"}</li></ul>
+          <ul className="space-y-2 text-sm text-stone-600"><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Estadía de 4 horas (3,5 h al ingresar a las 18:00)</li><li className="flex gap-2"><Check className="h-4 w-4 text-emerald-700" /> Bata o toalla, gorra y locker</li><li className="flex gap-2"><ShieldCheck className="h-4 w-4 text-emerald-700" /> {appliedGiftCard ? "Reserva cubierta con Gift Card" : total === 0 ? "Reserva liberada con código de descuento" : "Pago seguro con Transbank Webpay Plus"}</li></ul>
           <label className="flex cursor-pointer items-start gap-3 text-sm"><Checkbox checked={accepted} onCheckedChange={value => setAccepted(value === true)} /><span>Acepto las <a className="underline" href={service.rulesUrl || "#"} target="_blank" rel="noreferrer">condiciones y reglamento</a>. Entiendo que los niños deben asistir con un adulto.</span></label>
-          <Button type="submit" size="lg" className="w-full bg-[#536481] hover:bg-[#43526a]" disabled={availability.isFetching || startPayment.isPending || !startTime}>{availability.isFetching ? "Confirmando horario…" : startPayment.isPending ? (total === 0 ? "Confirmando reserva…" : "Conectando con Webpay…") : (total === 0 ? "Confirmar reserva por $0" : `Pagar ${clp.format(total)}`)}</Button>
-          <p className="text-center text-xs text-stone-500">{total === 0 ? "No se abrirá Transbank ni se realizará ningún cobro." : "Tus cupos se reservarán por 30 minutos mientras completas el pago."}</p>
+          <Button type="submit" size="lg" className="w-full bg-[#536481] hover:bg-[#43526a]" disabled={availability.isFetching || startPayment.isPending || !startTime}>{availability.isFetching ? "Confirmando horario…" : startPayment.isPending ? (total === 0 || appliedGiftCard ? "Confirmando reserva…" : "Conectando con Webpay…") : appliedGiftCard ? "Confirmar con Gift Card" : (total === 0 ? "Confirmar reserva por $0" : `Pagar ${clp.format(total)}`)}</Button>
+          <p className="text-center text-xs text-stone-500">{appliedGiftCard ? "La Gift Card se descontará al confirmar la reserva." : total === 0 ? "No se abrirá Transbank ni se realizará ningún cobro." : "Tus cupos se reservarán por 30 minutos mientras completas el pago."}</p>
         </CardContent></Card></aside>
       </form>
     </section>

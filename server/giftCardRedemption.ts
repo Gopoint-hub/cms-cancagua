@@ -1,4 +1,5 @@
 import { hasGiftCardAccess, type PermissionUser } from "@shared/permissions";
+import { giftCardServiceMatches, type GiftCardServiceKey } from "@shared/giftCardServices";
 
 export function canRedeemGiftCard(user: PermissionUser): boolean {
   return hasGiftCardAccess(user);
@@ -9,6 +10,8 @@ export function validateServiceGiftCardRedemption(input: {
   purchaseStatus: string;
   amount: number;
   expiresAt?: Date | null;
+  serviceKey?: string | null;
+  requestedServiceKey?: GiftCardServiceKey;
 }): void {
   if (input.purchaseStatus !== "completed") {
     throw new Error("La Gift Card no tiene una compra completada");
@@ -21,6 +24,10 @@ export function validateServiceGiftCardRedemption(input: {
   }
   if (input.expiresAt && input.expiresAt < new Date()) {
     throw new Error("La Gift Card está vencida");
+  }
+  if (input.requestedServiceKey && !giftCardServiceMatches(input.serviceKey, input.requestedServiceKey)) {
+    if (input.serviceKey === "mixed_program") throw new Error("Esta Gift Card corresponde a un programa que todavía no está habilitado en el CMS");
+    throw new Error("Esta Gift Card no corresponde al servicio seleccionado");
   }
 }
 

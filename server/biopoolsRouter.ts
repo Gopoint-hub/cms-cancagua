@@ -67,6 +67,8 @@ import {
   validateGiftCardRedemption,
   validateServiceGiftCardRedemption,
 } from "./giftCardRedemption";
+import { inferGiftCardServiceKey } from "@shared/giftCardServices";
+import { validatePublicGiftCard } from "./publicGiftCards";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -1022,6 +1024,7 @@ export const biopoolsRouter = router({
         adultQuantity: z.number().int().min(1).max(40),
         childQuantity: z.number().int().min(0).max(40),
         discountCode: z.string().trim().max(50).optional(),
+        giftCardCode: z.string().trim().min(1).max(20).optional(),
         acceptedTerms: z.literal(true),
         utmSource: z.string().max(100).optional(),
         utmMedium: z.string().max(100).optional(),
@@ -1129,6 +1132,11 @@ export const biopoolsRouter = router({
               }
             }
             totalClp = discount?.finalTotal ?? subtotalClp;
+            const normalizedGiftCardCode = input.giftCardCode?.trim().toUpperCase();
+            if (normalizedGiftCardCode) {
+              const [card] = await tx.select().from(giftCards).where(eq(giftCards.code, normalizedGiftCardCode)).limit(1);
+              validatePublicGiftCard(card, "biopools", totalClp);
+            }
             subtotalClpForOrder = subtotalClp;
             discountClpForOrder = discount?.discountTotal ?? 0;
             discountCodeIdForOrder = discount?.discountCodeId ?? null;
@@ -1151,6 +1159,7 @@ export const biopoolsRouter = router({
               discountClp: discount?.discountTotal ?? 0,
               discountCodeId: discount?.discountCodeId ?? null,
               discountCode: discount?.code ?? null,
+              giftCardCode: normalizedGiftCardCode ?? null,
               totalClp,
               status: "initiating",
               expiresAt: new Date(Date.now() + 30 * 60_000),
@@ -1190,6 +1199,15 @@ export const biopoolsRouter = router({
             await releaseCapacityLock(tx, lockName);
           }
         });
+        if (input.giftCardCode) {
+          try {
+            await finalizeApprovedBiopoolOrder(orderId, { kind: "gift_card", code: input.giftCardCode.trim().toUpperCase() });
+            return { paymentRequired: false as const, paymentUrl: null, token: null, orderToken: publicToken, resultUrl: biopoolResultUrl(publicToken, "pagado") };
+          } catch (error) {
+            await db.update(biopoolCheckoutOrders).set({ status: "failed", error: String(error).slice(0, 2000) }).where(eq(biopoolCheckoutOrders.id, orderId));
+            throw error instanceof TRPCError ? error : new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "No pudimos canjear la Gift Card" });
+          }
+        }
         if (
           isFullyDiscountedBiopoolOrder({
           subtotalClp: subtotalClpForOrder,
@@ -1678,6 +1696,8 @@ export const biopoolsRouter = router({
                     purchaseStatus: card.purchaseStatus,
                     amount: card.amount,
                     expiresAt: card.expiresAt,
+                    serviceKey: card.serviceKey ?? inferGiftCardServiceKey(card.personalMessage),
+                    requestedServiceKey: "biopools",
                   });
                   if (payment.amountClp !== totalClp) {
                     throw new Error(
@@ -1970,6 +1990,8 @@ export const biopoolsRouter = router({
                     purchaseStatus: giftCard.purchaseStatus,
                     amount: giftCard.amount,
                     expiresAt: giftCard.expiresAt,
+                    serviceKey: giftCard.serviceKey ?? inferGiftCardServiceKey(giftCard.personalMessage),
+                    requestedServiceKey: "biopools",
                   });
                   if (input.payment.amountClp !== totalClp || plannedClp !== 0)
                     throw new Error(

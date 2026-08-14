@@ -101,6 +101,7 @@ import {
   validateReservationPayment,
 } from "./reservationPayments";
 import { canRedeemGiftCard } from "./giftCardRedemption";
+import { validatePublicGiftCard } from "./publicGiftCards";
 import { withMassageResourceLock } from "./massageResourceLock";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
@@ -2490,6 +2491,7 @@ const agendaRouter = router({
                   module: "massages",
                   reservationId: created.id,
                   note: `Canje en masaje de ${input.clientName}`,
+                  serviceKey: "massages",
                 })
             : undefined;
           await tx.insert(reservationPayments).values({
@@ -2897,6 +2899,7 @@ const agendaRouter = router({
                 module: "massages",
                 reservationId: booking.id,
                 note: `Abono Gift Card en masaje #${booking.id}`,
+                serviceKey: "massages",
               })
           : undefined;
         const [created] = await tx
@@ -6063,6 +6066,7 @@ const masajesPublicRouter = router({
       clientEmail: z.string().optional(),
       subscribeNewsletter: z.boolean().optional(),
       discountCode: z.string().trim().max(50).optional(),
+      giftCardCode: z.string().trim().min(1).max(20).optional(),
           checkoutId: z
             .string()
             .trim()
@@ -6298,6 +6302,19 @@ const masajesPublicRouter = router({
         }
       }
 
+      const massageOriginalTotal = prepared.reduce((sum, item) => sum + item.price, 0);
+      const massageTotal = prepared.reduce((sum, item, index) => sum + item.price - (discountResult?.lineDiscounts[index] ?? 0), 0);
+      const classTotal = classPlan ? classPlan.priceClp - (discountResult?.lineDiscounts[prepared.length] ?? 0) : 0;
+      const originalTotal = massageOriginalTotal + (classPlan?.priceClp ?? 0);
+      const total = massageTotal + classTotal;
+      const normalizedGiftCardCode = input.giftCardCode?.trim().toUpperCase();
+      const giftCardServiceKey = prepared.length > 0 && !classPlan ? "massages" as const : prepared.length === 0 && classPlan ? "regular_classes" as const : "mixed_program" as const;
+      if (normalizedGiftCardCode) {
+        const [card] = await db.select().from(giftCards).where(eq(giftCards.code, normalizedGiftCardCode)).limit(1);
+        if (card?.amount === 0 && prepared.length + (classPlan ? 1 : 0) !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Una Gift Card de servicio solo puede canjearse por un servicio a la vez" });
+        validatePublicGiftCard(card, giftCardServiceKey, total);
+      }
+
       let bookingIds: number[];
       try {
         bookingIds = await db.transaction(async tx => {
@@ -6461,21 +6478,33 @@ const masajesPublicRouter = router({
         });
       }
 
-      const massageOriginalTotal = prepared.reduce(
-        (sum, item) => sum + item.price,
-        0
-      );
-      const massageTotal = prepared.reduce(
-        (sum, item, index) =>
-          sum + item.price - (discountResult?.lineDiscounts[index] ?? 0),
-        0
-      );
-      const classTotal = classPlan
-        ? classPlan.priceClp -
-          (discountResult?.lineDiscounts[prepared.length] ?? 0)
-        : 0;
-      const originalTotal = massageOriginalTotal + (classPlan?.priceClp ?? 0);
-      const total = massageTotal + classTotal;
+      if (normalizedGiftCardCode) {
+        const reservationId = bookingIds[0] ?? membershipId!;
+        const module = bookingIds.length > 0 ? "massages" : "regular_classes";
+        let gift: { id: number; code: string };
+        try {
+          gift = await db.transaction(async tx => {
+            const redeemed = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: total, paidAt: new Date().toISOString().slice(0, 16), giftCardCode: normalizedGiftCardCode }, totalClp: total, module, reservationId, note: `Canje web en ${module === "massages" ? "Masajes" : "Clases Regulares"}`, serviceKey: giftCardServiceKey });
+            await tx.insert(reservationPayments).values({ module, reservationId, method: "gift_card", status: "paid", amountClp: total, paidAt: new Date(), reference: redeemed.code, giftCardId: redeemed.id });
+            if (bookingIds.length > 0) await tx.update(massageBookings).set({ paymentStatus: "paid", status: "pending", manualPaymentMethod: "gift_card" }).where(inArray(massageBookings.id, bookingIds));
+            if (membershipId) await tx.update(regularClassMemberships).set({ paymentStatus: "paid", status: "active", paymentMethod: "gift_card", paymentReference: redeemed.code, paidAt: new Date() }).where(eq(regularClassMemberships.id, membershipId));
+            return redeemed;
+          });
+        } catch (error) {
+          if (bookingIds.length > 0) await db.update(massageBookings).set({ status: "cancelled", paymentStatus: "pending", cancellationCategory: "system", cancellationReason: "No se pudo canjear la Gift Card.", cancelledAt: new Date() }).where(inArray(massageBookings.id, bookingIds));
+          if (membershipId) await db.update(regularClassMemberships).set({ status: "cancelled" }).where(eq(regularClassMemberships.id, membershipId));
+          throw error;
+        }
+        for (const bookingId of bookingIds) {
+          sendBookingConfirmations(bookingId).catch(error => console.error("[initCartPayment] Reserva Gift Card confirmada; falló notificación:", error));
+          syncMassageSale(bookingId).catch(error => console.error("[initCartPayment] Reserva Gift Card confirmada; falló venta:", error));
+        }
+        if (discountResult?.discountCodeId) await recordMassageDiscountUsage(db, { discountCodeId: discountResult.discountCodeId, requestId: `gift-${gift.id}-${reservationId}`, email: input.clientEmail, originalAmount: originalTotal, discountAmount: discountResult.discountTotal, finalAmount: total });
+        if (input.subscribeNewsletter && input.clientEmail) {
+          try { await db.insert(newsletterSubscribers).values({ email: input.clientEmail, name: input.clientName, source: "masajes_booking", status: "active" }); } catch { /* email duplicado */ }
+        }
+        return { processUrl: `/masajes/reserva/confirmacion?gift=1&amount=${total}&classes=${membershipId ? "1" : "0"}`, bookingIds, membershipId, total, originalTotal, discountTotal: discountResult?.discountTotal ?? 0, giftCardCode: gift.code };
+      }
       try {
         const session = await createGetnetSession({
           bookingId: bookingIds[0],

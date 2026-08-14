@@ -5,10 +5,12 @@ import {
   saunaBookings,
   saunaCheckoutOrders,
   saunaServices,
+  reservationPayments,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
 import { commitTransaction, isTransactionApproved } from "./webpay";
+import { redeemGiftCardPayment } from "./reservationPayments";
 
 export function saunaResultUrl(publicToken: string, state: string): string {
   const frontend = (
@@ -55,6 +57,7 @@ export async function finalizeApprovedSaunaOrder(
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
   return db.transaction(async tx => {
+    const giftCardCode = result?.kind === "gift_card" ? String(result.code) : null;
     await tx.execute(
       sql`SELECT id FROM sauna_checkout_orders WHERE id = ${orderId} FOR UPDATE`
     );
@@ -93,8 +96,8 @@ export async function finalizeApprovedSaunaOrder(
         status: "confirmed",
         isConfirmed: 1,
         paymentStatus: "paid",
-        paymentMethod: "webpay_plus",
-        paymentReference: result.authorizationCode || order.buyOrder,
+        paymentMethod: giftCardCode ? "gift_card" : "webpay_plus",
+        paymentReference: giftCardCode || result.authorizationCode || order.buyOrder,
         amountClp: order.totalClp,
         amountPaidClp: order.totalClp,
         source: "web",
@@ -102,18 +105,24 @@ export async function finalizeApprovedSaunaOrder(
       })
       .$returningId();
 
+    if (giftCardCode) {
+      const paidAt = new Date();
+      const gift = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt: paidAt.toISOString().slice(0, 16), giftCardCode }, totalClp: order.totalClp, module: "sauna", reservationId: created.id, note: `Canje web en Sauna ${created.id}`, serviceKey: "sauna" });
+      await tx.insert(reservationPayments).values({ module: "sauna", reservationId: created.id, method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt, reference: gift.code, giftCardId: gift.id });
+    }
+
     await tx
       .update(saunaCheckoutOrders)
       .set({
         bookingId: created.id,
         status: "paid",
-        webpayStatus: result.status,
-        responseCode: result.responseCode,
-        authorizationCode: result.authorizationCode,
-        cardNumber: result.cardNumber,
-        paymentTypeCode: result.paymentTypeCode,
-        transactionDate: result.transactionDate,
-        rawResponse: JSON.stringify(result),
+        webpayStatus: giftCardCode ? "NOT_REQUIRED" : result.status,
+        responseCode: giftCardCode ? 0 : result.responseCode,
+        authorizationCode: giftCardCode ? null : result.authorizationCode,
+        cardNumber: giftCardCode ? null : result.cardNumber,
+        paymentTypeCode: giftCardCode ? null : result.paymentTypeCode,
+        transactionDate: giftCardCode ? null : result.transactionDate,
+        rawResponse: JSON.stringify(giftCardCode ? { paymentRequired: false, reason: "gift_card", giftCardCode } : result),
         paidAt: new Date(),
         completedAt: new Date(),
         error: null,

@@ -2171,6 +2171,9 @@ export async function redeemServiceGiftCard(code: string, usedBy?: string) {
   return await db.transaction(async (tx) => {
     const [giftCard] = await tx.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
     if (!giftCard) throw new Error("Gift Card no encontrada");
+    const { inferGiftCardServiceKey } = await import("../shared/giftCardServices");
+    const serviceKey = giftCard.serviceKey ?? inferGiftCardServiceKey(giftCard.personalMessage);
+    if (serviceKey === "mixed_program") throw new Error("Esta Gift Card corresponde a un programa que todavía no está habilitado en el CMS");
     validateServiceGiftCardRedemption({
       status: giftCard.status,
       purchaseStatus: giftCard.purchaseStatus,

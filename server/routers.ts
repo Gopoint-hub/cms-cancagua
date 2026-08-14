@@ -21,6 +21,7 @@ import { discounts360Router } from "./discounts360Router";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS, hasCmsPermission } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
+import { validatePublicGiftCard } from "./publicGiftCards";
 import {
   CANCAGUA_EMAIL_REFINEMENT_RULES,
   getCancaguaEmailDesignSystem,
@@ -3450,6 +3451,17 @@ Devuelve un JSON con este formato:
           expiresAt: giftCard.expiresAt,
           purchaseStatus: giftCard.purchaseStatus,
         };
+      }),
+
+    validateForService: publicProcedure
+      .input(z.object({
+        code: z.string().trim().min(1).max(20),
+        serviceKey: z.enum(["biopools", "massages", "sauna", "regular_classes", "mixed_program"]),
+        totalClp: z.number().int().positive(),
+      }))
+      .mutation(async ({ input }) => {
+        const card = await db.getGiftCardByCode(input.code.trim().toUpperCase());
+        return validatePublicGiftCard(card, input.serviceKey, input.totalClp);
       }),
 
     create: publicProcedure

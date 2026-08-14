@@ -356,7 +356,7 @@ export default function GiftCardsSales() {
                             {giftCard.balance < giftCard.amount && <div className="text-xs text-muted-foreground">Saldo: {formatPrecio(giftCard.balance)}</div>}
                           </>
                         ) : (
-                          <Badge variant="secondary">Por servicio</Badge>
+                          <div className="space-y-1"><Badge variant="secondary">{giftCard.serviceName || "Por servicio"}</Badge>{giftCard.serviceKey === "mixed_program" && <div className="text-xs text-amber-700">Pendiente de módulo</div>}</div>
                         )}
                       </TableCell>
                       <TableCell>
@@ -699,12 +699,7 @@ export default function GiftCardsSales() {
                   <>
                     <div className="space-y-2">
                       <Label htmlFor="service-name">Servicio *</Label>
-                      <Input
-                        id="service-name"
-                        placeholder="Ej: Biopiscinas"
-                        value={manualGiftCard.serviceName}
-                        onChange={(e) => setManualGiftCard({ ...manualGiftCard, serviceName: e.target.value })}
-                      />
+                      <Select value={manualGiftCard.serviceName} onValueChange={(serviceName) => setManualGiftCard({ ...manualGiftCard, serviceName })}><SelectTrigger id="service-name"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Biopiscinas">Biopiscinas</SelectItem><SelectItem value="Masajes">Masajes</SelectItem><SelectItem value="Sauna">Sauna</SelectItem><SelectItem value="Clases Regulares">Clases Regulares</SelectItem></SelectContent></Select>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="service-details">Cantidad o detalle</Label>

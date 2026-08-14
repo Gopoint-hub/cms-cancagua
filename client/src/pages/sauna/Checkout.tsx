@@ -32,6 +32,8 @@ export default function SaunaCheckout() {
   const [startTime, setStartTime] = useState("");
   const [privateGuests, setPrivateGuests] = useState(6);
   const [accepted, setAccepted] = useState(false);
+  const [giftCardCode, setGiftCardCode] = useState("");
+  const [appliedGiftCard, setAppliedGiftCard] = useState<{ code: string; mode: "amount" | "service"; balanceAfter: number } | null>(null);
   const [customer, setCustomer] = useState({
     name: "",
     email: "",
@@ -57,6 +59,7 @@ export default function SaunaCheckout() {
   }, [slots, startTime]);
   const payment = trpc.sauna.public.startPayment.useMutation({
     onSuccess: result => {
+      if (!result.paymentRequired) { window.location.assign(result.resultUrl); return; }
       const form = document.createElement("form");
       form.method = "POST";
       form.action = result.paymentUrl;
@@ -70,6 +73,11 @@ export default function SaunaCheckout() {
     },
     onError: error => toast.error(error.message),
   });
+  const validateGiftCard = trpc.giftCards.validateForService.useMutation({
+    onSuccess: result => { setAppliedGiftCard(result); setGiftCardCode(result.code); toast.success(`Gift Card ${result.code} aplicada`); },
+    onError: error => { setAppliedGiftCard(null); toast.error(error.message); },
+  });
+  useEffect(() => setAppliedGiftCard(null), [service?.id]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!service || !startTime)
@@ -91,6 +99,7 @@ export default function SaunaCheckout() {
           : undefined,
       acceptedSharedUse: true,
       acceptedTerms: true,
+      giftCardCode: appliedGiftCard?.code,
     });
   };
   if (catalog.isLoading)
@@ -286,6 +295,7 @@ export default function SaunaCheckout() {
                   <span>Total</span>
                   <span>{clp.format(service.priceClp)}</span>
                 </div>
+                <div className="space-y-2 border-t pt-4"><Label htmlFor="sauna-gift-card">Pagar con Gift Card</Label><div className="flex gap-2"><Input id="sauna-gift-card" value={giftCardCode} onChange={event => { setGiftCardCode(event.target.value.toUpperCase()); setAppliedGiftCard(null); }} placeholder="Código de Gift Card" /><Button type="button" variant="outline" disabled={!giftCardCode.trim() || validateGiftCard.isPending} onClick={() => validateGiftCard.mutate({ code: giftCardCode, serviceKey: "sauna", totalClp: service.priceClp })}>{validateGiftCard.isPending ? "Validando…" : "Aplicar"}</Button></div>{appliedGiftCard && <p className="text-xs text-emerald-700">Gift Card aplicada{appliedGiftCard.mode === "amount" ? ` · saldo restante ${clp.format(appliedGiftCard.balanceAfter)}` : " · servicio cubierto"}</p>}</div>
                 <ul className="space-y-2 text-sm text-stone-600">
                   <li className="flex gap-2">
                     <Check className="h-4 w-4 text-emerald-700" />1 hora de
@@ -297,7 +307,7 @@ export default function SaunaCheckout() {
                   </li>
                   <li className="flex gap-2">
                     <ShieldCheck className="h-4 w-4 text-emerald-700" />
-                    Pago seguro con Transbank Webpay Plus
+                    {appliedGiftCard ? "Reserva cubierta con Gift Card" : "Pago seguro con Transbank Webpay Plus"}
                   </li>
                 </ul>
                 <label className="flex cursor-pointer items-start gap-3 text-sm">
@@ -320,12 +330,11 @@ export default function SaunaCheckout() {
                   disabled={payment.isPending || !startTime}
                 >
                   {payment.isPending
-                    ? "Conectando con Webpay…"
-                    : `Pagar ${clp.format(service.priceClp)}`}
+                    ? appliedGiftCard ? "Confirmando reserva…" : "Conectando con Webpay…"
+                    : appliedGiftCard ? "Confirmar con Gift Card" : `Pagar ${clp.format(service.priceClp)}`}
                 </Button>
                 <p className="text-center text-xs text-stone-500">
-                  Los cupos quedan reservados durante 30 minutos mientras
-                  completas el pago.
+                  {appliedGiftCard ? "La Gift Card se descontará al confirmar la reserva." : "Los cupos quedan reservados durante 30 minutos mientras completas el pago."}
                 </p>
               </CardContent>
             </Card>

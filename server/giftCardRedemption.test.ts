@@ -43,6 +43,15 @@ describe("validación de Gift Cards por servicio", () => {
       expiresAt: new Date(Date.now() + 86400000),
     })).not.toThrow();
   });
+
+  it("acepta una Gift Card únicamente en su módulo asociado", () => {
+    expect(() => validateServiceGiftCardRedemption({ status: "active", purchaseStatus: "completed", amount: 0, serviceKey: "sauna", requestedServiceKey: "sauna" })).not.toThrow();
+    expect(() => validateServiceGiftCardRedemption({ status: "active", purchaseStatus: "completed", amount: 0, serviceKey: "sauna", requestedServiceKey: "massages" })).toThrow("no corresponde al servicio");
+  });
+
+  it("mantiene bloqueados los programas mixtos hasta que exista su módulo", () => {
+    expect(() => validateServiceGiftCardRedemption({ status: "active", purchaseStatus: "completed", amount: 0, serviceKey: "mixed_program", requestedServiceKey: "sauna" })).toThrow("programa que todavía no está habilitado");
+  });
 });
 
 describe("validación de canje de Gift Cards", () => {

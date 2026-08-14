@@ -19,6 +19,7 @@ import {
   regularClassStudents,
   regularClassTeacherAgreements,
   regularClassTeachers,
+  reservationPayments,
   users,
 } from "../drizzle/schema";
 import {
@@ -40,6 +41,8 @@ import {
 } from "./regularClassesPeriod";
 import { decodeCmsImageDataUrl } from "./imageUpload";
 import { loadPublicRegularClassesCatalog } from "./publicRegularClassesCatalog";
+import { redeemGiftCardPayment } from "./reservationPayments";
+import { canRedeemGiftCard } from "./giftCardRedemption";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -919,36 +922,46 @@ export const regularClassesRouter = router({
       paymentStatus: z.enum(["pending", "paid"]).default("paid"),
       paymentMethod: z.string().trim().max(60).optional(),
       paymentReference: z.string().trim().max(160).optional(),
+      giftCardCode: z.string().trim().min(1).max(20).optional(),
     })).mutation(async ({ ctx, input }) => {
       requireReception(ctx.user);
+      if (input.giftCardCode && !canRedeemGiftCard(ctx.user)) throw new TRPCError({ code: "FORBIDDEN", message: "No tienes permisos para canjear Gift Cards" });
       const db = await requireDb();
       const [plan] = await db.select().from(regularClassPlans)
         .where(eq(regularClassPlans.id, input.planId)).limit(1);
       if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Plan no encontrado" });
       const period = calendarMonthRange(input.month);
-      const [created] = await db.insert(regularClassMemberships).values({
+      const created = await db.transaction(async tx => {
+      const isGiftCard = Boolean(input.giftCardCode);
+      const paymentStatus = isGiftCard ? "paid" as const : input.paymentStatus;
+      const totalClp = input.pricePaidClp ?? plan.priceClp;
+      const [created] = await tx.insert(regularClassMemberships).values({
         studentId: input.studentId,
         planId: input.planId,
         periodStart: period.start,
         periodEnd: period.end,
-        pricePaidClp: input.pricePaidClp ?? plan.priceClp,
-        originalAmountClp: input.pricePaidClp ?? plan.priceClp,
+        pricePaidClp: totalClp,
+        originalAmountClp: totalClp,
         creditsTotal: plan.creditsPerPeriod,
-        status: input.paymentStatus === "paid" ? "active" : "pending_payment",
-        paymentStatus: input.paymentStatus,
-        paymentMethod: input.paymentMethod,
-        paymentReference: input.paymentReference,
-        paidAt: input.paymentStatus === "paid" ? new Date() : null,
+        status: paymentStatus === "paid" ? "active" : "pending_payment",
+        paymentStatus,
+        paymentMethod: isGiftCard ? "gift_card" : input.paymentMethod,
+        paymentReference: isGiftCard ? input.giftCardCode!.trim().toUpperCase() : input.paymentReference,
+        paidAt: paymentStatus === "paid" ? new Date() : null,
         createdByUserId: ctx.user.id,
       }).$returningId();
-      if (input.paymentStatus === "paid") {
-        await db.update(regularClassStudents).set({ status: "active" })
+      if (isGiftCard) {
+        const gift = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: totalClp, paidAt: new Date().toISOString().slice(0, 16), giftCardCode: input.giftCardCode }, totalClp, module: "regular_classes", reservationId: created.id, note: `Canje en plan de Clases Regulares ${plan.name}`, serviceKey: "regular_classes" });
+        await tx.insert(reservationPayments).values({ module: "regular_classes", reservationId: created.id, method: "gift_card", status: "paid", amountClp: totalClp, paidAt: new Date(), reference: gift.code, giftCardId: gift.id, createdByUserId: ctx.user.id });
+      }
+      if (paymentStatus === "paid") {
+        await tx.update(regularClassStudents).set({ status: "active" })
           .where(eq(regularClassStudents.id, input.studentId));
-        await db.update(regularClassPaymentInvitations).set({
+        await tx.update(regularClassPaymentInvitations).set({
           status: "completed",
           completedAt: new Date(),
         }).where(eq(regularClassPaymentInvitations.studentId, input.studentId));
-        await db.update(regularClassAttendances).set({
+        await tx.update(regularClassAttendances).set({
           membershipId: created.id,
           status: "present",
         }).where(and(
@@ -956,6 +969,8 @@ export const regularClassesRouter = router({
           eq(regularClassAttendances.status, "pending_payment"),
         ));
       }
+      return created;
+      });
       await writeAudit("membership", created.id, "created", ctx.user.id, input);
       return { success: true, id: created.id };
     }),

@@ -54,7 +54,7 @@ export default function RegularClassesStudents() {
   const [studentForm, setStudentForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   const [enrollForm, setEnrollForm] = useState({
     planId: "", month: currentMonthString(),
-    paymentStatus: "paid" as "paid" | "pending", paymentMethod: "recepcion", paymentReference: "",
+    paymentStatus: "paid" as "paid" | "pending", paymentMethod: "recepcion", paymentReference: "", giftCardCode: "",
   });
   const [carryReason, setCarryReason] = useState("");
   const students = trpc.regularClasses.students.list.useQuery();
@@ -252,18 +252,20 @@ export default function RegularClassesStudents() {
                 <SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente</SelectItem></SelectContent>
               </Select>
             </div>
-            <div className="space-y-2"><Label>Referencia</Label><Input value={enrollForm.paymentReference} onChange={(e) => setEnrollForm({ ...enrollForm, paymentReference: e.target.value })} /></div>
+            <div className="space-y-2"><Label>Medio de pago</Label><Select value={enrollForm.paymentMethod} onValueChange={(paymentMethod) => setEnrollForm({ ...enrollForm, paymentMethod, paymentStatus: paymentMethod === "gift_card" ? "paid" : enrollForm.paymentStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="recepcion">Recepción</SelectItem><SelectItem value="cash">Efectivo</SelectItem><SelectItem value="bank_transfer">Transferencia</SelectItem><SelectItem value="transbank_machine">Transbank</SelectItem><SelectItem value="gift_card">Gift Card</SelectItem></SelectContent></Select></div>
+            {enrollForm.paymentMethod === "gift_card" ? <div className="space-y-2"><Label>Código de Gift Card</Label><Input value={enrollForm.giftCardCode} onChange={(e) => setEnrollForm({ ...enrollForm, giftCardCode: e.target.value.toUpperCase() })} placeholder="GC-..." /></div> : <div className="space-y-2"><Label>Referencia</Label><Input value={enrollForm.paymentReference} onChange={(e) => setEnrollForm({ ...enrollForm, paymentReference: e.target.value })} /></div>}
             {selectedPlan && <p className="rounded-lg bg-muted p-3 text-sm">Se registrarán {selectedPlan.creditsPerPeriod} clases por {clp(selectedPlan.priceClp)}.</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEnrollStudent(null)}>Cancelar</Button>
-            <Button disabled={enroll.isPending || !enrollForm.planId || !enrollForm.month} onClick={() => enroll.mutate({
+            <Button disabled={enroll.isPending || !enrollForm.planId || !enrollForm.month || (enrollForm.paymentMethod === "gift_card" && !enrollForm.giftCardCode.trim())} onClick={() => enroll.mutate({
               studentId: enrollStudent.id,
               planId: Number(enrollForm.planId),
               month: enrollForm.month,
               paymentStatus: enrollForm.paymentStatus,
               paymentMethod: enrollForm.paymentMethod,
               paymentReference: enrollForm.paymentReference || undefined,
+              giftCardCode: enrollForm.paymentMethod === "gift_card" ? enrollForm.giftCardCode || undefined : undefined,
             })}>Registrar plan</Button>
           </DialogFooter>
         </DialogContent>

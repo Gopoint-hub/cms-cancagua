@@ -46,6 +46,8 @@ import {
 } from "./webpay";
 import { calculatedPaymentStatus } from "../shared/reservationPayments";
 import { canRedeemGiftCard } from "./giftCardRedemption";
+import { validatePublicGiftCard } from "./publicGiftCards";
+import { finalizeApprovedSaunaOrder, saunaResultUrl } from "./saunaWebpay";
 import {
   redeemGiftCardPayment,
   reservationPaymentDate,
@@ -544,6 +546,7 @@ export const saunaRouter = router({
                       module: "sauna",
                       reservationId: created.id,
                       note: `Canje en sauna ${input.clientName || created.id}`,
+                      serviceKey: "sauna",
                     })
                 : undefined;
               await tx.insert(reservationPayments).values({
@@ -638,6 +641,7 @@ export const saunaRouter = router({
                   module: "sauna",
                   reservationId: booking.id,
                   note: `Abono Gift Card en sauna ${booking.bookingCode}`,
+                  serviceKey: "sauna",
                 })
               : undefined;
           const [created] = await tx
@@ -1393,6 +1397,7 @@ export const saunaRouter = router({
           privateGuestCount: z.number().int().min(1).max(6).optional(),
           acceptedSharedUse: z.literal(true),
           acceptedTerms: z.literal(true),
+          giftCardCode: z.string().trim().min(1).max(20).optional(),
         })
       )
       .mutation(async ({ input }) => {
@@ -1432,6 +1437,7 @@ export const saunaRouter = router({
           });
         let orderId = 0;
         let publicToken = "";
+        const normalizedGiftCardCode = input.giftCardCode?.trim().toUpperCase();
         await db.transaction(async tx => {
           await acquireCapacityLock(tx, input.bookingDate);
           try {
@@ -1453,6 +1459,10 @@ export const saunaRouter = router({
               });
             }
             publicToken = nanoid(48);
+            if (normalizedGiftCardCode) {
+              const [card] = await tx.select().from(giftCards).where(eq(giftCards.code, normalizedGiftCardCode)).limit(1);
+              validatePublicGiftCard(card, "sauna", service.priceClp);
+            }
             const [created] = await tx
               .insert(saunaCheckoutOrders)
               .values({
@@ -1468,6 +1478,7 @@ export const saunaRouter = router({
                 capacityUsed: service.capacityUsed,
                 isPrivate: isPrivate ? 1 : 0,
                 totalClp: service.priceClp,
+                giftCardCode: normalizedGiftCardCode ?? null,
                 status: "initiating",
                 expiresAt: new Date(Date.now() + 30 * 60_000),
               })
@@ -1477,6 +1488,15 @@ export const saunaRouter = router({
             await releaseCapacityLock(tx, input.bookingDate);
           }
         });
+        if (normalizedGiftCardCode) {
+          try {
+            await finalizeApprovedSaunaOrder(orderId, { kind: "gift_card", code: normalizedGiftCardCode });
+            return { paymentRequired: false as const, paymentUrl: null, token: null, orderToken: publicToken, resultUrl: saunaResultUrl(publicToken, "pagado") };
+          } catch (error) {
+            await db.update(saunaCheckoutOrders).set({ status: "failed", error: String(error).slice(0, 2000) }).where(eq(saunaCheckoutOrders.id, orderId));
+            throw error instanceof TRPCError ? error : new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "No pudimos canjear la Gift Card" });
+          }
+        }
         const buyOrder = generateSaunaBuyOrder(orderId);
         const sessionId = generateSessionId();
         const origin = (ENV.appUrl || "https://cms.cancagua.cl").replace(
@@ -1500,9 +1520,11 @@ export const saunaRouter = router({
             })
             .where(eq(saunaCheckoutOrders.id, orderId));
           return {
+            paymentRequired: true as const,
             paymentUrl: payment.url,
             token: payment.token,
             orderToken: publicToken,
+            resultUrl: null,
           };
         } catch (error) {
           await db
