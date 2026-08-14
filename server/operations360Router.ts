@@ -20,6 +20,7 @@ import {
   regularClassSessions,
   regularClassStudents,
   regularClassTeachers,
+  saunaBookings,
 } from "../drizzle/schema";
 import {
   hasCmsPermission,
@@ -30,12 +31,20 @@ import { getDb } from "./db";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const serviceSchema = z.enum(["massages", "biopools", "regular_classes"]);
+const calendarServiceSchema = z.enum([
+  "massages",
+  "biopools",
+  "sauna",
+  "regular_classes",
+]);
 
 type ServiceKey = z.infer<typeof serviceSchema>;
+type CalendarServiceKey = z.infer<typeof calendarServiceSchema>;
 const eventKindSchema = z.enum([
   "massage",
   "massage_program",
   "biopool",
+  "sauna",
   "regular_class",
   "regular_class_schedule",
 ]);
@@ -95,10 +104,11 @@ async function database() {
   return db;
 }
 
-function calendarServices(user: PermissionUser): ServiceKey[] {
+function calendarServices(user: PermissionUser): CalendarServiceKey[] {
   return [
     ...(hasCmsPermission(user, "module.massages") ? ["massages" as const] : []),
     ...(hasCmsPermission(user, "module.biopools") ? ["biopools" as const] : []),
+    ...(hasCmsPermission(user, "module.sauna") ? ["sauna" as const] : []),
     ...(hasCmsPermission(user, "module.regular_classes") ? ["regular_classes" as const] : []),
   ];
 }
@@ -282,7 +292,7 @@ export const operations360Router = router({
       z.object({
         from: dateSchema,
         to: dateSchema,
-        services: z.array(serviceSchema).optional(),
+        services: z.array(calendarServiceSchema).optional(),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -388,6 +398,35 @@ export const operations360Router = router({
             paymentStatus: booking.paymentStatus,
             people: booking.totalGuests,
             href: `/cms/biopiscinas/agenda?date=${serializeDate(booking.bookingDate)}`,
+          }))
+        );
+      }
+
+      if (selected.includes("sauna")) {
+        const rows = await db
+          .select()
+          .from(saunaBookings)
+          .where(
+            and(
+              gte(saunaBookings.bookingDate, input.from),
+              lte(saunaBookings.bookingDate, input.to)
+            )
+          );
+        events.push(
+          ...rows.map(booking => ({
+            id: `sauna:${booking.id}`,
+            entityId: booking.id,
+            kind: "sauna",
+            service: "sauna",
+            date: serializeDate(booking.bookingDate),
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            title: booking.serviceName,
+            clientName: booking.clientName ?? "Sin cliente registrado",
+            status: booking.status,
+            paymentStatus: booking.paymentStatus,
+            people: booking.guests,
+            href: `/cms/sauna/agenda?date=${serializeDate(booking.bookingDate)}`,
           }))
         );
       }
@@ -606,6 +645,59 @@ export const operations360Router = router({
             ...(nps?.respondedAt ? [{ id: `nps:${nps.id}`, type: "nps", label: `NPS ${nps.score}/10`, detail: nps.comment, at: nps.respondedAt }] : []),
           ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()),
           href: `/cms/masajes/agenda?date=${serializeDate(booking.bookingDate)}`,
+        };
+      }
+
+      if (input.kind === "sauna") {
+        if (!allowed.includes("sauna")) throw new TRPCError({ code: "FORBIDDEN" });
+        const [booking] = await db
+          .select()
+          .from(saunaBookings)
+          .where(eq(saunaBookings.id, input.entityId))
+          .limit(1);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        return {
+          service: "sauna" as const,
+          title: booking.serviceName,
+          client: {
+            name: booking.clientName ?? "Sin cliente registrado",
+            email: booking.clientEmail,
+            phone: booking.clientPhone,
+          },
+          schedule: {
+            date: serializeDate(booking.bookingDate),
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+          },
+          status: booking.status,
+          payment: {
+            status: booking.paymentStatus,
+            method: booking.paymentMethod,
+            reference: booking.paymentReference,
+            amountClp: booking.amountPaidClp,
+            refundAmountClp: booking.paymentStatus === "refunded" ? booking.amountPaidClp : 0,
+          },
+          notes: booking.notes,
+          detail: `${booking.guests} persona(s) · ${booking.source === "skedu" ? "Skedu" : "CMS"}`,
+          activity: [
+            {
+              id: `created:${booking.id}`,
+              type: "activity",
+              label: "Reserva creada",
+              detail: booking.origin,
+              at: booking.createdAt,
+            },
+            ...(booking.cancelledAt
+              ? [{
+                  id: `cancelled:${booking.id}`,
+                  type: "activity",
+                  label: "Reserva cancelada",
+                  detail: null,
+                  at: booking.cancelledAt,
+                }]
+              : []),
+          ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()),
+          href: `/cms/sauna/agenda?date=${serializeDate(booking.bookingDate)}`,
         };
       }
 

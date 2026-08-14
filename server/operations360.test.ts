@@ -18,6 +18,7 @@ describe("acceso a vistas 360", () => {
   it("permite calendario con acceso a cualquier módulo operativo", () => {
     const permissions = JSON.stringify(["module.biopools"]);
     expect(canAccessCmsPath("editor", "/cms/calendario", false, permissions)).toBe(true);
+    expect(canAccessCmsPath("editor", "/cms/calendario", false, JSON.stringify(["module.sauna"]))).toBe(true);
     expect(canAccessCmsPath("editor", "/cms/clientes-360", false, permissions)).toBe(false);
   });
 

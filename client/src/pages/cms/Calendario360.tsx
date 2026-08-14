@@ -27,6 +27,7 @@ import {
   ListChecks,
   Mail,
   Phone,
+  RefreshCw,
   Rows3,
   UsersRound,
 } from "lucide-react";
@@ -56,8 +57,8 @@ import { cn } from "@/lib/utils";
 
 type ViewMode = "day" | "week" | "month";
 type DayMode = "list" | "summary" | "services";
-type ServiceKey = "massages" | "biopools" | "regular_classes";
-type EventKind = "massage" | "massage_program" | "biopool" | "regular_class" | "regular_class_schedule";
+type ServiceKey = "massages" | "biopools" | "sauna" | "regular_classes";
+type EventKind = "massage" | "massage_program" | "biopool" | "sauna" | "regular_class" | "regular_class_schedule";
 
 type CalendarEvent = {
   id: string;
@@ -87,6 +88,12 @@ const SERVICE_META: Record<ServiceKey, { label: string; dot: string; panel: stri
     dot: "bg-cyan-600",
     panel: "border-cyan-200 bg-cyan-50/90",
     solid: "bg-cyan-600",
+  },
+  sauna: {
+    label: "Sauna",
+    dot: "bg-amber-600",
+    panel: "border-amber-200 bg-amber-50/90",
+    solid: "bg-amber-600",
   },
   regular_classes: {
     label: "Clases regulares",
@@ -363,7 +370,19 @@ export default function Calendario360() {
     return { from: startOfWeek(startOfMonth(selectedDate), { weekStartsOn: 1 }), to: endOfWeek(endOfMonth(selectedDate), { weekStartsOn: 1 }) };
   }, [selectedDate, view]);
 
-  const calendar = trpc.operations360.calendar.useQuery({ from: dateKey(range.from), to: dateKey(range.to), services: services.length ? services : undefined });
+  const calendar = trpc.operations360.calendar.useQuery(
+    {
+      from: dateKey(range.from),
+      to: dateKey(range.to),
+      services: services.length ? services : undefined,
+    },
+    {
+      refetchInterval: 30_000,
+      refetchIntervalInBackground: true,
+      refetchOnReconnect: true,
+      refetchOnWindowFocus: true,
+    }
+  );
   const events = (calendar.data ?? []) as CalendarEvent[];
   const filtered = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
@@ -399,12 +418,15 @@ export default function Calendario360() {
         ) : dayMode === "services" ? (
           <TimeGrid days={[selectedDate]} events={dayEvents} services={allowedServices} serviceColumns onEvent={setSelectedEvent} />
         ) : dayMode === "summary" ? (
-          <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Card><CardContent className="p-5"><CalendarDays className="h-5 w-5 text-primary" /><p className="mt-3 text-3xl font-semibold">{dayEvents.length}</p><p className="text-sm text-muted-foreground">Reservas y actividades</p></CardContent></Card><Card><CardContent className="p-5"><UsersRound className="h-5 w-5 text-primary" /><p className="mt-3 text-3xl font-semibold">{dayEvents.reduce((sum, event) => sum + event.people, 0)}</p><p className="text-sm text-muted-foreground">Personas registradas</p></CardContent></Card><Card><CardContent className="p-5"><CircleDollarSign className="h-5 w-5 text-emerald-600" /><p className="mt-3 text-3xl font-semibold">{dayEvents.filter(event => event.paymentStatus === "paid").length}</p><p className="text-sm text-muted-foreground">Reservas pagadas</p></CardContent></Card><Card><CardContent className="p-5"><Rows3 className="h-5 w-5 text-primary" /><p className="mt-3 text-3xl font-semibold">{new Set(dayEvents.map(event => event.service)).size}</p><p className="text-sm text-muted-foreground">Servicios activos</p></CardContent></Card></div><div className="grid gap-3 lg:grid-cols-3">{allowedServices.map(service => { const serviceEvents = dayEvents.filter(event => event.service === service); return <Card key={service}><CardContent className="p-4"><div className="mb-3 flex items-center justify-between"><p className="flex items-center gap-2 font-semibold"><span className={cn("h-2.5 w-2.5 rounded-full", SERVICE_META[service].dot)} />{SERVICE_META[service].label}</p><Badge variant="secondary">{serviceEvents.length}</Badge></div><div className="space-y-2">{serviceEvents.length ? serviceEvents.map(event => <CalendarEventButton key={event.id} event={event} onClick={() => setSelectedEvent(event)} />) : <p className="py-6 text-center text-sm text-muted-foreground">Sin actividades</p>}</div></CardContent></Card>; })}</div></div>
+          <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Card><CardContent className="p-5"><CalendarDays className="h-5 w-5 text-primary" /><p className="mt-3 text-3xl font-semibold">{dayEvents.length}</p><p className="text-sm text-muted-foreground">Reservas y actividades</p></CardContent></Card><Card><CardContent className="p-5"><UsersRound className="h-5 w-5 text-primary" /><p className="mt-3 text-3xl font-semibold">{dayEvents.reduce((sum, event) => sum + event.people, 0)}</p><p className="text-sm text-muted-foreground">Personas registradas</p></CardContent></Card><Card><CardContent className="p-5"><CircleDollarSign className="h-5 w-5 text-emerald-600" /><p className="mt-3 text-3xl font-semibold">{dayEvents.filter(event => event.paymentStatus === "paid").length}</p><p className="text-sm text-muted-foreground">Reservas pagadas</p></CardContent></Card><Card><CardContent className="p-5"><Rows3 className="h-5 w-5 text-primary" /><p className="mt-3 text-3xl font-semibold">{new Set(dayEvents.map(event => event.service)).size}</p><p className="text-sm text-muted-foreground">Servicios activos</p></CardContent></Card></div><div className="grid gap-3 lg:grid-cols-4">{allowedServices.map(service => { const serviceEvents = dayEvents.filter(event => event.service === service); return <Card key={service}><CardContent className="p-4"><div className="mb-3 flex items-center justify-between"><p className="flex items-center gap-2 font-semibold"><span className={cn("h-2.5 w-2.5 rounded-full", SERVICE_META[service].dot)} />{SERVICE_META[service].label}</p><Badge variant="secondary">{serviceEvents.length}</Badge></div><div className="space-y-2">{serviceEvents.length ? serviceEvents.map(event => <CalendarEventButton key={event.id} event={event} onClick={() => setSelectedEvent(event)} />) : <p className="py-6 text-center text-sm text-muted-foreground">Sin actividades</p>}</div></CardContent></Card>; })}</div></div>
         ) : dayEvents.length ? (
           <div className="space-y-3">{dayEvents.map(event => <CalendarEventButton key={event.id} event={event} onClick={() => setSelectedEvent(event)} />)}</div>
         ) : <Card><CardContent className="py-16 text-center text-muted-foreground"><Clock3 className="mx-auto mb-3 h-8 w-8" />No hay actividades para este día.</CardContent></Card>}
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground"><ListChecks className="h-4 w-4" />Haz clic en un día para abrir la vista diaria y en cualquier reserva para revisar su pago y actividad.</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-2"><ListChecks className="h-4 w-4" />Haz clic en un día para abrir la vista diaria y en cualquier reserva para revisar su pago y actividad.</span>
+          <span className="flex items-center gap-2"><RefreshCw className={cn("h-3.5 w-3.5", calendar.isFetching && "animate-spin")} />Actualización automática cada 30 segundos</span>
+        </div>
       </div>
       <ReservationDetail event={selectedEvent} open={Boolean(selectedEvent)} onOpenChange={open => !open && setSelectedEvent(null)} />
     </DashboardLayout>
