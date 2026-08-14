@@ -1,5 +1,4 @@
 import { useState, useRef } from "react";
-import * as XLSX from "xlsx";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -167,7 +166,7 @@ export default function ProductosCorporativos() {
       const reader = new FileReader();
       reader.onload = (event) => {
         const data = event.target?.result as ArrayBuffer;
-        parseExcel(data);
+        void parseExcel(data);
       };
       reader.readAsArrayBuffer(file);
     } else {
@@ -180,8 +179,9 @@ export default function ProductosCorporativos() {
     }
   };
 
-  const parseExcel = (data: ArrayBuffer) => {
+  const parseExcel = async (data: ArrayBuffer) => {
     try {
+      const XLSX = await import("xlsx");
       const workbook = XLSX.read(data, { type: 'array' });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
