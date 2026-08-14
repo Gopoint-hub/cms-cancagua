@@ -46,6 +46,7 @@ import { sendWhatsApp } from "./_core/whapi";
 import { syncMassageSale } from "./massageSales";
 import {
   calculateWellnessCartDiscount,
+  recordMassageDiscountUsage,
   recordPaidWellnessDiscountUsage,
   type WellnessDiscountLine,
 } from "./massageDiscounts";

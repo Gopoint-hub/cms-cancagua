@@ -25,6 +25,7 @@ import {
 } from "../drizzle/schema";
 import {
   hasCmsPermission,
+  hasMassagePaymentAccess,
   type PermissionUser,
 } from "../shared/permissions";
 import { protectedProcedure, router } from "./_core/trpc";
@@ -644,6 +645,7 @@ export const operations360Router = router({
         const booking = row.booking;
         return {
           service: "biopools" as const,
+          canManagePayments: hasCmsPermission(ctx.user, "biopools.manage_agenda"),
           title: row.serviceName,
           client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
           schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
@@ -714,6 +716,7 @@ export const operations360Router = router({
           const booking = row.booking;
           return {
             service: "massages" as const,
+            canManagePayments: hasMassagePaymentAccess(ctx.user),
             title: row.techniqueName ?? "Masaje",
             client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
             schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
@@ -751,6 +754,7 @@ export const operations360Router = router({
           )).limit(1);
         return {
           service: "massages" as const,
+          canManagePayments: false,
           title: `Programa ${booking.program.replaceAll("_", " ")}`,
           client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
           schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
@@ -790,6 +794,7 @@ export const operations360Router = router({
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
         return {
           service: "sauna" as const,
+          canManagePayments: hasCmsPermission(ctx.user, "sauna.manage_agenda"),
           title: booking.serviceName,
           client: {
             name: booking.clientName ?? "Sin cliente registrado",
@@ -851,6 +856,7 @@ export const operations360Router = router({
           .where(eq(regularClassAttendances.sessionId, input.entityId));
         return {
           service: "regular_classes" as const,
+          canManagePayments: false,
           title: row.disciplineName,
           client: { name: row.teacherName, email: null, phone: null },
           schedule: { date: serializeDate(row.session.sessionDate), startTime: row.session.startTime, endTime: row.session.endTime },
@@ -874,6 +880,7 @@ export const operations360Router = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       return {
         service: "regular_classes" as const,
+        canManagePayments: false,
         title: row.disciplineName,
         client: { name: row.teacherName, email: null, phone: null },
         schedule: { date: input.date, startTime: row.schedule.startTime, endTime: row.schedule.endTime },
