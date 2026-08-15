@@ -2622,6 +2622,129 @@ export const biopoolsRouter = router({
           }
         });
       }),
+    updateGuests: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          adultQuantity: z.number().int().min(0).max(40),
+          childQuantity: z.number().int().min(0).max(40),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "biopools.manage_agenda");
+        const quantityError = validateAdultChildQuantities(
+          input.adultQuantity,
+          input.childQuantity
+        );
+        if (quantityError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: quantityError });
+        const db = await database();
+        return db.transaction(async tx => {
+          const [booking] = await tx
+            .select()
+            .from(biopoolBookings)
+            .where(eq(biopoolBookings.id, input.id))
+            .limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          if (booking.status === "cancelled")
+            throw new TRPCError({ code: "BAD_REQUEST", message: "La reserva está cancelada" });
+
+          const lockName = `biopool:shared:${serializeDate(booking.bookingDate)}`;
+          await acquireCapacityLock(tx, lockName);
+          try {
+            const totalGuests = input.adultQuantity + input.childQuantity;
+            const availability = await availabilityForDay(
+              tx,
+              booking.serviceId,
+              serializeDate(booking.bookingDate),
+              booking.id
+            );
+            const slot = availability.slots.find(
+              item => item.startTime === booking.startTime
+            );
+            if (!slot || slot.availableSeats < totalGuests)
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `Solo quedan ${slot?.availableSeats ?? 0} cupos disponibles para este horario`,
+              });
+
+            const tickets = await tx
+              .select()
+              .from(biopoolTicketTypes)
+              .where(
+                and(
+                  eq(biopoolTicketTypes.serviceId, booking.serviceId),
+                  eq(biopoolTicketTypes.active, 1)
+                )
+              );
+            const adult = tickets.find(ticket => ticket.code === "adult");
+            const child = tickets.find(ticket => ticket.code === "child");
+            if (!adult || (input.childQuantity > 0 && !child))
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: "Faltan los tickets requeridos para recalcular la reserva",
+              });
+            const originalAmountClp =
+              adult.priceClp * input.adultQuantity +
+              (child?.priceClp ?? 0) * input.childQuantity;
+            let discountAmountClp = 0;
+            let discountCodeId: number | null = null;
+            let discountCode: string | null = null;
+            if (booking.discountCode) {
+              try {
+                const discount = await calculateWellnessCartDiscount(
+                  tx,
+                  booking.discountCode,
+                  [{ service: "biopiscinas", serviceId: booking.serviceId, originalAmount: originalAmountClp }]
+                );
+                discountAmountClp = discount.discountTotal;
+                discountCodeId = discount.discountCodeId;
+                discountCode = discount.code;
+              } catch (error) {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: error instanceof Error
+                    ? `No se pudo mantener el descuento: ${error.message}`
+                    : "No se pudo mantener el descuento aplicado",
+                });
+              }
+            }
+            const finalAmountClp = Math.max(0, originalAmountClp - discountAmountClp);
+            await tx
+              .update(biopoolBookings)
+              .set({
+                adultQuantity: input.adultQuantity,
+                childQuantity: input.childQuantity,
+                totalGuests,
+                originalAmountClp,
+                discountAmountClp,
+                discountCodeId,
+                discountCode,
+                paymentStatus: bookingPaymentStatus(booking.amountPaidClp, finalAmountClp),
+              })
+              .where(eq(biopoolBookings.id, booking.id));
+            await addActivity(
+              tx,
+              booking.id,
+              "guest_count_updated",
+              {
+                from: { adults: booking.adultQuantity, children: booking.childQuantity, totalClp: booking.originalAmountClp },
+                to: { adults: input.adultQuantity, children: input.childQuantity, totalClp: originalAmountClp },
+              },
+              ctx.user.id
+            );
+            return {
+              success: true,
+              originalAmountClp,
+              discountAmountClp,
+              finalAmountClp,
+              overpaymentAmountClp: Math.max(0, booking.amountPaidClp - finalAmountClp),
+            };
+          } finally {
+            await releaseCapacityLock(tx, lockName);
+          }
+        });
+      }),
     updateStatus: protectedProcedure
       .input(
         z.object({

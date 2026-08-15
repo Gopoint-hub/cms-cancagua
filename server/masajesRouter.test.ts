@@ -12,6 +12,7 @@ import {
   isSkeduProgramDurationAllowed,
   isPendingManualMassageAssignment,
   listAutomaticMassageSlots,
+  massagePriceForDuration,
   MASSAGE_AGENDA_STATUSES,
   MANUAL_ASSIGNMENT_REJECTION_STATUSES,
   SKEDU_AGENDA_STATUSES,
@@ -24,6 +25,15 @@ import {
   validateSkeduTherapistSelection,
   validatePublicMassageLeadTime,
 } from "./masajesRouter";
+
+describe("edición de servicio de masaje", () => {
+  it("obtiene el valor correspondiente a la duración elegida", () => {
+    const prices = { price50min: "45000", price80min: "60000", price110min: null };
+    expect(massagePriceForDuration(prices, 50)).toBe(45_000);
+    expect(massagePriceForDuration(prices, 80)).toBe(60_000);
+    expect(massagePriceForDuration(prices, 110)).toBeNull();
+  });
+});
 
 describe("massage agenda visibility", () => {
   it("keeps every standard booking status visible, including manual pending and system cancellations", () => {

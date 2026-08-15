@@ -6,6 +6,7 @@ import {
   biopoolBookingActivity,
   biopoolNotifications,
   biopoolServices,
+  biopoolTicketTypes,
   massageBookings,
   massageNpsResponses,
   massageProgramBookings,
@@ -185,6 +186,7 @@ export function buildPaymentDetail(input: {
     discountCode: input.discountCode ?? null,
     totalAmountClp,
     balanceAmountClp: Math.max(0, totalAmountClp - amountPaidClp),
+    overpaymentAmountClp: Math.max(0, amountPaidClp - totalAmountClp),
     lines,
   };
 }
@@ -636,7 +638,7 @@ export const operations360Router = router({
           .where(eq(biopoolBookings.id, input.entityId))
           .limit(1);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-        const [activity, notifications, paymentRows] = await Promise.all([
+        const [activity, notifications, paymentRows, tickets] = await Promise.all([
           db.select().from(biopoolBookingActivity)
             .where(eq(biopoolBookingActivity.bookingId, input.entityId)),
           db.select().from(biopoolNotifications)
@@ -646,12 +648,25 @@ export const operations360Router = router({
               eq(reservationPayments.module, "biopools"),
               eq(reservationPayments.reservationId, input.entityId),
             )),
+          db.select().from(biopoolTicketTypes)
+            .where(and(
+              eq(biopoolTicketTypes.serviceId, row.booking.serviceId),
+              eq(biopoolTicketTypes.active, 1),
+            )),
         ]);
         const booking = row.booking;
         return {
           service: "biopools" as const,
           canManagePayments: hasCmsPermission(ctx.user, "biopools.manage_agenda"),
+          canManageReservation: hasCmsPermission(ctx.user, "biopools.manage_agenda"),
           title: row.serviceName,
+          editable: {
+            serviceId: booking.serviceId,
+            adultQuantity: booking.adultQuantity,
+            childQuantity: booking.childQuantity,
+            adultPriceClp: tickets.find(ticket => ticket.code === "adult")?.priceClp ?? 0,
+            childPriceClp: tickets.find(ticket => ticket.code === "child")?.priceClp ?? 0,
+          },
           client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
           schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
           status: booking.status,
@@ -722,7 +737,12 @@ export const operations360Router = router({
           return {
             service: "massages" as const,
             canManagePayments: hasMassagePaymentAccess(ctx.user),
+            canManageReservation: hasCmsPermission(ctx.user, "massages.manage_agenda"),
             title: row.techniqueName ?? "Masaje",
+            editable: {
+              techniqueId: booking.techniqueId,
+              duration: booking.duration,
+            },
             client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
             schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
             status: booking.status,
@@ -760,6 +780,7 @@ export const operations360Router = router({
         return {
           service: "massages" as const,
           canManagePayments: false,
+          canManageReservation: false,
           title: `Programa ${booking.program.replaceAll("_", " ")}`,
           client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
           schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
@@ -800,6 +821,7 @@ export const operations360Router = router({
         return {
           service: "sauna" as const,
           canManagePayments: hasCmsPermission(ctx.user, "sauna.manage_agenda"),
+          canManageReservation: hasCmsPermission(ctx.user, "sauna.manage_agenda"),
           title: booking.serviceName,
           client: {
             name: booking.clientName ?? "Sin cliente registrado",

@@ -89,4 +89,14 @@ describe("pagos diferenciados del Calendario 360", () => {
       ["cash", 20_000],
     ]);
   });
+
+  it("señala un excedente cuando el nuevo valor queda bajo lo ya pagado", () => {
+    const payment = buildPaymentDetail({
+      originalAmountClp: 36_000,
+      amountPaidClp: 72_000,
+      status: "paid",
+    });
+    expect(payment.balanceAmountClp).toBe(0);
+    expect(payment.overpaymentAmountClp).toBe(36_000);
+  });
 });

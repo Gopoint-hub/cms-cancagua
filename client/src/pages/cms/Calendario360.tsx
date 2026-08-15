@@ -18,6 +18,8 @@ import {
 import { es } from "date-fns/locale";
 import {
   CalendarDays,
+  CalendarClock,
+  Ban,
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
@@ -48,6 +50,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -458,6 +461,149 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
   </div>;
 }
 
+function ReservationActions({
+  event,
+  detail,
+  onChanged,
+  onCancelled,
+}: {
+  event: CalendarEvent;
+  detail: any;
+  onChanged: () => Promise<unknown> | void;
+  onCancelled: () => void;
+}) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [adults, setAdults] = useState(String(detail.editable?.adultQuantity ?? 1));
+  const [children, setChildren] = useState(String(detail.editable?.childQuantity ?? 0));
+  const [techniqueId, setTechniqueId] = useState(String(detail.editable?.techniqueId ?? ""));
+  const [duration, setDuration] = useState(String(detail.editable?.duration ?? 50));
+  const [bookingDate, setBookingDate] = useState(detail.schedule.date);
+  const [startTime, setStartTime] = useState(detail.schedule.startTime.slice(0, 5));
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const techniques = trpc.masajes.tecnicas.getAll.useQuery(undefined, {
+    enabled: editOpen && event.kind === "massage",
+  });
+  const updateGuests = trpc.biopools.bookings.updateGuests.useMutation();
+  const updateMassage = trpc.masajes.agenda.updateService.useMutation();
+  const rescheduleBiopool = trpc.biopools.bookings.reschedule.useMutation();
+  const rescheduleMassage = trpc.masajes.agenda.reschedule.useMutation();
+  const cancelBiopool = trpc.biopools.bookings.updateStatus.useMutation();
+  const cancelMassage = trpc.masajes.agenda.updateStatus.useMutation();
+
+  const execute = async (action: () => Promise<any>, success: string, close: () => void) => {
+    setBusy(true);
+    try {
+      const result = await action();
+      const excess = Number(result?.overpaymentAmountClp ?? 0);
+      toast.success(excess > 0 ? `${success}. Quedó un excedente de ${money(excess)} por regularizar.` : success);
+      close();
+      await onChanged();
+    } catch (error: any) {
+      toast.error(error?.message || "No fue posible actualizar la reserva");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectedTechnique: any = techniques.data?.find((item: any) => item.id === Number(techniqueId));
+  const massagePrice = duration === "50"
+    ? selectedTechnique?.price50min
+    : duration === "80"
+      ? selectedTechnique?.price80min
+      : selectedTechnique?.price110min;
+  const biopoolPrice =
+    Number(adults || 0) * Number(detail.editable?.adultPriceClp ?? 0) +
+    Number(children || 0) * Number(detail.editable?.childPriceClp ?? 0);
+
+  return <>
+    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+      <Button type="button" variant="outline" onClick={() => {
+        setAdults(String(detail.editable?.adultQuantity ?? 1));
+        setChildren(String(detail.editable?.childQuantity ?? 0));
+        setTechniqueId(String(detail.editable?.techniqueId ?? ""));
+        setDuration(String(detail.editable?.duration ?? 50));
+        setEditOpen(true);
+      }}>
+        <Pencil className="mr-2 h-4 w-4" />Editar reserva
+      </Button>
+      <Button type="button" variant="outline" onClick={() => {
+        setBookingDate(detail.schedule.date);
+        setStartTime(detail.schedule.startTime.slice(0, 5));
+        setReason("");
+        setRescheduleOpen(true);
+      }}>
+        <CalendarClock className="mr-2 h-4 w-4" />Reagendar
+      </Button>
+      <Button type="button" variant="destructive" onClick={() => { setReason(""); setCancelOpen(true); }}>
+        <Ban className="mr-2 h-4 w-4" />Cancelar reserva
+      </Button>
+    </div>
+
+    <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{event.kind === "biopool" ? "Editar cantidad de personas" : "Editar masaje"}</DialogTitle>
+          <DialogDescription>El valor y el saldo se recalcularán sin modificar los pagos ya registrados.</DialogDescription>
+        </DialogHeader>
+        {event.kind === "biopool" ? <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Adultos</Label><Input type="number" min={0} max={40} value={adults} onChange={e => setAdults(e.target.value)} /></div>
+            <div><Label>Niños</Label><Input type="number" min={0} max={40} value={children} onChange={e => setChildren(e.target.value)} /></div>
+          </div>
+          <div className="rounded-lg bg-muted p-3 text-sm"><span>Nuevo precio base</span><strong className="float-right">{money(biopoolPrice)}</strong></div>
+          <Button disabled={busy || Number(adults) + Number(children) < 1} onClick={() => execute(
+            () => updateGuests.mutateAsync({ id: event.entityId, adultQuantity: Number(adults), childQuantity: Number(children) }),
+            "Cantidad de personas y monto actualizados",
+            () => setEditOpen(false),
+          )}>Guardar cambios</Button>
+        </div> : <div className="space-y-4">
+          <div><Label>Tipo de masaje</Label><Select value={techniqueId} onValueChange={setTechniqueId}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{techniques.data?.filter((item: any) => item.active === 1).map((item: any) => <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}</SelectContent></Select></div>
+          <div><Label>Duración</Label><Select value={duration} onValueChange={setDuration}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{String(selectedTechnique?.durations ?? "50,80,110").split(",").map((minutes: string) => <SelectItem key={minutes.trim()} value={minutes.trim()}>{minutes.trim()} minutos</SelectItem>)}</SelectContent></Select></div>
+          <div className="rounded-lg bg-muted p-3 text-sm"><span>Nuevo precio base</span><strong className="float-right">{massagePrice ? money(Number(massagePrice)) : "Sin valor"}</strong></div>
+          <Button disabled={busy || !techniqueId || !massagePrice} onClick={() => execute(
+            () => updateMassage.mutateAsync({ id: event.entityId, techniqueId: Number(techniqueId), duration: Number(duration) as 50 | 80 | 110 }),
+            "Masaje, duración y monto actualizados",
+            () => setEditOpen(false),
+          )}>Guardar cambios</Button>
+        </div>}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Reagendar reserva</DialogTitle><DialogDescription>Se comprobará nuevamente la disponibilidad antes de guardar.</DialogDescription></DialogHeader>
+        <div className="grid grid-cols-2 gap-3"><div><Label>Nueva fecha</Label><Input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)} /></div><div><Label>Nueva hora</Label><Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></div></div>
+        <div><Label>Motivo</Label><Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Motivo del reagendamiento" /></div>
+        <Button disabled={busy || !bookingDate || !startTime || reason.trim().length < 3} onClick={() => execute(
+          () => event.kind === "biopool"
+            ? rescheduleBiopool.mutateAsync({ id: event.entityId, bookingDate, startTime, reason: reason.trim(), overridePolicy: false })
+            : rescheduleMassage.mutateAsync({ id: event.entityId, bookingDate, startTime, reason: reason.trim() }),
+          "Reserva reagendada",
+          () => setRescheduleOpen(false),
+        )}>Confirmar reagendamiento</Button>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Cancelar reserva</DialogTitle><DialogDescription>La reserva desaparecerá del Calendario 360. Los pagos electrónicos conservarán sus reglas de reembolso.</DialogDescription></DialogHeader>
+        <div><Label>Motivo de cancelación</Label><Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Indica por qué se cancela" /></div>
+        <Button variant="destructive" disabled={busy || reason.trim().length < 3} onClick={() => execute(
+          () => event.kind === "biopool"
+            ? cancelBiopool.mutateAsync({ id: event.entityId, status: "cancelled", reason: reason.trim() })
+            : cancelMassage.mutateAsync({ id: event.entityId, status: "cancelled", cancellationCategory: "client_cancelled", cancellationReason: reason.trim() }),
+          "Reserva cancelada",
+          () => { setCancelOpen(false); onCancelled(); },
+        )}>Sí, cancelar reserva</Button>
+      </DialogContent>
+    </Dialog>
+  </>;
+}
+
 function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   const utils = trpc.useUtils();
   const query = trpc.operations360.detail.useQuery(
@@ -510,6 +656,8 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                       <div><p className="text-xs text-muted-foreground">Saldo</p><p className="font-semibold">{money(detail.payment.balanceAmountClp)}</p></div>
                     </div>
 
+                    {detail.payment.overpaymentAmountClp > 0 && <div className="flex flex-col gap-1 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"><span>Excedente pagado por regularizar</span><strong className="text-amber-800">{money(detail.payment.overpaymentAmountClp)}</strong></div>}
+
                     {detail.canManagePayments && event && ["massages", "biopools", "sauna"].includes(event.service) ? <PaymentManager event={event} detail={detail} onChanged={async () => { await Promise.all([query.refetch(), utils.operations360.calendar.invalidate()]); }} /> : <div className="overflow-hidden rounded-xl border">
                       {detail.payment.lines.map((line: any) => (
                         <div key={line.id} className="grid min-w-0 gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] sm:items-center">
@@ -536,6 +684,12 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                 {detail.activity.length ? <div className="space-y-4">{detail.activity.map((item: any) => <div key={item.id} className="relative border-l-2 border-primary/30 pl-4"><span className="absolute -left-[5px] top-1 h-2 w-2 rounded-full bg-primary" /><p className="font-medium">{item.label}</p>{item.detail && <p className="text-sm text-muted-foreground">{item.detail}</p>}<p className="mt-1 text-xs text-muted-foreground">{item.at ? new Date(item.at).toLocaleString("es-CL") : "Sin fecha"}</p></div>)}</div> : <p className="py-6 text-center text-sm text-muted-foreground">Aún no hay actividad adicional registrada.</p>}
               </TabsContent>
             </Tabs>
+            {detail.canManageReservation && event && (event.kind === "biopool" || event.kind === "massage") && detail.status !== "cancelled" && <ReservationActions
+              event={event}
+              detail={detail}
+              onChanged={async () => { await Promise.all([query.refetch(), utils.operations360.calendar.invalidate()]); }}
+              onCancelled={() => onOpenChange(false)}
+            />}
             <div className="flex min-w-0 justify-end"><Button className="h-auto max-w-full whitespace-normal py-2 text-center" asChild><a href={detail.href}>Abrir agenda del módulo <ExternalLink className="ml-2 h-4 w-4" /></a></Button></div>
           </>
         ) : null}
