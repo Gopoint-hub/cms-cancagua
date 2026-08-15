@@ -1736,9 +1736,9 @@ export default function BiopiscinasAgenda() {
                   </Button>
               </div>
               )}
-              <div className="overflow-x-auto rounded-xl border">
-                <div className="min-w-[680px]">
-                  <div className="grid grid-cols-[1.3fr_1fr_1.2fr_.8fr] gap-3 border-b bg-muted/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="overflow-hidden rounded-xl border">
+                <div>
+                  <div className="hidden grid-cols-[1.3fr_1fr_1.2fr_.8fr] gap-3 border-b bg-muted/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
                     <span>Método</span>
                     <span>Fecha</span>
                     <span>Detalle</span>
@@ -1747,7 +1747,7 @@ export default function BiopiscinasAgenda() {
                   {paymentRows.map(row => (
                     <div
                       key={row.id}
-                      className="grid grid-cols-[1.3fr_1fr_1.2fr_.8fr] items-center gap-3 border-b px-4 py-3 text-sm last:border-b-0"
+                      className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b px-3 py-3 text-sm last:border-b-0 sm:grid-cols-[1.3fr_1fr_1.2fr_.8fr] sm:items-center sm:gap-3 sm:px-4"
                     >
                       <div>
                         <strong>{row.method}</strong>
@@ -1761,19 +1761,19 @@ export default function BiopiscinasAgenda() {
                               : "Pendiente"}
                         </p>
                       </div>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="col-span-2 text-xs text-muted-foreground sm:col-span-1">
                         {paymentDateLabel(row.date)}
                       </span>
                       <span
                         className={
-                          row.status === "discount"
-                            ? "font-mono text-xs font-semibold text-violet-700"
-                            : "text-xs"
+                          `col-span-2 break-words text-xs sm:col-span-1 ${row.status === "discount"
+                            ? "font-mono font-semibold text-violet-700"
+                            : ""}`
                         }
                       >
                         {row.detail}
                       </span>
-                      <div className="text-right">
+                      <div className="col-start-2 row-start-1 text-right sm:col-start-auto sm:row-start-auto">
                         <strong
                           className={
                             row.status === "discount" ? "text-emerald-700" : ""

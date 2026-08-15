@@ -248,18 +248,37 @@ export default function GiftCardsSales() {
     totalAmount: giftCards?.filter((gc: any) => gc.purchaseStatus === "completed").reduce((sum: number, gc: any) => sum + gc.amount, 0) || 0,
   };
 
+  const giftCardActions = (giftCard: any) => (
+    <div className="flex flex-wrap items-center justify-end gap-1">
+      <Button variant="ghost" size="icon" onClick={() => handleViewDetails(giftCard)} title="Ver detalles" aria-label="Ver detalles"><Eye className="h-4 w-4" /></Button>
+      {giftCard.purchaseStatus === "completed" && giftCard.status !== "redeemed" && (
+        <>
+          {giftCard.amount > 0 ? (
+            <Button variant="ghost" size="icon" onClick={() => handleRedeem(giftCard)} title="Canjear monto" aria-label="Canjear monto"><CheckCircle className="h-4 w-4 text-green-600" /></Button>
+          ) : (
+            <Button variant="ghost" size="icon" disabled={redeemService.isPending} onClick={() => {
+              if (window.confirm(`¿Marcar como utilizado el servicio de ${giftCard.recipientName || "esta Gift Card"}?`)) redeemService.mutate({ code: giftCard.code });
+            }} title="Marcar servicio como utilizado" aria-label="Marcar servicio como utilizado"><CheckCircle className="h-4 w-4 text-green-600" /></Button>
+          )}
+          <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(giftCard)} title="Descargar PDF" aria-label="Descargar PDF"><Download className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => handleResendEmail(giftCard)} title="Reenviar email" aria-label="Reenviar email"><Send className="h-4 w-4" /></Button>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <DashboardLayout>
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Ventas de Gift Cards</h1>
           <p className="text-muted-foreground">
             Gestiona las gift cards vendidas y reenvía emails si es necesario.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex">
           <Button 
             variant="default"
             onClick={() => setIsCreateManualDialogOpen(true)}
@@ -315,7 +334,31 @@ export default function GiftCardsSales() {
               No se encontraron gift cards
             </div>
           ) : (
-            <div className="rounded-md border">
+            <>
+            <div className="space-y-3 md:hidden">
+              {filteredGiftCards.map((giftCard: any) => (
+                <div key={giftCard.id} className="rounded-xl border bg-background p-3 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <code className="inline-block max-w-full rounded bg-muted px-2 py-1 text-sm">{giftCard.code}</code>
+                      <p className="mt-2 font-semibold">{giftCard.recipientName || "Sin destinatario"}</p>
+                      <p className="break-all text-sm text-muted-foreground">{giftCard.recipientEmail || "Sin correo"}</p>
+                    </div>
+                    <div className="min-w-0 font-semibold sm:max-w-[45%] sm:text-right">
+                      {giftCard.amount > 0 ? formatPrecio(giftCard.amount) : <Badge variant="secondary">{giftCard.serviceName || "Por servicio"}</Badge>}
+                      {giftCard.amount > 0 && giftCard.balance < giftCard.amount && <p className="text-xs font-normal text-muted-foreground">Saldo: {formatPrecio(giftCard.balance)}</p>}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {giftCard.status === "redeemed" ? <Badge className="bg-purple-100 text-purple-800"><CheckCircle className="mr-1 h-3 w-3" />Usada</Badge> : getStatusBadge(giftCard.purchaseStatus)}
+                    {getDeliveryBadge(giftCard.deliveredAt)}
+                    <span className="text-xs text-muted-foreground">{giftCard.createdAt ? format(new Date(giftCard.createdAt), "dd/MM/yyyy HH:mm", { locale: es }) : "-"}</span>
+                  </div>
+                  <div className="mt-2 border-t pt-2">{giftCardActions(giftCard)}</div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden rounded-md border md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -365,66 +408,14 @@ export default function GiftCardsSales() {
                       </TableCell>
                       <TableCell>{getDeliveryBadge(giftCard.deliveredAt)}</TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleViewDetails(giftCard)}
-                            title="Ver detalles"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {giftCard.purchaseStatus === "completed" && giftCard.status !== "redeemed" && (
-                            <>
-                              {giftCard.amount > 0 ? (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleRedeem(giftCard)}
-                                  title="Canjear monto"
-                                >
-                                  <CheckCircle className="h-4 w-4 text-green-600" />
-                                </Button>
-                              ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  disabled={redeemService.isPending}
-                                  onClick={() => {
-                                    if (window.confirm(`¿Marcar como utilizado el servicio de ${giftCard.recipientName || "esta Gift Card"}?`)) {
-                                      redeemService.mutate({ code: giftCard.code });
-                                    }
-                                  }}
-                                  title="Marcar servicio como utilizado"
-                                >
-                                  <CheckCircle className="h-4 w-4 text-green-600" />
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDownloadPDF(giftCard)}
-                                title="Descargar PDF"
-                              >
-                                <Download className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleResendEmail(giftCard)}
-                                title="Reenviar email"
-                              >
-                                <Send className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
+                        {giftCardActions(giftCard)}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -542,7 +533,7 @@ export default function GiftCardsSales() {
           </DialogHeader>
           {selectedGiftCard && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <p className="text-sm text-muted-foreground">Código</p>
                   <code className="text-lg font-mono">{selectedGiftCard.code}</code>
@@ -669,7 +660,7 @@ export default function GiftCardsSales() {
               <RadioGroup
                 value={manualGiftCard.type}
                 onValueChange={(value) => setManualGiftCard({ ...manualGiftCard, type: value as "amount" | "service" })}
-                className="grid grid-cols-2 gap-3"
+                className="grid gap-3 sm:grid-cols-2"
               >
                 <Label htmlFor="type-amount" className="flex cursor-pointer items-center gap-3 rounded-lg border p-4">
                   <RadioGroupItem id="type-amount" value="amount" />
@@ -683,7 +674,7 @@ export default function GiftCardsSales() {
             </div>
 
             {/* Valor o servicio y diseño */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-3">
                 {manualGiftCard.type === "amount" ? (
                   <div className="space-y-2">
@@ -741,7 +732,7 @@ export default function GiftCardsSales() {
             </div>
 
             {/* Destinatario */}
-            <div className="grid grid-cols-2 gap-4 border-t pt-4">
+            <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="dest-name">Nombre Destinatario *</Label>
                 <Input 
@@ -764,7 +755,7 @@ export default function GiftCardsSales() {
             </div>
 
             {/* Remitente */}
-            <div className="grid grid-cols-2 gap-4 border-t pt-4">
+            <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="send-name">Nombre Remitente (Opcional)</Label>
                 <Input 

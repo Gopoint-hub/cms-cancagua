@@ -450,7 +450,7 @@ export default function SaunaAgenda() {
   return (
     <DashboardLayout>
       <div className="space-y-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium text-amber-700">Sauna</p>
             <h1 className="text-3xl font-bold">Agenda y aforo</h1>
@@ -459,7 +459,7 @@ export default function SaunaAgenda() {
             </p>
           </div>
           {canManage && (
-            <Button
+            <Button className="w-full sm:w-auto"
               onClick={() => {
                 setForm(initialForm(anchor));
                 setPayments([emptyPayment()]);
@@ -472,23 +472,25 @@ export default function SaunaAgenda() {
           )}
         </div>
 
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3">
-          <Button size="icon" variant="outline" onClick={() => move(-1)}>
+    <div className="grid gap-3 rounded-xl border bg-card p-3 sm:flex sm:flex-wrap sm:items-center">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-2 sm:flex">
+          <Button size="icon" variant="outline" aria-label="Periodo anterior" onClick={() => move(-1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Input
             type="date"
             value={anchor}
             onChange={event => setAnchor(event.target.value)}
-            className="w-40"
+            className="w-full sm:w-40"
           />
-          <Button size="icon" variant="outline" onClick={() => move(1)}>
+          <Button size="icon" variant="outline" aria-label="Periodo siguiente" onClick={() => move(1)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" onClick={() => setAnchor(today)}>
+          </div>
+          <Button className="w-full sm:w-auto" variant="ghost" onClick={() => setAnchor(today)}>
             Hoy
           </Button>
-          <div className="ml-auto flex rounded-lg border p-1">
+          <div className="grid grid-cols-3 rounded-lg border p-1 sm:ml-auto sm:flex">
             {(["day", "week", "month"] as const).map(mode => (
               <Button
                 key={mode}
@@ -513,8 +515,8 @@ export default function SaunaAgenda() {
                 className={date === today ? "border-amber-500" : ""}
               >
                 <CardContent className="p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
                       <p className="font-semibold capitalize">
                         {format(parseISO(date), "EEEE d 'de' MMMM", {
                           locale: es,

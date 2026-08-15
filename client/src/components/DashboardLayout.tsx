@@ -510,7 +510,6 @@ function DashboardLayoutContent({
   });
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar, setOpenMobile } = useSidebar();
-  const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
   const [isReordering, setIsReordering] = useState(false);
   const [draggedModuleId, setDraggedModuleId] = useState<SidebarModuleId | null>(null);
@@ -520,6 +519,7 @@ function DashboardLayoutContent({
   );
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const isCollapsed = !isMobile && state === "collapsed";
   const isSuperAdmin = user?.role === "super_admin";
   const trpcUtils = trpc.useUtils();
   const sidebarOrderQuery = trpc.sidebar.getOrder.useQuery(undefined, {
@@ -759,7 +759,7 @@ function DashboardLayoutContent({
                                   if (isMobile) setOpenMobile(false);
                                 }}
                                 tooltip={item.label}
-                                className="h-10 font-medium"
+                                className="h-11 font-medium md:h-10"
                               >
                                 <item.icon className={cn("h-4 w-4", isActive && "text-primary")} />
                                 <span className="text-sm">{item.label}</span>
@@ -782,7 +782,7 @@ function DashboardLayoutContent({
                             <CollapsibleTrigger asChild>
                               <button
                                 className={cn(
-                                  "flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
+                                  "flex h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors md:h-10",
                                   "hover:bg-accent/50",
                                   hasActiveItem && "bg-accent/30",
                                 )}
@@ -826,7 +826,7 @@ function DashboardLayoutContent({
                                             if (isMobile) setOpenMobile(false);
                                           }}
                                           tooltip={item.label}
-                                          className="h-10 font-normal transition-all"
+                                          className="h-11 font-normal transition-all md:h-10"
                                         >
                                           <item.icon className={cn("h-4 w-4", isActive && "text-primary")} />
                                           <span className="text-sm">{item.label}</span>

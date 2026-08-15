@@ -25,7 +25,11 @@ import { Ban, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 type BlockReason =
-  "technical" | "temperature" | "private_event" | "maintenance" | "other";
+  | "technical"
+  | "temperature"
+  | "private_event"
+  | "maintenance"
+  | "other";
 const reasons: Record<BlockReason, string> = {
   technical: "Problema técnico",
   temperature: "Temperatura fuera de estándar",
@@ -85,19 +89,24 @@ export default function BiopiscinasBlocks() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between gap-4">
+      <div className="space-y-6 p-0 sm:p-6">
+        <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-cyan-700">
               Control operacional
             </p>
-            <h1 className="text-3xl font-semibold">Bloqueos de capacidad</h1>
+            <h1 className="text-2xl font-semibold sm:text-3xl">
+              Bloqueos de capacidad
+            </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Cierra un horario completo o descuenta parte del aforo de 40
               personas.
             </p>
           </div>
-          <Button onClick={() => setOpen(true)}>
+          <Button
+            className="h-11 w-full sm:h-9 sm:w-auto"
+            onClick={() => setOpen(true)}
+          >
             <Plus className="h-4 w-4 mr-2" />
             Nuevo bloqueo
           </Button>
@@ -115,10 +124,10 @@ export default function BiopiscinasBlocks() {
               .map(block => (
                 <div
                   key={block.id}
-                  className="rounded-xl border p-4 flex flex-wrap items-center justify-between gap-4"
+                  className="flex flex-col items-stretch gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div>
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
                       <strong>{reasons[block.reason]}</strong>
                       <Badge
                         variant={
@@ -140,11 +149,12 @@ export default function BiopiscinasBlocks() {
                   </div>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="text-red-600"
+                    className="h-11 w-full text-red-600 sm:size-9 sm:p-0"
+                    aria-label="Eliminar bloqueo"
                     onClick={() => remove.mutate({ id: block.id })}
                   >
                     <Trash2 className="h-4 w-4" />
+                    <span className="sm:sr-only">Eliminar bloqueo</span>
                   </Button>
                 </div>
               ))}
@@ -156,7 +166,7 @@ export default function BiopiscinasBlocks() {
           </CardContent>
         </Card>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
+          <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Bloquear Biopiscinas</DialogTitle>
             </DialogHeader>
@@ -250,10 +260,18 @@ export default function BiopiscinasBlocks() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}>
+              <Button
+                variant="outline"
+                className="h-11 w-full sm:h-9 sm:w-auto"
+                onClick={() => setOpen(false)}
+              >
                 Cancelar
               </Button>
-              <Button onClick={submit} disabled={create.isPending}>
+              <Button
+                className="h-11 w-full sm:h-9 sm:w-auto"
+                onClick={submit}
+                disabled={create.isPending}
+              >
                 {create.isPending ? "Aplicando…" : "Aplicar bloqueo"}
               </Button>
             </DialogFooter>

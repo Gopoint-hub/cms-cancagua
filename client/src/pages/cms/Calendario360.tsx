@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addDays,
   addMonths,
@@ -62,6 +62,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/useMobile";
 import { toast } from "sonner";
 import { UnifiedBookingDialog } from "./UnifiedBookingDialog";
 
@@ -321,7 +322,7 @@ function TimeGrid({
     <div className="overflow-x-auto rounded-xl border bg-background">
       <div style={{ minWidth }}>
         <div className="sticky top-0 z-30 grid border-b bg-background" style={{ gridTemplateColumns: `64px repeat(${columns.length}, minmax(0, 1fr))` }}>
-          <div className="border-r p-3 text-center text-xs text-muted-foreground">Hora</div>
+          <div className="sticky left-0 z-40 border-r bg-background p-3 text-center text-xs text-muted-foreground">Hora</div>
           {columns.map((service, index) => {
             const day = days[index] ?? days[0];
             const meta = service ? SERVICE_META[service] : null;
@@ -346,7 +347,7 @@ function TimeGrid({
           })}
         </div>
         <div className="relative grid" style={{ height: GRID_HEIGHT, gridTemplateColumns: `64px repeat(${columns.length}, minmax(0, 1fr))` }}>
-          <div className="relative border-r bg-muted/10">
+          <div className="sticky left-0 z-20 border-r bg-background">
             {hours.map(hour => (
               <span key={hour} className="absolute right-2 -translate-y-1/2 text-[11px] text-muted-foreground" style={{ top: (hour - START_HOUR) * HOUR_HEIGHT }}>{String(hour).padStart(2, "0")}:00</span>
             ))}
@@ -488,11 +489,11 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
         const processorProtected = ["webpay", "webpay_plus", "getnet"].includes(line.method);
         const giftCard = line.method === "gift_card";
         const removableDiscount = line.type === "discount" && line.status === "applied" && Boolean(detail.payment.discountCode) && (service === "massages" || service === "biopools");
-        return <div key={line.id} className="grid min-w-0 gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] sm:items-center">
+        return <div key={line.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 border-b p-3 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] sm:items-center sm:p-4">
           <div><p className="font-semibold">{paymentLabel(line.method)}</p><p className={cn("text-xs", line.type === "discount" ? "text-emerald-700" : "text-muted-foreground")}>{paymentLabel(line.status)}</p></div>
-          <div className="text-xs text-muted-foreground"><p className={cn("break-all", line.type === "discount" && "font-mono font-semibold text-violet-700")}>{line.reference || "Sin referencia"}</p>{line.cardType && <p>{line.cardType === "credit" ? "Crédito" : "Débito"}</p>}{line.at && <p>{new Date(line.at).toLocaleString("es-CL")}</p>}</div>
-          <p className={cn("font-semibold sm:text-right", line.type === "discount" && "text-emerald-700")}>{line.type === "discount" ? "−" : ""}{money(line.amountClp)}</p>
-          <div className="flex justify-end gap-1">{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title={giftCard ? "Editar Gift Card" : "Editar pago"} disabled={busy} onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy} onClick={() => removePayment(line)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{removableDiscount && <Button type="button" size="icon" variant="ghost" title="Eliminar código de descuento" disabled={busy} onClick={() => saveDiscount(true)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="text-[10px] text-muted-foreground">Protegido</span>}</div>
+          <div className="col-span-2 text-xs text-muted-foreground sm:col-span-1"><p className={cn("break-words", line.type === "discount" && "font-mono font-semibold text-violet-700")}>{line.reference || "Sin referencia"}</p>{line.cardType && <p>{line.cardType === "credit" ? "Crédito" : "Débito"}</p>}{line.at && <p>{new Date(line.at).toLocaleString("es-CL")}</p>}</div>
+          <p className={cn("col-start-2 row-start-1 font-semibold text-right sm:col-start-auto sm:row-start-auto", line.type === "discount" && "text-emerald-700")}>{line.type === "discount" ? "−" : ""}{money(line.amountClp)}</p>
+          <div className="col-span-2 flex justify-end gap-1 sm:col-span-1">{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title={giftCard ? "Editar Gift Card" : "Editar pago"} disabled={busy} onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy} onClick={() => removePayment(line)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{removableDiscount && <Button type="button" size="icon" variant="ghost" title="Eliminar código de descuento" disabled={busy} onClick={() => saveDiscount(true)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Protegido</span>}</div>
         </div>;
       })}
       {!detail.payment.lines.length && <p className="p-4 text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
@@ -598,11 +599,11 @@ function ReservationActions({
           <DialogDescription>El valor y el saldo se recalcularán sin modificar los pagos ya registrados.</DialogDescription>
         </DialogHeader>
         {event.kind === "biopool" ? <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div><Label>Adultos</Label><Input type="number" min={0} max={40} value={adults} onChange={e => setAdults(e.target.value)} /></div>
             <div><Label>Niños</Label><Input type="number" min={0} max={40} value={children} onChange={e => setChildren(e.target.value)} /></div>
           </div>
-          <div className="rounded-lg bg-muted p-3 text-sm"><span>Nuevo precio base</span><strong className="float-right">{money(biopoolPrice)}</strong></div>
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted p-3 text-sm"><span>Nuevo precio base</span><strong>{money(biopoolPrice)}</strong></div>
           <Button disabled={busy || Number(adults) + Number(children) < 1} onClick={() => execute(
             () => updateGuests.mutateAsync({ id: event.entityId, adultQuantity: Number(adults), childQuantity: Number(children) }),
             "Cantidad de personas y monto actualizados",
@@ -611,7 +612,7 @@ function ReservationActions({
         </div> : <div className="space-y-4">
           <div><Label>Tipo de masaje</Label><Select value={techniqueId} onValueChange={setTechniqueId}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{techniques.data?.filter((item: any) => item.active === 1).map((item: any) => <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}</SelectContent></Select></div>
           <div><Label>Duración</Label><Select value={duration} onValueChange={setDuration}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{String(selectedTechnique?.durations ?? "50,80,110").split(",").map((minutes: string) => <SelectItem key={minutes.trim()} value={minutes.trim()}>{minutes.trim()} minutos</SelectItem>)}</SelectContent></Select></div>
-          <div className="rounded-lg bg-muted p-3 text-sm"><span>Nuevo precio base</span><strong className="float-right">{massagePrice ? money(Number(massagePrice)) : "Sin valor"}</strong></div>
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted p-3 text-sm"><span>Nuevo precio base</span><strong>{massagePrice ? money(Number(massagePrice)) : "Sin valor"}</strong></div>
           <Button disabled={busy || !techniqueId || !massagePrice} onClick={() => execute(
             () => updateMassage.mutateAsync({ id: event.entityId, techniqueId: Number(techniqueId), duration: Number(duration) as 50 | 80 | 110 }),
             "Masaje, duración y monto actualizados",
@@ -624,7 +625,7 @@ function ReservationActions({
     <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>Reagendar reserva</DialogTitle><DialogDescription>Se comprobará nuevamente la disponibilidad antes de guardar.</DialogDescription></DialogHeader>
-        <div className="grid grid-cols-2 gap-3"><div><Label>Nueva fecha</Label><Input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)} /></div><div><Label>Nueva hora</Label><Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></div></div>
+        <div className="grid gap-3 sm:grid-cols-2"><div><Label>Nueva fecha</Label><Input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)} /></div><div><Label>Nueva hora</Label><Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></div></div>
         <div><Label>Motivo</Label><Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Motivo del reagendamiento" /></div>
         <Button disabled={busy || !bookingDate || !startTime || reason.trim().length < 3} onClick={() => execute(
           () => event.kind === "biopool"
@@ -703,7 +704,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
               <TabsContent value="payments" className="rounded-xl border p-4">
                 {detail.payment ? (
                   <div className="space-y-4">
-                    <div className="grid gap-3 rounded-xl bg-muted/40 p-4 sm:grid-cols-2 lg:grid-cols-5">
+                    <div className="grid grid-cols-2 gap-3 rounded-xl bg-muted/40 p-3 sm:p-4 lg:grid-cols-5">
                       <div><p className="text-xs text-muted-foreground">Precio original</p><p className="font-semibold">{money(detail.payment.originalAmountClp)}</p></div>
                       <div className="min-w-0"><p className="text-xs text-muted-foreground">Descuento</p><p className={cn("font-semibold", detail.payment.discountAmountClp > 0 && "text-emerald-700")}>{detail.payment.discountAmountClp > 0 ? `−${money(detail.payment.discountAmountClp)}` : money(0)}</p>{detail.payment.discountCode && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-violet-700">{detail.payment.discountAmountClp > 0 ? detail.payment.discountCode : `Retirado: ${detail.payment.discountCode}`}</p>}</div>
                       <div><p className="text-xs text-muted-foreground">Total final</p><p className="font-semibold">{money(detail.payment.totalAmountClp)}</p></div>
@@ -754,6 +755,8 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
 }
 
 export default function Calendario360() {
+  const isMobile = useIsMobile();
+  const mobileViewInitialized = useRef(false);
   const [view, setView] = useState<ViewMode>("week");
   const [dayMode, setDayMode] = useState<DayMode>("list");
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -762,6 +765,14 @@ export default function Calendario360() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const { data: access } = trpc.operations360.access.useQuery();
+
+  useEffect(() => {
+    if (isMobile && !mobileViewInitialized.current) {
+      mobileViewInitialized.current = true;
+      setView("day");
+      setDayMode("list");
+    }
+  }, [isMobile]);
 
   const range = useMemo(() => {
     if (view === "day") return { from: selectedDate, to: selectedDate };
@@ -805,17 +816,17 @@ export default function Calendario360() {
   return (
     <DashboardLayout>
       <div className="space-y-5 p-2 sm:p-4">
-        <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
           <div><p className="text-xs uppercase tracking-[0.25em] text-slate-500">Operación integrada</p><h1 className="mt-1 text-3xl font-semibold">Calendario 360</h1><p className="mt-1 text-sm text-muted-foreground">El zoom completo de todas las reservas y actividades de Cancagua.</p></div>
-          <div className="flex flex-wrap items-center gap-2"><div className="flex rounded-lg border bg-background p-1">{(["day", "week", "month"] as ViewMode[]).map(mode => <Button key={mode} size="sm" variant={view === mode ? "default" : "ghost"} onClick={() => setView(mode)}>{mode === "day" ? "Día" : mode === "week" ? "Semana" : "Mes"}</Button>)}</div></div>
+          <div className="grid w-full grid-cols-3 rounded-lg border bg-background p-1 sm:flex sm:w-auto">{(["day", "week", "month"] as ViewMode[]).map(mode => <Button key={mode} size="sm" variant={view === mode ? "default" : "ghost"} onClick={() => setView(mode)}>{mode === "day" ? "Día" : mode === "week" ? "Semana" : "Mes"}</Button>)}</div>
         </div>
 
-        <Card><CardContent className="space-y-4 p-4"><div className="flex flex-wrap items-center gap-2"><Button variant="outline" size="icon" onClick={() => move(-1)}><ChevronLeft className="h-4 w-4" /></Button><Button variant="outline" onClick={() => setSelectedDate(new Date())}>Hoy</Button><Button variant="outline" size="icon" onClick={() => move(1)}><ChevronRight className="h-4 w-4" /></Button><h2 className="min-w-56 flex-1 text-center text-lg font-semibold capitalize">{title}</h2>{view === "day" && <Select value={dayMode} onValueChange={value => value === "week" ? setView("week") : setDayMode(value as DayMode)}><SelectTrigger className="w-52"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="week">Volver a la semana</SelectItem><SelectItem value="list">Lista del día</SelectItem><SelectItem value="summary">Resumen del día</SelectItem><SelectItem value="services">Agendas por servicio</SelectItem></SelectContent></Select>}<Input className="w-full sm:w-60" placeholder="Buscar cliente o servicio…" value={search} onChange={event => setSearch(event.target.value)} /></div><div className="flex flex-wrap items-center gap-2 border-t pt-3"><Filter className="h-4 w-4 text-muted-foreground" /><Button size="sm" variant={!services.length ? "default" : "outline"} onClick={() => setServices([])}>Todos</Button>{allowedServices.map(key => <Button key={key} size="sm" variant={services.includes(key) ? "default" : "outline"} onClick={() => toggleService(key)} className="gap-2"><span className={cn("h-2 w-2 rounded-full", SERVICE_META[key].dot)} />{SERVICE_META[key].label}</Button>)}</div></CardContent></Card>
+        <Card><CardContent className="space-y-4 p-3 sm:p-4"><div className="grid gap-3 sm:flex sm:flex-wrap sm:items-center"><h2 className="order-first min-w-0 text-center text-lg font-semibold capitalize sm:order-none sm:min-w-56 sm:flex-1">{title}</h2><div className="grid grid-cols-[auto_1fr_auto] gap-2 sm:flex"><Button variant="outline" size="icon" aria-label="Periodo anterior" onClick={() => move(-1)}><ChevronLeft className="h-4 w-4" /></Button><Button className="w-full sm:w-auto" variant="outline" onClick={() => setSelectedDate(new Date())}>Hoy</Button><Button variant="outline" size="icon" aria-label="Periodo siguiente" onClick={() => move(1)}><ChevronRight className="h-4 w-4" /></Button></div>{view === "day" && <Select value={dayMode} onValueChange={value => value === "week" ? setView("week") : setDayMode(value as DayMode)}><SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="week">Volver a la semana</SelectItem><SelectItem value="list">Lista del día</SelectItem><SelectItem value="summary">Resumen del día</SelectItem><SelectItem value="services">Agendas por servicio</SelectItem></SelectContent></Select>}<Input className="w-full sm:w-60" placeholder="Buscar cliente o servicio…" value={search} onChange={event => setSearch(event.target.value)} /></div><div className="-mx-1 flex flex-nowrap items-center gap-2 overflow-x-auto border-t px-1 pt-3 pb-1"><Filter className="h-4 w-4 shrink-0 text-muted-foreground" /><Button className="shrink-0" size="sm" variant={!services.length ? "default" : "outline"} onClick={() => setServices([])}>Todos</Button>{allowedServices.map(key => <Button key={key} size="sm" variant={services.includes(key) ? "default" : "outline"} onClick={() => toggleService(key)} className="shrink-0 gap-2"><span className={cn("h-2 w-2 rounded-full", SERVICE_META[key].dot)} />{SERVICE_META[key].label}</Button>)}</div></CardContent></Card>
 
         {calendar.isLoading ? <Skeleton className="h-[54rem] w-full" /> : view === "week" ? (
           <TimeGrid days={days} events={filtered} onDay={openDay} onEvent={setSelectedEvent} />
         ) : view === "month" ? (
-          <div className="grid grid-cols-7 gap-px overflow-hidden rounded-xl border bg-border">{days.map(day => { const dateEvents = filtered.filter(event => event.date === dateKey(day)); return <button type="button" key={dateKey(day)} onClick={() => openDay(day)} className={cn("min-h-32 bg-background p-2 text-left hover:bg-muted/50", !isSameMonth(day, selectedDate) && "bg-muted/40 text-muted-foreground")}><div className="mb-2 flex items-center justify-between"><span className="text-xs font-medium capitalize">{format(day, "EEE d", { locale: es })}</span>{isSameDay(day, new Date()) && <span className="h-2 w-2 rounded-full bg-primary" />}</div><div className="space-y-1">{dateEvents.slice(0, 3).map(event => <CalendarEventButton key={event.id} event={event} compact onClick={() => setSelectedEvent(event)} />)}{dateEvents.length > 3 && <p className="text-xs font-medium text-primary">+{dateEvents.length - 3} más</p>}</div></button>; })}</div>
+          <div className="overflow-x-auto rounded-xl border"><div className="grid min-w-[760px] grid-cols-7 gap-px bg-border">{days.map(day => { const dateEvents = filtered.filter(event => event.date === dateKey(day)); return <button type="button" key={dateKey(day)} onClick={() => openDay(day)} className={cn("min-h-32 bg-background p-2 text-left hover:bg-muted/50", !isSameMonth(day, selectedDate) && "bg-muted/40 text-muted-foreground")}><div className="mb-2 flex items-center justify-between"><span className="text-xs font-medium capitalize">{format(day, "EEE d", { locale: es })}</span>{isSameDay(day, new Date()) && <span className="h-2 w-2 rounded-full bg-primary" />}</div><div className="space-y-1">{dateEvents.slice(0, 3).map(event => <CalendarEventButton key={event.id} event={event} compact onClick={() => setSelectedEvent(event)} />)}{dateEvents.length > 3 && <p className="text-xs font-medium text-primary">+{dateEvents.length - 3} más</p>}</div></button>; })}</div></div>
         ) : dayMode === "services" ? (
           <TimeGrid days={[selectedDate]} events={dayEvents} services={allowedServices} serviceColumns onEvent={setSelectedEvent} />
         ) : dayMode === "summary" ? (
@@ -830,7 +841,7 @@ export default function Calendario360() {
         </div>
       </div>
       <ReservationDetail event={selectedEvent} open={Boolean(selectedEvent)} onOpenChange={open => !open && setSelectedEvent(null)} />
-      {canCreateReservation && <Button aria-label="Crear nueva reserva" title="Crear nueva reserva" className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full shadow-xl" onClick={() => setBookingOpen(true)}><Plus className="h-6 w-6" /></Button>}
+      {canCreateReservation && <Button aria-label="Crear nueva reserva" title="Crear nueva reserva" className="cms-mobile-fab fixed right-4 bottom-4 z-40 h-14 w-14 rounded-full shadow-xl sm:right-6 sm:bottom-6" onClick={() => setBookingOpen(true)}><Plus className="h-6 w-6" /></Button>}
       <UnifiedBookingDialog open={bookingOpen} onOpenChange={setBookingOpen} initialDate={dateKey(selectedDate)} allowedServices={manualBookingServices} onCreated={async () => { await calendar.refetch(); }} />
     </DashboardLayout>
   );

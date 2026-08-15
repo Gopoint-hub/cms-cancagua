@@ -345,8 +345,8 @@ function BookingCard({
       className={b.status === "cancelled" ? "border-red-200 bg-red-50/20" : ""}
     >
       <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-lg">{b.startTime}</span>
               <span className="text-muted-foreground">–</span>
@@ -403,7 +403,7 @@ function BookingCard({
             )}
           </div>
           {(canManageAgenda || canAssignTherapists) && (
-            <div className="flex gap-2 flex-wrap shrink-0">
+            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:shrink-0">
             {canManageAgenda && b.status === "pending" && (
                 <Button
                   size="sm"
@@ -441,7 +441,8 @@ function BookingCard({
               <>
                 {canManageAgenda && b.status !== "cancelled" && (
                   <Button size="sm" variant="ghost" onClick={() => onEdit(b)}>
-                    <Edit className="w-4 h-4" />
+                    <Edit className="mr-1.5 h-4 w-4" />
+                    Editar
                   </Button>
                 )}
                   {canManageAgenda &&
@@ -1315,8 +1316,8 @@ export default function MasajesAgenda() {
                 {editingId ? "Editar reserva" : "Nueva reserva"}
               </DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2">
+          <div className="grid gap-4 py-2 sm:grid-cols-2">
+            <div className="sm:col-span-2">
               <Label>Nombre del cliente *</Label>
                 <Input
                   value={form.clientName}
@@ -1495,7 +1496,7 @@ export default function MasajesAgenda() {
                 </div>
               )}
               {canManagePayments && !editingId && (
-                <div className="col-span-2 space-y-3">
+                <div className="space-y-3 sm:col-span-2">
                   <div className="flex items-center justify-between">
                     <Label>Pagos y abonos</Label>
                     <Button
@@ -1557,7 +1558,7 @@ export default function MasajesAgenda() {
                 </div>
               )}
               {canManagePayments && editingId && (
-                <div className="col-span-2 space-y-3">
+                <div className="space-y-3 sm:col-span-2">
               <Label>Pagos registrados</Label>
                   {(paymentQuery.data ?? []).map(payment =>
                     editingPaymentId === payment.id ? (
@@ -1689,7 +1690,7 @@ export default function MasajesAgenda() {
                 </div>
               )}
               {canManagePayments && editingId ? (
-                <div className="col-span-2 space-y-2 rounded-xl border p-3">
+                <div className="space-y-2 rounded-xl border p-3 sm:col-span-2">
                   <Label>Código de descuento</Label>
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Input
@@ -1761,7 +1762,7 @@ export default function MasajesAgenda() {
                   />
             </div>
               )}
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <Label>Notas</Label>
                 <Textarea
                   value={form.notes}

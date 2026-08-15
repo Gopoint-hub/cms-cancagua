@@ -64,15 +64,20 @@ export default function SaunaBlocks() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-end justify-between gap-3">
+        <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium text-amber-700">Sauna</p>
-            <h1 className="text-3xl font-bold">Bloqueos y excepciones</h1>
+            <h1 className="text-2xl font-bold sm:text-3xl">
+              Bloqueos y excepciones
+            </h1>
             <p className="text-muted-foreground">
               Descuenta entre 1 y 6 cupos por mantención, operación o eventos.
             </p>
           </div>
-          <Button onClick={() => setOpen(true)}>
+          <Button
+            className="h-11 w-full sm:h-9 sm:w-auto"
+            onClick={() => setOpen(true)}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Nuevo bloqueo
           </Button>
@@ -80,9 +85,9 @@ export default function SaunaBlocks() {
         <div className="space-y-3">
           {query.data?.map(block => (
             <Card key={block.id} className={!block.active ? "opacity-50" : ""}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
-                <div>
-                  <div className="flex items-center gap-2">
+              <CardContent className="flex flex-col items-stretch gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Ban className="h-4 w-4 text-amber-700" />
                     <strong>
                       {String(block.blockDate).slice(0, 10)} · {block.startTime}
@@ -100,6 +105,7 @@ export default function SaunaBlocks() {
                 <Button
                   variant="outline"
                   size="sm"
+                  className="h-11 w-full sm:h-8 sm:w-auto"
                   onClick={() =>
                     toggle.mutate({
                       id: block.id,
@@ -121,7 +127,7 @@ export default function SaunaBlocks() {
           )}
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
+          <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Nuevo bloqueo de cupos</DialogTitle>
             </DialogHeader>
@@ -198,10 +204,15 @@ export default function SaunaBlocks() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}>
+              <Button
+                variant="outline"
+                className="h-11 w-full sm:h-9 sm:w-auto"
+                onClick={() => setOpen(false)}
+              >
                 Cancelar
               </Button>
               <Button
+                className="h-11 w-full sm:h-9 sm:w-auto"
                 onClick={() =>
                   create.mutate({ ...form, notes: form.notes || undefined })
                 }

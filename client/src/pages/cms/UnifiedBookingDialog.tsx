@@ -657,7 +657,7 @@ function BookingEditor({
   };
 
   return (
-    <div className="space-y-4 rounded-2xl border bg-white p-4">
+    <div className="space-y-4 rounded-2xl border bg-white p-3 sm:p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="font-semibold">
@@ -765,7 +765,7 @@ function BookingEditor({
           </div>
           <div>
             <Label>Semana</Label>
-            <div className="mt-1 grid grid-cols-7 overflow-hidden rounded-2xl border bg-white">
+            <div className="mt-1 grid auto-cols-[minmax(3rem,1fr)] grid-flow-col overflow-x-auto rounded-2xl border bg-white sm:grid-flow-row sm:grid-cols-7">
               {weekDates.map(date => (
                 <button
                   key={date.value}
@@ -773,7 +773,7 @@ function BookingEditor({
                   onClick={() =>
                     onChange({ ...value, date: date.value, time: "" })
                   }
-                  className={`p-2 text-center capitalize sm:p-3 ${value.date === date.value ? "bg-[#9a7655] text-white" : "hover:bg-muted"}`}
+                  className={`min-h-14 min-w-12 p-2 text-center capitalize sm:p-3 ${value.date === date.value ? "bg-[#9a7655] text-white" : "hover:bg-muted"}`}
                 >
                   <span className="block text-xs">{date.day}</span>
                   <strong>{date.number}</strong>
@@ -1703,7 +1703,7 @@ export function UnifiedBookingDialog({
             </div>
           )}
           {step === 5 && (
-            <div className="space-y-5 rounded-3xl border bg-white p-6 text-center">
+            <div className="space-y-5 rounded-3xl border bg-white p-4 text-center sm:p-6">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#efe5da]">
                 <Plus className="h-6 w-6 text-[#76573d]" />
               </div>
@@ -1737,7 +1737,7 @@ export function UnifiedBookingDialog({
               </div>
               {items.map((item, index) => (
                 <div key={item.key} className="rounded-2xl border bg-white p-4">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <p className="break-words text-lg font-semibold">
                         {item.serviceName}
@@ -1784,7 +1784,7 @@ export function UnifiedBookingDialog({
                           ))}
                       </div>
                     </div>
-                    <strong className="shrink-0">
+                    <strong className="shrink-0 text-lg sm:text-base">
                       {clp(
                         Math.max(0, item.amountClp - item.discountAmountClp)
                       )}
@@ -1837,12 +1837,12 @@ export function UnifiedBookingDialog({
                   <span>Pagado</span>
                   <span>{clp(paidTotal)}</span>
                 </div>
-                <div className="flex justify-between border-t border-slate-700 pt-3">
+                <div className="flex flex-col gap-1 border-t border-slate-700 pt-3 sm:flex-row sm:items-center sm:justify-between">
                   <span>
                     Total de {items.length}{" "}
                     {items.length === 1 ? "reserva" : "reservas"}
                   </span>
-                  <strong className="text-2xl">{clp(total)}</strong>
+                  <strong className="break-words text-xl sm:text-2xl">{clp(total)}</strong>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Saldo pendiente</span>

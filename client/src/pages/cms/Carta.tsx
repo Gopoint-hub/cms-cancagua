@@ -276,7 +276,7 @@ export default function CMSCarta() {
               Administra las categorías e items del menú del restaurant
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-3">
             <Button asChild variant="outline">
               <a href="https://cancagua.cl/cartahottubs" target="_blank" rel="noreferrer">
                 <Eye className="w-4 h-4 mr-2" />
@@ -304,7 +304,7 @@ export default function CMSCarta() {
 
           {/* Categorías */}
           <TabsContent value="categories" className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-xl font-semibold">Categorías de Menú</h2>
               <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
                 <DialogTrigger asChild>
@@ -391,7 +391,7 @@ export default function CMSCarta() {
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           size="sm"
                           variant="outline"
@@ -555,7 +555,7 @@ export default function CMSCarta() {
                           <div>
                             <input type="radio" id="multiple" name="priceType" value="multiple" />
                             <label htmlFor="multiple" className="ml-2">Precios por cantidad</label>
-                            <div className="grid grid-cols-3 gap-2 mt-2">
+                            <div className="mt-2 grid gap-2 sm:grid-cols-3">
                               <div>
                                 <Label className="text-xs">Para 2</Label>
                                 <Input type="number" name="price2" placeholder="CLP" />
@@ -909,7 +909,7 @@ export default function CMSCarta() {
                       <Label>Tipo de precio</Label>
                       <div className="flex gap-5 mt-2"><label><input type="radio" name="editPriceType" value="single" defaultChecked={!multiple} /> Único</label><label><input type="radio" name="editPriceType" value="multiple" defaultChecked={multiple} /> Por tamaño</label></div>
                       <Input type="number" name="editPriceDefault" defaultValue={prices.default} placeholder="Precio único" className="mt-2" />
-                      <div className="grid grid-cols-3 gap-2 mt-2"><Input type="number" name="editPrice2" defaultValue={prices.for_2} placeholder="Para 2" /><Input type="number" name="editPrice4" defaultValue={prices.for_4} placeholder="Para 4" /><Input type="number" name="editPrice6" defaultValue={prices.for_6} placeholder="Para 6" /></div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3"><Input type="number" name="editPrice2" defaultValue={prices.for_2} placeholder="Para 2" /><Input type="number" name="editPrice4" defaultValue={prices.for_4} placeholder="Para 4" /><Input type="number" name="editPrice6" defaultValue={prices.for_6} placeholder="Para 6" /></div>
                     </div>
                     <div><Label>Etiquetas</Label><div className="flex flex-wrap gap-4 mt-2"><label><input type="checkbox" name="edit_vegan" defaultChecked={tags.includes("vegan")} /> Vegano</label><label><input type="checkbox" name="edit_gluten_free" defaultChecked={tags.includes("gluten_free")} /> Sin gluten</label><label><input type="checkbox" name="edit_keto" defaultChecked={tags.includes("keto")} /> Keto</label></div></div>
                     <div><Label>Notas especiales</Label><Input name="editSpecialNotes" defaultValue={editingItem.specialNotes || ""} /></div>

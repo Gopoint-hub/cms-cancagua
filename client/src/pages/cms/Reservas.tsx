@@ -204,7 +204,7 @@ export default function CMSReservas() {
         </div>
 
         {/* Filtros */}
-        <div className="flex gap-3 mb-6">
+        <div className="mb-6 grid grid-cols-2 gap-2 sm:flex sm:gap-3">
           <Button
             variant={statusFilter === "all" ? "default" : "outline"}
             onClick={() => setStatusFilter("all")}
@@ -364,7 +364,7 @@ export default function CMSReservas() {
                     </div>
                   )}
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {booking.status === "pending" && (
                       <>
                         <Button

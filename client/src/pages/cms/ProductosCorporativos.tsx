@@ -324,14 +324,14 @@ export default function ProductosCorporativos() {
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold">Catálogo de Productos Corporativos</h1>
             <p className="text-muted-foreground mt-1">
               Gestiona los productos y servicios para eventos corporativos
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex">
             <input
               ref={fileInputRef}
               type="file"
@@ -359,7 +359,7 @@ export default function ProductosCorporativos() {
         {selectedProducts.length > 0 && (
           <Card className="bg-muted/50 border-primary/20">
             <CardContent className="p-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">
                     {selectedProducts.length} producto(s) seleccionado(s)
@@ -372,7 +372,7 @@ export default function ProductosCorporativos() {
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:flex">
                   <Button
                     variant="outline"
                     size="sm"

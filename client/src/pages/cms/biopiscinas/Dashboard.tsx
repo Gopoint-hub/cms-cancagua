@@ -26,7 +26,7 @@ export default function BiopiscinasDashboard() {
   if (isLoading)
     return (
       <DashboardLayout>
-        <div className="p-6 grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 p-0 sm:p-6 md:grid-cols-4">
           {[1, 2, 3, 4].map(item => (
             <Skeleton key={item} className="h-32" />
           ))}
@@ -63,13 +63,13 @@ export default function BiopiscinasDashboard() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6">
-        <div className="flex items-start justify-between gap-4">
+      <div className="space-y-6 p-0 sm:p-6">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-cyan-700">
               Operación diaria
             </p>
-            <h1 className="text-3xl font-semibold">Biopiscinas</h1>
+            <h1 className="text-2xl font-semibold sm:text-3xl">Biopiscinas</h1>
             <p className="text-sm text-muted-foreground mt-1">
               Cupos independientes por servicio y hora de ingreso.
             </p>
@@ -103,14 +103,14 @@ export default function BiopiscinasDashboard() {
 
         <div className="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
           <Card>
-            <CardHeader className="flex-row items-center justify-between">
+            <CardHeader className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="flex items-center gap-2">
                 <Droplets className="h-5 w-5 text-cyan-700" /> Capacidad por
                 ingreso
               </CardTitle>
               <Link
                 href="/cms/biopiscinas/agenda"
-                className="text-sm text-cyan-700 hover:underline"
+                className="flex h-11 w-full items-center justify-center rounded-md border px-4 text-sm font-medium text-cyan-700 hover:bg-accent sm:h-auto sm:w-auto sm:border-0 sm:p-0 sm:hover:bg-transparent sm:hover:underline"
               >
                 Abrir agenda
               </Link>
@@ -122,13 +122,19 @@ export default function BiopiscinasDashboard() {
                   ? Math.round((used / slot.capacity) * 100)
                   : 0;
                 return (
-                  <div key={`${slot.serviceId}-${slot.startTime}`} className="space-y-1.5">
-                    <div className="flex justify-between text-sm">
-                      <span>
+                  <div
+                    key={`${slot.serviceId}-${slot.startTime}`}
+                    className="space-y-1.5"
+                  >
+                    <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-start sm:justify-between">
+                      <span className="min-w-0">
                         <strong>{slot.serviceName}</strong>
-                        <span className="text-muted-foreground"> · ingreso {slot.startTime} · salida {slot.endTime}</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · ingreso {slot.startTime} · salida {slot.endTime}
+                        </span>
                       </span>
-                      <span className="text-muted-foreground">
+                      <span className="shrink-0 text-muted-foreground">
                         {slot.availableSeats} disponibles de {slot.capacity}
                       </span>
                     </div>

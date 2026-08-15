@@ -590,7 +590,7 @@ export default function CMSListas() {
                 <p>No hay suscriptores en esta lista</p>
               </div>
             ) : (
-              <div className="max-h-80 overflow-y-auto border rounded-lg">
+              <div className="max-h-80 overflow-auto border rounded-lg">
                 <table className="w-full">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
