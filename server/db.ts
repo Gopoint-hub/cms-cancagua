@@ -696,24 +696,37 @@ export const HOT_TUB_NAMES: Record<string, string> = {
 export async function getHotTubMenuCatalog() {
   const database = await getDb();
   if (!database) return [];
-  const { menuItems } = await import("../drizzle/schema");
-  const { HOT_TUB_CATALOG } = await import("./hotTubMenu");
+  const { menuCategories, menuItems } = await import("../drizzle/schema");
+  const { HOT_TUB_CATALOG, resolveHotTubCatalogPrice } = await import("./hotTubMenu");
   const ids = Array.from(
     new Set(HOT_TUB_CATALOG.flatMap(section => section.items.map(entry => entry.menuItemId))),
   );
   const products = await database
-    .select({ id: menuItems.id, active: menuItems.active, inStock: menuItems.inStock })
+    .select({
+      id: menuItems.id,
+      active: menuItems.active,
+      inStock: menuItems.inStock,
+      prices: menuItems.prices,
+    })
     .from(menuItems)
-    .where(inArray(menuItems.id, ids));
+    .innerJoin(menuCategories, eq(menuItems.categoryId, menuCategories.id))
+    .where(and(inArray(menuItems.id, ids), eq(menuCategories.active, 1)));
   const state = new Map(products.map(product => [product.id, product]));
   return HOT_TUB_CATALOG.map(section => ({
     ...section,
     items: section.items
-      .filter(entry => state.get(entry.menuItemId)?.active === 1)
-      .map(entry => ({
-        ...entry,
-        inStock: state.get(entry.menuItemId)?.inStock === 1,
-      })),
+      .flatMap(entry => {
+        const product = state.get(entry.menuItemId);
+        if (product?.active !== 1) return [];
+        const cmsPrices = safeJsonParse<Record<string, number>>(product.prices, {});
+        const currentPrice = resolveHotTubCatalogPrice(entry, cmsPrices);
+        if (currentPrice === null) return [];
+        return [{
+          ...entry,
+          priceClp: currentPrice,
+          inStock: product.inStock === 1,
+        }];
+      }),
   })).filter(section => section.items.length > 0);
 }
 
@@ -741,7 +754,7 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
 
   const { hotTubOrders, hotTubOrderItems, menuItems } = await import("../drizzle/schema");
   return await database.transaction(async (tx) => {
-    const { findHotTubCatalogItem } = await import("./hotTubMenu");
+    const { findHotTubCatalogItem, resolveHotTubCatalogPrice } = await import("./hotTubMenu");
     if (input.identificationType === "hot_tub" && !input.hotTubCode)
       throw new Error("Selecciona tu Hot Tub");
     if (input.identificationType === "key_fob" && !input.keyFobNumber?.trim())
@@ -768,7 +781,9 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
 
       const priceKey = catalogItem ? `hot_tub:${catalogItem.key}` : requested.priceKey;
       const prices = safeJsonParse<Record<string, number>>(product.prices, {});
-      const selectedPrice = catalogItem?.priceClp ?? (requested.priceKey ? prices[requested.priceKey] : undefined);
+      const selectedPrice = catalogItem
+        ? resolveHotTubCatalogPrice(catalogItem, prices)
+        : (requested.priceKey ? prices[requested.priceKey] : undefined);
       if (typeof selectedPrice !== "number" || !Number.isInteger(selectedPrice) || selectedPrice < 0)
         throw new Error(`El precio de ${product.name} cambió. Revisa tu pedido.`);
       const unitPrice = selectedPrice;

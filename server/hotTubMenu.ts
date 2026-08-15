@@ -7,6 +7,8 @@ export type HotTubCatalogItem = {
   subtitle?: string;
   description?: string;
   priceClp: number;
+  /** Clave del precio administrado desde la Carta del CMS. */
+  cmsPriceKey: "default" | "for_2" | "for_4" | "for_6";
   preparationArea: HotTubMenuArea;
 };
 
@@ -26,6 +28,7 @@ const item = (
   preparationArea: HotTubMenuArea,
   subtitle?: string,
   description?: string,
+  cmsPriceKey: HotTubCatalogItem["cmsPriceKey"] = "default",
 ): HotTubCatalogItem => ({
   key,
   menuItemId,
@@ -33,6 +36,7 @@ const item = (
   subtitle,
   description,
   priceClp,
+  cmsPriceKey,
   preparationArea,
 });
 
@@ -52,8 +56,8 @@ export const HOT_TUB_CATALOG: HotTubCatalogSection[] = [
     title: "Tablas",
     preparationArea: "cafe",
     items: [
-      item(2, "charcuteria-2-3", "Charcutería & Quesos", 28_000, "cafe", "para 2 a 3 personas", charcuterie),
-      item(2, "charcuteria-4-6", "Charcutería & Quesos", 38_000, "cafe", "para 4 a 6 personas", charcuterie),
+      item(2, "charcuteria-2-3", "Charcutería & Quesos", 28_000, "cafe", "para 2 a 3 personas", charcuterie, "for_2"),
+      item(2, "charcuteria-4-6", "Charcutería & Quesos", 38_000, "cafe", "para 4 a 6 personas", charcuterie, "for_4"),
       item(
         3,
         "tabla-ninos-3",
@@ -62,9 +66,10 @@ export const HOT_TUB_CATALOG: HotTubCatalogSection[] = [
         "cafe",
         "para 3 personas",
         "Queso de Los Bajos, salame, pepinillos dill, tomates cherry, fruta de la estación, pocillo de mermelada, galletas bañadas en chocolate, galletas saladas, papitas Gololo, palomitas y frutos secos.",
+        "for_2",
       ),
-      item(1, "otono-2-3", "Tabla Otoño (vegana)", 28_000, "cafe", "para 2 a 3 personas", vegan),
-      item(1, "otono-4-6", "Tabla Otoño (vegana)", 38_000, "cafe", "para 4 a 6 personas", vegan),
+      item(1, "otono-2-3", "Tabla Otoño (vegana)", 28_000, "cafe", "para 2 a 3 personas", vegan, "for_2"),
+      item(1, "otono-4-6", "Tabla Otoño (vegana)", 38_000, "cafe", "para 4 a 6 personas", vegan, "for_4"),
     ],
   },
   {
@@ -166,4 +171,12 @@ const ITEMS_BY_KEY = new Map(
 
 export function findHotTubCatalogItem(key: string): HotTubCatalogItem | null {
   return ITEMS_BY_KEY.get(key) ?? null;
+}
+
+export function resolveHotTubCatalogPrice(
+  entry: HotTubCatalogItem,
+  prices: Record<string, number>,
+): number | null {
+  const price = prices[entry.cmsPriceKey];
+  return Number.isInteger(price) && price >= 0 ? price : null;
 }
