@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
+import { ReschedulePolicyOverride } from "@/components/cms/ReschedulePolicyOverride";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -277,6 +278,8 @@ export default function SaunaAgenda() {
   const [rescheduleBooking, setRescheduleBooking] = useState<any>(null);
   const [rescheduleDate, setRescheduleDate] = useState(today);
   const [rescheduleTime, setRescheduleTime] = useState("10:00");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [rescheduleOverride, setRescheduleOverride] = useState(false);
   const [payments, setPayments] = useState<PaymentDraft[]>([emptyPayment()]);
   const [paymentBooking, setPaymentBooking] = useState<any>(null);
   const [newPayment, setNewPayment] = useState<PaymentDraft>(emptyPayment());
@@ -410,7 +413,12 @@ export default function SaunaAgenda() {
     onSuccess: () => {
       toast.success("Reserva reagendada");
       setRescheduleBooking(null);
-      void utils.sauna.invalidate();
+      setRescheduleReason("");
+      setRescheduleOverride(false);
+      void Promise.all([
+        utils.sauna.invalidate(),
+        utils.operations360.calendar.invalidate(),
+      ]);
     },
     onError: error => toast.error(error.message),
   });
@@ -557,6 +565,8 @@ export default function SaunaAgenda() {
                             String(booking.bookingDate).slice(0, 10)
                           );
                           setRescheduleTime(booking.startTime);
+                          setRescheduleReason("");
+                          setRescheduleOverride(false);
                         }}
                       />
                     ))}
@@ -965,15 +975,18 @@ export default function SaunaAgenda() {
         </Dialog>
         <Dialog
           open={Boolean(rescheduleBooking)}
-          onOpenChange={open => !open && setRescheduleBooking(null)}
+          onOpenChange={open => {
+            if (!open) {
+              setRescheduleBooking(null);
+              setRescheduleReason("");
+              setRescheduleOverride(false);
+            }
+          }}
         >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Reagendar reserva</DialogTitle>
             </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              Política: mínimo 48 horas de anticipación y máximo 2 cambios.
-            </p>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Nueva fecha">
                 <Input
@@ -990,6 +1003,18 @@ export default function SaunaAgenda() {
                 />
               </Field>
             </div>
+            <Field label="Motivo del reagendamiento">
+              <Textarea
+                value={rescheduleReason}
+                onChange={event => setRescheduleReason(event.target.value)}
+                placeholder="Explica la solicitud del cliente"
+              />
+            </Field>
+            <ReschedulePolicyOverride
+              checked={rescheduleOverride}
+              onCheckedChange={setRescheduleOverride}
+              policySummary="Mínimo 48 horas de anticipación y máximo 2 cambios para las reservas administradas por el CMS."
+            />
             <DialogFooter>
               <Button
                 variant="outline"
@@ -1004,12 +1029,21 @@ export default function SaunaAgenda() {
                     id: rescheduleBooking.id,
                     bookingDate: rescheduleDate,
                     startTime: rescheduleTime,
-                    overridePolicy: false,
+                    reason: rescheduleReason.trim(),
+                    overridePolicy: rescheduleOverride,
                   })
                 }
-                disabled={reschedule.isPending}
+                disabled={
+                  reschedule.isPending ||
+                  !rescheduleDate ||
+                  !rescheduleTime ||
+                  rescheduleReason.trim().length <
+                    (rescheduleOverride ? 10 : 3)
+                }
               >
-                Reagendar
+                {rescheduleOverride
+                  ? "Reagendar como excepción"
+                  : "Reagendar"}
               </Button>
             </DialogFooter>
           </DialogContent>

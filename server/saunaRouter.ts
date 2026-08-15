@@ -54,6 +54,15 @@ import {
   reservationPaymentInputSchema,
   validateReservationPayment,
 } from "./reservationPayments";
+import {
+  evaluateReschedulePolicy,
+  validOverrideReason,
+} from "./biopoolReschedulePolicy";
+import {
+  appendRescheduleAuditLine,
+  buildRescheduleAuditLine,
+  type ReschedulePolicyViolation,
+} from "./rescheduleAudit";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
@@ -1039,7 +1048,7 @@ export const saunaRouter = router({
           bookingDate: dateSchema,
           startTime: timeSchema,
           overridePolicy: z.boolean().default(false),
-          reason: z.string().max(1000).optional(),
+          reason: z.string().trim().min(3).max(1000),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -1059,24 +1068,34 @@ export const saunaRouter = router({
                 "Las reservas de Skedu deben reagendarse en Skedu; el CMS reflejará el cambio en la próxima sincronización",
             });
           const config = await settings(tx);
-          if (
-            !input.overridePolicy &&
-            booking.rescheduleCount >= config.maxReschedules
-          ) {
+          const { exceedsMaximum, violatesNotice, canOverride } =
+            evaluateReschedulePolicy({
+              rescheduleCount: booking.rescheduleCount,
+              maxReschedules: config.maxReschedules,
+              hoursUntilStart:
+                (chileLocalDateTimeToUtc(
+                  serializeDate(booking.bookingDate),
+                  booking.startTime
+                ).getTime() -
+                  Date.now()) /
+                (60 * 60_000),
+              noticeHours: config.rescheduleNoticeHours,
+              overrideRequested: input.overridePolicy,
+            });
+          if (input.overridePolicy && !validOverrideReason(input.reason)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "La excepción requiere un motivo de al menos 10 caracteres",
+            });
+          }
+          if (!canOverride && exceedsMaximum) {
             throw new TRPCError({
               code: "BAD_REQUEST",
               message: `La reserva ya alcanzó el máximo de ${config.maxReschedules} reagendamientos`,
             });
           }
-          const target = chileLocalDateTimeToUtc(
-            input.bookingDate,
-            input.startTime
-          );
-          if (
-            !input.overridePolicy &&
-            target.getTime() - Date.now() <
-              config.rescheduleNoticeHours * 60 * 60_000
-          ) {
+          if (!canOverride && violatesNotice) {
             throw new TRPCError({
               code: "BAD_REQUEST",
               message: `La política exige reagendar con al menos ${config.rescheduleNoticeHours} horas de anticipación`,
@@ -1084,10 +1103,21 @@ export const saunaRouter = router({
           }
           await acquireCapacityLock(tx, input.bookingDate);
           try {
-            const endTime = addMinutesToTime(
-              input.startTime,
-              config.durationMinutes
+            const availability = await availabilityForDay(
+              tx,
+              input.bookingDate
             );
+            const slot = availability.slots.find(
+              item => item.startTime === input.startTime
+            );
+            if (!slot) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message:
+                  "El horario seleccionado no está habilitado para Sauna",
+              });
+            }
+            const endTime = slot.endTime;
             await assertCapacity(
               tx,
               {
@@ -1098,6 +1128,33 @@ export const saunaRouter = router({
               },
               booking.id
             );
+            const policyViolations: ReschedulePolicyViolation[] = [];
+            if (violatesNotice) {
+              policyViolations.push({
+                code: "notice",
+                noticeHours: config.rescheduleNoticeHours,
+              });
+            }
+            if (exceedsMaximum) {
+              policyViolations.push({
+                code: "maximum_reschedules",
+                maxReschedules: config.maxReschedules,
+              });
+            }
+            const auditLine = buildRescheduleAuditLine({
+              from: {
+                date: serializeDate(booking.bookingDate),
+                time: booking.startTime,
+              },
+              to: {
+                date: input.bookingDate,
+                time: input.startTime,
+              },
+              reason: input.reason,
+              actor: ctx.user,
+              policyOverride: canOverride,
+              policyViolations,
+            });
             await tx
               .update(saunaBookings)
               .set({
@@ -1105,13 +1162,7 @@ export const saunaRouter = router({
                 startTime: input.startTime,
                 endTime,
                 rescheduleCount: booking.rescheduleCount + 1,
-                notes:
-                  [
-                    booking.notes,
-                    input.reason ? `Reagendamiento: ${input.reason}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join("\n") || null,
+                notes: appendRescheduleAuditLine(booking.notes, auditLine),
               })
               .where(eq(saunaBookings.id, booking.id));
             return { success: true };

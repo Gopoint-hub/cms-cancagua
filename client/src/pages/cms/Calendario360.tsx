@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
+import { ReschedulePolicyOverride } from "@/components/cms/ReschedulePolicyOverride";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -531,6 +532,7 @@ function ReservationActions({
   const [bookingDate, setBookingDate] = useState(detail.schedule.date);
   const [startTime, setStartTime] = useState(detail.schedule.startTime.slice(0, 5));
   const [reason, setReason] = useState("");
+  const [overridePolicy, setOverridePolicy] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const techniques = trpc.masajes.tecnicas.getAll.useQuery(undefined, {
@@ -540,6 +542,7 @@ function ReservationActions({
   const updateMassage = trpc.masajes.agenda.updateService.useMutation();
   const rescheduleBiopool = trpc.biopools.bookings.reschedule.useMutation();
   const rescheduleMassage = trpc.masajes.agenda.reschedule.useMutation();
+  const rescheduleSauna = trpc.sauna.agenda.reschedule.useMutation();
   const cancelBiopool = trpc.biopools.bookings.updateStatus.useMutation();
   const cancelMassage = trpc.masajes.agenda.updateStatus.useMutation();
 
@@ -568,9 +571,52 @@ function ReservationActions({
     Number(adults || 0) * Number(detail.editable?.adultPriceClp ?? 0) +
     Number(children || 0) * Number(detail.editable?.childPriceClp ?? 0);
 
+  const submitReschedule = () => {
+    if (event.kind === "biopool") {
+      return rescheduleBiopool.mutateAsync({
+        id: event.entityId,
+        bookingDate,
+        startTime,
+        reason: reason.trim(),
+        overridePolicy,
+      });
+    }
+    if (event.kind === "sauna") {
+      return rescheduleSauna.mutateAsync({
+        id: event.entityId,
+        bookingDate,
+        startTime,
+        reason: reason.trim(),
+        overridePolicy,
+      });
+    }
+    return rescheduleMassage.mutateAsync({
+      id: event.entityId,
+      bookingDate,
+      startTime,
+      reason: reason.trim(),
+    });
+  };
+
+  const submitCancellation = () => {
+    if (event.kind === "biopool") {
+      return cancelBiopool.mutateAsync({
+        id: event.entityId,
+        status: "cancelled",
+        reason: reason.trim(),
+      });
+    }
+    return cancelMassage.mutateAsync({
+      id: event.entityId,
+      status: "cancelled",
+      cancellationCategory: "client_cancelled",
+      cancellationReason: reason.trim(),
+    });
+  };
+
   return <>
     <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-      <Button type="button" variant="outline" onClick={() => {
+      {(event.kind === "biopool" || event.kind === "massage") && <Button type="button" variant="outline" onClick={() => {
         setAdults(String(detail.editable?.adultQuantity ?? 1));
         setChildren(String(detail.editable?.childQuantity ?? 0));
         setTechniqueId(String(detail.editable?.techniqueId ?? ""));
@@ -578,18 +624,19 @@ function ReservationActions({
         setEditOpen(true);
       }}>
         <Pencil className="mr-2 h-4 w-4" />Editar reserva
-      </Button>
+      </Button>}
       <Button type="button" variant="outline" onClick={() => {
         setBookingDate(detail.schedule.date);
         setStartTime(detail.schedule.startTime.slice(0, 5));
         setReason("");
+        setOverridePolicy(false);
         setRescheduleOpen(true);
       }}>
         <CalendarClock className="mr-2 h-4 w-4" />Reagendar
       </Button>
-      <Button type="button" variant="destructive" onClick={() => { setReason(""); setCancelOpen(true); }}>
+      {event.kind !== "sauna" && <Button type="button" variant="destructive" onClick={() => { setReason(""); setCancelOpen(true); }}>
         <Ban className="mr-2 h-4 w-4" />Cancelar reserva
-      </Button>
+      </Button>}
     </div>
 
     <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -622,18 +669,26 @@ function ReservationActions({
       </DialogContent>
     </Dialog>
 
-    <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
+    <Dialog open={rescheduleOpen} onOpenChange={open => {
+      setRescheduleOpen(open);
+      if (!open) setOverridePolicy(false);
+    }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>Reagendar reserva</DialogTitle><DialogDescription>Se comprobará nuevamente la disponibilidad antes de guardar.</DialogDescription></DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2"><div><Label>Nueva fecha</Label><Input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)} /></div><div><Label>Nueva hora</Label><Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} /></div></div>
         <div><Label>Motivo</Label><Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Motivo del reagendamiento" /></div>
-        <Button disabled={busy || !bookingDate || !startTime || reason.trim().length < 3} onClick={() => execute(
-          () => event.kind === "biopool"
-            ? rescheduleBiopool.mutateAsync({ id: event.entityId, bookingDate, startTime, reason: reason.trim(), overridePolicy: false })
-            : rescheduleMassage.mutateAsync({ id: event.entityId, bookingDate, startTime, reason: reason.trim() }),
+        {(event.kind === "biopool" || event.kind === "sauna") && <ReschedulePolicyOverride
+          checked={overridePolicy}
+          onCheckedChange={setOverridePolicy}
+          policySummary={event.kind === "biopool"
+            ? "Biopiscinas exige el plazo mínimo y el máximo de cambios configurados para la reserva."
+            : "Sauna exige el plazo mínimo y el máximo de cambios configurados para la reserva."}
+        />}
+        <Button disabled={busy || !bookingDate || !startTime || reason.trim().length < (overridePolicy ? 10 : 3)} onClick={() => execute(
+          submitReschedule,
           "Reserva reagendada",
           () => setRescheduleOpen(false),
-        )}>Confirmar reagendamiento</Button>
+        )}>{overridePolicy ? "Reagendar como excepción" : "Confirmar reagendamiento"}</Button>
       </DialogContent>
     </Dialog>
 
@@ -642,9 +697,7 @@ function ReservationActions({
         <DialogHeader><DialogTitle>Cancelar reserva</DialogTitle><DialogDescription>La reserva desaparecerá del Calendario 360. Los pagos electrónicos conservarán sus reglas de reembolso.</DialogDescription></DialogHeader>
         <div><Label>Motivo de cancelación</Label><Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Indica por qué se cancela" /></div>
         <Button variant="destructive" disabled={busy || reason.trim().length < 3} onClick={() => execute(
-          () => event.kind === "biopool"
-            ? cancelBiopool.mutateAsync({ id: event.entityId, status: "cancelled", reason: reason.trim() })
-            : cancelMassage.mutateAsync({ id: event.entityId, status: "cancelled", cancellationCategory: "client_cancelled", cancellationReason: reason.trim() }),
+          submitCancellation,
           "Reserva cancelada",
           () => { setCancelOpen(false); onCancelled(); },
         )}>Sí, cancelar reserva</Button>
@@ -668,6 +721,19 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
       : detail.payment.amountClp > 0
         ? "border-amber-300 bg-amber-50/80"
         : "border-rose-300 bg-rose-50/80";
+  const refreshReservationViews = async () => {
+    await Promise.all([
+      query.refetch(),
+      utils.operations360.calendar.invalidate(),
+      event?.service === "biopools"
+        ? utils.biopools.invalidate()
+        : event?.service === "sauna"
+          ? utils.sauna.invalidate()
+          : event?.service === "massages"
+            ? utils.masajes.agenda.getByDateRange.invalidate()
+            : Promise.resolve(),
+    ]);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -714,7 +780,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
 
                     {detail.payment.overpaymentAmountClp > 0 && <div className="flex flex-col gap-1 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"><span>Excedente pagado por regularizar</span><strong className="text-amber-800">{money(detail.payment.overpaymentAmountClp)}</strong></div>}
 
-                    {detail.canManagePayments && event && ["massages", "biopools", "sauna"].includes(event.service) ? <PaymentManager event={event} detail={detail} onChanged={async () => { await Promise.all([query.refetch(), utils.operations360.calendar.invalidate()]); }} /> : <div className="overflow-hidden rounded-xl border">
+                    {detail.canManagePayments && event && ["massages", "biopools", "sauna"].includes(event.service) ? <PaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <div className="overflow-hidden rounded-xl border">
                       {detail.payment.lines.map((line: any) => (
                         <div key={line.id} className="grid min-w-0 gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] sm:items-center">
                           <div>
@@ -740,10 +806,10 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                 {detail.activity.length ? <div className="space-y-4">{detail.activity.map((item: any) => <div key={item.id} className="relative border-l-2 border-primary/30 pl-4"><span className="absolute -left-[5px] top-1 h-2 w-2 rounded-full bg-primary" /><p className="font-medium">{item.label}</p>{item.detail && <p className="text-sm text-muted-foreground">{item.detail}</p>}<p className="mt-1 text-xs text-muted-foreground">{item.at ? new Date(item.at).toLocaleString("es-CL") : "Sin fecha"}</p></div>)}</div> : <p className="py-6 text-center text-sm text-muted-foreground">Aún no hay actividad adicional registrada.</p>}
               </TabsContent>
             </Tabs>
-            {detail.canManageReservation && event && (event.kind === "biopool" || event.kind === "massage") && detail.status !== "cancelled" && <ReservationActions
+            {detail.canManageReservation && event && (event.kind === "biopool" || event.kind === "massage" || event.kind === "sauna") && detail.status !== "cancelled" && <ReservationActions
               event={event}
               detail={detail}
-              onChanged={async () => { await Promise.all([query.refetch(), utils.operations360.calendar.invalidate()]); }}
+              onChanged={refreshReservationViews}
               onCancelled={() => onOpenChange(false)}
             />}
             <div className="flex min-w-0 justify-end"><Button className="h-auto max-w-full whitespace-normal py-2 text-center" asChild><a href={detail.href}>Abrir agenda del módulo <ExternalLink className="ml-2 h-4 w-4" /></a></Button></div>

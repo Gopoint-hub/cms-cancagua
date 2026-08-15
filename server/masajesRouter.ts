@@ -107,6 +107,10 @@ import {
   withMassageResourceLock,
   withMassageResourceLocks,
 } from "./massageResourceLock";
+import {
+  appendRescheduleAuditLine,
+  buildRescheduleAuditLine,
+} from "./rescheduleAudit";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 
@@ -3267,12 +3271,18 @@ const agendaRouter = router({
             code: "CONFLICT",
             message: roomBusy ? "La sala no está disponible en ese horario" : "El terapeuta no está disponible en ese horario",
           });
+        const auditLine = buildRescheduleAuditLine({
+          from: { date: oldDate, time: booking.startTime },
+          to: { date: input.bookingDate, time: input.startTime },
+          reason: input.reason,
+          actor: ctx.user,
+        });
         await db.update(massageBookings).set({
           bookingDate: input.bookingDate as any,
           startTime: input.startTime,
           endTime: formatTimeMin(end),
           rescheduleCount: booking.rescheduleCount + 1,
-          notes: [booking.notes, `Reagendamiento: ${input.reason}`].filter(Boolean).join("\n"),
+          notes: appendRescheduleAuditLine(booking.notes, auditLine),
         }).where(eq(massageBookings.id, booking.id));
         await syncMassageSale(booking.id);
         return { success: true };

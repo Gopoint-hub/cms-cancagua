@@ -36,6 +36,7 @@ import {
 import { protectedProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { redeemGiftCardPayment } from "./reservationPayments";
+import { parseRescheduleAuditLines } from "./rescheduleAudit";
 import { syncMassageSale } from "./massageSales";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -104,6 +105,51 @@ export function isVisibleCalendarReservation(status?: string | null): boolean {
 function money(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+}
+
+function noteRescheduleActivities(notes: string | null | undefined, prefix: string) {
+  return parseRescheduleAuditLines(notes).map((entry, index) => ({
+    id: `rescheduled:${prefix}:${entry.timestamp}:${index}`,
+    type: "activity" as const,
+    label: entry.policyOverride
+      ? "Reagendamiento con excepción"
+      : "Reserva reagendada",
+    detail: [
+      `${entry.from.date} ${entry.from.time} → ${entry.to.date} ${entry.to.time}`,
+      `Motivo: ${entry.reason}`,
+      `Responsable: ${entry.actor}`,
+      entry.policyViolations.length
+        ? `Política omitida: ${entry.policyViolations.join("; ")}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    at: entry.timestamp,
+  }));
+}
+
+function biopoolActivityPresentation(action: string, detail: string | null) {
+  if (action !== "booking_rescheduled" || !detail) {
+    return { label: action, detail };
+  }
+  try {
+    const parsed = JSON.parse(detail);
+    return {
+      label: parsed.policyOverride
+        ? "Reagendamiento con excepción"
+        : "Reserva reagendada",
+      detail: [
+        parsed.from && parsed.to ? `${parsed.from} → ${parsed.to}` : null,
+        parsed.reason ? `Motivo: ${parsed.reason}` : null,
+        parsed.actor ? `Responsable: ${parsed.actor}` : null,
+        parsed.policyOverride ? "Excepción administrativa autorizada" : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    };
+  } catch {
+    return { label: "Reserva reagendada", detail };
+  }
 }
 
 type PaymentDetailRow = {
@@ -720,13 +766,19 @@ export const operations360Router = router({
           notes: booking.notes,
           detail: `${booking.adultQuantity} adulto(s) · ${booking.childQuantity} niño(s) · ${booking.totalGuests} personas`,
           activity: [
-            ...activity.map(item => ({
-              id: `activity:${item.id}`,
-              type: "activity",
-              label: item.action,
-              detail: item.detail,
-              at: item.createdAt,
-            })),
+            ...activity.map(item => {
+              const presentation = biopoolActivityPresentation(
+                item.action,
+                item.detail
+              );
+              return {
+                id: `activity:${item.id}`,
+                type: "activity",
+                label: presentation.label,
+                detail: presentation.detail,
+                at: item.createdAt,
+              };
+            }),
             ...notifications.map(item => ({
               id: `notification:${item.id}`,
               type: "notification",
@@ -797,6 +849,7 @@ export const operations360Router = router({
             detail: [row.therapistName, row.roomName, `${booking.duration} min`].filter(Boolean).join(" · "),
             activity: [
               { id: `created:${booking.id}`, type: "activity", label: "Reserva creada", detail: booking.bookingSource, at: booking.createdAt },
+              ...noteRescheduleActivities(booking.notes, `massage:${booking.id}`),
               ...(booking.cancelledAt ? [{ id: `cancelled:${booking.id}`, type: "activity", label: "Reserva cancelada", detail: booking.cancellationReason, at: booking.cancelledAt }] : []),
               ...(nps?.respondedAt ? [{ id: `nps:${nps.id}`, type: "nps", label: `NPS ${nps.score}/10`, detail: nps.comment, at: nps.respondedAt }] : []),
             ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()),
@@ -859,7 +912,9 @@ export const operations360Router = router({
         return {
           service: "sauna" as const,
           canManagePayments: hasCmsPermission(ctx.user, "sauna.manage_agenda"),
-          canManageReservation: hasCmsPermission(ctx.user, "sauna.manage_agenda"),
+          canManageReservation:
+            booking.source !== "skedu" &&
+            hasCmsPermission(ctx.user, "sauna.manage_agenda"),
           title: booking.serviceName,
           client: {
             name: booking.clientName ?? "Sin cliente registrado",
@@ -895,6 +950,7 @@ export const operations360Router = router({
               detail: booking.origin,
               at: booking.createdAt,
             },
+            ...noteRescheduleActivities(booking.notes, `sauna:${booking.id}`),
             ...(booking.cancelledAt
               ? [{
                   id: `cancelled:${booking.id}`,

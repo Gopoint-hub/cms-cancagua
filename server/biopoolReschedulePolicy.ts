@@ -7,10 +7,12 @@ export type ReschedulePolicyInput = {
 };
 
 export function evaluateReschedulePolicy(input: ReschedulePolicyInput) {
+  const exceedsMaximum = input.rescheduleCount >= input.maxReschedules;
+  const violatesNotice = input.hoursUntilStart < input.noticeHours;
   return {
-    exceedsMaximum: input.rescheduleCount >= input.maxReschedules,
-    violatesNotice: input.hoursUntilStart < input.noticeHours,
-    canOverride: input.overrideRequested,
+    exceedsMaximum,
+    violatesNotice,
+    canOverride: input.overrideRequested && (exceedsMaximum || violatesNotice),
   };
 }
 

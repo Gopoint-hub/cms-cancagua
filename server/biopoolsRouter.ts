@@ -43,6 +43,7 @@ import {
   evaluateReschedulePolicy,
   validOverrideReason,
 } from "./biopoolReschedulePolicy";
+import { formatRescheduleActor } from "./rescheduleAudit";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import {
   createTransaction,
@@ -3018,6 +3019,7 @@ export const biopoolsRouter = router({
                 from: `${serializeDate(booking.bookingDate)} ${booking.startTime}`,
                 to: `${input.bookingDate} ${input.startTime}`,
                 reason: input.reason,
+                actor: formatRescheduleActor(ctx.user),
                 policyOverride: canOverride,
                 policyViolations: {
                   noticeHours: violatesNotice,

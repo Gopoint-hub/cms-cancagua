@@ -3,6 +3,7 @@ import { useSearch } from "wouter";
 import { addDays, format, parseISO, subDays } from "date-fns";
 import { es } from "date-fns/locale";
 import DashboardLayout from "@/components/DashboardLayout";
+import { ReschedulePolicyOverride } from "@/components/cms/ReschedulePolicyOverride";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +30,6 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import {
   ChevronLeft,
   ChevronRight,
-  AlertTriangle,
   Plus,
   RotateCcw,
   RotateCw,
@@ -444,7 +444,10 @@ export default function BiopiscinasAgenda() {
       toast.success("Reserva reagendada correctamente");
       setRescheduleBooking(null);
       setRescheduleOverride(false);
-      utils.biopools.invalidate();
+      void Promise.all([
+        utils.biopools.invalidate(),
+        utils.operations360.calendar.invalidate(),
+      ]);
     },
     onError: error => toast.error(error.message),
   });
@@ -2082,45 +2085,21 @@ export default function BiopiscinasAgenda() {
                   placeholder="Motivo informado por el cliente"
                 />
               </div>
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                <div className="flex gap-2">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>
-                    <p className="font-medium">
-                      Recuerda la política de reagendamiento
-                    </p>
-                    <p className="mt-1 text-xs">
-                      Debe solicitarse con al menos{" "}
-                      {rescheduleAvailability?.service.rescheduleNoticeHours ??
-                        48}{" "}
-                      horas de anticipación y admite un máximo de{" "}
-                      {rescheduleAvailability?.service.maxStaffReschedules ?? 2}{" "}
-                      cambios. Esta reserva lleva{" "}
-                      {rescheduleBooking?.rescheduleCount ?? 0}.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4"
-                  checked={rescheduleOverride}
-                  onChange={event =>
-                    setRescheduleOverride(event.target.checked)
-                  }
-                />
-                <span>
-                  <span className="font-medium">
-                    Aplicar excepción autorizada
-                  </span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    Úsala solo con autorización de Operaciones. El motivo, la
-                    persona responsable y el incumplimiento de la política
-                    quedarán registrados.
-                  </span>
-                </span>
-              </label>
+              <ReschedulePolicyOverride
+                checked={rescheduleOverride}
+                onCheckedChange={setRescheduleOverride}
+                policySummary={
+                  <>
+                    Mínimo{" "}
+                    {rescheduleAvailability?.service.rescheduleNoticeHours ??
+                      48}{" "}
+                    horas de anticipación y máximo{" "}
+                    {rescheduleAvailability?.service.maxStaffReschedules ?? 2}{" "}
+                    cambios. Esta reserva lleva{" "}
+                    {rescheduleBooking?.rescheduleCount ?? 0}.
+                  </>
+                }
+              />
               <p className="text-xs text-muted-foreground">
                 Los recordatorios pendientes se reemplazarán solo si todavía
                 corresponde enviarlos para la nueva fecha.
