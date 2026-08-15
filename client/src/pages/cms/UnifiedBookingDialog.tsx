@@ -59,6 +59,11 @@ type BookingDraft = {
   discountAmountClp: number;
   notes: string;
   payments: PaymentDraft[];
+  modality: "simple" | "double";
+  secondClientName: string;
+  externalReference: string;
+  programPaymentMethod: string;
+  programPaymentReference: string;
 };
 
 const labels: Record<DirectService, string> = {
@@ -146,6 +151,11 @@ function booking(service: DirectService, date = localDate()): BookingDraft {
     discountAmountClp: 0,
     notes: "",
     payments: [payment()],
+    modality: "simple",
+    secondClientName: "",
+    externalReference: "",
+    programPaymentMethod: "skedu_program",
+    programPaymentReference: "",
   };
 }
 function clp(value: number) {
@@ -371,6 +381,25 @@ function BookingEditor({
   const techniques = trpc.masajes.tecnicas.getAll.useQuery(undefined, {
     enabled: value.service === "massages",
   });
+  const programs = trpc.masajes.agenda.getSkeduPrograms.useQuery(undefined, {
+    enabled: value.service === "massages",
+  });
+  const isProgram =
+    value.service === "massages" && value.serviceKind === "massage_program";
+  const programCode = isProgram ? value.serviceId.replace(/^program:/, "") : "";
+  const selectedProgram: any = programs.data?.find(
+    (item: any) => item.value === programCode
+  );
+  const programResources =
+    trpc.masajes.agenda.getSkeduProgramResources.useQuery(
+      {
+        bookingDate: value.date,
+        startTime: value.time || "10:00",
+        duration: (value.duration === 30 ? 30 : 50) as 30 | 50,
+        modality: value.modality,
+      },
+      { enabled: isProgram && Boolean(value.date && value.time) }
+    );
   const rooms = trpc.masajes.salas.getAll.useQuery(undefined, {
     enabled: value.service === "massages",
   });
@@ -380,7 +409,10 @@ function BookingEditor({
       duration: value.duration,
       techniqueId: value.serviceId ? Number(value.serviceId) : undefined,
     },
-    { enabled: value.service === "massages" && Boolean(value.date) }
+    {
+      enabled:
+        value.service === "massages" && !isProgram && Boolean(value.date),
+    }
   );
   const bioServices = trpc.biopools.services.list.useQuery(undefined, {
     enabled: value.service === "biopools",
@@ -412,8 +444,14 @@ function BookingEditor({
     saunaServices.data?.filter(
       (item: any) => item.published && item.kind !== "program"
     ) ?? [];
+  const programHasTherapists =
+    (programResources.data?.therapists.length ?? 0) >=
+    (value.modality === "double" ? 2 : 1);
+  const programRooms = programHasTherapists
+    ? (programResources.data?.rooms ?? [])
+    : [];
   const selectedTechnique: any = techniques.data?.find(
-    (item: any) => String(item.id) === value.serviceId
+    (item: any) => !isProgram && String(item.id) === value.serviceId
   );
   const selectedBio: any = activeBio.find(
     (item: any) => String(item.id) === value.serviceId
@@ -428,8 +466,15 @@ function BookingEditor({
   const childPrice = Number(
     tickets.find(item => item.code === "child")?.priceClp ?? 0
   );
-  const availableTimes: any[] =
-    value.service === "massages"
+  const availableTimes: any[] = isProgram
+    ? Array.from({ length: 21 }, (_, index) => {
+        const minutes = 10 * 60 + index * 30;
+        return {
+          time: `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`,
+          availableRooms: [],
+        };
+      })
+    : value.service === "massages"
       ? (massageSlots.data ?? [])
       : value.service === "biopools"
         ? ((bioSlots.data as any)?.slots ?? [])
@@ -437,7 +482,16 @@ function BookingEditor({
   const finalAmount = Math.max(0, value.amountClp - value.discountAmountClp);
   const catalogItems: any[] =
     value.service === "massages"
-      ? (techniques.data?.filter((item: any) => item.active) ?? [])
+      ? [
+          ...(techniques.data?.filter((item: any) => item.active) ?? []),
+          ...(programs.data ?? []).map((item: any) => ({
+            id: `program:${item.value}`,
+            name: `Programa ${item.label}`,
+            kind: "massage_program",
+            durations: item.durations,
+            priceClp: item.durations[0] === 30 ? 35_000 : 45_000,
+          })),
+        ]
       : value.service === "biopools"
         ? activeBio
         : activeSauna;
@@ -460,7 +514,7 @@ function BookingEditor({
   }, [value.date]);
 
   useEffect(() => {
-    if (value.service === "massages" && selectedTechnique) {
+    if (value.service === "massages" && !isProgram && selectedTechnique) {
       const amount =
         Number(
           value.duration === 50
@@ -482,6 +536,37 @@ function BookingEditor({
         });
     }
   }, [value.service, value.serviceId, value.duration, selectedTechnique]);
+  useEffect(() => {
+    if (!isProgram || !selectedProgram) return;
+    const allowed = selectedProgram.durations as number[];
+    const duration = allowed.includes(value.duration)
+      ? value.duration
+      : allowed[0];
+    const amount =
+      (duration === 30 ? 35_000 : 45_000) *
+      (value.modality === "double" ? 2 : 1);
+    if (duration !== value.duration || amount !== value.amountClp)
+      onChange({ ...value, duration, amountClp: amount, discountAmountClp: 0 });
+  }, [
+    isProgram,
+    selectedProgram,
+    value.duration,
+    value.modality,
+    value.amountClp,
+  ]);
+  useEffect(() => {
+    if (!isProgram || !value.time || !programResources.data) return;
+    const roomIds = programRooms.map((room: any) => String(room.id));
+    if (!roomIds.includes(value.roomId))
+      onChange({ ...value, roomId: String(programRooms[0]?.id ?? "") });
+  }, [
+    isProgram,
+    value.time,
+    value.date,
+    value.duration,
+    value.modality,
+    programResources.data,
+  ]);
   useEffect(() => {
     if (value.service === "biopools" && tickets.length) {
       const amount = adultPrice * value.adults + childPrice * value.children;
@@ -617,6 +702,7 @@ function BookingEditor({
                       item.price50min ??
                         item.price80min ??
                         item.price110min ??
+                        item.priceClp ??
                         0
                     )
                   : Number(item.priceClp ?? 0);
@@ -731,9 +817,11 @@ function BookingEditor({
                       }
                     >
                       {time}
-                      <span className="ml-1 text-xs opacity-70">
-                        ({item.availableSeats ?? item.availableRooms?.length})
-                      </span>
+                      {!isProgram && (
+                        <span className="ml-1 text-xs opacity-70">
+                          ({item.availableSeats ?? item.availableRooms?.length})
+                        </span>
+                      )}
                     </Button>
                   );
                 })}
@@ -744,6 +832,15 @@ function BookingEditor({
               )}
             </div>
           </div>
+          {isProgram &&
+            value.time &&
+            !programResources.isFetching &&
+            !programRooms.length && (
+              <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                No hay suficientes terapeutas o una sala compatible en este
+                horario. Selecciona otro.
+              </p>
+            )}
           <p className="text-center text-xs text-muted-foreground">
             Horarios de Cancagua · America/Santiago
           </p>
@@ -841,11 +938,14 @@ function BookingEditor({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {String(selectedTechnique?.durations ?? "50,80,110")
-                    .split(",")
-                    .map(Number)
+                  {(isProgram
+                    ? (selectedProgram?.durations ?? [30, 50])
+                    : String(selectedTechnique?.durations ?? "50,80,110")
+                        .split(",")
+                        .map(Number)
+                  )
                     .filter(Boolean)
-                    .map(duration => (
+                    .map((duration: number) => (
                       <SelectItem key={duration} value={String(duration)}>
                         {duration} minutos
                       </SelectItem>
@@ -854,6 +954,45 @@ function BookingEditor({
               </Select>
             </div>
           )}
+        {(section === "all" || section === "variant") && isProgram && (
+          <>
+            <div>
+              <Label>Modalidad</Label>
+              <Select
+                value={value.modality}
+                onValueChange={(modality: "simple" | "double") =>
+                  onChange({
+                    ...value,
+                    modality,
+                    roomId: "",
+                    secondClientName:
+                      modality === "simple" ? "" : value.secondClientName,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="simple">Simple · 1 persona</SelectItem>
+                  <SelectItem value="double">Doble · 2 personas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {value.modality === "double" && (
+              <div>
+                <Label>Segundo cliente</Label>
+                <Input
+                  value={value.secondClientName}
+                  onChange={event =>
+                    onChange({ ...value, secondClientName: event.target.value })
+                  }
+                  placeholder="Nombre y apellido"
+                />
+              </div>
+            )}
+          </>
+        )}
         {section === "all" && (
           <div>
             <Label>Día</Label>
@@ -931,9 +1070,10 @@ function BookingEditor({
                   <SelectValue placeholder="Automática" />
                 </SelectTrigger>
                 <SelectContent>
-                  {rooms.data
+                  {(isProgram ? programRooms : rooms.data)
                     ?.filter(
                       (room: any) =>
+                        isProgram ||
                         !value.time ||
                         availableTimes
                           .find(item => item.time === value.time)
@@ -1016,7 +1156,8 @@ function BookingEditor({
           </div>
         )}
         {(section === "all" || section === "payment") &&
-          value.service !== "sauna" && (
+          value.service !== "sauna" &&
+          !isProgram && (
             <div className="lg:col-span-2">
               <Label>Código de descuento</Label>
               <div className="flex gap-2">
@@ -1064,13 +1205,66 @@ function BookingEditor({
           </span>
         </div>
       )}
-      {(section === "all" || section === "payment") && finalAmount > 0 && (
-        <PaymentEditor
-          service={value.service}
-          items={value.payments}
-          onChange={payments => onChange({ ...value, payments })}
-        />
+      {(section === "all" || section === "payment") && isProgram && (
+        <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+          <div>
+            <Label>Medio de pago</Label>
+            <Select
+              value={value.programPaymentMethod}
+              onValueChange={programPaymentMethod =>
+                onChange({ ...value, programPaymentMethod })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="skedu_program">
+                  Incluido en programa Skedu
+                </SelectItem>
+                {paymentMethods.massages
+                  .filter(([method]) => method !== "gift_card")
+                  .map(([method, label]) => (
+                    <SelectItem key={method} value={method}>
+                      {label}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Referencia de pago</Label>
+            <Input
+              value={value.programPaymentReference}
+              onChange={event =>
+                onChange({
+                  ...value,
+                  programPaymentReference: event.target.value,
+                })
+              }
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Referencia Skedu</Label>
+            <Input
+              value={value.externalReference}
+              onChange={event =>
+                onChange({ ...value, externalReference: event.target.value })
+              }
+              placeholder="Código o ID de la reserva (opcional)"
+            />
+          </div>
+        </div>
       )}
+      {(section === "all" || section === "payment") &&
+        !isProgram &&
+        finalAmount > 0 && (
+          <PaymentEditor
+            service={value.service}
+            items={value.payments}
+            onChange={payments => onChange({ ...value, payments })}
+          />
+        )}
       {(section === "all" || section === "payment") && (
         <div>
           <Label>Notas</Label>
@@ -1117,6 +1311,8 @@ export function UnifiedBookingDialog({
   const [step, setStep] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const massageCreate = trpc.masajes.agenda.create.useMutation();
+  const programCreate =
+    trpc.masajes.agenda.createSkeduProgramBooking.useMutation();
   const bioCreate = trpc.biopools.bookings.create.useMutation();
   const saunaCreate = trpc.sauna.agenda.create.useMutation();
   const clientSearch = trpc.operations360.clients.list.useQuery(
@@ -1150,12 +1346,15 @@ export function UnifiedBookingDialog({
   const paidTotal = items.reduce(
     (sum, item) =>
       sum +
-      item.payments
-        .filter(payment => payment.status === "paid")
-        .reduce(
-          (paymentSum, payment) => paymentSum + Number(payment.amountClp || 0),
-          0
-        ),
+      (item.serviceKind === "massage_program"
+        ? Math.max(0, item.amountClp - item.discountAmountClp)
+        : item.payments
+            .filter(payment => payment.status === "paid")
+            .reduce(
+              (paymentSum, payment) =>
+                paymentSum + Number(payment.amountClp || 0),
+              0
+            )),
     0
   );
   const valid =
@@ -1163,6 +1362,8 @@ export function UnifiedBookingDialog({
     client.email.includes("@") &&
     client.phone.trim().length >= 8 &&
     items.every(item => {
+      const program =
+        item.service === "massages" && item.serviceKind === "massage_program";
       const due = Math.max(0, item.amountClp - item.discountAmountClp);
       const planned = item.payments.reduce(
         (sum, row) => sum + Number(row.amountClp || 0),
@@ -1173,11 +1374,16 @@ export function UnifiedBookingDialog({
         item.date &&
         item.time &&
         (item.service === "sauna" || item.amountClp > 0) &&
-        (!item.discountCode.trim() || item.discountAmountClp > 0) &&
+        (program || !item.discountCode.trim() || item.discountAmountClp > 0) &&
         (item.service !== "massages" || item.roomId) &&
+        (!program ||
+          (item.programPaymentMethod &&
+            (item.modality === "simple" ||
+              item.secondClientName.trim().length >= 2))) &&
         (item.service !== "biopools" ||
           (item.adults >= 1 && item.adults + item.children > 0)) &&
-        (due === 0 ||
+        (program ||
+          due === 0 ||
           (item.payments.length > 0 &&
             item.payments.every(paymentComplete) &&
             planned <= due))
@@ -1191,7 +1397,10 @@ export function UnifiedBookingDialog({
   const variantValid =
     Boolean(activeItem?.serviceId) &&
     (activeItem?.service === "sauna" || activeItem?.amountClp > 0) &&
-    (activeItem?.service !== "biopools" || activeItem.adults >= 1);
+    (activeItem?.service !== "biopools" || activeItem.adults >= 1) &&
+    (activeItem?.serviceKind !== "massage_program" ||
+      activeItem.modality === "simple" ||
+      activeItem.secondClientName.trim().length >= 2);
   const availabilityValid = Boolean(
     activeItem?.date &&
       activeItem?.time &&
@@ -1199,6 +1408,8 @@ export function UnifiedBookingDialog({
   );
   const paymentValid = activeItem
     ? (() => {
+        if (activeItem.serviceKind === "massage_program")
+          return Boolean(activeItem.programPaymentMethod);
         const due = Math.max(
           0,
           activeItem.amountClp - activeItem.discountAmountClp
@@ -1261,7 +1472,30 @@ export function UnifiedBookingDialog({
       for (const item of items) {
         const due = Math.max(0, item.amountClp - item.discountAmountClp);
         const payments = due > 0 ? item.payments.map(paymentInput) : [];
-        if (item.service === "massages")
+        if (
+          item.service === "massages" &&
+          item.serviceKind === "massage_program"
+        )
+          await programCreate.mutateAsync({
+            program: item.serviceId.replace(/^program:/, "") as any,
+            duration: item.duration === 30 ? 30 : 50,
+            modality: item.modality,
+            clientName: client.name.trim(),
+            secondClientName:
+              item.modality === "double"
+                ? item.secondClientName.trim()
+                : undefined,
+            clientEmail: client.email.trim(),
+            clientPhone: client.phone.trim(),
+            bookingDate: item.date,
+            startTime: item.time,
+            roomId: Number(item.roomId),
+            externalReference: item.externalReference.trim() || undefined,
+            paymentMethod: item.programPaymentMethod as any,
+            paymentReference: item.programPaymentReference.trim() || undefined,
+            notes: item.notes.trim() || undefined,
+          });
+        else if (item.service === "massages")
           await massageCreate.mutateAsync({
             clientName: client.name.trim(),
             clientEmail: client.email.trim(),
@@ -1516,7 +1750,9 @@ export function UnifiedBookingDialog({
                           ? `${item.adults} adulto(s) · ${item.children} niño(s)`
                           : item.service === "sauna"
                             ? `${item.guests} persona(s)`
-                            : `${item.duration} minutos`}
+                            : item.serviceKind === "massage_program"
+                              ? `${item.duration} minutos · modalidad ${item.modality === "double" ? "doble" : "simple"}${item.secondClientName ? ` · ${item.secondClientName}` : ""}`
+                              : `${item.duration} minutos`}
                       </p>
                       {item.discountAmountClp > 0 && (
                         <p className="mt-1 text-sm text-emerald-700">
@@ -1525,6 +1761,14 @@ export function UnifiedBookingDialog({
                         </p>
                       )}
                       <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                        {item.serviceKind === "massage_program" && (
+                          <p>
+                            {item.programPaymentMethod.replaceAll("_", " ")}
+                            {item.programPaymentReference
+                              ? ` · ${item.programPaymentReference}`
+                              : ""}
+                          </p>
+                        )}
                         {item.payments
                           .filter(payment => payment.method)
                           .map((payment, paymentIndex) => (
