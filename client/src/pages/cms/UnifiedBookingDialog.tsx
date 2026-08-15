@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  Clock3,
+  Plus,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -351,12 +359,14 @@ function BookingEditor({
   onRemove,
   canRemove,
   allowedServices,
+  section = "all",
 }: {
   value: BookingDraft;
   onChange: (value: BookingDraft) => void;
   onRemove: () => void;
   canRemove: boolean;
   allowedServices: DirectService[];
+  section?: "all" | "catalog" | "variant" | "availability" | "payment";
 }) {
   const techniques = trpc.masajes.tecnicas.getAll.useQuery(undefined, {
     enabled: value.service === "massages",
@@ -425,6 +435,29 @@ function BookingEditor({
         ? ((bioSlots.data as any)?.slots ?? [])
         : ((saunaSlots.data as any)?.slots ?? []);
   const finalAmount = Math.max(0, value.amountClp - value.discountAmountClp);
+  const catalogItems: any[] =
+    value.service === "massages"
+      ? (techniques.data?.filter((item: any) => item.active) ?? [])
+      : value.service === "biopools"
+        ? activeBio
+        : activeSauna;
+  const weekDates = useMemo(() => {
+    const selected = new Date(`${value.date}T12:00:00`);
+    const monday = new Date(selected);
+    const day = selected.getDay() || 7;
+    monday.setDate(selected.getDate() - day + 1);
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + index);
+      return {
+        value: new Intl.DateTimeFormat("en-CA").format(date),
+        day: new Intl.DateTimeFormat("es-CL", { weekday: "short" }).format(
+          date
+        ),
+        number: date.getDate(),
+      };
+    });
+  }, [value.date]);
 
   useEffect(() => {
     if (value.service === "massages" && selectedTechnique) {
@@ -541,7 +574,19 @@ function BookingEditor({
   return (
     <div className="space-y-4 rounded-2xl border bg-white p-4">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-semibold">Reserva</h3>
+        <div>
+          <h3 className="font-semibold">
+            {section === "catalog"
+              ? "Selecciona el servicio a reservar"
+              : value.serviceName || labels[value.service]}
+          </h3>
+          {section !== "catalog" && (
+            <p className="text-xs text-muted-foreground">
+              {labels[value.service]} ·{" "}
+              {value.amountClp ? clp(value.amountClp) : "Precio por calcular"}
+            </p>
+          )}
+        </div>
         {canRemove && (
           <Button type="button" size="sm" variant="ghost" onClick={onRemove}>
             <Trash2 className="mr-1 h-4 w-4" />
@@ -549,143 +594,113 @@ function BookingEditor({
           </Button>
         )}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <div>
-          <Label>Área</Label>
-          <Select
-            value={value.service}
-            onValueChange={(service: DirectService) => setService(service)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {allowedServices.map(service => (
-                <SelectItem key={service} value={service}>
-                  {labels[service]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Servicio</Label>
-          <Select
-            value={value.serviceId}
-            onValueChange={serviceId => {
-              const source: any[] =
-                value.service === "massages"
-                  ? (techniques.data ?? [])
-                  : value.service === "biopools"
-                    ? activeBio
-                    : activeSauna;
-              const selected: any = source.find(
-                item => String(item.id) === serviceId
-              );
-              onChange({
-                ...value,
-                serviceId,
-                serviceName: selected?.name ?? "",
-                serviceKind: selected?.kind ?? "",
-                time: "",
-                discountAmountClp: 0,
-              });
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona" />
-            </SelectTrigger>
-            <SelectContent>
-              {value.service === "massages"
-                ? techniques.data
-                    ?.filter((item: any) => item.active)
-                    .map((item: any) => (
-                      <SelectItem key={item.id} value={String(item.id)}>
-                        {item.name}
-                      </SelectItem>
-                    ))
-                : value.service === "biopools"
-                  ? activeBio.map((item: any) => (
-                      <SelectItem key={item.id} value={String(item.id)}>
-                        {item.name}
-                      </SelectItem>
-                    ))
-                  : activeSauna.map((item: any) => (
-                      <SelectItem key={item.id} value={String(item.id)}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {value.service === "massages" && (
-          <div>
-            <Label>Duración</Label>
-            <Select
-              value={String(value.duration)}
-              onValueChange={duration =>
-                onChange({
-                  ...value,
-                  duration: Number(duration),
-                  time: "",
-                  discountAmountClp: 0,
-                })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {String(selectedTechnique?.durations ?? "50,80,110")
-                  .split(",")
-                  .map(Number)
-                  .filter(Boolean)
-                  .map(duration => (
-                    <SelectItem key={duration} value={String(duration)}>
-                      {duration} minutos
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+      {section === "catalog" && (
+        <div className="space-y-4">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {allowedServices.map(service => (
+              <button
+                key={service}
+                type="button"
+                onClick={() => setService(service)}
+                className={`rounded-2xl border p-4 text-left font-semibold transition ${value.service === service ? "border-[#9a7655] bg-[#f3e9df] text-[#684a32]" : "bg-background hover:bg-muted"}`}
+              >
+                {labels[service]}
+              </button>
+            ))}
           </div>
-        )}
-        <div>
-          <Label>Día</Label>
-          <Input
-            type="date"
-            min={localDate()}
-            value={value.date}
-            onChange={event =>
-              onChange({ ...value, date: event.target.value, time: "" })
-            }
-          />
-        </div>
-        <div>
-          <Label>Hora disponible</Label>
-          <Select
-            value={value.time}
-            onValueChange={time => {
-              const slot = availableTimes.find(
-                item => (item.time ?? item.startTime) === time
+          <div className="space-y-2">
+            {catalogItems.map((item: any) => {
+              const selected = String(item.id) === value.serviceId;
+              const price =
+                value.service === "massages"
+                  ? Number(
+                      item.price50min ??
+                        item.price80min ??
+                        item.price110min ??
+                        0
+                    )
+                  : Number(item.priceClp ?? 0);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      ...value,
+                      serviceId: String(item.id),
+                      serviceName: item.name ?? "",
+                      serviceKind: item.kind ?? "",
+                      time: "",
+                      discountAmountClp: 0,
+                    })
+                  }
+                  className={`flex w-full items-center justify-between gap-3 rounded-2xl border p-4 text-left transition ${selected ? "border-[#9a7655] bg-[#fffaf5] ring-1 ring-[#9a7655]" : "bg-white hover:bg-muted/50"}`}
+                >
+                  <div className="min-w-0">
+                    <p className="break-words font-semibold">{item.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {price > 0
+                        ? `Desde ${clp(price)}`
+                        : "Precio según variante"}
+                    </p>
+                  </div>
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${selected ? "bg-[#9a7655] text-white" : ""}`}
+                  >
+                    {selected ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                  </span>
+                </button>
               );
-              onChange({
-                ...value,
-                time,
-                roomId:
-                  value.service === "massages"
-                    ? String(slot?.availableRooms?.[0] ?? "")
-                    : value.roomId,
-              });
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue
-                placeholder={
-                  availableTimes.length ? "Selecciona" : "Sin horarios"
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
+            })}
+            {!catalogItems.length && (
+              <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                Cargando servicios disponibles…
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      {section === "availability" && (
+        <div className="space-y-4">
+          <div className="max-w-xs">
+            <Label>Ir a otra fecha</Label>
+            <Input
+              type="date"
+              min={localDate()}
+              value={value.date}
+              onChange={event =>
+                onChange({ ...value, date: event.target.value, time: "" })
+              }
+            />
+          </div>
+          <div>
+            <Label>Semana</Label>
+            <div className="mt-1 grid grid-cols-7 overflow-hidden rounded-2xl border bg-white">
+              {weekDates.map(date => (
+                <button
+                  key={date.value}
+                  type="button"
+                  onClick={() =>
+                    onChange({ ...value, date: date.value, time: "" })
+                  }
+                  className={`p-2 text-center capitalize sm:p-3 ${value.date === date.value ? "bg-[#9a7655] text-white" : "hover:bg-muted"}`}
+                >
+                  <span className="block text-xs">{date.day}</span>
+                  <strong>{date.number}</strong>
+                  <span
+                    className={`mx-auto mt-1 block h-2 w-2 rounded-full ${value.date === date.value && availableTimes.length ? "bg-emerald-400" : "bg-stone-300"}`}
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Label>Horarios disponibles</Label>
+            <div className="mt-2 flex flex-wrap gap-2">
               {availableTimes
                 .filter(
                   item =>
@@ -697,170 +712,377 @@ function BookingEditor({
                     value.service !== "sauna" ||
                     item.availableSeats >= value.guests
                 )
-                .map(item => (
-                  <SelectItem
-                    key={item.time ?? item.startTime}
-                    value={item.time ?? item.startTime}
-                  >
-                    {item.time ?? item.startTime} ·{" "}
-                    {item.availableSeats ?? item.availableRooms?.length}{" "}
-                    disponible(s)
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+                .map(item => {
+                  const time = item.time ?? item.startTime;
+                  return (
+                    <Button
+                      key={time}
+                      type="button"
+                      variant={value.time === time ? "default" : "outline"}
+                      onClick={() =>
+                        onChange({
+                          ...value,
+                          time,
+                          roomId:
+                            value.service === "massages"
+                              ? String(item.availableRooms?.[0] ?? "")
+                              : value.roomId,
+                        })
+                      }
+                    >
+                      {time}
+                      <span className="ml-1 text-xs opacity-70">
+                        ({item.availableSeats ?? item.availableRooms?.length})
+                      </span>
+                    </Button>
+                  );
+                })}
+              {!availableTimes.length && (
+                <p className="w-full rounded-xl border border-dashed p-5 text-center text-sm text-muted-foreground">
+                  No hay horarios disponibles para este día.
+                </p>
+              )}
+            </div>
+          </div>
+          <p className="text-center text-xs text-muted-foreground">
+            Horarios de Cancagua · America/Santiago
+          </p>
         </div>
-        {value.service === "massages" && (
+      )}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {section === "all" && (
           <div>
-            <Label>Sala</Label>
+            <Label>Área</Label>
             <Select
-              value={value.roomId}
-              onValueChange={roomId => onChange({ ...value, roomId })}
+              value={value.service}
+              onValueChange={(service: DirectService) => setService(service)}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Automática" />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {rooms.data
-                  ?.filter(
-                    (room: any) =>
-                      !value.time ||
-                      availableTimes
-                        .find(item => item.time === value.time)
-                        ?.availableRooms?.includes(room.id)
+                {allowedServices.map(service => (
+                  <SelectItem key={service} value={service}>
+                    {labels[service]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {section === "all" && (
+          <div>
+            <Label>Servicio</Label>
+            <Select
+              value={value.serviceId}
+              onValueChange={serviceId => {
+                const source: any[] =
+                  value.service === "massages"
+                    ? (techniques.data ?? [])
+                    : value.service === "biopools"
+                      ? activeBio
+                      : activeSauna;
+                const selected: any = source.find(
+                  item => String(item.id) === serviceId
+                );
+                onChange({
+                  ...value,
+                  serviceId,
+                  serviceName: selected?.name ?? "",
+                  serviceKind: selected?.kind ?? "",
+                  time: "",
+                  discountAmountClp: 0,
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona" />
+              </SelectTrigger>
+              <SelectContent>
+                {value.service === "massages"
+                  ? techniques.data
+                      ?.filter((item: any) => item.active)
+                      .map((item: any) => (
+                        <SelectItem key={item.id} value={String(item.id)}>
+                          {item.name}
+                        </SelectItem>
+                      ))
+                  : value.service === "biopools"
+                    ? activeBio.map((item: any) => (
+                        <SelectItem key={item.id} value={String(item.id)}>
+                          {item.name}
+                        </SelectItem>
+                      ))
+                    : activeSauna.map((item: any) => (
+                        <SelectItem key={item.id} value={String(item.id)}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {(section === "all" || section === "variant") &&
+          value.service === "massages" && (
+            <div>
+              <Label>Duración</Label>
+              <Select
+                value={String(value.duration)}
+                onValueChange={duration =>
+                  onChange({
+                    ...value,
+                    duration: Number(duration),
+                    time: "",
+                    discountAmountClp: 0,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {String(selectedTechnique?.durations ?? "50,80,110")
+                    .split(",")
+                    .map(Number)
+                    .filter(Boolean)
+                    .map(duration => (
+                      <SelectItem key={duration} value={String(duration)}>
+                        {duration} minutos
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        {section === "all" && (
+          <div>
+            <Label>Día</Label>
+            <Input
+              type="date"
+              min={localDate()}
+              value={value.date}
+              onChange={event =>
+                onChange({ ...value, date: event.target.value, time: "" })
+              }
+            />
+          </div>
+        )}
+        {section === "all" && (
+          <div>
+            <Label>Hora disponible</Label>
+            <Select
+              value={value.time}
+              onValueChange={time => {
+                const slot = availableTimes.find(
+                  item => (item.time ?? item.startTime) === time
+                );
+                onChange({
+                  ...value,
+                  time,
+                  roomId:
+                    value.service === "massages"
+                      ? String(slot?.availableRooms?.[0] ?? "")
+                      : value.roomId,
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    availableTimes.length ? "Selecciona" : "Sin horarios"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {availableTimes
+                  .filter(
+                    item =>
+                      value.service !== "biopools" ||
+                      item.availableSeats >= value.adults + value.children
                   )
-                  .map((room: any) => (
-                    <SelectItem key={room.id} value={String(room.id)}>
-                      {room.name}
+                  .filter(
+                    item =>
+                      value.service !== "sauna" ||
+                      item.availableSeats >= value.guests
+                  )
+                  .map(item => (
+                    <SelectItem
+                      key={item.time ?? item.startTime}
+                      value={item.time ?? item.startTime}
+                    >
+                      {item.time ?? item.startTime} ·{" "}
+                      {item.availableSeats ?? item.availableRooms?.length}{" "}
+                      disponible(s)
                     </SelectItem>
                   ))}
               </SelectContent>
             </Select>
           </div>
         )}
-        {value.service === "biopools" ? (
-          <>
+        {(section === "all" || section === "availability") &&
+          value.service === "massages" && (
             <div>
-              <Label>Adultos · {clp(adultPrice)}</Label>
+              <Label>Sala</Label>
+              <Select
+                value={value.roomId}
+                onValueChange={roomId => onChange({ ...value, roomId })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Automática" />
+                </SelectTrigger>
+                <SelectContent>
+                  {rooms.data
+                    ?.filter(
+                      (room: any) =>
+                        !value.time ||
+                        availableTimes
+                          .find(item => item.time === value.time)
+                          ?.availableRooms?.includes(room.id)
+                    )
+                    .map((room: any) => (
+                      <SelectItem key={room.id} value={String(room.id)}>
+                        {room.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        {(section === "all" || section === "variant") &&
+          (value.service === "biopools" ? (
+            <>
+              <div>
+                <Label>Adultos · {clp(adultPrice)}</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={40}
+                  value={value.adults}
+                  onChange={event =>
+                    onChange({
+                      ...value,
+                      adults: Number(event.target.value),
+                      discountAmountClp: 0,
+                    })
+                  }
+                />
+              </div>
+              <div>
+                <Label>Niños · {clp(childPrice)}</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={40}
+                  value={value.children}
+                  onChange={event =>
+                    onChange({
+                      ...value,
+                      children: Number(event.target.value),
+                      discountAmountClp: 0,
+                    })
+                  }
+                />
+              </div>
+            </>
+          ) : value.service === "sauna" ? (
+            <div>
+              <Label>Personas</Label>
               <Input
                 type="number"
-                min={0}
-                max={40}
-                value={value.adults}
+                min={1}
+                max={6}
+                value={value.guests}
                 onChange={event =>
-                  onChange({
-                    ...value,
-                    adults: Number(event.target.value),
-                    discountAmountClp: 0,
-                  })
+                  onChange({ ...value, guests: Number(event.target.value) })
                 }
               />
             </div>
-            <div>
-              <Label>Niños · {clp(childPrice)}</Label>
-              <Input
-                type="number"
-                min={0}
-                max={40}
-                value={value.children}
-                onChange={event =>
-                  onChange({
-                    ...value,
-                    children: Number(event.target.value),
-                    discountAmountClp: 0,
-                  })
-                }
-              />
-            </div>
-          </>
-        ) : value.service === "sauna" ? (
+          ) : null)}
+        {(section === "all" || section === "variant") && (
           <div>
-            <Label>Personas</Label>
+            <Label>Monto</Label>
             <Input
               type="number"
-              min={1}
-              max={6}
-              value={value.guests}
+              min={0}
+              value={value.amountClp}
               onChange={event =>
-                onChange({ ...value, guests: Number(event.target.value) })
+                onChange({
+                  ...value,
+                  amountClp: Number(event.target.value),
+                  discountAmountClp: 0,
+                })
               }
             />
           </div>
-        ) : null}
-        <div>
-          <Label>Monto</Label>
-          <Input
-            type="number"
-            min={0}
-            value={value.amountClp}
-            onChange={event =>
-              onChange({
-                ...value,
-                amountClp: Number(event.target.value),
-                discountAmountClp: 0,
-              })
-            }
-          />
-        </div>
-        {value.service !== "sauna" && (
-          <div className="lg:col-span-2">
-            <Label>Código de descuento</Label>
-            <div className="flex gap-2">
-              <Input
-                value={value.discountCode}
-                onChange={event =>
-                  onChange({
-                    ...value,
-                    discountCode: event.target.value.toUpperCase(),
-                    discountAmountClp: 0,
-                  })
-                }
-              />
-              <Button
-                type="button"
-                variant="outline"
-                disabled={
-                  !value.discountCode.trim() ||
-                  !value.serviceId ||
-                  massageDiscount.isPending ||
-                  bioDiscount.isPending
-                }
-                onClick={applyDiscount}
-              >
-                Aplicar
-              </Button>
+        )}
+        {(section === "all" || section === "payment") &&
+          value.service !== "sauna" && (
+            <div className="lg:col-span-2">
+              <Label>Código de descuento</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={value.discountCode}
+                  onChange={event =>
+                    onChange({
+                      ...value,
+                      discountCode: event.target.value.toUpperCase(),
+                      discountAmountClp: 0,
+                    })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    !value.discountCode.trim() ||
+                    !value.serviceId ||
+                    massageDiscount.isPending ||
+                    bioDiscount.isPending
+                  }
+                  onClick={applyDiscount}
+                >
+                  Aplicar
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
       </div>
-      <div className="flex flex-wrap justify-between gap-2 rounded-xl bg-muted/60 p-3 text-sm">
-        <span>
-          Subtotal: <strong>{clp(value.amountClp)}</strong>
-        </span>
-        {value.discountAmountClp > 0 && (
-          <span className="text-emerald-700">
-            Descuento: <strong>−{clp(value.discountAmountClp)}</strong>
+      {(section === "all" ||
+        section === "variant" ||
+        section === "payment") && (
+        <div className="flex flex-wrap justify-between gap-2 rounded-xl bg-muted/60 p-3 text-sm">
+          <span>
+            Subtotal: <strong>{clp(value.amountClp)}</strong>
           </span>
-        )}
-        <span>
-          Total: <strong>{clp(finalAmount)}</strong>
-        </span>
-      </div>
-      {finalAmount > 0 && (
+          {value.discountAmountClp > 0 && (
+            <span className="text-emerald-700">
+              Descuento: <strong>−{clp(value.discountAmountClp)}</strong>
+            </span>
+          )}
+          <span>
+            Total: <strong>{clp(finalAmount)}</strong>
+          </span>
+        </div>
+      )}
+      {(section === "all" || section === "payment") && finalAmount > 0 && (
         <PaymentEditor
           service={value.service}
           items={value.payments}
           onChange={payments => onChange({ ...value, payments })}
         />
       )}
-      <div>
-        <Label>Notas</Label>
-        <Textarea
-          rows={2}
-          value={value.notes}
-          onChange={event => onChange({ ...value, notes: event.target.value })}
-        />
-      </div>
+      {(section === "all" || section === "payment") && (
+        <div>
+          <Label>Notas</Label>
+          <Textarea
+            rows={2}
+            value={value.notes}
+            onChange={event =>
+              onChange({ ...value, notes: event.target.value })
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -892,6 +1114,8 @@ export function UnifiedBookingDialog({
     booking(first, initialDate),
   ]);
   const [saving, setSaving] = useState(false);
+  const [step, setStep] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
   const massageCreate = trpc.masajes.agenda.create.useMutation();
   const bioCreate = trpc.biopools.bookings.create.useMutation();
   const saunaCreate = trpc.sauna.agenda.create.useMutation();
@@ -905,6 +1129,8 @@ export function UnifiedBookingDialog({
       setClient({ name: "", email: "", phone: "" });
       setClientSelected(false);
       setItems([booking(first, initialDate)]);
+      setStep(0);
+      setActiveIndex(0);
     }
   }, [open, initialDate, first]);
   const total = useMemo(
@@ -915,6 +1141,22 @@ export function UnifiedBookingDialog({
         0
       ),
     [items]
+  );
+  const subtotal = items.reduce((sum, item) => sum + item.amountClp, 0);
+  const discountTotal = items.reduce(
+    (sum, item) => sum + item.discountAmountClp,
+    0
+  );
+  const paidTotal = items.reduce(
+    (sum, item) =>
+      sum +
+      item.payments
+        .filter(payment => payment.status === "paid")
+        .reduce(
+          (paymentSum, payment) => paymentSum + Number(payment.amountClp || 0),
+          0
+        ),
+    0
   );
   const valid =
     client.name.trim().length >= 2 &&
@@ -941,6 +1183,75 @@ export function UnifiedBookingDialog({
             planned <= due))
       );
     });
+  const activeItem = items[activeIndex] ?? items[0];
+  const clientValid =
+    client.name.trim().length >= 2 &&
+    client.email.includes("@") &&
+    client.phone.trim().length >= 8;
+  const variantValid =
+    Boolean(activeItem?.serviceId) &&
+    (activeItem?.service === "sauna" || activeItem?.amountClp > 0) &&
+    (activeItem?.service !== "biopools" || activeItem.adults >= 1);
+  const availabilityValid = Boolean(
+    activeItem?.date &&
+      activeItem?.time &&
+      (activeItem.service !== "massages" || activeItem.roomId)
+  );
+  const paymentValid = activeItem
+    ? (() => {
+        const due = Math.max(
+          0,
+          activeItem.amountClp - activeItem.discountAmountClp
+        );
+        const planned = activeItem.payments.reduce(
+          (sum, row) => sum + Number(row.amountClp || 0),
+          0
+        );
+        return (
+          (!activeItem.discountCode.trim() ||
+            activeItem.discountAmountClp > 0) &&
+          (due === 0 ||
+            (activeItem.payments.every(paymentComplete) && planned <= due))
+        );
+      })()
+    : false;
+
+  const next = () => {
+    if (step === 0 && !activeItem.serviceId)
+      return toast.error("Selecciona un servicio");
+    if (step === 1 && !variantValid)
+      return toast.error("Completa la variante y cantidad de personas");
+    if (step === 2 && !availabilityValid)
+      return toast.error("Selecciona un día y horario disponible");
+    if (step === 3 && !clientValid)
+      return toast.error("Completa los datos del cliente");
+    if (step === 4 && !paymentValid)
+      return toast.error("Revisa descuentos, Gift Cards y pagos");
+    if (step === 2 && activeIndex > 0) {
+      setStep(4);
+      return;
+    }
+    setStep(current => current + 1);
+  };
+  const back = () => {
+    if (step === 0 && activeIndex > 0) {
+      setItems(current => current.slice(0, -1));
+      setActiveIndex(current => current - 1);
+      setStep(5);
+      return;
+    }
+    if (step === 4 && activeIndex > 0) {
+      setStep(2);
+      return;
+    }
+    setStep(current => Math.max(0, current - 1));
+  };
+  const addAnother = () => {
+    const nextItem = booking(first, initialDate);
+    setItems(current => [...current, nextItem]);
+    setActiveIndex(items.length);
+    setStep(0);
+  };
 
   const save = async () => {
     if (!valid)
@@ -1023,137 +1334,313 @@ export function UnifiedBookingDialog({
     }
   };
 
+  const progress = Math.min(100, ((step + 1) / 7) * 100);
+  const updateActive = (nextValue: BookingDraft) =>
+    setItems(current =>
+      current.map((row, index) => (index === activeIndex ? nextValue : row))
+    );
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] max-w-5xl overflow-y-auto">
+      <DialogContent className="max-h-[96vh] max-w-3xl overflow-y-auto border-stone-200 bg-[#f8f6f2] p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Nueva reserva</DialogTitle>
-          <DialogDescription>
-            Registra una o varias reservas para el mismo cliente desde un solo
-            lugar.
-          </DialogDescription>
+          <div className="flex items-start gap-3">
+            {step > 0 && (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className="rounded-full"
+                onClick={back}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            )}
+            <div>
+              <DialogTitle>
+                {step === 0
+                  ? "Selecciona el servicio a reservar"
+                  : step === 6
+                    ? "Resumen de la reserva"
+                    : "Completa los datos para reservar"}
+              </DialogTitle>
+              <DialogDescription>
+                {items.length > 1
+                  ? `${items.length} reservas para el mismo cliente`
+                  : "Reserva manual desde Calendario 360"}
+              </DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
         <div className="space-y-5">
-          <div className="grid gap-3 rounded-2xl border bg-muted/30 p-4 sm:grid-cols-3">
-            <div className="sm:col-span-3">
-              <h3 className="font-semibold">Cliente</h3>
-              <p className="text-xs text-muted-foreground">
-                Busca un cliente existente por nombre, teléfono o correo, o
-                ingresa uno nuevo.
-              </p>
-            </div>
-            <div className="relative">
-              <Label>Nombre *</Label>
-              <Input
-                value={client.name}
-                onChange={event => {
-                  setClient({ ...client, name: event.target.value });
-                  setClientSelected(false);
-                }}
-              />
-              {!clientSelected && (clientSearch.data?.length ?? 0) > 0 && (
-                <div className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-lg border bg-background p-1 shadow-lg">
-                  {clientSearch.data?.slice(0, 8).map((row: any) => (
-                    <button
-                      key={row.key}
-                      type="button"
-                      className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                      onClick={() => {
-                        setClient({
-                          name: row.name ?? "",
-                          email: row.email ?? "",
-                          phone: row.phone ?? "",
-                        });
-                        setClientSelected(true);
-                      }}
-                    >
-                      <strong>{row.name}</strong>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {row.phone || row.email}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <Label>WhatsApp *</Label>
-              <Input
-                value={client.phone}
-                onChange={event =>
-                  setClient({ ...client, phone: event.target.value })
-                }
-              />
-            </div>
-            <div>
-              <Label>Correo *</Label>
-              <Input
-                type="email"
-                value={client.email}
-                onChange={event =>
-                  setClient({ ...client, email: event.target.value })
-                }
-              />
-            </div>
+          <div className="h-2 overflow-hidden rounded-full bg-stone-200">
+            <div
+              className="h-full rounded-full bg-[#9a7655] transition-all"
+              style={{ width: `${progress}%` }}
+            />
           </div>
-          {open &&
-            items.map(item => (
-              <BookingEditor
-                key={item.key}
-                value={item}
-                onChange={next =>
-                  setItems(current =>
-                    current.map(row => (row.key === item.key ? next : row))
-                  )
-                }
-                onRemove={() =>
-                  setItems(current =>
-                    current.filter(row => row.key !== item.key)
-                  )
-                }
-                canRemove={items.length > 1}
-                allowedServices={available}
-              />
-            ))}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!available.length}
-            onClick={() =>
-              setItems(current => [...current, booking(first, initialDate)])
-            }
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Agregar otro servicio
-          </Button>
-          <div className="rounded-2xl bg-slate-900 p-4 text-white">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-sm text-slate-300">Resumen</p>
-                <p className="font-semibold">
-                  {items.length} {items.length === 1 ? "reserva" : "reservas"}{" "}
-                  para el mismo cliente
+          <div className="flex justify-between text-stone-400">
+            <Plus className="h-4 w-4" />
+            <Clock3 className="h-4 w-4" />
+            <UserRound className="h-4 w-4" />
+            <CalendarDays className="h-4 w-4" />
+            <Check className="h-4 w-4" />
+          </div>
+          {open && [0, 1, 2, 4].includes(step) && activeItem && (
+            <BookingEditor
+              value={activeItem}
+              onChange={updateActive}
+              onRemove={() => {}}
+              canRemove={false}
+              allowedServices={available}
+              section={
+                step === 0
+                  ? "catalog"
+                  : step === 1
+                    ? "variant"
+                    : step === 2
+                      ? "availability"
+                      : "payment"
+              }
+            />
+          )}
+          {step === 3 && (
+            <div className="grid gap-4 rounded-2xl border bg-white p-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <h3 className="text-xl font-semibold">Cliente</h3>
+                <p className="text-sm text-muted-foreground">
+                  Selecciona un cliente existente o crea uno nuevo.
                 </p>
               </div>
-              <p className="text-2xl font-semibold">{clp(total)}</p>
+              <div className="relative sm:col-span-2">
+                <Label>Buscar por nombre, teléfono o correo</Label>
+                <Input
+                  autoFocus
+                  value={client.name}
+                  onChange={event => {
+                    setClient({ ...client, name: event.target.value });
+                    setClientSelected(false);
+                  }}
+                />
+                {!clientSelected && (clientSearch.data?.length ?? 0) > 0 && (
+                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border bg-background p-1 shadow-lg">
+                    {clientSearch.data?.slice(0, 8).map((row: any) => (
+                      <button
+                        key={row.key}
+                        type="button"
+                        className="block w-full rounded-lg px-3 py-3 text-left hover:bg-muted"
+                        onClick={() => {
+                          setClient({
+                            name: row.name ?? "",
+                            email: row.email ?? "",
+                            phone: row.phone ?? "",
+                          });
+                          setClientSelected(true);
+                        }}
+                      >
+                        <strong>{row.name}</strong>
+                        <span className="block text-xs text-muted-foreground">
+                          {row.phone || "Sin teléfono"} ·{" "}
+                          {row.email || "Sin correo"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <Label>WhatsApp *</Label>
+                <Input
+                  value={client.phone}
+                  onChange={event =>
+                    setClient({ ...client, phone: event.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <Label>Correo *</Label>
+                <Input
+                  type="email"
+                  value={client.email}
+                  onChange={event =>
+                    setClient({ ...client, email: event.target.value })
+                  }
+                />
+              </div>
             </div>
-          </div>
+          )}
+          {step === 5 && (
+            <div className="space-y-5 rounded-3xl border bg-white p-6 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#efe5da]">
+                <Plus className="h-6 w-6 text-[#76573d]" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-semibold">
+                  ¿Deseas reservar algo más?
+                </h3>
+                <p className="mt-1 text-muted-foreground">
+                  Conservaremos los datos de {client.name}.
+                </p>
+              </div>
+              <div className="flex flex-col justify-center gap-3 sm:flex-row">
+                <Button type="button" variant="outline" onClick={addAnother}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Agregar otro servicio
+                </Button>
+                <Button type="button" onClick={() => setStep(6)}>
+                  Ir al resumen
+                </Button>
+              </div>
+            </div>
+          )}
+          {step === 6 && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border bg-white p-4">
+                <p className="text-sm text-muted-foreground">Cliente</p>
+                <p className="font-semibold">{client.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {client.phone} · {client.email}
+                </p>
+              </div>
+              {items.map((item, index) => (
+                <div key={item.key} className="rounded-2xl border bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-lg font-semibold">
+                        {item.serviceName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {labels[item.service]} · {item.date} · {item.time}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {item.service === "biopools"
+                          ? `${item.adults} adulto(s) · ${item.children} niño(s)`
+                          : item.service === "sauna"
+                            ? `${item.guests} persona(s)`
+                            : `${item.duration} minutos`}
+                      </p>
+                      {item.discountAmountClp > 0 && (
+                        <p className="mt-1 text-sm text-emerald-700">
+                          Descuento {item.discountCode}: −
+                          {clp(item.discountAmountClp)}
+                        </p>
+                      )}
+                      <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                        {item.payments
+                          .filter(payment => payment.method)
+                          .map((payment, paymentIndex) => (
+                            <p key={paymentIndex}>
+                              {payment.method === "gift_card"
+                                ? `Gift Card ${payment.giftCardCode}`
+                                : payment.method.replaceAll("_", " ")}{" "}
+                              · {clp(Number(payment.amountClp || 0))} ·{" "}
+                              {payment.status === "paid"
+                                ? "Pagado"
+                                : "Pendiente"}
+                            </p>
+                          ))}
+                      </div>
+                    </div>
+                    <strong className="shrink-0">
+                      {clp(
+                        Math.max(0, item.amountClp - item.discountAmountClp)
+                      )}
+                    </strong>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setActiveIndex(index);
+                        setStep(0);
+                      }}
+                    >
+                      Editar
+                    </Button>
+                    {items.length > 1 && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          setItems(current =>
+                            current.filter(
+                              (_, itemIndex) => itemIndex !== index
+                            )
+                          )
+                        }
+                      >
+                        <Trash2 className="mr-1 h-4 w-4" />
+                        Quitar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div className="space-y-2 rounded-2xl bg-slate-900 p-5 text-white">
+                <div className="flex justify-between text-sm text-slate-300">
+                  <span>Subtotal</span>
+                  <span>{clp(subtotal)}</span>
+                </div>
+                {discountTotal > 0 && (
+                  <div className="flex justify-between text-sm text-emerald-300">
+                    <span>Descuentos</span>
+                    <span>−{clp(discountTotal)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm text-slate-300">
+                  <span>Pagado</span>
+                  <span>{clp(paidTotal)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-700 pt-3">
+                  <span>
+                    Total de {items.length}{" "}
+                    {items.length === 1 ? "reserva" : "reservas"}
+                  </span>
+                  <strong className="text-2xl">{clp(total)}</strong>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Saldo pendiente</span>
+                  <strong>{clp(Math.max(0, total - paidTotal))}</strong>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancelar
-          </Button>
-          <Button type="button" disabled={!valid || saving} onClick={save}>
-            {saving
-              ? "Guardando…"
-              : items.length === 1
-                ? "Crear reserva"
-                : `Crear ${items.length} reservas`}
-          </Button>
+        <DialogFooter className="mt-2">
+          {step < 5 && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={step === 0 ? () => onOpenChange(false) : back}
+              >
+                {step === 0 ? "Cancelar" : "Atrás"}
+              </Button>
+              <Button type="button" onClick={next}>
+                Siguiente
+              </Button>
+            </>
+          )}
+          {step === 6 && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setStep(5)}
+              >
+                Atrás
+              </Button>
+              <Button type="button" disabled={!valid || saving} onClick={save}>
+                {saving
+                  ? "Guardando…"
+                  : items.length === 1
+                    ? "Confirmar reserva"
+                    : `Confirmar ${items.length} reservas`}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
