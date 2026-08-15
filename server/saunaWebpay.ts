@@ -105,7 +105,17 @@ export async function finalizeApprovedSaunaOrder(
       })
       .$returningId();
 
-    if (giftCardCode) {
+    if (!giftCardCode) {
+      await tx.insert(reservationPayments).values({
+        module: "sauna",
+        reservationId: created.id,
+        method: "webpay_plus",
+        status: "paid",
+        amountClp: order.totalClp,
+        paidAt: new Date(),
+        reference: result.authorizationCode || order.buyOrder,
+      });
+    } else {
       const paidAt = new Date();
       const gift = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt: paidAt.toISOString().slice(0, 16), giftCardCode }, totalClp: order.totalClp, module: "sauna", reservationId: created.id, note: `Canje web en Sauna ${created.id}`, serviceKey: "sauna" });
       await tx.insert(reservationPayments).values({ module: "sauna", reservationId: created.id, method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt, reference: gift.code, giftCardId: gift.id });

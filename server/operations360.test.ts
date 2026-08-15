@@ -90,6 +90,28 @@ describe("pagos diferenciados del Calendario 360", () => {
     ]);
   });
 
+  it("reconstruye el pago electrónico anterior junto a pagos manuales", () => {
+    const payment = buildPaymentDetail({
+      status: "paid",
+      method: "mixed",
+      amountPaidClp: 72_000,
+      originalAmountClp: 72_000,
+      legacyMethod: "webpay_plus",
+      legacyReference: "006923",
+      historicalDiscountCode: "BIOPISCINA2X1",
+      historicalDiscountAmountClp: 36_000,
+      rows: [
+        { id: 1, method: "transbank_machine", status: "paid", amountClp: 36_000, reference: "005949" },
+      ],
+    });
+
+    expect(payment.lines.map(line => [line.type, line.method, line.status, line.amountClp])).toEqual([
+      ["discount", "Código de descuento", "removed", 36_000],
+      ["payment", "webpay_plus", "paid", 36_000],
+      ["payment", "transbank_machine", "paid", 36_000],
+    ]);
+  });
+
   it("señala un excedente cuando el nuevo valor queda bajo lo ya pagado", () => {
     const payment = buildPaymentDetail({
       originalAmountClp: 36_000,

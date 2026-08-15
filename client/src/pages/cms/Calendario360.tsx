@@ -177,6 +177,7 @@ function paymentLabel(value?: string | null) {
     refunded: "Reembolsado",
     unknown: "Sin registrar",
     applied: "Aplicado",
+    removed: "Retirado",
     transbank: "Transbank Webpay",
     webpay_plus: "Webpay",
     webpay: "Transbank Webpay",
@@ -698,12 +699,12 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                   <div><p className="text-xs font-medium uppercase text-muted-foreground">Detalle operativo</p><p className="mt-1 text-sm">{detail.detail || "Sin detalle adicional"}</p>{detail.notes && <><p className="mt-4 text-xs font-medium uppercase text-muted-foreground">Notas</p><p className="mt-1 whitespace-pre-wrap text-sm">{detail.notes}</p></>}</div>
                 </div>
               </TabsContent>
-              <TabsContent value="payments" className={cn("rounded-xl border-2 p-4", paymentTone)}>
+              <TabsContent value="payments" className="rounded-xl border p-4">
                 {detail.payment ? (
                   <div className="space-y-4">
                     <div className="grid gap-3 rounded-xl bg-muted/40 p-4 sm:grid-cols-2 lg:grid-cols-5">
                       <div><p className="text-xs text-muted-foreground">Precio original</p><p className="font-semibold">{money(detail.payment.originalAmountClp)}</p></div>
-                      <div className="min-w-0"><p className="text-xs text-muted-foreground">Descuento</p><p className={cn("font-semibold", detail.payment.discountAmountClp > 0 && "text-emerald-700")}>{detail.payment.discountAmountClp > 0 ? `−${money(detail.payment.discountAmountClp)}` : money(0)}</p>{detail.payment.discountCode && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-violet-700">{detail.payment.discountCode}</p>}</div>
+                      <div className="min-w-0"><p className="text-xs text-muted-foreground">Descuento</p><p className={cn("font-semibold", detail.payment.discountAmountClp > 0 && "text-emerald-700")}>{detail.payment.discountAmountClp > 0 ? `−${money(detail.payment.discountAmountClp)}` : money(0)}</p>{detail.payment.discountCode && <p className="mt-1 break-all font-mono text-[11px] font-semibold text-violet-700">{detail.payment.discountAmountClp > 0 ? detail.payment.discountCode : `Retirado: ${detail.payment.discountCode}`}</p>}</div>
                       <div><p className="text-xs text-muted-foreground">Total final</p><p className="font-semibold">{money(detail.payment.totalAmountClp)}</p></div>
                       <div><p className="text-xs text-muted-foreground">Pagado</p><p className="font-semibold text-emerald-700">{money(detail.payment.amountClp)}</p></div>
                       <div><p className="text-xs text-muted-foreground">Saldo</p><p className="font-semibold">{money(detail.payment.balanceAmountClp)}</p></div>

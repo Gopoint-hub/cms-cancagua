@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   biopoolBookings,
   biopoolBookingActivity,
+  biopoolCheckoutOrders,
   biopoolNotifications,
   biopoolServices,
   biopoolTicketTypes,
@@ -25,6 +26,7 @@ import {
   regularClassTeachers,
   reservationPayments,
   saunaBookings,
+  saunaCheckoutOrders,
 } from "../drizzle/schema";
 import {
   hasCmsPermission,
@@ -126,6 +128,11 @@ export function buildPaymentDetail(input: {
   refundAmountClp?: unknown;
   createdAt?: Date | string | null;
   rows?: PaymentDetailRow[];
+  legacyMethod?: string | null;
+  legacyReference?: string | null;
+  legacyPaidAt?: Date | string | null;
+  historicalDiscountCode?: string | null;
+  historicalDiscountAmountClp?: unknown;
 }) {
   const discountAmountClp = money(input.discountAmountClp);
   const amountPaidClp = money(input.amountPaidClp);
@@ -155,6 +162,33 @@ export function buildPaymentDetail(input: {
       cardType: null,
       at: input.createdAt ?? null,
     });
+  } else if (input.historicalDiscountCode && money(input.historicalDiscountAmountClp) > 0) {
+    lines.push({
+      id: "discount:historical",
+      type: "discount",
+      method: "Código de descuento",
+      status: "removed",
+      amountClp: money(input.historicalDiscountAmountClp),
+      reference: input.historicalDiscountCode,
+      cardType: null,
+      at: input.createdAt ?? null,
+    });
+  }
+  const detailedPaidClp = rows
+    .filter(row => row.status === "paid")
+    .reduce((sum, row) => sum + money(row.amountClp), 0);
+  const legacyPaidClp = Math.max(0, amountPaidClp - detailedPaidClp);
+  if (legacyPaidClp > 0 || (!rows.length && input.method)) {
+    lines.push({
+      id: "payment:summary",
+      type: "payment",
+      method: input.legacyMethod ?? input.method ?? "Sin registrar",
+      status: input.status ?? "paid",
+      amountClp: legacyPaidClp || amountPaidClp,
+      reference: input.legacyReference ?? input.reference ?? null,
+      cardType: null,
+      at: input.legacyPaidAt ?? input.createdAt ?? null,
+    });
   }
   if (rows.length) {
     lines.push(...rows.map((row, index) => ({
@@ -167,17 +201,6 @@ export function buildPaymentDetail(input: {
       cardType: row.cardType ?? null,
       at: row.paidAt ?? row.createdAt ?? null,
     })));
-  } else if (amountPaidClp > 0 || input.method) {
-    lines.push({
-      id: "payment:summary",
-      type: "payment",
-      method: input.method ?? "Sin registrar",
-      status: input.status ?? "paid",
-      amountClp: amountPaidClp,
-      reference: input.reference ?? null,
-      cardType: null,
-      at: input.createdAt ?? null,
-    });
   }
   return {
     status: input.status ?? null,
@@ -642,7 +665,7 @@ export const operations360Router = router({
           .where(eq(biopoolBookings.id, input.entityId))
           .limit(1);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-        const [activity, notifications, paymentRows, tickets] = await Promise.all([
+        const [activity, notifications, paymentRows, tickets, [checkout]] = await Promise.all([
           db.select().from(biopoolBookingActivity)
             .where(eq(biopoolBookingActivity.bookingId, input.entityId)),
           db.select().from(biopoolNotifications)
@@ -657,6 +680,9 @@ export const operations360Router = router({
               eq(biopoolTicketTypes.serviceId, row.booking.serviceId),
               eq(biopoolTicketTypes.active, 1),
             )),
+          db.select().from(biopoolCheckoutOrders)
+            .where(eq(biopoolCheckoutOrders.bookingId, input.entityId))
+            .limit(1),
         ]);
         const booking = row.booking;
         return {
@@ -685,6 +711,11 @@ export const operations360Router = router({
             refundAmountClp: booking.refundAmountClp,
             createdAt: booking.createdAt,
             rows: paymentRows,
+            legacyMethod: checkout?.authorizationCode ? "webpay_plus" : booking.paymentMethod,
+            legacyReference: checkout?.authorizationCode ?? checkout?.buyOrder ?? booking.paymentReference,
+            legacyPaidAt: checkout?.paidAt ?? booking.createdAt,
+            historicalDiscountCode: checkout?.discountCode,
+            historicalDiscountAmountClp: checkout?.discountClp,
           }),
           notes: booking.notes,
           detail: `${booking.adultQuantity} adulto(s) · ${booking.childQuantity} niño(s) · ${booking.totalGuests} personas`,
@@ -810,7 +841,7 @@ export const operations360Router = router({
 
       if (input.kind === "sauna") {
         if (!allowed.includes("sauna")) throw new TRPCError({ code: "FORBIDDEN" });
-        const [[booking], paymentRows] = await Promise.all([
+        const [[booking], paymentRows, [checkout]] = await Promise.all([
           db.select()
             .from(saunaBookings)
             .where(eq(saunaBookings.id, input.entityId))
@@ -820,6 +851,9 @@ export const operations360Router = router({
               eq(reservationPayments.module, "sauna"),
               eq(reservationPayments.reservationId, input.entityId),
             )),
+          db.select().from(saunaCheckoutOrders)
+            .where(eq(saunaCheckoutOrders.bookingId, input.entityId))
+            .limit(1),
         ]);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
         return {
@@ -847,6 +881,9 @@ export const operations360Router = router({
             refundAmountClp: booking.paymentStatus === "refunded" ? booking.amountPaidClp : 0,
             createdAt: booking.createdAt,
             rows: paymentRows,
+            legacyMethod: checkout?.authorizationCode ? "webpay_plus" : booking.paymentMethod,
+            legacyReference: checkout?.authorizationCode ?? checkout?.buyOrder ?? booking.paymentReference,
+            legacyPaidAt: checkout?.paidAt ?? booking.createdAt,
           }),
           notes: booking.notes,
           detail: `${booking.guests} persona(s) · ${booking.source === "skedu" ? "Skedu" : "CMS"}`,

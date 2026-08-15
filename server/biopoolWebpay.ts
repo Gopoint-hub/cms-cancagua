@@ -167,7 +167,17 @@ export async function finalizeApprovedBiopoolOrder(
       source: "web",
     }).$returningId();
 
-    if (completion.kind === "gift_card") {
+    if (completion.kind === "webpay") {
+      await tx.insert(reservationPayments).values({
+        module: "biopools",
+        reservationId: createdBooking.id,
+        method: "webpay_plus",
+        status: "paid",
+        amountClp: order.totalClp,
+        paidAt: new Date(),
+        reference: completion.result.authorizationCode || order.buyOrder,
+      });
+    } else if (completion.kind === "gift_card") {
       const paidAt = new Date();
       const gift = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt: paidAt.toISOString().slice(0, 16), giftCardCode: completion.code }, totalClp: order.totalClp, module: "biopools", reservationId: createdBooking.id, note: `Canje web en Biopiscinas ${createdBooking.id}`, serviceKey: "biopools" });
       await tx.insert(reservationPayments).values({ module: "biopools", reservationId: createdBooking.id, method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt, reference: gift.code, giftCardId: gift.id });
