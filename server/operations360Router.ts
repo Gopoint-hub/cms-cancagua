@@ -7,6 +7,8 @@ import {
   biopoolNotifications,
   biopoolServices,
   biopoolTicketTypes,
+  giftCards,
+  giftCardTransactions,
   massageBookings,
   massageNpsResponses,
   massageProgramBookings,
@@ -31,6 +33,8 @@ import {
 } from "../shared/permissions";
 import { protectedProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { redeemGiftCardPayment } from "./reservationPayments";
+import { syncMassageSale } from "./massageSales";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const serviceSchema = z.enum(["massages", "biopools", "regular_classes"]);
@@ -918,6 +922,186 @@ export const operations360Router = router({
         activity: [],
         href: `/cms/clases-regulares/asistencia?date=${input.date}`,
       };
+    }),
+
+  materializeLegacyPayment: protectedProcedure
+    .input(z.object({
+      service: z.enum(["massages", "biopools", "sauna"]),
+      entityId: z.number().int().positive(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await database();
+      const allowed = calendarServices(ctx.user);
+      if (!allowed.includes(input.service)) throw new TRPCError({ code: "FORBIDDEN" });
+      const canManage = input.service === "massages"
+        ? hasMassagePaymentAccess(ctx.user)
+        : hasCmsPermission(ctx.user, `${input.service}.manage_agenda` as any);
+      if (!canManage) throw new TRPCError({ code: "FORBIDDEN" });
+
+      return db.transaction(async tx => {
+        const existing = await tx.select().from(reservationPayments).where(and(
+          eq(reservationPayments.module, input.service),
+          eq(reservationPayments.reservationId, input.entityId),
+        ));
+        if (existing.length)
+          throw new TRPCError({ code: "CONFLICT", message: "El pago ya fue convertido a detalle. Actualiza la reserva." });
+
+        let method: string | null = null;
+        let reference: string | null = null;
+        let amountClp = 0;
+        let createdAt: Date | null = null;
+        if (input.service === "massages") {
+          const [booking] = await tx.select().from(massageBookings)
+            .where(eq(massageBookings.id, input.entityId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          if (booking.getnetRequestId)
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos Getnet están protegidos" });
+          method = booking.manualPaymentMethod;
+          amountClp = money(booking.amountPaid);
+          createdAt = booking.createdAt;
+        } else if (input.service === "biopools") {
+          const [booking] = await tx.select().from(biopoolBookings)
+            .where(eq(biopoolBookings.id, input.entityId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          method = booking.paymentMethod;
+          reference = booking.paymentReference;
+          amountClp = booking.amountPaidClp;
+          createdAt = booking.createdAt;
+        } else {
+          const [booking] = await tx.select().from(saunaBookings)
+            .where(eq(saunaBookings.id, input.entityId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          method = booking.paymentMethod;
+          reference = booking.paymentReference;
+          amountClp = booking.amountPaidClp;
+          createdAt = booking.createdAt;
+        }
+        if (!method || amountClp <= 0)
+          throw new TRPCError({ code: "BAD_REQUEST", message: "No existe un pago manual para editar" });
+        if (["webpay", "webpay_plus", "getnet"].includes(method))
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Los pagos electrónicos están protegidos" });
+        if (method === "gift_card")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Esta Gift Card histórica no tiene trazabilidad suficiente para editarla de forma segura",
+          });
+        const [created] = await tx.insert(reservationPayments).values({
+          module: input.service,
+          reservationId: input.entityId,
+          method,
+          status: "paid",
+          amountClp,
+          paidAt: createdAt,
+          reference,
+          createdByUserId: ctx.user.id,
+        }).$returningId();
+        return { paymentId: created.id };
+      });
+    }),
+
+  replaceGiftCardPayment: protectedProcedure
+    .input(z.object({
+      service: z.enum(["massages", "biopools", "sauna"]),
+      paymentId: z.number().int().positive(),
+      code: z.string().trim().min(1).max(20),
+      amountClp: z.number().int().positive(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await database();
+      const canManage = input.service === "massages"
+        ? hasMassagePaymentAccess(ctx.user)
+        : hasCmsPermission(ctx.user, `${input.service}.manage_agenda` as any);
+      if (!canManage) throw new TRPCError({ code: "FORBIDDEN" });
+      const result = await db.transaction(async tx => {
+        const [payment] = await tx.select().from(reservationPayments).where(and(
+          eq(reservationPayments.id, input.paymentId),
+          eq(reservationPayments.module, input.service),
+        )).limit(1);
+        if (!payment?.giftCardId || payment.method !== "gift_card")
+          throw new TRPCError({ code: "BAD_REQUEST", message: "El pago no corresponde a una Gift Card editable" });
+
+        let totalClp = 0;
+        let currentPaidClp = 0;
+        if (input.service === "massages") {
+          const [booking] = await tx.select().from(massageBookings)
+            .where(eq(massageBookings.id, payment.reservationId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          totalClp = Math.max(0, money(booking.originalAmount) - money(booking.discountAmount));
+          currentPaidClp = money(booking.amountPaid);
+        } else if (input.service === "biopools") {
+          const [booking] = await tx.select().from(biopoolBookings)
+            .where(eq(biopoolBookings.id, payment.reservationId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          totalClp = Math.max(0, booking.originalAmountClp - booking.discountAmountClp);
+          currentPaidClp = booking.amountPaidClp;
+        } else {
+          const [booking] = await tx.select().from(saunaBookings)
+            .where(eq(saunaBookings.id, payment.reservationId)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          totalClp = booking.amountClp;
+          currentPaidClp = booking.amountPaidClp;
+        }
+        const newPaidClp = Math.max(0, currentPaidClp - payment.amountClp) + input.amountClp;
+        if (newPaidClp > totalClp)
+          throw new TRPCError({ code: "BAD_REQUEST", message: "El canje supera el saldo pendiente de la reserva" });
+
+        const [oldCard] = await tx.select().from(giftCards)
+          .where(eq(giftCards.id, payment.giftCardId)).limit(1);
+        if (!oldCard) throw new TRPCError({ code: "NOT_FOUND", message: "Gift Card anterior no encontrada" });
+        const restoredBalance = oldCard.amount === 0
+          ? 0
+          : Math.min(oldCard.amount, oldCard.balance + payment.amountClp);
+        await tx.update(giftCards).set({
+          balance: restoredBalance,
+          status: "active",
+          redeemedAt: null,
+        }).where(eq(giftCards.id, oldCard.id));
+        await tx.insert(giftCardTransactions).values({
+          giftCardId: oldCard.id,
+          transactionType: "refund",
+          amount: payment.amountClp,
+          balanceBefore: oldCard.balance,
+          balanceAfter: restoredBalance,
+          orderType: `${input.service}_booking`,
+          orderId: String(payment.reservationId),
+          notes: `Gift Card reemplazada desde Calendario 360 por ${ctx.user.name || ctx.user.email || "usuario"}`,
+        });
+        const redeemed = await redeemGiftCardPayment({
+          tx,
+          payment: {
+            method: "gift_card",
+            status: "paid",
+            amountClp: input.amountClp,
+            paidAt: new Date().toISOString().slice(0, 16),
+            giftCardCode: input.code.trim().toUpperCase(),
+          },
+          totalClp,
+          module: input.service,
+          reservationId: payment.reservationId,
+          note: `Gift Card editada desde Calendario 360`,
+          serviceKey: input.service,
+        });
+        await tx.update(reservationPayments).set({
+          amountClp: input.amountClp,
+          reference: redeemed.code,
+          giftCardId: redeemed.id,
+          paidAt: new Date(),
+        }).where(eq(reservationPayments.id, payment.id));
+        const status = newPaidClp <= 0 ? "pending" : newPaidClp < totalClp ? "partially_paid" : "paid";
+        if (input.service === "massages") {
+          await tx.update(massageBookings).set({ amountPaid: String(newPaidClp), paymentStatus: status })
+            .where(eq(massageBookings.id, payment.reservationId));
+        } else if (input.service === "biopools") {
+          await tx.update(biopoolBookings).set({ amountPaidClp: newPaidClp, paymentStatus: status })
+            .where(eq(biopoolBookings.id, payment.reservationId));
+        } else {
+          await tx.update(saunaBookings).set({ amountPaidClp: newPaidClp, paymentStatus: status })
+            .where(eq(saunaBookings.id, payment.reservationId));
+        }
+        return { success: true, reservationId: payment.reservationId };
+      });
+      if (input.service === "massages") await syncMassageSale(result.reservationId);
+      return { success: true };
     }),
 
   clients: router({

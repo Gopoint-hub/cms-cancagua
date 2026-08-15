@@ -375,12 +375,16 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
   const [draft, setDraft] = useState<PaymentDraft>(() => emptyPayment(String(detail.payment?.balanceAmountClp || "")));
   const [editingId, setEditingId] = useState<number | null>(null);
   const [discountCode, setDiscountCode] = useState(detail.payment?.discountCode ?? "");
+  const [giftCardCode, setGiftCardCode] = useState("");
+  const [giftCardAmount, setGiftCardAmount] = useState(String(detail.payment?.balanceAmountClp || ""));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setDraft(emptyPayment(String(detail.payment?.balanceAmountClp || "")));
     setEditingId(null);
     setDiscountCode(detail.payment?.discountCode ?? "");
+    setGiftCardCode("");
+    setGiftCardAmount(String(detail.payment?.balanceAmountClp || ""));
   }, [event.id, detail.payment?.balanceAmountClp, detail.payment?.discountCode]);
 
   const massageAdd = trpc.masajes.agenda.addPayment.useMutation();
@@ -394,6 +398,8 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
   const saunaAdd = trpc.sauna.agenda.addPayment.useMutation();
   const saunaUpdate = trpc.sauna.agenda.updatePayment.useMutation();
   const saunaRemove = trpc.sauna.agenda.removePayment.useMutation();
+  const materializeLegacy = trpc.operations360.materializeLegacyPayment.useMutation();
+  const replaceGiftCard = trpc.operations360.replaceGiftCardPayment.useMutation();
 
   const refresh = async (message: string) => {
     await onChanged();
@@ -407,21 +413,39 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     catch (error) { toast.error(error instanceof Error ? error.message : "No se pudo guardar el cambio"); }
     finally { setBusy(false); }
   };
+  const addPayment = (payment: any) => service === "massages"
+    ? massageAdd.mutateAsync({ bookingId: event.entityId, totalAmountClp: detail.payment.totalAmountClp, payment })
+    : service === "biopools"
+      ? biopoolAdd.mutateAsync({ bookingId: event.entityId, payment })
+      : saunaAdd.mutateAsync({ bookingId: event.entityId, payment });
   const savePayment = () => {
     if (!validPayment(draft)) return toast.error("Completa los datos obligatorios del pago");
     const payment = paymentPayload(draft) as any;
     if (editingId) {
+      if (draft.method === "gift_card") {
+        return execute(() => replaceGiftCard.mutateAsync({
+          service,
+          paymentId: editingId,
+          code: draft.giftCardCode.trim().toUpperCase(),
+          amountClp: Number(draft.amountClp),
+        }), "Gift Card actualizada");
+      }
       return execute(() => service === "massages" ? massageUpdate.mutateAsync({ paymentId: editingId, payment }) : service === "biopools" ? biopoolUpdate.mutateAsync({ paymentId: editingId, payment }) : saunaUpdate.mutateAsync({ paymentId: editingId, payment }), "Pago actualizado");
     }
-    return execute(() => service === "massages"
-      ? massageAdd.mutateAsync({ bookingId: event.entityId, totalAmountClp: detail.payment.totalAmountClp, payment })
-      : service === "biopools"
-        ? biopoolAdd.mutateAsync({ bookingId: event.entityId, payment })
-        : saunaAdd.mutateAsync({ bookingId: event.entityId, payment }), "Pago agregado");
+    return execute(() => addPayment(payment), "Pago agregado");
   };
-  const removePayment = (paymentId: number) => {
+  const paymentIdFor = async (line: any) => {
+    const paymentId = Number(String(line.id).replace("payment:", ""));
+    if (paymentId) return paymentId;
+    const result = await materializeLegacy.mutateAsync({ service, entityId: event.entityId });
+    return result.paymentId;
+  };
+  const removePayment = (line: any) => {
     if (!window.confirm("¿Eliminar este pago? Si corresponde a una Gift Card, su saldo será repuesto.")) return;
-    execute(() => service === "massages" ? massageRemove.mutateAsync({ paymentId }) : service === "biopools" ? biopoolRemove.mutateAsync({ paymentId }) : saunaRemove.mutateAsync({ paymentId }), "Pago eliminado");
+    execute(async () => {
+      const paymentId = await paymentIdFor(line);
+      return service === "massages" ? massageRemove.mutateAsync({ paymentId }) : service === "biopools" ? biopoolRemove.mutateAsync({ paymentId }) : saunaRemove.mutateAsync({ paymentId });
+    }, "Pago eliminado");
   };
   const saveDiscount = (remove = false) => execute(
     () => service === "massages"
@@ -429,35 +453,57 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
       : biopoolDiscount.mutateAsync({ bookingId: event.entityId, code: remove ? undefined : discountCode.trim().toUpperCase() || undefined }),
     remove ? "Código de descuento eliminado" : "Código de descuento actualizado",
   );
-  const startEdit = (line: any) => {
-    const id = Number(String(line.id).replace("payment:", ""));
-    if (!id) return;
-    setEditingId(id);
-    setDraft({ method: line.method, status: line.status === "pending" ? "pending" : "paid", amountClp: String(line.amountClp), paidAt: chileDateTimeInput(line.at), reference: line.reference ?? "", cardType: line.cardType === "credit" || line.cardType === "debit" ? line.cardType : "", giftCardCode: "" });
+  const startEdit = async (line: any) => {
+    setBusy(true);
+    try {
+      const id = await paymentIdFor(line);
+      setEditingId(id);
+      setDraft({ method: line.method, status: line.status === "pending" ? "pending" : "paid", amountClp: String(line.amountClp), paidAt: chileDateTimeInput(line.at), reference: line.reference ?? "", cardType: line.cardType === "credit" || line.cardType === "debit" ? line.cardType : "", giftCardCode: line.method === "gift_card" ? line.reference ?? "" : "" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No fue posible preparar el pago para editar");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyGiftCard = () => {
+    const amountClp = Number(giftCardAmount);
+    if (!giftCardCode.trim() || !Number.isInteger(amountClp) || amountClp <= 0)
+      return toast.error("Ingresa el código y el monto a utilizar");
+    if (amountClp > detail.payment.balanceAmountClp)
+      return toast.error("El monto de la Gift Card supera el saldo pendiente");
+    execute(() => addPayment({
+      method: "gift_card",
+      status: "paid",
+      amountClp,
+      paidAt: chileDateTimeInput(),
+      giftCardCode: giftCardCode.trim().toUpperCase(),
+    }), "Gift Card aplicada y saldo actualizado");
   };
 
   return <div className="space-y-4">
-    {(service === "massages" || service === "biopools") && <div className="space-y-2 rounded-xl border p-3"><Label>Código de descuento</Label><div className="flex flex-col gap-2 sm:flex-row"><Input value={discountCode} onChange={e => setDiscountCode(e.target.value.toUpperCase())} placeholder="Código" /><Button type="button" variant="outline" disabled={busy || !discountCode.trim()} onClick={() => saveDiscount(false)}>Aplicar o cambiar</Button>{detail.payment.discountCode && <Button type="button" variant="destructive" disabled={busy} onClick={() => saveDiscount(true)}>Eliminar</Button>}</div></div>}
+    {detail.payment.balanceAmountClp > 0 && (service === "massages" || service === "biopools") && <div className="space-y-2 rounded-xl border bg-background/80 p-3"><Label>Código de descuento</Label><div className="flex flex-col gap-2 sm:flex-row"><Input value={discountCode} onChange={e => setDiscountCode(e.target.value.toUpperCase())} placeholder="Código" /><Button type="button" variant="outline" disabled={busy || !discountCode.trim()} onClick={() => saveDiscount(false)}>Aplicar o cambiar</Button>{detail.payment.discountCode && <Button type="button" variant="destructive" disabled={busy} onClick={() => saveDiscount(true)}>Eliminar</Button>}</div></div>}
 
     <div className="overflow-hidden rounded-xl border">
       {detail.payment.lines.map((line: any) => {
-        const paymentId = line.type === "payment" ? Number(String(line.id).replace("payment:", "")) : 0;
-        const processorProtected = ["webpay", "webpay_plus", "getnet"].includes(line.method) || !paymentId;
+        const processorProtected = ["webpay", "webpay_plus", "getnet"].includes(line.method);
         const giftCard = line.method === "gift_card";
         return <div key={line.id} className="grid min-w-0 gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] sm:items-center">
           <div><p className="font-semibold">{paymentLabel(line.method)}</p><p className={cn("text-xs", line.type === "discount" ? "text-emerald-700" : "text-muted-foreground")}>{paymentLabel(line.status)}</p></div>
           <div className="text-xs text-muted-foreground"><p className={cn("break-all", line.type === "discount" && "font-mono font-semibold text-violet-700")}>{line.reference || "Sin referencia"}</p>{line.cardType && <p>{line.cardType === "credit" ? "Crédito" : "Débito"}</p>}{line.at && <p>{new Date(line.at).toLocaleString("es-CL")}</p>}</div>
           <p className={cn("font-semibold sm:text-right", line.type === "discount" && "text-emerald-700")}>{line.type === "discount" ? "−" : ""}{money(line.amountClp)}</p>
-          <div className="flex justify-end gap-1">{line.type === "payment" && !processorProtected && !giftCard && <Button type="button" size="icon" variant="ghost" title="Editar pago" onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy} onClick={() => removePayment(paymentId)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="text-[10px] text-muted-foreground">Protegido</span>}</div>
+          <div className="flex justify-end gap-1">{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title={giftCard ? "Editar Gift Card" : "Editar pago"} disabled={busy} onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy} onClick={() => removePayment(line)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="text-[10px] text-muted-foreground">Protegido</span>}</div>
         </div>;
       })}
       {!detail.payment.lines.length && <p className="p-4 text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
     </div>
 
-    <div className="space-y-3 rounded-xl border border-dashed p-3"><div className="flex items-center justify-between"><p className="font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</p>{editingId && <Button type="button" size="sm" variant="ghost" onClick={() => { setEditingId(null); setDraft(emptyPayment(String(detail.payment.balanceAmountClp || ""))); }}><X className="mr-1 h-4 w-4" />Cancelar</Button>}</div>
-      <div className="grid gap-3 sm:grid-cols-2"><div><Label>Medio de pago</Label><Select value={draft.method} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "gift_card" ? "paid" : current.status }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{PAYMENT_METHODS[service].map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent></Select></div><div><Label>Estado</Label><Select value={draft.status} disabled={draft.method === "gift_card"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente</SelectItem></SelectContent></Select></div><div><Label>Monto</Label><Input type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>{draft.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}{draft.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código de Gift Card</Label><Input value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div> : draft.method !== "cash" && draft.status === "paid" ? <div><Label>Referencia</Label><Input value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div> : null}{CARD_METHODS.has(draft.method) && draft.status === "paid" && <div><Label>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}</div>
+    {detail.payment.balanceAmountClp > 0 && <div className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/70 p-3"><div><p className="font-semibold">Aplicar Gift Card</p><p className="text-xs text-muted-foreground">Se descontará el monto utilizado y se conservará automáticamente cualquier saldo a favor.</p></div><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto]"><div><Label>Código de Gift Card</Label><Input value={giftCardCode} onChange={e => setGiftCardCode(e.target.value.toUpperCase())} placeholder="Código" /></div><div><Label>Monto a utilizar</Label><Input type="number" min={1} max={detail.payment.balanceAmountClp} value={giftCardAmount} onChange={e => setGiftCardAmount(e.target.value)} /></div><Button className="self-end" type="button" disabled={busy || !giftCardCode.trim() || !giftCardAmount} onClick={applyGiftCard}>Aplicar</Button></div></div>}
+
+    {(detail.payment.balanceAmountClp > 0 || editingId) && <div className="space-y-3 rounded-xl border border-dashed bg-background/80 p-3"><div className="flex items-center justify-between"><p className="font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</p>{editingId && <Button type="button" size="sm" variant="ghost" onClick={() => { setEditingId(null); setDraft(emptyPayment(String(detail.payment.balanceAmountClp || ""))); }}><X className="mr-1 h-4 w-4" />Cancelar</Button>}</div>
+      <div className="grid gap-3 sm:grid-cols-2"><div><Label>Medio de pago</Label><Select value={draft.method} disabled={editingId !== null && draft.method === "gift_card"} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "gift_card" ? "paid" : current.status }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{PAYMENT_METHODS[service].map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent></Select></div><div><Label>Estado</Label><Select value={draft.status} disabled={draft.method === "gift_card"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente</SelectItem></SelectContent></Select></div><div><Label>Monto</Label><Input type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>{draft.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}{draft.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código de Gift Card</Label><Input value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div> : draft.method !== "cash" && draft.status === "paid" ? <div><Label>Referencia</Label><Input value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div> : null}{CARD_METHODS.has(draft.method) && draft.status === "paid" && <div><Label>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}</div>
       <Button type="button" disabled={busy || !validPayment(draft)} onClick={savePayment}><Plus className="mr-2 h-4 w-4" />{editingId ? "Guardar cambios" : "Agregar pago"}</Button>
-    </div>
+    </div>}
   </div>;
 }
 
@@ -612,6 +658,13 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
   );
   const detail: any = query.data;
   const meta = event ? SERVICE_META[event.service] : null;
+  const paymentTone = !detail?.payment
+    ? "border-slate-200 bg-background"
+    : detail.payment.balanceAmountClp <= 0
+      ? "border-emerald-300 bg-emerald-50/80"
+      : detail.payment.amountClp > 0
+        ? "border-amber-300 bg-amber-50/80"
+        : "border-rose-300 bg-rose-50/80";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -631,7 +684,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
             <div className="grid min-w-0 gap-3 sm:grid-cols-3">
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Fecha y hora</p><p className="mt-1 font-semibold capitalize">{format(new Date(`${detail.schedule.date}T12:00:00`), "EEE d MMM", { locale: es })}</p><p className="text-sm">{detail.schedule.startTime.slice(0, 5)} – {detail.schedule.endTime.slice(0, 5)}</p></CardContent></Card>
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Cliente / responsable</p><p className="mt-1 font-semibold">{detail.client.name}</p><p className="text-xs text-muted-foreground">{detail.detail}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Estado de pago</p><p className="mt-1 font-semibold">{detail.payment ? paymentLabel(detail.payment.status) : "No corresponde"}</p><p className="text-sm text-muted-foreground">{detail.payment ? money(detail.payment.amountClp) : "Clase programada"}</p></CardContent></Card>
+              <Card className={cn(detail.payment && paymentTone)}><CardContent className="p-4"><p className="text-xs text-muted-foreground">Estado de pago</p><p className="mt-1 font-semibold">{detail.payment ? detail.payment.balanceAmountClp <= 0 ? "Pagada" : detail.payment.amountClp > 0 ? "Abonada" : "No pagada" : "No corresponde"}</p><p className="text-sm text-muted-foreground">{detail.payment ? money(detail.payment.amountClp) : "Clase programada"}</p></CardContent></Card>
             </div>
             <Tabs defaultValue="general">
               <TabsList className="grid h-auto w-full grid-cols-3">
@@ -645,7 +698,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
                   <div><p className="text-xs font-medium uppercase text-muted-foreground">Detalle operativo</p><p className="mt-1 text-sm">{detail.detail || "Sin detalle adicional"}</p>{detail.notes && <><p className="mt-4 text-xs font-medium uppercase text-muted-foreground">Notas</p><p className="mt-1 whitespace-pre-wrap text-sm">{detail.notes}</p></>}</div>
                 </div>
               </TabsContent>
-              <TabsContent value="payments" className="rounded-xl border p-4">
+              <TabsContent value="payments" className={cn("rounded-xl border-2 p-4", paymentTone)}>
                 {detail.payment ? (
                   <div className="space-y-4">
                     <div className="grid gap-3 rounded-xl bg-muted/40 p-4 sm:grid-cols-2 lg:grid-cols-5">
