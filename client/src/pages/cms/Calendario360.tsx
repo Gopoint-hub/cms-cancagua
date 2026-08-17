@@ -17,6 +17,7 @@ import {
 } from "date-fns";
 import { es } from "date-fns/locale";
 import {
+  BadgePercent,
   CalendarDays,
   CalendarClock,
   Ban,
@@ -26,6 +27,7 @@ import {
   Clock3,
   ExternalLink,
   Filter,
+  Gift,
   ListChecks,
   Link2,
   Mail,
@@ -40,6 +42,12 @@ import {
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { ReschedulePolicyOverride } from "@/components/cms/ReschedulePolicyOverride";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -218,6 +226,8 @@ type PaymentDraft = {
   giftCardCode: string;
 };
 
+type PaymentAction = "link" | "manual" | "discount" | "giftcard";
+
 function chileDateTimeInput(value?: unknown) {
   const date = value ? new Date(String(value)) : new Date();
   const safe = Number.isNaN(date.getTime()) ? new Date() : date;
@@ -390,6 +400,7 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
   const [giftCardAmount, setGiftCardAmount] = useState(String(detail.payment?.balanceAmountClp || ""));
   const [paymentLinks, setPaymentLinks] = useState<ReservationPaymentLink[]>([]);
   const [paymentLinkPhone, setPaymentLinkPhone] = useState(detail.client?.phone ?? "");
+  const [openPaymentAction, setOpenPaymentAction] = useState<PaymentAction | "">("");
   const [busy, setBusy] = useState(false);
   const activePaymentLink =
     trpc.reservationPaymentLinks.activeForReservation.useQuery(
@@ -409,6 +420,7 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     setGiftCardAmount(String(detail.payment?.balanceAmountClp || ""));
     setPaymentLinks([]);
     setPaymentLinkPhone(detail.client?.phone ?? "");
+    setOpenPaymentAction("");
   }, [event.id, detail.payment?.balanceAmountClp, detail.payment?.discountCode]);
 
   const massageAdd = trpc.masajes.agenda.addPayment.useMutation();
@@ -433,6 +445,10 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     activePaymentLink.data?.status === "reconciliation_required";
 
   useEffect(() => {
+    if (activePaymentLink.data?.token) setOpenPaymentAction("link");
+  }, [activePaymentLink.data?.token]);
+
+  useEffect(() => {
     const active = activePaymentLink.data;
     if (!active) {
       if (activePaymentLink.isFetched) setPaymentLinks([]);
@@ -453,6 +469,7 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     await onChanged();
     setDraft(emptyPayment());
     setEditingId(null);
+    setOpenPaymentAction("");
     toast.success(message);
   };
   const execute = async (action: () => Promise<unknown>, message: string) => {
@@ -506,6 +523,7 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     try {
       const id = await paymentIdFor(line);
       setEditingId(id);
+      setOpenPaymentAction("manual");
       setDraft({ method: line.method, status: line.status === "pending" ? "pending" : "paid", amountClp: String(line.amountClp), paidAt: chileDateTimeInput(line.at), reference: line.reference ?? "", cardType: line.cardType === "credit" || line.cardType === "debit" ? line.cardType : "", giftCardCode: line.method === "gift_card" ? line.reference ?? "" : "" });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No fue posible preparar el pago para editar");
@@ -576,6 +594,11 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     }
   };
 
+  const hasOutstandingBalance = detail.payment.balanceAmountClp > 0;
+  const otherPaymentActionsLocked =
+    paymentLinkLocked || !activePaymentLink.isFetched;
+  const paymentFieldId = `payment-${service}-${event.entityId}`;
+
   return <div className="space-y-4">
     <div className="overflow-hidden rounded-xl border">
       {detail.payment.lines.map((line: any) => {
@@ -590,61 +613,230 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
           <div><p className="font-semibold">{paymentLabel(line.method)}</p><p className={cn("text-xs", line.type === "discount" ? "text-emerald-700" : "text-muted-foreground")}>{paymentLabel(line.status)}</p></div>
           <div className="col-span-2 text-xs text-muted-foreground sm:col-span-1"><p className={cn("break-words", line.type === "discount" && "font-mono font-semibold text-violet-700")}>{line.reference || "Sin referencia"}</p>{line.cardType && <p>{line.cardType === "credit" ? "Crédito" : "Débito"}</p>}{line.at && <p>{new Date(line.at).toLocaleString("es-CL")}</p>}</div>
           <p className={cn("col-start-2 row-start-1 font-semibold text-right sm:col-start-auto sm:row-start-auto", line.type === "discount" && "text-emerald-700")}>{line.type === "discount" ? "−" : ""}{money(line.amountClp)}</p>
-          <div className="col-span-2 flex justify-end gap-1 sm:col-span-1">{line.type === "payment" && !lockedPayment && <Button type="button" size="icon" variant="ghost" title={giftCard ? "Editar Gift Card" : "Editar pago"} disabled={busy || paymentLinkLocked} onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !lockedPayment && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy || paymentLinkLocked} onClick={() => removePayment(line)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{removableDiscount && <Button type="button" size="icon" variant="ghost" title="Eliminar código de descuento" disabled={busy || paymentLinkLocked} onClick={() => saveDiscount(true)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Protegido</span>}{linkedPlaceholder && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Vinculado al link</span>}</div>
+          <div className="col-span-2 flex justify-end gap-1 sm:col-span-1">{line.type === "payment" && !lockedPayment && <Button type="button" size="icon" variant="ghost" title={giftCard ? "Editar Gift Card" : "Editar pago"} disabled={busy || paymentLinkLocked || !activePaymentLink.isFetched} onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !lockedPayment && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy || paymentLinkLocked || !activePaymentLink.isFetched} onClick={() => removePayment(line)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{removableDiscount && <Button type="button" size="icon" variant="ghost" title="Eliminar código de descuento" disabled={busy || paymentLinkLocked || !activePaymentLink.isFetched} onClick={() => saveDiscount(true)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Protegido</span>}{linkedPlaceholder && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Vinculado al link</span>}</div>
         </div>;
       })}
       {!detail.payment.lines.length && <p className="p-4 text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
     </div>
 
-    {(detail.payment.balanceAmountClp > 0 || Boolean(activePaymentLink.data)) && <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 sm:p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div><p className="font-semibold">Cobrar saldo por internet</p><p className="text-xs text-muted-foreground">Genera un link relacionado con esta reserva. Al pagarse, el estado se actualizará automáticamente.</p></div>
-        <Button type="button" variant={paymentLinks.length ? "outline" : "default"} disabled={busy || createPaymentLinks.isPending || paymentLinkLocked} onClick={generatePaymentLink}><Link2 className="mr-2 h-4 w-4" />{createPaymentLinks.isPending ? "Generando…" : paymentLinks.length ? "Link vigente" : "Generar link de pago"}</Button>
-      </div>
-      <ReservationPaymentLinks links={paymentLinks} clientPhone={paymentLinkPhone} clientName={detail.client?.name} />
-      {paymentLinks.length > 0 && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">
-            {activePaymentLink.data?.status === "processing"
-              ? "El cliente ya inició el pago. Esperando confirmación de la pasarela."
-              : activePaymentLink.data?.status === "reconciliation_required"
-                ? "El proveedor informó un pago y quedó pendiente de revisión interna. No realices un nuevo cobro."
-              : "Este link seguirá disponible al volver a abrir la reserva."}
+    {(hasOutstandingBalance || Boolean(activePaymentLink.data) || Boolean(editingId)) && (
+      <section className="space-y-3 rounded-xl border bg-muted/20 p-3 sm:p-4">
+        <div>
+          <p className="font-semibold">
+            {hasOutstandingBalance
+              ? `Elige cómo cubrir el saldo · ${money(detail.payment.balanceAmountClp)}`
+              : editingId
+                ? "Editar pago registrado"
+                : "Cobro electrónico en revisión"}
           </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="destructive"
-            disabled={
-              busy ||
-              cancelPaymentLinkMutation.isPending ||
-              activePaymentLink.data?.status !== "active"
-            }
-            onClick={cancelPaymentLink}
-          >
-            Cancelar link
-          </Button>
+          {hasOutstandingBalance && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Abre una opción para ver su detalle. Las opciones desaparecerán cuando la reserva esté pagada al 100%.
+            </p>
+          )}
         </div>
-      )}
-      {paymentLinkLocked && (
-        <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
-          {activePaymentLink.data?.status === "processing"
-            ? "El pago ya fue iniciado. Espera la confirmación antes de modificar la reserva."
-            : activePaymentLink.data?.status === "reconciliation_required"
-              ? "El pago electrónico está en revisión. No modifiques la reserva ni registres otro cobro hasta conciliarlo."
-            : "Cancela el link vigente antes de agregar pagos, descuentos o Gift Cards."}
-        </p>
-      )}
-    </div>}
 
-    {(detail.payment.balanceAmountClp > 0 || editingId) && <fieldset disabled={paymentLinkLocked} className="space-y-3 rounded-xl border border-dashed bg-background/80 p-3 disabled:opacity-60"><div className="flex items-center justify-between"><p className="font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</p>{editingId && <Button type="button" size="sm" variant="ghost" onClick={() => { setEditingId(null); setDraft(emptyPayment(String(detail.payment.balanceAmountClp || ""))); }}><X className="mr-1 h-4 w-4" />Cancelar</Button>}</div>
-      <div className="grid gap-3 sm:grid-cols-2"><div><Label>Medio de pago</Label><Select value={draft.method} disabled={editingId !== null && draft.method === "gift_card"} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "pending_payment" ? "pending" : method === "gift_card" ? "paid" : current.status }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{PAYMENT_METHODS[service].map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent></Select></div><div><Label>Estado</Label><Select value={draft.status} disabled={draft.method === "gift_card" || draft.method === "pending_payment"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente de pago</SelectItem></SelectContent></Select></div><div><Label>Monto</Label><Input type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>{draft.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}{draft.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código de Gift Card</Label><Input value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div> : draft.method !== "cash" && draft.status === "paid" ? <div><Label>Referencia</Label><Input value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div> : null}{CARD_METHODS.has(draft.method) && draft.status === "paid" && <div><Label>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}</div>
-      <Button type="button" disabled={busy || paymentLinkLocked || !validPayment(draft)} onClick={savePayment}><Plus className="mr-2 h-4 w-4" />{editingId ? "Guardar cambios" : "Agregar pago"}</Button>
-    </fieldset>}
+        {!activePaymentLink.isFetched && hasOutstandingBalance && (
+          <p className="rounded-lg bg-sky-50 p-2 text-xs text-sky-900">
+            Comprobando si esta reserva ya tiene un link de pago…
+          </p>
+        )}
 
-    {detail.payment.balanceAmountClp > 0 && (service === "massages" || service === "biopools") && <div className="space-y-2 rounded-xl border bg-background/80 p-3"><Label>Código de descuento</Label><div className="flex flex-col gap-2 sm:flex-row"><Input value={discountCode} onChange={e => setDiscountCode(e.target.value.toUpperCase())} placeholder="Código" disabled={paymentLinkLocked} /><Button type="button" variant="outline" disabled={busy || paymentLinkLocked || !discountCode.trim()} onClick={() => saveDiscount(false)}>Aplicar o cambiar</Button>{detail.payment.discountCode && <Button type="button" variant="destructive" disabled={busy || paymentLinkLocked} onClick={() => saveDiscount(true)}>Eliminar</Button>}</div></div>}
+        {paymentLinkLocked && (
+          <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+            {activePaymentLink.data?.status === "processing"
+              ? "El pago ya fue iniciado. Espera la confirmación antes de elegir otro medio."
+              : activePaymentLink.data?.status === "reconciliation_required"
+                ? "El pago electrónico está en revisión. No registres otro cobro hasta conciliarlo."
+                : "Hay un link vigente. Cancélalo antes de elegir otra forma de pago."}
+          </p>
+        )}
 
-    {detail.payment.balanceAmountClp > 0 && <div className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/70 p-3"><div><p className="font-semibold">Aplicar Gift Card</p><p className="text-xs text-muted-foreground">Se descontará el monto utilizado y se conservará automáticamente cualquier saldo a favor.</p></div><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto]"><div><Label>Código de Gift Card</Label><Input value={giftCardCode} onChange={e => setGiftCardCode(e.target.value.toUpperCase())} placeholder="Código" disabled={paymentLinkLocked} /></div><div><Label>Monto a utilizar</Label><Input type="number" min={1} max={detail.payment.balanceAmountClp} value={giftCardAmount} onChange={e => setGiftCardAmount(e.target.value)} disabled={paymentLinkLocked} /></div><Button className="self-end" type="button" disabled={busy || paymentLinkLocked || !giftCardCode.trim() || !giftCardAmount} onClick={applyGiftCard}>Aplicar</Button></div></div>}
+        <Accordion
+          type="single"
+          collapsible
+          value={openPaymentAction}
+          onValueChange={value => setOpenPaymentAction(value as PaymentAction | "")}
+          className="space-y-2"
+        >
+          {(hasOutstandingBalance || Boolean(activePaymentLink.data)) && (
+            <AccordionItem value="link" className="overflow-hidden rounded-xl border border-emerald-200 bg-white px-3 sm:px-4">
+              <AccordionTrigger className="min-h-14 py-3 hover:no-underline">
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                    <Link2 className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-semibold">Link de pago</span>
+                    <span className="block text-xs font-normal text-muted-foreground">
+                      {paymentLinks.length ? "Link vigente para copiar o enviar" : "Cobrar por internet con actualización automática"}
+                    </span>
+                  </span>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="px-0 pb-3">
+                <div className="space-y-3 rounded-lg bg-emerald-50/60 p-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Genera un link relacionado con esta reserva. Al pagarse, el estado se actualizará automáticamente.
+                    </p>
+                    <Button
+                      type="button"
+                      className="w-full sm:w-auto"
+                      variant={paymentLinks.length ? "outline" : "default"}
+                      disabled={busy || createPaymentLinks.isPending || paymentLinkLocked || !activePaymentLink.isFetched}
+                      onClick={generatePaymentLink}
+                    >
+                      <Link2 className="mr-2 h-4 w-4" />
+                      {createPaymentLinks.isPending ? "Generando…" : paymentLinks.length ? "Link vigente" : "Generar link de pago"}
+                    </Button>
+                  </div>
+                  <ReservationPaymentLinks links={paymentLinks} clientPhone={paymentLinkPhone} clientName={detail.client?.name} />
+                  {paymentLinks.length > 0 && (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs text-muted-foreground">
+                        {activePaymentLink.data?.status === "processing"
+                          ? "El cliente ya inició el pago. Esperando confirmación de la pasarela."
+                          : activePaymentLink.data?.status === "reconciliation_required"
+                            ? "El proveedor informó un pago y quedó pendiente de revisión interna. No realices un nuevo cobro."
+                            : "Este link seguirá disponible al volver a abrir la reserva."}
+                      </p>
+                      <Button
+                        type="button"
+                        className="w-full sm:w-auto"
+                        size="sm"
+                        variant="destructive"
+                        disabled={busy || cancelPaymentLinkMutation.isPending || activePaymentLink.data?.status !== "active"}
+                        onClick={cancelPaymentLink}
+                      >
+                        Cancelar link
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )}
+
+          {(hasOutstandingBalance || Boolean(editingId)) && (
+            <AccordionItem
+              value="manual"
+              disabled={otherPaymentActionsLocked}
+              className="overflow-hidden rounded-xl border bg-white px-3 sm:px-4"
+            >
+              <AccordionTrigger className="min-h-14 py-3 hover:no-underline">
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+                    <CircleDollarSign className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</span>
+                    <span className="block text-xs font-normal text-muted-foreground">Efectivo, transferencia o máquina</span>
+                  </span>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="px-0 pb-3">
+                <fieldset disabled={paymentLinkLocked} className="space-y-3 rounded-lg border border-dashed bg-background/80 p-3 disabled:opacity-60">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</p>
+                    {editingId && (
+                      <Button type="button" size="sm" variant="ghost" onClick={() => {
+                        setEditingId(null);
+                        setDraft(emptyPayment(String(detail.payment.balanceAmountClp || "")));
+                        setOpenPaymentAction("");
+                      }}>
+                        <X className="mr-1 h-4 w-4" />Cancelar
+                      </Button>
+                    )}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor={`${paymentFieldId}-method`}>Medio de pago</Label>
+                      <Select value={draft.method} disabled={editingId !== null && draft.method === "gift_card"} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "pending_payment" ? "pending" : method === "gift_card" ? "paid" : current.status }))}>
+                        <SelectTrigger id={`${paymentFieldId}-method`}><SelectValue placeholder="Selecciona" /></SelectTrigger>
+                        <SelectContent>{PAYMENT_METHODS[service]
+                          .filter(method => method !== "gift_card" || (editingId !== null && draft.method === "gift_card"))
+                          .map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor={`${paymentFieldId}-status`}>Estado</Label>
+                      <Select value={draft.status} disabled={draft.method === "gift_card" || draft.method === "pending_payment"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}>
+                        <SelectTrigger id={`${paymentFieldId}-status`}><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente de pago</SelectItem></SelectContent>
+                      </Select>
+                    </div>
+                    <div><Label htmlFor={`${paymentFieldId}-amount`}>Monto</Label><Input id={`${paymentFieldId}-amount`} type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>
+                    {draft.status === "paid" && <div><Label htmlFor={`${paymentFieldId}-paid-at`}>Fecha y hora</Label><Input id={`${paymentFieldId}-paid-at`} type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}
+                    {draft.method === "gift_card" ? (
+                      <div className="sm:col-span-2"><Label htmlFor={`${paymentFieldId}-edit-giftcard`}>Código de Gift Card</Label><Input id={`${paymentFieldId}-edit-giftcard`} value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div>
+                    ) : draft.method !== "cash" && draft.status === "paid" ? (
+                      <div><Label htmlFor={`${paymentFieldId}-reference`}>Referencia</Label><Input id={`${paymentFieldId}-reference`} value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div>
+                    ) : null}
+                    {CARD_METHODS.has(draft.method) && draft.status === "paid" && (
+                      <div><Label htmlFor={`${paymentFieldId}-card-type`}>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger id={`${paymentFieldId}-card-type`}><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>
+                    )}
+                  </div>
+                  <Button className="w-full sm:w-auto" type="button" disabled={busy || paymentLinkLocked || !validPayment(draft)} onClick={savePayment}>
+                    <Plus className="mr-2 h-4 w-4" />{editingId ? "Guardar cambios" : "Agregar pago"}
+                  </Button>
+                </fieldset>
+              </AccordionContent>
+            </AccordionItem>
+          )}
+
+          {hasOutstandingBalance && (service === "massages" || service === "biopools") && (
+            <AccordionItem
+              value="discount"
+              disabled={otherPaymentActionsLocked}
+              className="overflow-hidden rounded-xl border bg-white px-3 sm:px-4"
+            >
+              <AccordionTrigger className="min-h-14 py-3 hover:no-underline">
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700"><BadgePercent className="h-4 w-4" /></span>
+                  <span className="min-w-0"><span className="block font-semibold">Código de descuento</span><span className="block text-xs font-normal text-muted-foreground">Aplicar, cambiar o eliminar un código</span></span>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="px-0 pb-3">
+                <div className="space-y-2 rounded-lg border bg-background/80 p-3">
+                  <Label htmlFor={`${paymentFieldId}-discount`}>Código de descuento</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input id={`${paymentFieldId}-discount`} value={discountCode} onChange={e => setDiscountCode(e.target.value.toUpperCase())} placeholder="Código" disabled={paymentLinkLocked} />
+                    <Button className="w-full sm:w-auto" type="button" variant="outline" disabled={busy || paymentLinkLocked || !discountCode.trim()} onClick={() => saveDiscount(false)}>Aplicar o cambiar</Button>
+                    {detail.payment.discountCode && <Button className="w-full sm:w-auto" type="button" variant="destructive" disabled={busy || paymentLinkLocked} onClick={() => saveDiscount(true)}>Eliminar</Button>}
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )}
+
+          {hasOutstandingBalance && (
+            <AccordionItem
+              value="giftcard"
+              disabled={otherPaymentActionsLocked}
+              className="overflow-hidden rounded-xl border border-violet-200 bg-white px-3 sm:px-4"
+            >
+              <AccordionTrigger className="min-h-14 py-3 hover:no-underline">
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700"><Gift className="h-4 w-4" /></span>
+                  <span className="min-w-0"><span className="block font-semibold">Gift Card</span><span className="block text-xs font-normal text-muted-foreground">Usar el saldo disponible de un código</span></span>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="px-0 pb-3">
+                <div className="space-y-3 rounded-lg bg-violet-50/70 p-3">
+                  <div><p className="font-semibold">Aplicar Gift Card</p><p className="text-xs text-muted-foreground">Se descontará el monto utilizado y se conservará automáticamente cualquier saldo a favor.</p></div>
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto]">
+                    <div><Label htmlFor={`${paymentFieldId}-giftcard-code`}>Código de Gift Card</Label><Input id={`${paymentFieldId}-giftcard-code`} value={giftCardCode} onChange={e => setGiftCardCode(e.target.value.toUpperCase())} placeholder="Código" disabled={paymentLinkLocked} /></div>
+                    <div><Label htmlFor={`${paymentFieldId}-giftcard-amount`}>Monto a utilizar</Label><Input id={`${paymentFieldId}-giftcard-amount`} type="number" min={1} max={detail.payment.balanceAmountClp} value={giftCardAmount} onChange={e => setGiftCardAmount(e.target.value)} disabled={paymentLinkLocked} /></div>
+                    <Button className="w-full self-end sm:w-auto" type="button" disabled={busy || paymentLinkLocked || !giftCardCode.trim() || !giftCardAmount} onClick={applyGiftCard}>Aplicar</Button>
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )}
+        </Accordion>
+      </section>
+    )}
   </div>;
 }
 
