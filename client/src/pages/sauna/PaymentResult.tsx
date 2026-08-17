@@ -28,6 +28,8 @@ export default function SaunaPaymentResult() {
   const pending =
     query.data?.status === "payment_pending" ||
     query.data?.status === "initiating";
+  const refunded = query.data?.status === "refunded";
+  const manualReview = query.data?.status === "manual_review";
   return (
     <main className="grid min-h-screen place-items-center bg-[#f5f1e9] px-4 py-12">
       <Card className="w-full max-w-xl border-0 shadow-xl">
@@ -62,6 +64,25 @@ export default function SaunaPaymentResult() {
               </h1>
               <p className="text-stone-600">
                 No cierres esta página; puede tardar unos segundos.
+              </p>
+            </>
+          ) : refunded ? (
+            <>
+              <XCircle className="mx-auto h-16 w-16 text-amber-600" />
+              <h1 className="font-serif text-3xl">Pago reembolsado</h1>
+              <p className="text-stone-600">
+                El horario dejó de estar disponible antes de completar la
+                reserva. Solicitamos automáticamente la devolución de{" "}
+                {clp.format(query.data?.totalClp ?? 0)} a tu medio de pago.
+              </p>
+            </>
+          ) : manualReview ? (
+            <>
+              <Clock3 className="mx-auto h-16 w-16 text-amber-600" />
+              <h1 className="font-serif text-3xl">Pago en revisión</h1>
+              <p className="text-stone-600">
+                No vuelvas a pagar. Nuestro equipo debe conciliar esta
+                transacción y se comunicará contigo.
               </p>
             </>
           ) : (

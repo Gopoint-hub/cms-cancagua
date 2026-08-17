@@ -551,7 +551,7 @@ export const saunaCheckoutOrders = mysqlTable("sauna_checkout_orders", {
   isPrivate: int("is_private").default(0).notNull(),
   totalClp: int("total_clp").notNull(),
   giftCardCode: varchar("gift_card_code", { length: 20 }),
-  status: mysqlEnum("status", ["initiating", "payment_pending", "paid", "rejected", "aborted", "expired", "failed"]).default("initiating").notNull(),
+  status: mysqlEnum("status", ["initiating", "payment_pending", "paid", "rejected", "aborted", "expired", "failed", "refunded", "manual_review"]).default("initiating").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   webpayToken: varchar("webpay_token", { length: 180 }).unique(),
   buyOrder: varchar("buy_order", { length: 26 }).unique(),

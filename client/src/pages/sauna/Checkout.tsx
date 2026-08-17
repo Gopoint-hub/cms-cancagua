@@ -33,13 +33,18 @@ export default function SaunaCheckout() {
   const [privateGuests, setPrivateGuests] = useState(6);
   const [accepted, setAccepted] = useState(false);
   const [giftCardCode, setGiftCardCode] = useState("");
-  const [appliedGiftCard, setAppliedGiftCard] = useState<{ code: string; mode: "amount" | "service"; balanceAfter: number } | null>(null);
+  const [appliedGiftCard, setAppliedGiftCard] = useState<{
+    code: string;
+    mode: "amount" | "service";
+    balanceAfter: number;
+  } | null>(null);
   const [customer, setCustomer] = useState({
     name: "",
     email: "",
     phone: "+56",
   });
   const services = catalog.data?.services ?? [];
+  const policies = catalog.data?.policies;
   const service =
     services.find(item => item.purchaseKey === purchaseKey) ?? services[0];
   useEffect(() => {
@@ -59,7 +64,10 @@ export default function SaunaCheckout() {
   }, [slots, startTime]);
   const payment = trpc.sauna.public.startPayment.useMutation({
     onSuccess: result => {
-      if (!result.paymentRequired) { window.location.assign(result.resultUrl); return; }
+      if (!result.paymentRequired) {
+        window.location.assign(result.resultUrl);
+        return;
+      }
       const form = document.createElement("form");
       form.method = "POST";
       form.action = result.paymentUrl;
@@ -74,8 +82,15 @@ export default function SaunaCheckout() {
     onError: error => toast.error(error.message),
   });
   const validateGiftCard = trpc.giftCards.validateForService.useMutation({
-    onSuccess: result => { setAppliedGiftCard(result); setGiftCardCode(result.code); toast.success(`Gift Card ${result.code} aplicada`); },
-    onError: error => { setAppliedGiftCard(null); toast.error(error.message); },
+    onSuccess: result => {
+      setAppliedGiftCard(result);
+      setGiftCardCode(result.code);
+      toast.success(`Gift Card ${result.code} aplicada`);
+    },
+    onError: error => {
+      setAppliedGiftCard(null);
+      toast.error(error.message);
+    },
   });
   useEffect(() => setAppliedGiftCard(null), [service?.id]);
   const submit = (event: React.FormEvent) => {
@@ -295,7 +310,44 @@ export default function SaunaCheckout() {
                   <span>Total</span>
                   <span>{clp.format(service.priceClp)}</span>
                 </div>
-                <div className="space-y-2 border-t pt-4"><Label htmlFor="sauna-gift-card">Pagar con Gift Card</Label><div className="flex gap-2"><Input id="sauna-gift-card" value={giftCardCode} onChange={event => { setGiftCardCode(event.target.value.toUpperCase()); setAppliedGiftCard(null); }} placeholder="Código de Gift Card" /><Button type="button" variant="outline" disabled={!giftCardCode.trim() || validateGiftCard.isPending} onClick={() => validateGiftCard.mutate({ code: giftCardCode, serviceKey: "sauna", totalClp: service.priceClp })}>{validateGiftCard.isPending ? "Validando…" : "Aplicar"}</Button></div>{appliedGiftCard && <p className="text-xs text-emerald-700">Gift Card aplicada{appliedGiftCard.mode === "amount" ? ` · saldo restante ${clp.format(appliedGiftCard.balanceAfter)}` : " · servicio cubierto"}</p>}</div>
+                <div className="space-y-2 border-t pt-4">
+                  <Label htmlFor="sauna-gift-card">Pagar con Gift Card</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="sauna-gift-card"
+                      value={giftCardCode}
+                      onChange={event => {
+                        setGiftCardCode(event.target.value.toUpperCase());
+                        setAppliedGiftCard(null);
+                      }}
+                      placeholder="Código de Gift Card"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={
+                        !giftCardCode.trim() || validateGiftCard.isPending
+                      }
+                      onClick={() =>
+                        validateGiftCard.mutate({
+                          code: giftCardCode,
+                          serviceKey: "sauna",
+                          totalClp: service.priceClp,
+                        })
+                      }
+                    >
+                      {validateGiftCard.isPending ? "Validando…" : "Aplicar"}
+                    </Button>
+                  </div>
+                  {appliedGiftCard && (
+                    <p className="text-xs text-emerald-700">
+                      Gift Card aplicada
+                      {appliedGiftCard.mode === "amount"
+                        ? ` · saldo restante ${clp.format(appliedGiftCard.balanceAfter)}`
+                        : " · servicio cubierto"}
+                    </p>
+                  )}
+                </div>
                 <ul className="space-y-2 text-sm text-stone-600">
                   <li className="flex gap-2">
                     <Check className="h-4 w-4 text-emerald-700" />1 hora de
@@ -307,7 +359,9 @@ export default function SaunaCheckout() {
                   </li>
                   <li className="flex gap-2">
                     <ShieldCheck className="h-4 w-4 text-emerald-700" />
-                    {appliedGiftCard ? "Reserva cubierta con Gift Card" : "Pago seguro con Transbank Webpay Plus"}
+                    {appliedGiftCard
+                      ? "Reserva cubierta con Gift Card"
+                      : "Pago seguro con Transbank Webpay Plus"}
                   </li>
                 </ul>
                 <label className="flex cursor-pointer items-start gap-3 text-sm">
@@ -316,8 +370,11 @@ export default function SaunaCheckout() {
                     onCheckedChange={value => setAccepted(value === true)}
                   />
                   <span>
-                    Acepto las políticas: cancelación con 72 horas,
-                    reagendamiento con 48 horas y máximo 2 cambios.{" "}
+                    Acepto las políticas: reserva con al menos{" "}
+                    {policies?.bookingLeadHours ?? 2} horas de anticipación,
+                    cancelación con {policies?.cancellationHours ?? 72} horas,
+                    reagendamiento con {policies?.rescheduleHours ?? 48} horas y
+                    máximo {policies?.maxReschedules ?? 2} cambios.{" "}
                     {service.kind === "private"
                       ? "Esta compra bloquea inmediatamente los 6 cupos del sauna."
                       : "Entiendo que el servicio es público y puedo compartir con personas de otras reservas."}
@@ -330,11 +387,17 @@ export default function SaunaCheckout() {
                   disabled={payment.isPending || !startTime}
                 >
                   {payment.isPending
-                    ? appliedGiftCard ? "Confirmando reserva…" : "Conectando con Webpay…"
-                    : appliedGiftCard ? "Confirmar con Gift Card" : `Pagar ${clp.format(service.priceClp)}`}
+                    ? appliedGiftCard
+                      ? "Confirmando reserva…"
+                      : "Conectando con Webpay…"
+                    : appliedGiftCard
+                      ? "Confirmar con Gift Card"
+                      : `Pagar ${clp.format(service.priceClp)}`}
                 </Button>
                 <p className="text-center text-xs text-stone-500">
-                  {appliedGiftCard ? "La Gift Card se descontará al confirmar la reserva." : "Los cupos quedan reservados durante 30 minutos mientras completas el pago."}
+                  {appliedGiftCard
+                    ? "La Gift Card se descontará al confirmar la reserva."
+                    : "Los cupos quedan reservados durante 30 minutos mientras completas el pago."}
                 </p>
               </CardContent>
             </Card>

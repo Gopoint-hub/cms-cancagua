@@ -96,6 +96,14 @@ export function saunaIntervalsOverlap(
   return leftStart < rightEnd && rightStart < leftEnd;
 }
 
+export function hasSaunaBookingLeadTime(
+  startsAt: Date,
+  leadHours: number,
+  now = new Date()
+): boolean {
+  return startsAt.getTime() - now.getTime() >= leadHours * 60 * 60_000;
+}
+
 export function addMinutesToTime(time: string, minutes: number): string {
   const [hours, mins] = time.split(":").map(Number);
   const value = hours * 60 + mins + minutes;

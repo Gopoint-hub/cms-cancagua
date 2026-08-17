@@ -1,16 +1,22 @@
 import express from "express";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
   saunaBookings,
+  saunaBlocks,
   saunaCheckoutOrders,
   saunaServices,
   reservationPayments,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
-import { commitTransaction, isTransactionApproved } from "./webpay";
+import {
+  commitTransaction,
+  isTransactionApproved,
+  refundTransaction,
+} from "./webpay";
 import { redeemGiftCardPayment } from "./reservationPayments";
+import { availableSaunaSeats, saunaIntervalsOverlap } from "../shared/sauna";
 
 export function saunaResultUrl(publicToken: string, state: string): string {
   const frontend = (
@@ -50,6 +56,165 @@ export function validateSaunaPayment(
   return { approved: true };
 }
 
+export function canFinalizeSaunaCheckout(status: string): boolean {
+  // Una orden expirada sí puede finalizar si el cupo continúa disponible. Las
+  // órdenes abortadas, rechazadas, reembolsadas o en conciliación no pueden
+  // volver a crear una reserva por un retorno repetido.
+  return ["initiating", "payment_pending", "expired", "paid"].includes(status);
+}
+
+async function assertPaidOrderCapacity(tx: any, order: any): Promise<void> {
+  const date = String(order.bookingDate).slice(0, 10);
+  const [bookings, blocks, holds] = await Promise.all([
+    tx
+      .select()
+      .from(saunaBookings)
+      .where(
+        and(
+          eq(saunaBookings.bookingDate, date),
+          ne(saunaBookings.status, "cancelled")
+        )
+      ),
+    tx
+      .select()
+      .from(saunaBlocks)
+      .where(and(eq(saunaBlocks.blockDate, date), eq(saunaBlocks.active, 1))),
+    tx
+      .select()
+      .from(saunaCheckoutOrders)
+      .where(
+        and(
+          eq(saunaCheckoutOrders.bookingDate, date),
+          inArray(saunaCheckoutOrders.status, [
+            "initiating",
+            "payment_pending",
+          ]),
+          gt(saunaCheckoutOrders.expiresAt, new Date()),
+          ne(saunaCheckoutOrders.id, order.id)
+        )
+      ),
+  ]);
+  const occupancy = [...bookings, ...blocks, ...holds]
+    .filter(item =>
+      saunaIntervalsOverlap(
+        order.startTime,
+        order.endTime,
+        item.startTime,
+        item.endTime
+      )
+    )
+    .map((item: any) => ({
+      guests: Number(item.guests ?? item.blockedCapacity ?? item.capacityUsed),
+      capacityUsed: Number(item.capacityUsed ?? item.blockedCapacity),
+      isPrivate: Number(item.isPrivate ?? 0),
+      status: item.status,
+    }));
+  const available = availableSaunaSeats(occupancy);
+  if (available < order.capacityUsed) {
+    throw new Error(
+      `El pago fue aprobado, pero el horario ya no tiene los ${order.capacityUsed} cupos requeridos`
+    );
+  }
+}
+
+async function refundApprovedSaunaPayment(input: {
+  order: any;
+  token: string;
+  paymentResult: any;
+  reason: unknown;
+}): Promise<"paid" | "refunded" | "manual_review"> {
+  const db = await getDb();
+  if (!db) return "manual_review";
+  const reason =
+    input.reason instanceof Error ? input.reason.message : String(input.reason);
+  const claim = await db.transaction(async tx => {
+    await tx.execute(
+      sql`SELECT id FROM sauna_checkout_orders WHERE id = ${input.order.id} FOR UPDATE`
+    );
+    const [current] = await tx
+      .select()
+      .from(saunaCheckoutOrders)
+      .where(eq(saunaCheckoutOrders.id, input.order.id))
+      .limit(1);
+    if (!current) throw new Error("Orden Sauna no encontrada");
+    if (current.status === "paid" && current.bookingId) return "paid" as const;
+    if (current.status === "refunded") return "refunded" as const;
+    if (current.status === "manual_review") return "manual_review" as const;
+    // Reclamar la orden antes de llamar a Transbank impide que otro retorno
+    // simultáneo cree la reserva o solicite un segundo reembolso.
+    await tx
+      .update(saunaCheckoutOrders)
+      .set({
+        status: "manual_review",
+        webpayStatus: input.paymentResult.status,
+        responseCode: input.paymentResult.responseCode,
+        authorizationCode: input.paymentResult.authorizationCode,
+        cardNumber: input.paymentResult.cardNumber,
+        paymentTypeCode: input.paymentResult.paymentTypeCode,
+        transactionDate: input.paymentResult.transactionDate,
+        rawResponse: JSON.stringify({
+          payment: input.paymentResult,
+          automaticRefund: "processing",
+        }),
+        error: `${reason}. Reembolso automático en proceso.`.slice(0, 2000),
+        paidAt: new Date(),
+      })
+      .where(eq(saunaCheckoutOrders.id, input.order.id));
+    return "claimed" as const;
+  });
+  if (claim !== "claimed") return claim;
+  try {
+    const amount = Number(input.paymentResult.amount || input.order.totalClp);
+    const refund = await refundTransaction(input.token, amount);
+    await db
+      .update(saunaCheckoutOrders)
+      .set({
+        status: "refunded",
+        webpayStatus: "REFUNDED",
+        responseCode: input.paymentResult.responseCode,
+        authorizationCode: input.paymentResult.authorizationCode,
+        cardNumber: input.paymentResult.cardNumber,
+        paymentTypeCode: input.paymentResult.paymentTypeCode,
+        transactionDate: input.paymentResult.transactionDate,
+        rawResponse: JSON.stringify({
+          payment: input.paymentResult,
+          refund,
+          automaticRefund: true,
+        }),
+        error: `${reason}. Reembolso automático solicitado.`.slice(0, 2000),
+        paidAt: new Date(),
+        completedAt: new Date(),
+      })
+      .where(eq(saunaCheckoutOrders.id, input.order.id));
+    return "refunded";
+  } catch (refundError) {
+    await db
+      .update(saunaCheckoutOrders)
+      .set({
+        status: "manual_review",
+        webpayStatus: input.paymentResult.status,
+        responseCode: input.paymentResult.responseCode,
+        authorizationCode: input.paymentResult.authorizationCode,
+        cardNumber: input.paymentResult.cardNumber,
+        paymentTypeCode: input.paymentResult.paymentTypeCode,
+        transactionDate: input.paymentResult.transactionDate,
+        rawResponse: JSON.stringify({
+          payment: input.paymentResult,
+          automaticRefund: false,
+        }),
+        error:
+          `${reason}. Falló el reembolso automático: ${String(refundError)}`.slice(
+            0,
+            2000
+          ),
+        paidAt: new Date(),
+        completedAt: new Date(),
+      })
+      .where(eq(saunaCheckoutOrders.id, input.order.id));
+    return "manual_review";
+  }
+}
+
 export async function finalizeApprovedSaunaOrder(
   orderId: number,
   result: any
@@ -57,7 +222,14 @@ export async function finalizeApprovedSaunaOrder(
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
   return db.transaction(async tx => {
-    const giftCardCode = result?.kind === "gift_card" ? String(result.code) : null;
+    const giftCardCode =
+      result?.kind === "gift_card" ? String(result.code) : null;
+    // Todas las operaciones que consumen aforo toman primero este mismo lock.
+    // Se mantiene hasta COMMIT/ROLLBACK y evita sobreventas y deadlocks por
+    // distinto orden de bloqueo entre el retorno de pago y la agenda.
+    await tx.execute(
+      sql`SELECT id FROM sauna_settings WHERE id = 1 FOR UPDATE`
+    );
     await tx.execute(
       sql`SELECT id FROM sauna_checkout_orders WHERE id = ${orderId} FOR UPDATE`
     );
@@ -68,8 +240,9 @@ export async function finalizeApprovedSaunaOrder(
       .limit(1);
     if (!order) throw new Error("Orden Sauna no encontrada");
     if (order.bookingId && order.status === "paid") return order.bookingId;
-    if (order.expiresAt < new Date())
-      throw new Error("La reserva temporal de cupos expiró");
+    if (!canFinalizeSaunaCheckout(order.status))
+      throw new Error("Esta orden ya fue enviada a conciliación");
+    await assertPaidOrderCapacity(tx, order);
     const [service] = await tx
       .select()
       .from(saunaServices)
@@ -97,7 +270,8 @@ export async function finalizeApprovedSaunaOrder(
         isConfirmed: 1,
         paymentStatus: "paid",
         paymentMethod: giftCardCode ? "gift_card" : "webpay_plus",
-        paymentReference: giftCardCode || result.authorizationCode || order.buyOrder,
+        paymentReference:
+          giftCardCode || result.authorizationCode || order.buyOrder,
         amountClp: order.totalClp,
         amountPaidClp: order.totalClp,
         source: "web",
@@ -117,8 +291,31 @@ export async function finalizeApprovedSaunaOrder(
       });
     } else {
       const paidAt = new Date();
-      const gift = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt: paidAt.toISOString().slice(0, 16), giftCardCode }, totalClp: order.totalClp, module: "sauna", reservationId: created.id, note: `Canje web en Sauna ${created.id}`, serviceKey: "sauna" });
-      await tx.insert(reservationPayments).values({ module: "sauna", reservationId: created.id, method: "gift_card", status: "paid", amountClp: order.totalClp, paidAt, reference: gift.code, giftCardId: gift.id });
+      const gift = await redeemGiftCardPayment({
+        tx,
+        payment: {
+          method: "gift_card",
+          status: "paid",
+          amountClp: order.totalClp,
+          paidAt: paidAt.toISOString().slice(0, 16),
+          giftCardCode,
+        },
+        totalClp: order.totalClp,
+        module: "sauna",
+        reservationId: created.id,
+        note: `Canje web en Sauna ${created.id}`,
+        serviceKey: "sauna",
+      });
+      await tx.insert(reservationPayments).values({
+        module: "sauna",
+        reservationId: created.id,
+        method: "gift_card",
+        status: "paid",
+        amountClp: order.totalClp,
+        paidAt,
+        reference: gift.code,
+        giftCardId: gift.id,
+      });
     }
 
     await tx
@@ -132,7 +329,11 @@ export async function finalizeApprovedSaunaOrder(
         cardNumber: giftCardCode ? null : result.cardNumber,
         paymentTypeCode: giftCardCode ? null : result.paymentTypeCode,
         transactionDate: giftCardCode ? null : result.transactionDate,
-        rawResponse: JSON.stringify(giftCardCode ? { paymentRequired: false, reason: "gift_card", giftCardCode } : result),
+        rawResponse: JSON.stringify(
+          giftCardCode
+            ? { paymentRequired: false, reason: "gift_card", giftCardCode }
+            : result
+        ),
         paidAt: new Date(),
         completedAt: new Date(),
         error: null,
@@ -167,7 +368,7 @@ saunaWebpayReturnRouter.all("/return", async (req, res) => {
         )
         .limit(1);
       if (!order) return res.redirect(saunaResultUrl("not-found", "abortado"));
-      if (order.status !== "paid") {
+      if (["initiating", "payment_pending", "expired"].includes(order.status)) {
         await db
           .update(saunaCheckoutOrders)
           .set({ status: "aborted", error: "Pago abortado por el usuario" })
@@ -184,9 +385,32 @@ saunaWebpayReturnRouter.all("/return", async (req, res) => {
     if (!order) return res.redirect(saunaResultUrl("not-found", "error"));
     if (order.status === "paid" && order.bookingId)
       return res.redirect(saunaResultUrl(order.publicToken, "pagado"));
+    if (order.status === "refunded")
+      return res.redirect(saunaResultUrl(order.publicToken, "reembolsado"));
+    if (order.status === "manual_review")
+      return res.redirect(saunaResultUrl(order.publicToken, "revision"));
     const result = await commitTransaction(token);
     const validation = validateSaunaPayment(order, result, token);
     if (!validation.approved) {
+      if (isTransactionApproved(result.responseCode, result.status)) {
+        const recovery = await refundApprovedSaunaPayment({
+          order,
+          token,
+          paymentResult: result,
+          reason:
+            validation.reason || "La validación interna del pago no coincidió",
+        });
+        return res.redirect(
+          saunaResultUrl(
+            order.publicToken,
+            recovery === "paid"
+              ? "pagado"
+              : recovery === "refunded"
+                ? "reembolsado"
+                : "revision"
+          )
+        );
+      }
       await db
         .update(saunaCheckoutOrders)
         .set({
@@ -202,8 +426,34 @@ saunaWebpayReturnRouter.all("/return", async (req, res) => {
         .where(eq(saunaCheckoutOrders.id, order.id));
       return res.redirect(saunaResultUrl(order.publicToken, "rechazado"));
     }
-    await finalizeApprovedSaunaOrder(order.id, result);
-    return res.redirect(saunaResultUrl(order.publicToken, "pagado"));
+    try {
+      await finalizeApprovedSaunaOrder(order.id, result);
+      return res.redirect(saunaResultUrl(order.publicToken, "pagado"));
+    } catch (finalizeError) {
+      const [latest] = await db
+        .select()
+        .from(saunaCheckoutOrders)
+        .where(eq(saunaCheckoutOrders.id, order.id))
+        .limit(1);
+      if (latest?.status === "paid" && latest.bookingId)
+        return res.redirect(saunaResultUrl(order.publicToken, "pagado"));
+      const recovery = await refundApprovedSaunaPayment({
+        order,
+        token,
+        paymentResult: result,
+        reason: finalizeError,
+      });
+      return res.redirect(
+        saunaResultUrl(
+          order.publicToken,
+          recovery === "paid"
+            ? "pagado"
+            : recovery === "refunded"
+              ? "reembolsado"
+              : "revision"
+        )
+      );
+    }
   } catch (error) {
     console.error("[sauna:webpay] Error procesando retorno", error);
     const [order] = token

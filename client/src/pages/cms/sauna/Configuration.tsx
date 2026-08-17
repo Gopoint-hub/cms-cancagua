@@ -31,6 +31,10 @@ export default function SaunaConfiguration() {
   const utils = trpc.useUtils();
   const sync = trpc.sauna.sync.run.useMutation({
     onSuccess: result => {
+      if ("skipped" in result && result.skipped) {
+        toast.info("Ya hay una sincronización Sauna en curso");
+        return;
+      }
       toast.success(
         `Skedu sincronizado: ${result.bookingsUpserted} reservas y ${result.programsQueued} pases`
       );
@@ -110,7 +114,7 @@ export default function SaunaConfiguration() {
                 />
                 <Info
                   label="Cadencia"
-                  value={`${row?.slotIntervalMinutes ?? 90} minutos`}
+                  value={`${row?.slotIntervalMinutes ?? 30} minutos`}
                 />
                 <Info
                   label="Anticipación mínima"

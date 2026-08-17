@@ -1,4 +1,5 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { createConnection } from "mysql2/promise";
 import {
   saunaBookings,
   saunaProgramQueue,
@@ -7,6 +8,7 @@ import {
 } from "../drizzle/schema";
 import { addMinutesToTime, inferSaunaBooking } from "../shared/sauna";
 import { getDb } from "./db";
+import { chileLocalDateTimeToUtc } from "./massageNps";
 import {
   getAllSkeduAppointments,
   getSkeduBusinessUser,
@@ -40,6 +42,12 @@ function dateAndTimeInChile(value: string): { date: string; time: string } {
     date: `${values.year}-${values.month}-${values.day}`,
     time: `${values.hour}:${values.minute}`,
   };
+}
+
+function addCalendarDays(value: string, days: number): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function servicesFromResponse(response: any): any[] {
@@ -110,7 +118,7 @@ function userValues(user?: SkeduUser | null) {
   };
 }
 
-export async function syncSaunaFromSkedu(rangeFrom: string, rangeTo: string) {
+async function syncSaunaFromSkeduUnlocked(rangeFrom: string, rangeTo: string) {
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
   const [run] = await db
@@ -294,7 +302,14 @@ export async function syncSaunaFromSkedu(rangeFrom: string, rangeTo: string) {
           skeduAppointmentUuid: appointment.UUID,
           ...values,
         })
-        .onDuplicateKeyUpdate({ set: values });
+        .onDuplicateKeyUpdate({
+          set: {
+            ...values,
+            status: isCancelled
+              ? "cancelled"
+              : sql`CASE WHEN ${saunaProgramQueue.status} IN ('scheduled','dismissed') THEN ${saunaProgramQueue.status} ELSE 'pending' END`,
+          },
+        });
       programsQueued += 1;
     }
 
@@ -306,7 +321,70 @@ export async function syncSaunaFromSkedu(rangeFrom: string, rangeTo: string) {
       sql`${saunaBookings.bookingDate} >= ${rangeFrom}`,
       sql`${saunaBookings.bookingDate} <= ${rangeTo}`
     );
-    if (externalIds.length) {
+    const missingExternalFilter = externalIds.length
+      ? sql`${saunaBookings.skeduAppointmentUuid} NOT IN (${sql.join(
+          externalIds.map(id => sql`${id}`),
+          sql`, `
+        )})`
+      : isNotNull(saunaBookings.skeduAppointmentUuid);
+    await db
+      .update(saunaBookings)
+      .set({
+        status: "cancelled",
+        cancelledAt: new Date(),
+        lastSyncedAt: new Date(),
+      })
+      .where(
+        and(
+          windowFilters,
+          ne(saunaBookings.status, "cancelled"),
+          missingExternalFilter
+        )
+      );
+
+    // La cola Detox también debe reflejar programas eliminados de Skedu. Si
+    // ya tenían un horario Sauna vinculado, se libera ese cupo.
+    const detoxExternalIds = detoxAppointments.map(item => String(item.UUID));
+    const programWindowFilters = and(
+      gte(
+        saunaProgramQueue.programStartsAt,
+        chileLocalDateTimeToUtc(rangeFrom, "00:00")
+      ),
+      lt(
+        saunaProgramQueue.programStartsAt,
+        chileLocalDateTimeToUtc(addCalendarDays(rangeTo, 1), "00:00")
+      )
+    );
+    const missingProgramFilter = detoxExternalIds.length
+      ? sql`${saunaProgramQueue.skeduAppointmentUuid} NOT IN (${sql.join(
+          detoxExternalIds.map(id => sql`${id}`),
+          sql`, `
+        )})`
+      : isNotNull(saunaProgramQueue.skeduAppointmentUuid);
+    await db
+      .update(saunaProgramQueue)
+      .set({ status: "cancelled", lastSyncedAt: new Date() })
+      .where(
+        and(
+          programWindowFilters,
+          inArray(saunaProgramQueue.status, ["pending", "scheduled"]),
+          missingProgramFilter
+        )
+      );
+    const cancelledPrograms = await db
+      .select({ saunaBookingId: saunaProgramQueue.saunaBookingId })
+      .from(saunaProgramQueue)
+      .where(
+        and(
+          programWindowFilters,
+          eq(saunaProgramQueue.status, "cancelled"),
+          isNotNull(saunaProgramQueue.saunaBookingId)
+        )
+      );
+    const cancelledBookingIds = cancelledPrograms
+      .map(item => item.saunaBookingId)
+      .filter((id): id is number => typeof id === "number");
+    if (cancelledBookingIds.length) {
       await db
         .update(saunaBookings)
         .set({
@@ -316,11 +394,9 @@ export async function syncSaunaFromSkedu(rangeFrom: string, rangeTo: string) {
         })
         .where(
           and(
-            windowFilters,
-            sql`${saunaBookings.skeduAppointmentUuid} NOT IN (${sql.join(
-              externalIds.map(id => sql`${id}`),
-              sql`, `
-            )})`
+            inArray(saunaBookings.id, cancelledBookingIds),
+            eq(saunaBookings.source, "detox"),
+            ne(saunaBookings.status, "cancelled")
           )
         );
     }
@@ -351,6 +427,35 @@ export async function syncSaunaFromSkedu(rangeFrom: string, rangeTo: string) {
       })
       .where(eq(saunaSyncRuns.id, run.id));
     throw error;
+  }
+}
+
+export async function syncSaunaFromSkedu(rangeFrom: string, rangeTo: string) {
+  if (!process.env.DATABASE_URL) throw new Error("Base de datos no disponible");
+  const connection = await createConnection(process.env.DATABASE_URL);
+  let acquired = false;
+  try {
+    const [rows] = await connection.query(
+      "SELECT GET_LOCK('sauna:sync:global', 0) AS acquired"
+    );
+    acquired = Number((rows as any[])?.[0]?.acquired) === 1;
+    if (!acquired) {
+      return {
+        appointmentsRead: 0,
+        bookingsUpserted: 0,
+        programsQueued: 0,
+        servicesSynced: 0,
+        skipped: true,
+      };
+    }
+    return await syncSaunaFromSkeduUnlocked(rangeFrom, rangeTo);
+  } finally {
+    try {
+      if (acquired)
+        await connection.query("SELECT RELEASE_LOCK('sauna:sync:global')");
+    } finally {
+      await connection.end();
+    }
   }
 }
 

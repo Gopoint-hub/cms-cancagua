@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateSaunaPayment } from "./saunaWebpay";
+import { canFinalizeSaunaCheckout, validateSaunaPayment } from "./saunaWebpay";
 
 const order = {
   webpayToken: "token",
@@ -29,5 +29,14 @@ describe("validateSaunaPayment", () => {
     expect(validateSaunaPayment(order, result, "another-token").approved).toBe(
       false
     );
+  });
+
+  it("allows a late return to finalize only before refund or manual review", () => {
+    expect(canFinalizeSaunaCheckout("expired")).toBe(true);
+    expect(canFinalizeSaunaCheckout("payment_pending")).toBe(true);
+    expect(canFinalizeSaunaCheckout("aborted")).toBe(false);
+    expect(canFinalizeSaunaCheckout("rejected")).toBe(false);
+    expect(canFinalizeSaunaCheckout("refunded")).toBe(false);
+    expect(canFinalizeSaunaCheckout("manual_review")).toBe(false);
   });
 });

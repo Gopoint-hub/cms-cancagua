@@ -29,6 +29,7 @@ import {
   addMinutesToTime,
   availableSaunaSeats,
   buildSaunaSlots,
+  hasSaunaBookingLeadTime,
   saunaIntervalsOverlap,
   SAUNA_CAPACITY,
   validateSaunaParty,
@@ -297,22 +298,23 @@ async function assertCapacity(
   return available;
 }
 
-async function acquireCapacityLock(executor: any, date: string): Promise<void> {
-  const result = await executor.execute(
-    sql`SELECT GET_LOCK(${`sauna:capacity:${date}`}, 10) AS acquired`
+async function acquireCapacityLock(
+  executor: any,
+  _date: string
+): Promise<void> {
+  // InnoDB mantiene este bloqueo hasta que la transacción termina realmente.
+  // Esto evita la ventana que dejaba GET_LOCK/RELEASE_LOCK entre el callback y
+  // el COMMIT de Drizzle. Se serializan las mutaciones de aforo, de bajo volumen.
+  await executor.execute(
+    sql`SELECT id FROM sauna_settings WHERE id = 1 FOR UPDATE`
   );
-  const rows = (result as any)?.[0];
-  const acquired = Array.isArray(rows) ? rows[0]?.acquired : rows?.acquired;
-  if (Number(acquired) !== 1) {
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: "La disponibilidad está siendo actualizada. Intenta nuevamente.",
-    });
-  }
 }
 
-async function releaseCapacityLock(executor: any, date: string): Promise<void> {
-  await executor.execute(sql`SELECT RELEASE_LOCK(${`sauna:capacity:${date}`})`);
+async function releaseCapacityLock(
+  _executor: any,
+  _date: string
+): Promise<void> {
+  // El bloqueo de fila se libera automáticamente después de COMMIT o ROLLBACK.
 }
 
 export const saunaRouter = router({
@@ -320,30 +322,39 @@ export const saunaRouter = router({
     requirePermission(ctx.user, "module.sauna");
     const db = await database();
     const today = chileToday();
-    const [bookings, dayAvailability, pendingPrograms, lastSync] =
-      await Promise.all([
-        db
-          .select()
-          .from(saunaBookings)
-          .where(
-            and(
-              eq(saunaBookings.bookingDate, today),
-              ne(saunaBookings.status, "cancelled")
-            )
+    const [
+      bookings,
+      dayAvailability,
+      pendingPrograms,
+      lastSync,
+      manualReviewOrders,
+    ] = await Promise.all([
+      db
+        .select()
+        .from(saunaBookings)
+        .where(
+          and(
+            eq(saunaBookings.bookingDate, today),
+            ne(saunaBookings.status, "cancelled")
           )
-          .orderBy(asc(saunaBookings.startTime)),
-        availabilityForDay(db, today),
-        db
-          .select()
-          .from(saunaProgramQueue)
-          .where(eq(saunaProgramQueue.status, "pending"))
-          .orderBy(asc(saunaProgramQueue.programStartsAt)),
-        db
-          .select()
-          .from(saunaSyncRuns)
-          .orderBy(desc(saunaSyncRuns.startedAt))
-          .limit(1),
-      ]);
+        )
+        .orderBy(asc(saunaBookings.startTime)),
+      availabilityForDay(db, today),
+      db
+        .select()
+        .from(saunaProgramQueue)
+        .where(eq(saunaProgramQueue.status, "pending"))
+        .orderBy(asc(saunaProgramQueue.programStartsAt)),
+      db
+        .select()
+        .from(saunaSyncRuns)
+        .orderBy(desc(saunaSyncRuns.startedAt))
+        .limit(1),
+      db
+        .select({ id: saunaCheckoutOrders.id })
+        .from(saunaCheckoutOrders)
+        .where(eq(saunaCheckoutOrders.status, "manual_review")),
+    ]);
     const alerts: Array<{ type: string; message: string; bookingId?: number }> =
       [];
     for (const slot of dayAvailability.slots) {
@@ -388,6 +399,11 @@ export const saunaRouter = router({
         type: "detox",
         message: `${pendingPrograms.length} pase(s) Detox aún no tienen horario de sauna`,
       });
+    if (manualReviewOrders.length)
+      alerts.push({
+        type: "payment_manual_review",
+        message: `${manualReviewOrders.length} pago(s) Webpay requieren conciliación manual`,
+      });
     return {
       today,
       capacity: SAUNA_CAPACITY,
@@ -397,6 +413,7 @@ export const saunaRouter = router({
       privateBookings: bookings.filter(item => Boolean(item.isPrivate)).length,
       unconfirmed: bookings.filter(item => !item.isConfirmed).length,
       pendingPrograms: pendingPrograms.length,
+      manualReviewPayments: manualReviewOrders.length,
       alerts,
       lastSync: lastSync[0] ?? null,
     };
@@ -566,7 +583,7 @@ export const saunaRouter = router({
                       note: `Canje en sauna ${input.clientName || created.id}`,
                       serviceKey: "sauna",
                     })
-                : undefined;
+                  : undefined;
               await tx.insert(reservationPayments).values({
                 module: "sauna",
                 reservationId: created.id,
@@ -620,7 +637,11 @@ export const saunaRouter = router({
           });
         const db = await database();
         return db.transaction(async tx => {
-          await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.bookingId);
+          await assertNoLiveReservationPaymentAttempt(
+            tx,
+            "sauna",
+            input.bookingId
+          );
           const [booking] = await tx
             .select()
             .from(saunaBookings)
@@ -714,9 +735,17 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
-          const [targetPayment] = await tx.select().from(reservationPayments)
-            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
-          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "sauna", targetPayment.reservationId);
+          const [targetPayment] = await tx
+            .select()
+            .from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId))
+            .limit(1);
+          if (targetPayment)
+            await assertNoLiveReservationPaymentAttempt(
+              tx,
+              "sauna",
+              targetPayment.reservationId
+            );
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -774,9 +803,17 @@ export const saunaRouter = router({
           });
         const db = await database();
         return db.transaction(async tx => {
-          const [targetPayment] = await tx.select().from(reservationPayments)
-            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
-          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "sauna", targetPayment.reservationId);
+          const [targetPayment] = await tx
+            .select()
+            .from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId))
+            .limit(1);
+          if (targetPayment)
+            await assertNoLiveReservationPaymentAttempt(
+              tx,
+              "sauna",
+              targetPayment.reservationId
+            );
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -888,9 +925,17 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
-          const [targetPayment] = await tx.select().from(reservationPayments)
-            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
-          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "sauna", targetPayment.reservationId);
+          const [targetPayment] = await tx
+            .select()
+            .from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId))
+            .limit(1);
+          if (targetPayment)
+            await assertNoLiveReservationPaymentAttempt(
+              tx,
+              "sauna",
+              targetPayment.reservationId
+            );
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -952,18 +997,16 @@ export const saunaRouter = router({
                 redeemedAt: null,
               })
               .where(eq(giftCards.id, card.id));
-            await tx
-              .insert(giftCardTransactions)
-              .values({
-                giftCardId: card.id,
-                transactionType: "refund",
-                amount: payment.amountClp,
-                balanceBefore: card.balance,
-                balanceAfter,
-                orderType: "sauna_booking",
-                orderId: String(booking.id),
-                notes: `Pago eliminado desde CMS por ${ctx.user.name || ctx.user.email || "usuario"}`,
-              });
+            await tx.insert(giftCardTransactions).values({
+              giftCardId: card.id,
+              transactionType: "refund",
+              amount: payment.amountClp,
+              balanceBefore: card.balance,
+              balanceAfter,
+              orderType: "sauna_booking",
+              orderId: String(booking.id),
+              notes: `Pago eliminado desde CMS por ${ctx.user.name || ctx.user.email || "usuario"}`,
+            });
           }
           await tx
             .delete(reservationPayments)
@@ -1011,35 +1054,72 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
-          if (input.status === "cancelled") await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
-          const [booking] = await tx.select().from(saunaBookings)
-            .where(eq(saunaBookings.id, input.id)).limit(1);
+          if (input.status !== "cancelled")
+            await acquireCapacityLock(tx, "status-change");
+          if (input.status === "cancelled")
+            await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
+          const [booking] = await tx
+            .select()
+            .from(saunaBookings)
+            .where(eq(saunaBookings.id, input.id))
+            .limit(1);
           if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-          if (booking.source === "skedu") throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Las reservas originadas en Skedu deben modificarse en Skedu para evitar que la sincronización revierta el cambio",
-          });
-          if (input.status === "cancelled" && booking.paymentStatus === "paid" && booking.paymentMethod === "webpay_plus") {
+          if (booking.source === "skedu")
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
-              message: "Esta reserva fue pagada por Webpay. Procesa primero el reembolso en Transbank antes de liberarla en el CMS",
+              message:
+                "Las reservas originadas en Skedu deben modificarse en Skedu para evitar que la sincronización revierta el cambio",
+            });
+          if (
+            input.status === "cancelled" &&
+            booking.paymentStatus === "paid" &&
+            booking.paymentMethod === "webpay_plus"
+          ) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message:
+                "Esta reserva fue pagada por Webpay. Procesa primero el reembolso en Transbank antes de liberarla en el CMS",
             });
           }
           if (input.status === "cancelled" && !input.overridePolicy) {
             const config = await settings(tx);
-            const startsAt = chileLocalDateTimeToUtc(serializeDate(booking.bookingDate), booking.startTime);
-            if (startsAt.getTime() - Date.now() < config.cancellationNoticeHours * 60 * 60_000) {
+            const startsAt = chileLocalDateTimeToUtc(
+              serializeDate(booking.bookingDate),
+              booking.startTime
+            );
+            if (
+              startsAt.getTime() - Date.now() <
+              config.cancellationNoticeHours * 60 * 60_000
+            ) {
               throw new TRPCError({
                 code: "BAD_REQUEST",
                 message: `La política exige cancelar con al menos ${config.cancellationNoticeHours} horas de anticipación`,
               });
             }
           }
-          await tx.update(saunaBookings).set({
-            status: input.status,
-            isConfirmed: input.status === "confirmed" || input.status === "completed" ? 1 : 0,
-            cancelledAt: input.status === "cancelled" ? new Date() : null,
-          }).where(eq(saunaBookings.id, input.id));
+          if (input.status !== "cancelled") {
+            await assertCapacity(
+              tx,
+              {
+                date: serializeDate(booking.bookingDate),
+                startTime: booking.startTime,
+                endTime: booking.endTime,
+                capacityUsed: booking.capacityUsed,
+              },
+              booking.id
+            );
+          }
+          await tx
+            .update(saunaBookings)
+            .set({
+              status: input.status,
+              isConfirmed:
+                input.status === "confirmed" || input.status === "completed"
+                  ? 1
+                  : 0,
+              cancelledAt: input.status === "cancelled" ? new Date() : null,
+            })
+            .where(eq(saunaBookings.id, input.id));
           return { success: true };
         });
       }),
@@ -1057,6 +1137,7 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          await acquireCapacityLock(tx, input.bookingDate);
           await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
           const [booking] = await tx
             .select()
@@ -1104,7 +1185,6 @@ export const saunaRouter = router({
               message: `La política exige reagendar con al menos ${config.rescheduleNoticeHours} horas de anticipación`,
             });
           }
-          await acquireCapacityLock(tx, input.bookingDate);
           try {
             const availability = await availabilityForDay(
               tx,
@@ -1216,29 +1296,67 @@ export const saunaRouter = router({
             code: "BAD_REQUEST",
             message: "La hora de término debe ser posterior al inicio",
           });
-        const [created] = await (
-          await database()
-        )
-          .insert(saunaBlocks)
-          .values({
-            ...input,
-            notes: input.notes || null,
-            createdByUserId: ctx.user.id,
-          })
-          .$returningId();
-        return created;
+        const db = await database();
+        return db.transaction(async tx => {
+          await acquireCapacityLock(tx, input.blockDate);
+          await assertCapacity(tx, {
+            date: input.blockDate,
+            startTime: input.startTime,
+            endTime: input.endTime,
+            capacityUsed: input.blockedCapacity,
+          });
+          const [created] = await tx
+            .insert(saunaBlocks)
+            .values({
+              ...input,
+              notes: input.notes || null,
+              createdByUserId: ctx.user.id,
+            })
+            .$returningId();
+          return created;
+        });
       }),
     setActive: protectedProcedure
       .input(z.object({ id: z.number(), active: z.boolean() }))
       .mutation(async ({ ctx, input }) => {
         requirePermission(ctx.user, "sauna.manage_blocks");
-        await (
-          await database()
-        )
-          .update(saunaBlocks)
-          .set({ active: input.active ? 1 : 0 })
-          .where(eq(saunaBlocks.id, input.id));
-        return { success: true };
+        const db = await database();
+        if (!input.active) {
+          await db
+            .update(saunaBlocks)
+            .set({ active: 0 })
+            .where(eq(saunaBlocks.id, input.id));
+          return { success: true };
+        }
+        const [existing] = await db
+          .select()
+          .from(saunaBlocks)
+          .where(eq(saunaBlocks.id, input.id))
+          .limit(1);
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+        if (existing.active) return { success: true };
+        return db.transaction(async tx => {
+          await acquireCapacityLock(tx, serializeDate(existing.blockDate));
+          const [block] = await tx
+            .select()
+            .from(saunaBlocks)
+            .where(eq(saunaBlocks.id, input.id))
+            .limit(1);
+          if (!block) throw new TRPCError({ code: "NOT_FOUND" });
+          if (!block.active) {
+            await assertCapacity(tx, {
+              date: serializeDate(block.blockDate),
+              startTime: block.startTime,
+              endTime: block.endTime,
+              capacityUsed: block.blockedCapacity,
+            });
+          }
+          await tx
+            .update(saunaBlocks)
+            .set({ active: 1 })
+            .where(eq(saunaBlocks.id, input.id));
+          return { success: true };
+        });
       }),
   }),
 
@@ -1264,6 +1382,7 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          await acquireCapacityLock(tx, input.bookingDate);
           const [program] = await tx
             .select()
             .from(saunaProgramQueue)
@@ -1275,7 +1394,6 @@ export const saunaRouter = router({
               code: "CONFLICT",
               message: "Este pase ya fue procesado",
             });
-          await acquireCapacityLock(tx, input.bookingDate);
           try {
             const endTime = addMinutesToTime(input.startTime, 60);
             await assertCapacity(tx, {
@@ -1402,9 +1520,10 @@ export const saunaRouter = router({
         services,
         capacity: SAUNA_CAPACITY,
         policies: {
-          cancellationHours: 72,
-          rescheduleHours: 48,
-          maxReschedules: 2,
+          bookingLeadHours: config.bookingLeadHours,
+          cancellationHours: config.cancellationNoticeHours,
+          rescheduleHours: config.rescheduleNoticeHours,
+          maxReschedules: config.maxReschedules,
         },
       };
     }),
@@ -1432,10 +1551,15 @@ export const saunaRouter = router({
         const result = await availabilityForDay(db, input.date);
         return {
           date: input.date,
-          slots: result.slots.filter(slot =>
-            service.kind === "private"
-              ? slot.privateAvailable
-              : slot.availableSeats >= service.capacityUsed
+          slots: result.slots.filter(
+            slot =>
+              hasSaunaBookingLeadTime(
+                chileLocalDateTimeToUtc(input.date, slot.startTime),
+                config.bookingLeadHours
+              ) &&
+              (service.kind === "private"
+                ? slot.privateAvailable
+                : slot.availableSeats >= service.capacityUsed)
           ),
         };
       }),
@@ -1482,12 +1606,14 @@ export const saunaRouter = router({
         if (partyError)
           throw new TRPCError({ code: "BAD_REQUEST", message: partyError });
         if (
-          chileLocalDateTimeToUtc(input.bookingDate, input.startTime) <=
-          new Date()
+          !hasSaunaBookingLeadTime(
+            chileLocalDateTimeToUtc(input.bookingDate, input.startTime),
+            config.bookingLeadHours
+          )
         )
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "El horario seleccionado ya pasó",
+            message: `La reserva exige al menos ${config.bookingLeadHours} horas de anticipación`,
           });
         let orderId = 0;
         let publicToken = "";
@@ -1514,7 +1640,11 @@ export const saunaRouter = router({
             }
             publicToken = nanoid(48);
             if (normalizedGiftCardCode) {
-              const [card] = await tx.select().from(giftCards).where(eq(giftCards.code, normalizedGiftCardCode)).limit(1);
+              const [card] = await tx
+                .select()
+                .from(giftCards)
+                .where(eq(giftCards.code, normalizedGiftCardCode))
+                .limit(1);
               validatePublicGiftCard(card, "sauna", service.priceClp);
             }
             const [created] = await tx
@@ -1544,11 +1674,31 @@ export const saunaRouter = router({
         });
         if (normalizedGiftCardCode) {
           try {
-            await finalizeApprovedSaunaOrder(orderId, { kind: "gift_card", code: normalizedGiftCardCode });
-            return { paymentRequired: false as const, paymentUrl: null, token: null, orderToken: publicToken, resultUrl: saunaResultUrl(publicToken, "pagado") };
+            await finalizeApprovedSaunaOrder(orderId, {
+              kind: "gift_card",
+              code: normalizedGiftCardCode,
+            });
+            return {
+              paymentRequired: false as const,
+              paymentUrl: null,
+              token: null,
+              orderToken: publicToken,
+              resultUrl: saunaResultUrl(publicToken, "pagado"),
+            };
           } catch (error) {
-            await db.update(saunaCheckoutOrders).set({ status: "failed", error: String(error).slice(0, 2000) }).where(eq(saunaCheckoutOrders.id, orderId));
-            throw error instanceof TRPCError ? error : new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "No pudimos canjear la Gift Card" });
+            await db
+              .update(saunaCheckoutOrders)
+              .set({ status: "failed", error: String(error).slice(0, 2000) })
+              .where(eq(saunaCheckoutOrders.id, orderId));
+            throw error instanceof TRPCError
+              ? error
+              : new TRPCError({
+                  code: "BAD_REQUEST",
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : "No pudimos canjear la Gift Card",
+                });
           }
         }
         const buyOrder = generateSaunaBuyOrder(orderId);
