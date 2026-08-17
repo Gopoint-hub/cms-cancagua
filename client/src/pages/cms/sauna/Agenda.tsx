@@ -304,7 +304,11 @@ export default function SaunaAgenda() {
       };
     return { from: anchor, to: anchor };
   }, [anchor, view]);
-  const query = trpc.sauna.agenda.list.useQuery(range);
+  const query = trpc.sauna.agenda.list.useQuery(range, {
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+  });
   const utils = trpc.useUtils();
   const create = trpc.sauna.agenda.create.useMutation({
     onSuccess: () => {
@@ -316,7 +320,11 @@ export default function SaunaAgenda() {
   });
   const paymentQuery = trpc.sauna.agenda.getPayments.useQuery(
     { bookingId: paymentBooking?.id ?? 0 },
-    { enabled: Boolean(paymentBooking) }
+    {
+      enabled: Boolean(paymentBooking),
+      refetchInterval: paymentBooking ? 30_000 : false,
+      refetchOnWindowFocus: true,
+    }
   );
   const addPayment = trpc.sauna.agenda.addPayment.useMutation({
     onSuccess: () => {

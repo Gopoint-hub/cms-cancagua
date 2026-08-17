@@ -49,6 +49,7 @@ import { canRedeemGiftCard } from "./giftCardRedemption";
 import { validatePublicGiftCard } from "./publicGiftCards";
 import { finalizeApprovedSaunaOrder, saunaResultUrl } from "./saunaWebpay";
 import {
+  assertReservationPaymentEditable,
   redeemGiftCardPayment,
   reservationPaymentDate,
   reservationPaymentInputSchema,
@@ -63,6 +64,7 @@ import {
   buildRescheduleAuditLine,
   type ReschedulePolicyViolation,
 } from "./rescheduleAudit";
+import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
@@ -618,6 +620,7 @@ export const saunaRouter = router({
           });
         const db = await database();
         return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.bookingId);
           const [booking] = await tx
             .select()
             .from(saunaBookings)
@@ -711,6 +714,9 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          const [targetPayment] = await tx.select().from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "sauna", targetPayment.reservationId);
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -768,6 +774,9 @@ export const saunaRouter = router({
           });
         const db = await database();
         return db.transaction(async tx => {
+          const [targetPayment] = await tx.select().from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "sauna", targetPayment.reservationId);
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -783,6 +792,7 @@ export const saunaRouter = router({
               code: "NOT_FOUND",
               message: "Pago no encontrado",
             });
+          assertReservationPaymentEditable(payment);
           if (payment.giftCardId)
             throw new TRPCError({
               code: "BAD_REQUEST",
@@ -878,6 +888,9 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          const [targetPayment] = await tx.select().from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "sauna", targetPayment.reservationId);
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -893,6 +906,7 @@ export const saunaRouter = router({
               code: "NOT_FOUND",
               message: "Pago no encontrado",
             });
+          assertReservationPaymentEditable(payment);
           const [booking] = await tx
             .select()
             .from(saunaBookings)
@@ -996,57 +1010,38 @@ export const saunaRouter = router({
       .mutation(async ({ ctx, input }) => {
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
-        const [booking] = await db
-          .select()
-          .from(saunaBookings)
-          .where(eq(saunaBookings.id, input.id))
-          .limit(1);
-        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-        if (booking.source === "skedu")
-          throw new TRPCError({
+        return db.transaction(async tx => {
+          if (input.status === "cancelled") await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
+          const [booking] = await tx.select().from(saunaBookings)
+            .where(eq(saunaBookings.id, input.id)).limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          if (booking.source === "skedu") throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message:
-              "Las reservas originadas en Skedu deben modificarse en Skedu para evitar que la sincronización revierta el cambio",
+            message: "Las reservas originadas en Skedu deben modificarse en Skedu para evitar que la sincronización revierta el cambio",
           });
-        if (
-          input.status === "cancelled" &&
-          booking.paymentStatus === "paid" &&
-          booking.paymentMethod === "webpay_plus"
-        ) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message:
-              "Esta reserva fue pagada por Webpay. Procesa primero el reembolso en Transbank antes de liberarla en el CMS",
-          });
-        }
-        if (input.status === "cancelled" && !input.overridePolicy) {
-          const config = await settings(db);
-          const startsAt = chileLocalDateTimeToUtc(
-            serializeDate(booking.bookingDate),
-            booking.startTime
-          );
-          if (
-            startsAt.getTime() - Date.now() <
-            config.cancellationNoticeHours * 60 * 60_000
-          ) {
+          if (input.status === "cancelled" && booking.paymentStatus === "paid" && booking.paymentMethod === "webpay_plus") {
             throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `La política exige cancelar con al menos ${config.cancellationNoticeHours} horas de anticipación`,
+              code: "PRECONDITION_FAILED",
+              message: "Esta reserva fue pagada por Webpay. Procesa primero el reembolso en Transbank antes de liberarla en el CMS",
             });
           }
-        }
-        await db
-          .update(saunaBookings)
-          .set({
+          if (input.status === "cancelled" && !input.overridePolicy) {
+            const config = await settings(tx);
+            const startsAt = chileLocalDateTimeToUtc(serializeDate(booking.bookingDate), booking.startTime);
+            if (startsAt.getTime() - Date.now() < config.cancellationNoticeHours * 60 * 60_000) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `La política exige cancelar con al menos ${config.cancellationNoticeHours} horas de anticipación`,
+              });
+            }
+          }
+          await tx.update(saunaBookings).set({
             status: input.status,
-            isConfirmed:
-              input.status === "confirmed" || input.status === "completed"
-                ? 1
-                : 0,
+            isConfirmed: input.status === "confirmed" || input.status === "completed" ? 1 : 0,
             cancelledAt: input.status === "cancelled" ? new Date() : null,
-          })
-          .where(eq(saunaBookings.id, input.id));
-        return { success: true };
+          }).where(eq(saunaBookings.id, input.id));
+          return { success: true };
+        });
       }),
     reschedule: protectedProcedure
       .input(
@@ -1062,6 +1057,7 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
           const [booking] = await tx
             .select()
             .from(saunaBookings)

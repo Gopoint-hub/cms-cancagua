@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronLeft,
   Clock3,
+  Link2,
   Plus,
   Trash2,
   UserRound,
@@ -29,8 +32,17 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
+import {
+  ReservationPaymentLinks,
+  type ReservationPaymentLink,
+} from "@/components/cms/ReservationPaymentLinks";
 
 type DirectService = "massages" | "biopools" | "sauna";
+type CreatedReservation = {
+  service: DirectService | "massage_programs";
+  reservationId: number;
+};
 type ClientDraft = { name: string; email: string; phone: string };
 type PaymentDraft = {
   method: string;
@@ -74,7 +86,6 @@ const labels: Record<DirectService, string> = {
 const paymentMethods: Record<DirectService, Array<[string, string]>> = {
   massages: [
     ["pending_payment", "Pendiente de pago"],
-    ["getnet_link", "Link Getnet"],
     ["getnet_pos", "Máquina Getnet"],
     ["bank_transfer", "Transferencia"],
     ["cash", "Efectivo"],
@@ -83,7 +94,6 @@ const paymentMethods: Record<DirectService, Array<[string, string]>> = {
   ],
   biopools: [
     ["pending_payment", "Pendiente de pago"],
-    ["payment_link", "Link de pago"],
     ["bank_transfer", "Transferencia"],
     ["cash", "Efectivo"],
     ["gift_card", "Gift Card"],
@@ -91,7 +101,6 @@ const paymentMethods: Record<DirectService, Array<[string, string]>> = {
   ],
   sauna: [
     ["pending_payment", "Pendiente de pago"],
-    ["payment_link", "Link de pago"],
     ["bank_transfer", "Transferencia"],
     ["cash", "Efectivo"],
     ["gift_card", "Gift Card"],
@@ -133,6 +142,13 @@ function payment(amount = ""): PaymentDraft {
     reference: "",
     cardType: "",
     giftCardCode: "",
+  };
+}
+function pendingPayment(amount: number): PaymentDraft {
+  return {
+    ...payment(String(Math.max(0, amount))),
+    method: "pending_payment",
+    status: "pending",
   };
 }
 function booking(service: DirectService, date = localDate()): BookingDraft {
@@ -218,30 +234,63 @@ function paymentInput(item: PaymentDraft) {
 function PaymentEditor({
   service,
   items,
+  balanceClp,
   onChange,
 }: {
   service: DirectService;
   items: PaymentDraft[];
+  balanceClp: number;
   onChange: (items: PaymentDraft[]) => void;
 }) {
   const update = (index: number, changes: Partial<PaymentDraft>) =>
     onChange(
       items.map((item, i) => (i === index ? { ...item, ...changes } : item))
     );
+  const paidRows = items.filter(item => item.status === "paid");
+  const paidClp = paidRows.reduce(
+    (sum, item) => sum + Number(item.amountClp || 0),
+    0
+  );
+  const pendingClp = Math.max(0, balanceClp - paidClp);
+  const leavePending = () => {
+    if (pendingClp <= 0) {
+      toast.info("Esta reserva no tiene saldo pendiente");
+      return;
+    }
+    // Conserva únicamente pagos efectivamente recibidos (incluidas Gift Cards)
+    // y reemplaza borradores/marcadores de cobro por un solo saldo pendiente.
+    onChange([...paidRows, pendingPayment(pendingClp)]);
+  };
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <Label>Pagos y abonos</Label>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => onChange([...items, payment()])}
-        >
-          <Plus className="mr-1 h-4 w-4" />
-          Otro pago
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+            disabled={pendingClp <= 0}
+            onClick={leavePending}
+          >
+            <Clock3 className="mr-1 h-4 w-4" />
+            Dejar saldo pendiente
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onChange([...items, payment()])}
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            Otro pago
+          </Button>
+        </div>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Podrás generar y enviar el link de pago después de crear la reserva.
+      </p>
       {items.map((item, index) => (
         <div
           key={index}
@@ -1223,6 +1272,28 @@ function BookingEditor({
       )}
       {(section === "all" || section === "payment") && isProgram && (
         <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+              onClick={() =>
+                onChange({
+                  ...value,
+                  programPaymentMethod: "pending_payment",
+                  programPaymentReference: "",
+                })
+              }
+            >
+              <Clock3 className="mr-1 h-4 w-4" />
+              Dejar saldo pendiente
+            </Button>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Podrás generar y enviar el link Getnet después de crear la
+              reserva.
+            </p>
+          </div>
           <div>
             <Label>Medio de pago</Label>
             <Select
@@ -1287,6 +1358,7 @@ function BookingEditor({
           <PaymentEditor
             service={value.service}
             items={value.payments}
+            balanceClp={finalAmount}
             onChange={payments => onChange({ ...value, payments })}
           />
         )}
@@ -1335,11 +1407,20 @@ export function UnifiedBookingDialog({
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [createdReservations, setCreatedReservations] = useState<
+    CreatedReservation[]
+  >([]);
+  const [paymentLinks, setPaymentLinks] = useState<ReservationPaymentLink[]>([]);
+  const [paymentLinkPhone, setPaymentLinkPhone] = useState("");
+  const [savedCount, setSavedCount] = useState(0);
+  const [partialSaveError, setPartialSaveError] = useState("");
   const massageCreate = trpc.masajes.agenda.create.useMutation();
   const programCreate =
     trpc.masajes.agenda.createSkeduProgramBooking.useMutation();
   const bioCreate = trpc.biopools.bookings.create.useMutation();
   const saunaCreate = trpc.sauna.agenda.create.useMutation();
+  const createPaymentLinks =
+    trpc.reservationPaymentLinks.create.useMutation();
   const clientSearch = trpc.operations360.clients.list.useQuery(
     { search: client.name.trim() || undefined },
     { enabled: open && !clientSelected && client.name.trim().length >= 2 }
@@ -1352,6 +1433,11 @@ export function UnifiedBookingDialog({
       setItems([booking(first, initialDate)]);
       setStep(0);
       setActiveIndex(0);
+      setCreatedReservations([]);
+      setPaymentLinks([]);
+      setPaymentLinkPhone("");
+      setSavedCount(0);
+      setPartialSaveError("");
     }
   }, [open, initialDate, first]);
   const total = useMemo(
@@ -1495,15 +1581,24 @@ export function UnifiedBookingDialog({
     if (!valid)
       return toast.error("Completa los datos obligatorios y revisa los pagos");
     setSaving(true);
+    const created: CreatedReservation[] = [];
+    let completed = 0;
     try {
       for (const item of items) {
         const due = Math.max(0, item.amountClp - item.discountAmountClp);
+        const paid = item.serviceKind === "massage_program"
+          ? item.programPaymentMethod === "pending_payment"
+            ? 0
+            : due
+          : item.payments
+              .filter(row => row.status === "paid")
+              .reduce((sum, row) => sum + Number(row.amountClp || 0), 0);
         const payments = due > 0 ? item.payments.map(paymentInput) : [];
         if (
           item.service === "massages" &&
           item.serviceKind === "massage_program"
-        )
-          await programCreate.mutateAsync({
+        ) {
+          const result = await programCreate.mutateAsync({
             program: item.serviceId.replace(/^program:/, "") as any,
             duration: item.duration === 30 ? 30 : 50,
             modality: item.modality,
@@ -1522,8 +1617,13 @@ export function UnifiedBookingDialog({
             paymentReference: item.programPaymentReference.trim() || undefined,
             notes: item.notes.trim() || undefined,
           });
-        else if (item.service === "massages")
-          await massageCreate.mutateAsync({
+          if (due > paid)
+            created.push({
+              service: "massage_programs",
+              reservationId: result.id,
+            });
+        } else if (item.service === "massages") {
+          const result = await massageCreate.mutateAsync({
             clientName: client.name.trim(),
             clientEmail: client.email.trim(),
             clientPhone: client.phone.trim(),
@@ -1539,8 +1639,10 @@ export function UnifiedBookingDialog({
             discountCode: item.discountCode.trim() || undefined,
             notes: item.notes.trim() || undefined,
           });
-        else if (item.service === "biopools")
-          await bioCreate.mutateAsync({
+          if (due > paid)
+            created.push({ service: "massages", reservationId: result.id });
+        } else if (item.service === "biopools") {
+          const result = await bioCreate.mutateAsync({
             serviceId: Number(item.serviceId),
             clientName: client.name.trim(),
             clientEmail: client.email.trim(),
@@ -1555,8 +1657,10 @@ export function UnifiedBookingDialog({
             notes: item.notes.trim() || undefined,
             source: "cms",
           });
-        else
-          await saunaCreate.mutateAsync({
+          if (due > paid)
+            created.push({ service: "biopools", reservationId: result.id });
+        } else {
+          const result = await saunaCreate.mutateAsync({
             serviceName: item.serviceName || "Sauna Nativo",
             kind: (["shared", "private", "staff", "manual"].includes(
               item.serviceKind
@@ -1576,26 +1680,80 @@ export function UnifiedBookingDialog({
             notes: item.notes.trim() || undefined,
             isConfirmed: true,
           });
+          if (due > paid)
+            created.push({ service: "sauna", reservationId: result.id });
+        }
+        completed += 1;
       }
-      await onCreated();
+      try {
+        await onCreated();
+      } catch {
+        toast.warning("Las reservas se guardaron, pero el calendario demoró en actualizarse");
+      }
+      setCreatedReservations(created);
+      setPaymentLinks([]);
+      setPaymentLinkPhone(client.phone.trim());
+      setSavedCount(completed);
+      setPartialSaveError("");
+      setStep(7);
       toast.success(
         items.length === 1
           ? "Reserva creada"
           : `${items.length} reservas creadas para ${client.name}`
       );
-      onOpenChange(false);
     } catch (error) {
-      toast.error(
+      const message =
         error instanceof Error
           ? error.message
-          : "No se pudieron crear las reservas"
-      );
+          : "No se pudieron crear las reservas";
+      if (completed > 0) {
+        try {
+          await onCreated();
+        } catch {
+          // Las reservas confirmadas por el servidor siguen siendo válidas;
+          // Calendario 360 las recogerá en su siguiente actualización.
+        }
+        setCreatedReservations(created);
+        setPaymentLinks([]);
+        setPaymentLinkPhone(client.phone.trim());
+        setSavedCount(completed);
+        setPartialSaveError(message);
+        setStep(7);
+        toast.warning(
+          `${completed} ${completed === 1 ? "reserva fue guardada" : "reservas fueron guardadas"}; una reserva no pudo crearse`
+        );
+      } else {
+        toast.error(message);
+      }
     } finally {
       setSaving(false);
     }
   };
 
-  const progress = Math.min(100, ((step + 1) / 7) * 100);
+  const generatePaymentLinks = async () => {
+    if (!createdReservations.length) return;
+    setPaymentLinks([]);
+    try {
+      const result: any = await createPaymentLinks.mutateAsync({
+        reservations: createdReservations,
+      });
+      setPaymentLinks(result.links);
+      setPaymentLinkPhone(result.clientPhone || client.phone.trim());
+      toast.success(
+        result.links.length === 1
+          ? "Link de pago generado"
+          : `${result.links.length} links de pago generados`
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No fue posible generar el link de pago"
+      );
+    }
+  };
+
+  const progress = step === 7 ? 100 : Math.min(100, ((step + 1) / 7) * 100);
   const updateActive = (nextValue: BookingDraft) =>
     setItems(current =>
       current.map((row, index) => (index === activeIndex ? nextValue : row))
@@ -1605,7 +1763,7 @@ export function UnifiedBookingDialog({
       <DialogContent className="max-h-[96vh] max-w-3xl overflow-y-auto border-stone-200 bg-[#f8f6f2] p-4 sm:p-6">
         <DialogHeader>
           <div className="flex items-start gap-3">
-            {step > 0 && (
+            {step > 0 && step < 7 && (
               <Button
                 type="button"
                 size="icon"
@@ -1620,12 +1778,18 @@ export function UnifiedBookingDialog({
               <DialogTitle>
                 {step === 0
                   ? "Selecciona el servicio a reservar"
+                  : step === 7
+                    ? "Reserva creada con éxito"
                   : step === 6
                     ? "Resumen de la reserva"
                     : "Completa los datos para reservar"}
               </DialogTitle>
               <DialogDescription>
-                {items.length > 1
+                {step === 7
+                  ? createdReservations.length
+                    ? "Ya puedes generar y enviar el pago al cliente"
+                    : "La reserva quedó registrada correctamente"
+                  : items.length > 1
                   ? `${items.length} reservas para el mismo cliente`
                   : "Reserva manual desde Calendario 360"}
               </DialogDescription>
@@ -1881,6 +2045,90 @@ export function UnifiedBookingDialog({
               </div>
             </div>
           )}
+          {step === 7 && (
+            <div className="space-y-5 rounded-3xl border bg-white p-4 sm:p-6">
+              <div className="text-center">
+                <span
+                  className={cn(
+                    "mx-auto flex h-14 w-14 items-center justify-center rounded-full",
+                    partialSaveError
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-emerald-100 text-emerald-700"
+                  )}
+                >
+                  {partialSaveError ? (
+                    <AlertTriangle className="h-8 w-8" />
+                  ) : (
+                    <CheckCircle2 className="h-8 w-8" />
+                  )}
+                </span>
+                <h3 className="mt-3 text-2xl font-semibold">
+                  {savedCount === 1
+                    ? "Reserva guardada"
+                    : `${savedCount} reservas guardadas`}
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {partialSaveError
+                    ? "No vuelvas a confirmar el grupo: las reservas indicadas ya existen."
+                    : "Calendario 360 y los módulos correspondientes ya están actualizados."}
+                </p>
+              </div>
+
+              {partialSaveError && (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+                  <p className="font-semibold">El guardado quedó incompleto</p>
+                  <p className="mt-1 text-sm">
+                    No se completó la siguiente reserva: {partialSaveError}
+                  </p>
+                  <p className="mt-2 text-xs">
+                    Las reservas posteriores no se intentaron. Cierra esta ventana y agrega únicamente las faltantes para evitar duplicados.
+                  </p>
+                </div>
+              )}
+
+              {createdReservations.length ? (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="font-semibold text-amber-950">
+                      {paymentLinks.length
+                        ? `Cobro por link · ${clp(paymentLinks.reduce((sum, link) => sum + link.totalClp, 0))}`
+                        : "La reserva tiene saldo pendiente"}
+                    </p>
+                    <p className="text-sm text-amber-800">
+                      El link quedará relacionado con la reserva y se marcará
+                      pagada automáticamente cuando el proveedor confirme el
+                      cobro.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    className="w-full"
+                    variant={paymentLinks.length ? "outline" : "default"}
+                    disabled={createPaymentLinks.isPending}
+                    onClick={generatePaymentLinks}
+                  >
+                    <Link2 className="mr-2 h-4 w-4" />
+                    {createPaymentLinks.isPending
+                      ? "Generando…"
+                      : paymentLinks.length
+                        ? "Recrear links de pago"
+                        : createdReservations.length === 1
+                          ? "Generar link de pago"
+                          : "Generar links de pago"}
+                  </Button>
+                  <ReservationPaymentLinks
+                    links={paymentLinks}
+                    clientName={client.name}
+                    clientPhone={paymentLinkPhone}
+                  />
+                </div>
+              ) : (
+                <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center text-sm text-emerald-800">
+                  No quedó saldo pendiente por cobrar.
+                </p>
+              )}
+            </div>
+          )}
         </div>
         <DialogFooter className="mt-2">
           {step < 5 && (
@@ -1914,6 +2162,11 @@ export function UnifiedBookingDialog({
                     : `Confirmar ${items.length} reservas`}
               </Button>
             </>
+          )}
+          {step === 7 && (
+            <Button type="button" onClick={() => onOpenChange(false)}>
+              Cerrar
+            </Button>
           )}
         </DialogFooter>
       </DialogContent>

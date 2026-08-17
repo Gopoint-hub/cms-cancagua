@@ -27,6 +27,7 @@ import {
   ExternalLink,
   Filter,
   ListChecks,
+  Link2,
   Mail,
   Phone,
   Pencil,
@@ -66,6 +67,10 @@ import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/useMobile";
 import { toast } from "sonner";
 import { UnifiedBookingDialog } from "./UnifiedBookingDialog";
+import {
+  ReservationPaymentLinks,
+  type ReservationPaymentLink,
+} from "@/components/cms/ReservationPaymentLinks";
 
 type ViewMode = "day" | "week" | "month";
 type DayMode = "list" | "summary" | "services";
@@ -229,9 +234,9 @@ function emptyPayment(amountClp = ""): PaymentDraft {
 }
 
 const PAYMENT_METHODS: Record<"massages" | "biopools" | "sauna", string[]> = {
-  massages: ["pending_payment", "getnet_link", "getnet_pos", "bank_transfer", "cash", "gift_card", "transbank"],
-  biopools: ["pending_payment", "payment_link", "bank_transfer", "cash", "gift_card", "transbank_machine"],
-  sauna: ["pending_payment", "payment_link", "bank_transfer", "cash", "gift_card", "transbank_machine"],
+  massages: ["pending_payment", "getnet_pos", "bank_transfer", "cash", "gift_card", "transbank"],
+  biopools: ["pending_payment", "bank_transfer", "cash", "gift_card", "transbank_machine"],
+  sauna: ["pending_payment", "bank_transfer", "cash", "gift_card", "transbank_machine"],
 };
 const CARD_METHODS = new Set(["getnet_link", "getnet_pos", "payment_link", "transbank", "transbank_machine"]);
 
@@ -383,7 +388,18 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
   const [discountCode, setDiscountCode] = useState(detail.payment?.discountCode ?? "");
   const [giftCardCode, setGiftCardCode] = useState("");
   const [giftCardAmount, setGiftCardAmount] = useState(String(detail.payment?.balanceAmountClp || ""));
+  const [paymentLinks, setPaymentLinks] = useState<ReservationPaymentLink[]>([]);
+  const [paymentLinkPhone, setPaymentLinkPhone] = useState(detail.client?.phone ?? "");
   const [busy, setBusy] = useState(false);
+  const activePaymentLink =
+    trpc.reservationPaymentLinks.activeForReservation.useQuery(
+      { service, reservationId: event.entityId },
+      {
+        refetchInterval: 10_000,
+        refetchIntervalInBackground: true,
+        refetchOnWindowFocus: true,
+      }
+    );
 
   useEffect(() => {
     setDraft(emptyPayment(String(detail.payment?.balanceAmountClp || "")));
@@ -391,6 +407,8 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     setDiscountCode(detail.payment?.discountCode ?? "");
     setGiftCardCode("");
     setGiftCardAmount(String(detail.payment?.balanceAmountClp || ""));
+    setPaymentLinks([]);
+    setPaymentLinkPhone(detail.client?.phone ?? "");
   }, [event.id, detail.payment?.balanceAmountClp, detail.payment?.discountCode]);
 
   const massageAdd = trpc.masajes.agenda.addPayment.useMutation();
@@ -406,6 +424,30 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
   const saunaRemove = trpc.sauna.agenda.removePayment.useMutation();
   const materializeLegacy = trpc.operations360.materializeLegacyPayment.useMutation();
   const replaceGiftCard = trpc.operations360.replaceGiftCardPayment.useMutation();
+  const createPaymentLinks = trpc.reservationPaymentLinks.create.useMutation();
+  const cancelPaymentLinkMutation =
+    trpc.reservationPaymentLinks.cancel.useMutation();
+  const paymentLinkLocked =
+    activePaymentLink.data?.status === "active" ||
+    activePaymentLink.data?.status === "processing" ||
+    activePaymentLink.data?.status === "reconciliation_required";
+
+  useEffect(() => {
+    const active = activePaymentLink.data;
+    if (!active) {
+      if (activePaymentLink.isFetched) setPaymentLinks([]);
+      return;
+    }
+    setPaymentLinks([
+      {
+        token: active.token,
+        url: active.url,
+        provider: active.provider,
+        totalClp: active.totalClp,
+        reservationCount: active.reservationCount,
+      },
+    ]);
+  }, [activePaymentLink.data?.token, activePaymentLink.isFetched]);
 
   const refresh = async (message: string) => {
     await onChanged();
@@ -487,30 +529,122 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     }), "Gift Card aplicada y saldo actualizado");
   };
 
+  const generatePaymentLink = async () => {
+    setPaymentLinks([]);
+    setBusy(true);
+    try {
+      const result: any = await createPaymentLinks.mutateAsync({
+        reservations: [{ service, reservationId: event.entityId }],
+      });
+      setPaymentLinks(result.links);
+      setPaymentLinkPhone(result.clientPhone || detail.client?.phone || "");
+      await Promise.all([activePaymentLink.refetch(), onChanged()]);
+      toast.success("Link de pago generado");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No fue posible generar el link de pago"
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelPaymentLink = async () => {
+    const token = paymentLinks[0]?.token;
+    if (!token) return;
+    const reservationCount = paymentLinks[0]?.reservationCount ?? 1;
+    const scope = reservationCount > 1
+      ? `Este cobro corresponde a ${reservationCount} reservas y el cliente ya no podrá utilizarlo.`
+      : "El cliente ya no podrá utilizarlo.";
+    if (!window.confirm(`¿Cancelar este link de pago? ${scope}`)) return;
+    setBusy(true);
+    try {
+      await cancelPaymentLinkMutation.mutateAsync({ token });
+      setPaymentLinks([]);
+      await Promise.all([activePaymentLink.refetch(), onChanged()]);
+      toast.success("Link de pago cancelado");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No fue posible cancelar el link de pago"
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return <div className="space-y-4">
     <div className="overflow-hidden rounded-xl border">
       {detail.payment.lines.map((line: any) => {
         const processorProtected = ["webpay", "webpay_plus", "getnet"].includes(line.method);
+        const linkedPlaceholder =
+          ["payment_link", "getnet_link"].includes(line.method) &&
+          String(line.reference ?? "").startsWith("PAYLINK:");
+        const lockedPayment = processorProtected || linkedPlaceholder;
         const giftCard = line.method === "gift_card";
         const removableDiscount = line.type === "discount" && line.status === "applied" && Boolean(detail.payment.discountCode) && (service === "massages" || service === "biopools");
         return <div key={line.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 border-b p-3 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] sm:items-center sm:p-4">
           <div><p className="font-semibold">{paymentLabel(line.method)}</p><p className={cn("text-xs", line.type === "discount" ? "text-emerald-700" : "text-muted-foreground")}>{paymentLabel(line.status)}</p></div>
           <div className="col-span-2 text-xs text-muted-foreground sm:col-span-1"><p className={cn("break-words", line.type === "discount" && "font-mono font-semibold text-violet-700")}>{line.reference || "Sin referencia"}</p>{line.cardType && <p>{line.cardType === "credit" ? "Crédito" : "Débito"}</p>}{line.at && <p>{new Date(line.at).toLocaleString("es-CL")}</p>}</div>
           <p className={cn("col-start-2 row-start-1 font-semibold text-right sm:col-start-auto sm:row-start-auto", line.type === "discount" && "text-emerald-700")}>{line.type === "discount" ? "−" : ""}{money(line.amountClp)}</p>
-          <div className="col-span-2 flex justify-end gap-1 sm:col-span-1">{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title={giftCard ? "Editar Gift Card" : "Editar pago"} disabled={busy} onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !processorProtected && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy} onClick={() => removePayment(line)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{removableDiscount && <Button type="button" size="icon" variant="ghost" title="Eliminar código de descuento" disabled={busy} onClick={() => saveDiscount(true)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Protegido</span>}</div>
+          <div className="col-span-2 flex justify-end gap-1 sm:col-span-1">{line.type === "payment" && !lockedPayment && <Button type="button" size="icon" variant="ghost" title={giftCard ? "Editar Gift Card" : "Editar pago"} disabled={busy || paymentLinkLocked} onClick={() => startEdit(line)}><Pencil className="h-4 w-4" /></Button>}{line.type === "payment" && !lockedPayment && <Button type="button" size="icon" variant="ghost" title="Eliminar pago" disabled={busy || paymentLinkLocked} onClick={() => removePayment(line)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{removableDiscount && <Button type="button" size="icon" variant="ghost" title="Eliminar código de descuento" disabled={busy || paymentLinkLocked} onClick={() => saveDiscount(true)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}{processorProtected && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Protegido</span>}{linkedPlaceholder && line.type === "payment" && <span className="self-center text-xs text-muted-foreground">Vinculado al link</span>}</div>
         </div>;
       })}
       {!detail.payment.lines.length && <p className="p-4 text-sm text-muted-foreground">Esta reserva todavía no tiene pagos detallados.</p>}
     </div>
 
-    {(detail.payment.balanceAmountClp > 0 || editingId) && <div className="space-y-3 rounded-xl border border-dashed bg-background/80 p-3"><div className="flex items-center justify-between"><p className="font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</p>{editingId && <Button type="button" size="sm" variant="ghost" onClick={() => { setEditingId(null); setDraft(emptyPayment(String(detail.payment.balanceAmountClp || ""))); }}><X className="mr-1 h-4 w-4" />Cancelar</Button>}</div>
-      <div className="grid gap-3 sm:grid-cols-2"><div><Label>Medio de pago</Label><Select value={draft.method} disabled={editingId !== null && draft.method === "gift_card"} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "pending_payment" ? "pending" : method === "gift_card" ? "paid" : current.status }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{PAYMENT_METHODS[service].map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent></Select></div><div><Label>Estado</Label><Select value={draft.status} disabled={draft.method === "gift_card" || draft.method === "pending_payment"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente de pago</SelectItem></SelectContent></Select></div><div><Label>Monto</Label><Input type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>{draft.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}{draft.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código de Gift Card</Label><Input value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div> : draft.method !== "cash" && draft.status === "paid" ? <div><Label>Referencia</Label><Input value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div> : null}{CARD_METHODS.has(draft.method) && draft.status === "paid" && <div><Label>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}</div>
-      <Button type="button" disabled={busy || !validPayment(draft)} onClick={savePayment}><Plus className="mr-2 h-4 w-4" />{editingId ? "Guardar cambios" : "Agregar pago"}</Button>
+    {(detail.payment.balanceAmountClp > 0 || Boolean(activePaymentLink.data)) && <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 sm:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="font-semibold">Cobrar saldo por internet</p><p className="text-xs text-muted-foreground">Genera un link relacionado con esta reserva. Al pagarse, el estado se actualizará automáticamente.</p></div>
+        <Button type="button" variant={paymentLinks.length ? "outline" : "default"} disabled={busy || createPaymentLinks.isPending || paymentLinkLocked} onClick={generatePaymentLink}><Link2 className="mr-2 h-4 w-4" />{createPaymentLinks.isPending ? "Generando…" : paymentLinks.length ? "Link vigente" : "Generar link de pago"}</Button>
+      </div>
+      <ReservationPaymentLinks links={paymentLinks} clientPhone={paymentLinkPhone} clientName={detail.client?.name} />
+      {paymentLinks.length > 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">
+            {activePaymentLink.data?.status === "processing"
+              ? "El cliente ya inició el pago. Esperando confirmación de la pasarela."
+              : activePaymentLink.data?.status === "reconciliation_required"
+                ? "El proveedor informó un pago y quedó pendiente de revisión interna. No realices un nuevo cobro."
+              : "Este link seguirá disponible al volver a abrir la reserva."}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={
+              busy ||
+              cancelPaymentLinkMutation.isPending ||
+              activePaymentLink.data?.status !== "active"
+            }
+            onClick={cancelPaymentLink}
+          >
+            Cancelar link
+          </Button>
+        </div>
+      )}
+      {paymentLinkLocked && (
+        <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+          {activePaymentLink.data?.status === "processing"
+            ? "El pago ya fue iniciado. Espera la confirmación antes de modificar la reserva."
+            : activePaymentLink.data?.status === "reconciliation_required"
+              ? "El pago electrónico está en revisión. No modifiques la reserva ni registres otro cobro hasta conciliarlo."
+            : "Cancela el link vigente antes de agregar pagos, descuentos o Gift Cards."}
+        </p>
+      )}
     </div>}
 
-    {detail.payment.balanceAmountClp > 0 && (service === "massages" || service === "biopools") && <div className="space-y-2 rounded-xl border bg-background/80 p-3"><Label>Código de descuento</Label><div className="flex flex-col gap-2 sm:flex-row"><Input value={discountCode} onChange={e => setDiscountCode(e.target.value.toUpperCase())} placeholder="Código" /><Button type="button" variant="outline" disabled={busy || !discountCode.trim()} onClick={() => saveDiscount(false)}>Aplicar o cambiar</Button>{detail.payment.discountCode && <Button type="button" variant="destructive" disabled={busy} onClick={() => saveDiscount(true)}>Eliminar</Button>}</div></div>}
+    {(detail.payment.balanceAmountClp > 0 || editingId) && <fieldset disabled={paymentLinkLocked} className="space-y-3 rounded-xl border border-dashed bg-background/80 p-3 disabled:opacity-60"><div className="flex items-center justify-between"><p className="font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</p>{editingId && <Button type="button" size="sm" variant="ghost" onClick={() => { setEditingId(null); setDraft(emptyPayment(String(detail.payment.balanceAmountClp || ""))); }}><X className="mr-1 h-4 w-4" />Cancelar</Button>}</div>
+      <div className="grid gap-3 sm:grid-cols-2"><div><Label>Medio de pago</Label><Select value={draft.method} disabled={editingId !== null && draft.method === "gift_card"} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "pending_payment" ? "pending" : method === "gift_card" ? "paid" : current.status }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{PAYMENT_METHODS[service].map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent></Select></div><div><Label>Estado</Label><Select value={draft.status} disabled={draft.method === "gift_card" || draft.method === "pending_payment"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente de pago</SelectItem></SelectContent></Select></div><div><Label>Monto</Label><Input type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>{draft.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}{draft.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código de Gift Card</Label><Input value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div> : draft.method !== "cash" && draft.status === "paid" ? <div><Label>Referencia</Label><Input value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div> : null}{CARD_METHODS.has(draft.method) && draft.status === "paid" && <div><Label>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}</div>
+      <Button type="button" disabled={busy || paymentLinkLocked || !validPayment(draft)} onClick={savePayment}><Plus className="mr-2 h-4 w-4" />{editingId ? "Guardar cambios" : "Agregar pago"}</Button>
+    </fieldset>}
 
-    {detail.payment.balanceAmountClp > 0 && <div className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/70 p-3"><div><p className="font-semibold">Aplicar Gift Card</p><p className="text-xs text-muted-foreground">Se descontará el monto utilizado y se conservará automáticamente cualquier saldo a favor.</p></div><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto]"><div><Label>Código de Gift Card</Label><Input value={giftCardCode} onChange={e => setGiftCardCode(e.target.value.toUpperCase())} placeholder="Código" /></div><div><Label>Monto a utilizar</Label><Input type="number" min={1} max={detail.payment.balanceAmountClp} value={giftCardAmount} onChange={e => setGiftCardAmount(e.target.value)} /></div><Button className="self-end" type="button" disabled={busy || !giftCardCode.trim() || !giftCardAmount} onClick={applyGiftCard}>Aplicar</Button></div></div>}
+    {detail.payment.balanceAmountClp > 0 && (service === "massages" || service === "biopools") && <div className="space-y-2 rounded-xl border bg-background/80 p-3"><Label>Código de descuento</Label><div className="flex flex-col gap-2 sm:flex-row"><Input value={discountCode} onChange={e => setDiscountCode(e.target.value.toUpperCase())} placeholder="Código" disabled={paymentLinkLocked} /><Button type="button" variant="outline" disabled={busy || paymentLinkLocked || !discountCode.trim()} onClick={() => saveDiscount(false)}>Aplicar o cambiar</Button>{detail.payment.discountCode && <Button type="button" variant="destructive" disabled={busy || paymentLinkLocked} onClick={() => saveDiscount(true)}>Eliminar</Button>}</div></div>}
+
+    {detail.payment.balanceAmountClp > 0 && <div className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/70 p-3"><div><p className="font-semibold">Aplicar Gift Card</p><p className="text-xs text-muted-foreground">Se descontará el monto utilizado y se conservará automáticamente cualquier saldo a favor.</p></div><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto]"><div><Label>Código de Gift Card</Label><Input value={giftCardCode} onChange={e => setGiftCardCode(e.target.value.toUpperCase())} placeholder="Código" disabled={paymentLinkLocked} /></div><div><Label>Monto a utilizar</Label><Input type="number" min={1} max={detail.payment.balanceAmountClp} value={giftCardAmount} onChange={e => setGiftCardAmount(e.target.value)} disabled={paymentLinkLocked} /></div><Button className="self-end" type="button" disabled={busy || paymentLinkLocked || !giftCardCode.trim() || !giftCardAmount} onClick={applyGiftCard}>Aplicar</Button></div></div>}
   </div>;
 }
 
@@ -527,7 +661,88 @@ function ProgramPaymentManager({
     "cash" | "bank_transfer" | "getnet_pos" | "transbank"
   >("cash");
   const [reference, setReference] = useState("");
+  const [paymentLinks, setPaymentLinks] = useState<ReservationPaymentLink[]>([]);
+  const [paymentLinkPhone, setPaymentLinkPhone] = useState(detail.client?.phone ?? "");
   const settle = trpc.masajes.agenda.settleSkeduProgramPayment.useMutation();
+  const createPaymentLinks = trpc.reservationPaymentLinks.create.useMutation();
+  const cancelPaymentLinkMutation = trpc.reservationPaymentLinks.cancel.useMutation();
+  const activePaymentLink =
+    trpc.reservationPaymentLinks.activeForReservation.useQuery(
+      { service: "massage_programs", reservationId: event.entityId },
+      {
+        refetchInterval: 10_000,
+        refetchIntervalInBackground: true,
+        refetchOnWindowFocus: true,
+      }
+    );
+  const paymentLinkLocked =
+    activePaymentLink.data?.status === "active" ||
+    activePaymentLink.data?.status === "processing" ||
+    activePaymentLink.data?.status === "reconciliation_required";
+
+  useEffect(() => {
+    setPaymentLinks([]);
+    setPaymentLinkPhone(detail.client?.phone ?? "");
+  }, [event.id, detail.payment?.balanceAmountClp]);
+
+  useEffect(() => {
+    const active = activePaymentLink.data;
+    if (!active) {
+      if (activePaymentLink.isFetched) setPaymentLinks([]);
+      return;
+    }
+    setPaymentLinks([
+      {
+        token: active.token,
+        url: active.url,
+        provider: active.provider,
+        totalClp: active.totalClp,
+        reservationCount: active.reservationCount,
+      },
+    ]);
+  }, [activePaymentLink.data?.token, activePaymentLink.isFetched]);
+
+  const generatePaymentLink = async () => {
+    setPaymentLinks([]);
+    try {
+      const result: any = await createPaymentLinks.mutateAsync({
+        reservations: [
+          { service: "massage_programs", reservationId: event.entityId },
+        ],
+      });
+      setPaymentLinks(result.links);
+      setPaymentLinkPhone(result.clientPhone || detail.client?.phone || "");
+      await Promise.all([activePaymentLink.refetch(), onChanged()]);
+      toast.success("Link de pago generado");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No fue posible generar el link de pago"
+      );
+    }
+  };
+  const cancelPaymentLink = async () => {
+    const token = paymentLinks[0]?.token;
+    if (!token) return;
+    const reservationCount = paymentLinks[0]?.reservationCount ?? 1;
+    const scope = reservationCount > 1
+      ? `Este cobro corresponde a ${reservationCount} reservas y el cliente ya no podrá utilizarlo.`
+      : "El cliente ya no podrá utilizarlo.";
+    if (!window.confirm(`¿Cancelar este link de pago? ${scope}`)) return;
+    try {
+      await cancelPaymentLinkMutation.mutateAsync({ token });
+      setPaymentLinks([]);
+      await Promise.all([activePaymentLink.refetch(), onChanged()]);
+      toast.success("Link de pago cancelado");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No fue posible cancelar el link de pago"
+      );
+    }
+  };
   const save = async () => {
     if (method !== "cash" && !reference.trim()) {
       return toast.error("Indica la referencia del pago");
@@ -548,6 +763,66 @@ function ProgramPaymentManager({
   };
   return (
     <div className="space-y-3 rounded-xl border border-red-200 bg-red-50/60 p-4">
+      <div className="space-y-3 rounded-xl border border-emerald-200 bg-white p-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold">Enviar cobro por Getnet</p>
+            <p className="text-xs text-muted-foreground">
+              El pago quedará asociado a este programa y se actualizará automáticamente.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant={paymentLinks.length ? "outline" : "default"}
+            disabled={createPaymentLinks.isPending || paymentLinkLocked}
+            onClick={generatePaymentLink}
+          >
+            <Link2 className="mr-2 h-4 w-4" />
+            {createPaymentLinks.isPending
+              ? "Generando…"
+              : paymentLinks.length
+                ? "Link vigente"
+                : "Generar link de pago"}
+          </Button>
+        </div>
+        <ReservationPaymentLinks
+          links={paymentLinks}
+          clientPhone={paymentLinkPhone}
+          clientName={detail.client?.name}
+        />
+        {paymentLinks.length > 0 && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              {activePaymentLink.data?.status === "processing"
+                ? "El cliente ya inició el pago. Esperando confirmación de Getnet."
+                : activePaymentLink.data?.status === "reconciliation_required"
+                  ? "Getnet informó un pago y quedó pendiente de revisión interna. No realices un nuevo cobro."
+                : "Este link seguirá disponible al volver a abrir el programa."}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              disabled={
+                cancelPaymentLinkMutation.isPending ||
+                activePaymentLink.data?.status !== "active"
+              }
+              onClick={cancelPaymentLink}
+            >
+              Cancelar link
+            </Button>
+          </div>
+        )}
+        {paymentLinkLocked && (
+          <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+            {activePaymentLink.data?.status === "processing"
+              ? "El pago ya fue iniciado. Espera la confirmación de Getnet."
+              : activePaymentLink.data?.status === "reconciliation_required"
+                ? "El pago electrónico está en revisión. No registres otro cobro hasta conciliarlo."
+              : "Cancela el link vigente antes de registrar otro pago."}
+          </p>
+        )}
+      </div>
       <div>
         <p className="font-semibold">
           Cobrar saldo del check-in · {money(detail.payment.balanceAmountClp)}
@@ -576,7 +851,7 @@ function ProgramPaymentManager({
           </div>
         )}
       </div>
-      <Button type="button" variant="destructive" disabled={settle.isPending} onClick={save}>
+      <Button type="button" variant="destructive" disabled={settle.isPending || paymentLinkLocked} onClick={save}>
         <CircleDollarSign className="mr-2 h-4 w-4" />
         Confirmar pago completo
       </Button>
@@ -784,7 +1059,11 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
   const [tab, setTab] = useState("general");
   const query = trpc.operations360.detail.useQuery(
     { kind: event?.kind ?? "biopool", entityId: event?.entityId ?? 1, date: event?.date ?? dateKey(new Date()) },
-    { enabled: open && Boolean(event) }
+    {
+      enabled: open && Boolean(event),
+      refetchInterval:
+        open && event?.paymentStatus !== "paid" ? 10_000 : false,
+    }
   );
   const detail: any = query.data;
   useEffect(() => {

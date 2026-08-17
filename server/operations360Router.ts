@@ -36,6 +36,7 @@ import {
 import { protectedProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { redeemGiftCardPayment } from "./reservationPayments";
+import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
 import { parseRescheduleAuditLines } from "./rescheduleAudit";
 import { syncMassageSale } from "./massageSales";
 
@@ -210,9 +211,9 @@ export function buildPaymentDetail(input: {
   historicalDiscountAmountClp?: unknown;
 }) {
   const discountAmountClp = money(input.discountAmountClp);
-  const amountPaidClp = money(input.amountPaidClp);
+  const reportedAmountPaidClp = money(input.amountPaidClp);
   const originalAmountClp = input.originalAmountClp == null
-    ? Math.max(0, amountPaidClp + discountAmountClp)
+    ? Math.max(0, reportedAmountPaidClp + discountAmountClp)
     : money(input.originalAmountClp);
   const totalAmountClp = Math.max(0, originalAmountClp - discountAmountClp);
   const rows = input.rows ?? [];
@@ -252,7 +253,14 @@ export function buildPaymentDetail(input: {
   const detailedPaidClp = rows
     .filter(row => row.status === "paid")
     .reduce((sum, row) => sum + money(row.amountClp), 0);
-  const legacyPaidClp = Math.max(0, amountPaidClp - detailedPaidClp);
+  // Algunos checkouts históricos guardaron el precio en amountPaid mientras
+  // la reserva aún seguía pendiente. Solo se reconoce el excedente legacy si
+  // el estado de la reserva confirma que hubo un pago real.
+  const recognizesLegacyPaid = ["paid", "partially_paid", "partially_refunded", "refunded"].includes(input.status ?? "");
+  const legacyPaidClp = recognizesLegacyPaid
+    ? Math.max(0, reportedAmountPaidClp - detailedPaidClp)
+    : 0;
+  const amountPaidClp = detailedPaidClp + legacyPaidClp;
   if (legacyPaidClp > 0 || (!rows.length && input.method)) {
     lines.push({
       id: "payment:summary",
@@ -1164,6 +1172,7 @@ export const operations360Router = router({
         )).limit(1);
         if (!payment?.giftCardId || payment.method !== "gift_card")
           throw new TRPCError({ code: "BAD_REQUEST", message: "El pago no corresponde a una Gift Card editable" });
+        await assertNoLiveReservationPaymentAttempt(tx, input.service, payment.reservationId);
 
         let totalClp = 0;
         let currentPaidClp = 0;

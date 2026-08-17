@@ -96,6 +96,8 @@ import {
 } from "./regularClassesPurchase";
 import { calculatedPaymentStatus } from "@shared/reservationPayments";
 import {
+  assertReservationPaymentEditable,
+  PROTECTED_ELECTRONIC_PAYMENT_METHODS,
   redeemGiftCardPayment,
   reservationPaymentDate,
   reservationPaymentInputSchema,
@@ -111,6 +113,7 @@ import {
   appendRescheduleAuditLine,
   buildRescheduleAuditLine,
 } from "./rescheduleAudit";
+import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 const skeduProgramPaymentMethodSchema = z.enum([
@@ -378,7 +381,7 @@ export function expandSkeduProgramResourceBlocks(
 type MassageDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
 async function loadBlockingMassageBookings(
-  db: MassageDb,
+  db: Pick<MassageDb, "select">,
   bookingDate: string,
   options: {
     excludeMassageBookingId?: number;
@@ -1827,6 +1830,7 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.transaction(async tx => {
+        await assertNoLiveReservationPaymentAttempt(tx, "massage_programs", input.id);
         const [booking] = await tx
           .select()
           .from(massageProgramBookings)
@@ -2004,20 +2008,20 @@ const agendaRouter = router({
           message: "Debes indicar por qué se cancela el masaje",
         });
       }
-      await db
-        .update(massageProgramBookings)
-        .set({
+      await db.transaction(async tx => {
+        if (input.status === "cancelled") await assertNoLiveReservationPaymentAttempt(tx, "massage_programs", input.id);
+        await tx.update(massageProgramBookings).set({
           status: input.status,
           ...(input.status === "cancelled"
             ? {
-            cancellationCategory: input.cancellationCategory,
-            cancellationReason: input.cancellationReason,
-            cancelledAt: new Date(),
-            cancelledByUserId: ctx.user.id,
+                cancellationCategory: input.cancellationCategory,
+                cancellationReason: input.cancellationReason,
+                cancelledAt: new Date(),
+                cancelledByUserId: ctx.user.id,
               }
             : {}),
-        })
-        .where(eq(massageProgramBookings.id, input.id));
+        }).where(eq(massageProgramBookings.id, input.id));
+      });
       await stopTherapistAssignmentForBooking("skedu_program", input.id);
       return { success: true };
     }),
@@ -2148,9 +2152,13 @@ const agendaRouter = router({
               )
             )
         : [];
-      const programPayments = new Map(
-        programPaymentRows.map(payment => [payment.reservationId, payment])
-      );
+      const programPayments = new Map<number, typeof programPaymentRows>();
+      for (const payment of programPaymentRows) {
+        programPayments.set(payment.reservationId, [
+          ...(programPayments.get(payment.reservationId) ?? []),
+          payment,
+        ]);
+      }
       const therapists = await db
         .select({ id: massageTherapists.id, name: massageTherapists.name })
         .from(massageTherapists);
@@ -2172,13 +2180,22 @@ const agendaRouter = router({
         externalReference: null,
       }));
       const skeduBookings = programRows.map(row => {
-        const payment = programPayments.get(row.id);
+        const payments = programPayments.get(row.id) ?? [];
         const totalClp =
           getSkeduMassageUnitPrice(row.duration) *
           getSkeduMassageQuantity(row.modality);
-        const paid = payment
-          ? payment.status === "paid"
-          : row.paymentMethod !== "pending_payment";
+        // Un link agrega un placeholder pendiente junto a cualquier abono ya
+        // existente. Se suman todas las filas pagadas: nunca se permite que
+        // una fila pendiente elegida por orden arbitrario oculte el abono, ni
+        // que una fila pagada convierta por sí sola el total en pagado.
+        const paidAmountClp = payments.length
+          ? payments
+              .filter(payment => payment.status === "paid")
+              .reduce((sum, payment) => sum + payment.amountClp, 0)
+          : row.paymentMethod !== "pending_payment" && row.paymentMethod !== "getnet_link"
+            ? totalClp
+            : 0;
+        const paymentStatus = calculatedPaymentStatus(paidAmountClp, totalClp);
         return {
         id: row.id,
         bookingKind: "skedu_program" as const,
@@ -2204,8 +2221,8 @@ const agendaRouter = router({
         endTime: row.endTime,
         status: row.status,
         paymentStatus:
-          row.status === "cancelled" ? null : paid ? ("paid" as const) : ("pending" as const),
-        amountPaid: row.status === "cancelled" ? null : String(paid ? totalClp : 0),
+          row.status === "cancelled" ? null : paymentStatus,
+        amountPaid: row.status === "cancelled" ? null : String(paidAmountClp),
         manualPaymentMethod: row.paymentMethod,
         notes: row.notes,
         cancellationCategory: row.cancellationCategory,
@@ -2772,6 +2789,9 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const bookingId = await db.transaction(async tx => {
+        const [targetPayment] = await tx.select().from(reservationPayments)
+          .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+        if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "massages", targetPayment.reservationId);
         const [payment] = await tx
           .select()
           .from(reservationPayments)
@@ -2787,6 +2807,7 @@ const agendaRouter = router({
             code: "NOT_FOUND",
             message: "Pago no encontrado",
           });
+        assertReservationPaymentEditable(payment);
         if (payment.giftCardId)
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -2880,6 +2901,9 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const bookingId = await db.transaction(async tx => {
+        const [targetPayment] = await tx.select().from(reservationPayments)
+          .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+        if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "massages", targetPayment.reservationId);
         const [payment] = await tx
           .select()
           .from(reservationPayments)
@@ -2895,6 +2919,7 @@ const agendaRouter = router({
             code: "NOT_FOUND",
             message: "Pago no encontrado",
           });
+        assertReservationPaymentEditable(payment);
         const [booking] = await tx
           .select()
           .from(massageBookings)
@@ -2996,57 +3021,48 @@ const agendaRouter = router({
         });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [booking] = await db
-        .select()
-        .from(massageBookings)
-        .where(eq(massageBookings.id, input.bookingId))
-        .limit(1);
-      if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-      const originalAmount = Number(booking.originalAmount ?? 0);
-      if (!originalAmount)
-        throw new TRPCError({
+      const result = await db.transaction(async tx => {
+        await assertNoLiveReservationPaymentAttempt(tx, "massages", input.bookingId);
+        const [booking] = await tx.select().from(massageBookings)
+          .where(eq(massageBookings.id, input.bookingId)).limit(1);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        const originalAmount = Number(booking.originalAmount ?? 0);
+        if (!originalAmount) throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Define primero el valor total del masaje",
         });
-      let discountCodeId: number | null = null;
-      let discountCode: string | null = null;
-      let discountAmount = 0;
-      if (input.code) {
-        try {
-          const result = await calculateWellnessCartDiscount(db, input.code, [
-            {
+        let discountCodeId: number | null = null;
+        let discountCode: string | null = null;
+        let discountAmount = 0;
+        if (input.code) {
+          try {
+            const discount = await calculateWellnessCartDiscount(tx, input.code, [{
               service: "masajes",
               serviceId: booking.techniqueId,
               techniqueId: booking.techniqueId,
               originalAmount,
-            },
-          ]);
-          discountCodeId = result.discountCodeId;
-          discountCode = result.code;
-          discountAmount = result.discountTotal;
-        } catch (error) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              error instanceof Error ? error.message : "El código no es válido",
-          });
+            }]);
+            discountCodeId = discount.discountCodeId;
+            discountCode = discount.code;
+            discountAmount = discount.discountTotal;
+          } catch (error) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: error instanceof Error ? error.message : "El código no es válido",
+            });
+          }
         }
-      }
-      const finalTotal = originalAmount - discountAmount;
-      await db
-        .update(massageBookings)
-        .set({
+        const finalTotal = originalAmount - discountAmount;
+        await tx.update(massageBookings).set({
           discountCodeId,
           discountCode,
           discountAmount: String(discountAmount),
-          paymentStatus: calculatedPaymentStatus(
-            Number(booking.amountPaid ?? 0),
-            finalTotal
-          ),
-        })
-        .where(eq(massageBookings.id, booking.id));
-      await syncMassageSale(booking.id);
-      return { success: true, discountCode, discountAmount };
+          paymentStatus: calculatedPaymentStatus(Number(booking.amountPaid ?? 0), finalTotal),
+        }).where(eq(massageBookings.id, booking.id));
+        return { bookingId: booking.id, discountCode, discountAmount };
+      });
+      await syncMassageSale(result.bookingId);
+      return { success: true, discountCode: result.discountCode, discountAmount: result.discountAmount };
     }),
 
   addPayment: protectedProcedure
@@ -3073,6 +3089,7 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const result = await db.transaction(async tx => {
+        await assertNoLiveReservationPaymentAttempt(tx, "massages", input.bookingId);
         const [booking] = await tx
           .select()
           .from(massageBookings)
@@ -3178,6 +3195,9 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const result = await db.transaction(async tx => {
+        const [targetPayment] = await tx.select().from(reservationPayments)
+          .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+        if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "massages", targetPayment.reservationId);
         const [payment] = await tx
           .select()
           .from(reservationPayments)
@@ -3257,20 +3277,20 @@ const agendaRouter = router({
           message: "Debes indicar por qué se cancela el masaje",
         });
       }
-      await db
-        .update(massageBookings)
-        .set({
-        status: input.status,
+      await db.transaction(async tx => {
+        if (input.status === "cancelled") await assertNoLiveReservationPaymentAttempt(tx, "massages", input.id);
+        await tx.update(massageBookings).set({
+          status: input.status,
           ...(input.status === "cancelled"
             ? {
-          cancellationCategory: input.cancellationCategory,
-          cancellationReason: input.cancellationReason,
-          cancelledAt: new Date(),
-          cancelledByUserId: ctx.user.id,
+                cancellationCategory: input.cancellationCategory,
+                cancellationReason: input.cancellationReason,
+                cancelledAt: new Date(),
+                cancelledByUserId: ctx.user.id,
               }
             : {}),
-        })
-        .where(eq(massageBookings.id, input.id));
+        }).where(eq(massageBookings.id, input.id));
+      });
       if (input.status !== "pending") {
         await stopTherapistAssignmentForBooking("massage", input.id);
       }
@@ -3289,97 +3309,117 @@ const agendaRouter = router({
       await massageAgenda(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const [booking] = await db
+      const [initialBooking] = await db
         .select()
         .from(massageBookings)
         .where(eq(massageBookings.id, input.id))
         .limit(1);
-      if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-      if (booking.status === "cancelled")
+      if (!initialBooking) throw new TRPCError({ code: "NOT_FOUND" });
+      if (initialBooking.status === "cancelled")
         throw new TRPCError({ code: "BAD_REQUEST", message: "La reserva está cancelada" });
 
-      return withMassageResourceLock(db, serializeDateOnly(booking.bookingDate)!, async () => {
-        const [technique] = await db
-          .select()
-          .from(massageTechniques)
-          .where(and(eq(massageTechniques.id, input.techniqueId), eq(massageTechniques.active, 1)))
-          .limit(1);
-        if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Tipo de masaje no disponible" });
-        const allowedDurations = technique.durations.split(",").map(Number);
-        if (!allowedDurations.includes(input.duration))
-          throw new TRPCError({ code: "BAD_REQUEST", message: "La duración no está disponible para este masaje" });
-        const originalAmount = massagePriceForDuration(technique, input.duration);
-        if (!originalAmount)
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El masaje no tiene un valor configurado para esa duración" });
-
-        const start = parseTimeMin(booking.startTime);
-        const end = start + input.duration;
-        const blockers = await loadBlockingMassageBookings(db, serializeDateOnly(booking.bookingDate)!, {
-          excludeMassageBookingId: booking.id,
-        });
-        const ownGroup = booking.coupleBookingId ? `booking-group:${booking.coupleBookingId}` : null;
-        const roomBusy = blockers.some(blocker =>
-          blocker.roomId === booking.roomId &&
-          (!ownGroup || blocker.groupKey !== ownGroup) &&
-          overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
-        );
-        const therapistBusy = booking.therapistId != null && blockers.some(blocker =>
-          blocker.therapistId === booking.therapistId &&
-          overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
-        );
-        if (roomBusy || therapistBusy)
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: roomBusy
-              ? "La sala no está disponible durante toda la nueva duración"
-              : "El terapeuta no está disponible durante toda la nueva duración",
-          });
-
-        let discountAmount = 0;
-        let discountCodeId: number | null = null;
-        let discountCode: string | null = null;
-        if (booking.discountCode) {
-          try {
-            const discount = await calculateWellnessCartDiscount(db, booking.discountCode, [{
-              service: "masajes",
-              serviceId: input.techniqueId,
-              techniqueId: input.techniqueId,
-              originalAmount,
-            }]);
-            discountAmount = discount.discountTotal;
-            discountCodeId = discount.discountCodeId;
-            discountCode = discount.code;
-          } catch (error) {
+      const bookingDate = serializeDateOnly(initialBooking.bookingDate)!;
+      return withMassageResourceLock(db, bookingDate, async () => {
+        const result = await db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "massages", input.id);
+          const [booking] = await tx
+            .select()
+            .from(massageBookings)
+            .where(eq(massageBookings.id, input.id))
+            .limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          if (booking.status === "cancelled")
+            throw new TRPCError({ code: "BAD_REQUEST", message: "La reserva está cancelada" });
+          if (serializeDateOnly(booking.bookingDate)! !== bookingDate) {
             throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: error instanceof Error
-                ? `No se pudo mantener el descuento: ${error.message}`
-                : "No se pudo mantener el descuento aplicado",
+              code: "CONFLICT",
+              message: "La reserva cambió mientras se editaba. Vuelve a intentarlo",
             });
           }
-        }
-        const finalAmount = Math.max(0, originalAmount - discountAmount);
-        await db
-          .update(massageBookings)
-          .set({
-            techniqueId: input.techniqueId,
-            duration: input.duration,
-            endTime: formatTimeMin(end),
-            originalAmount: String(originalAmount),
-            discountAmount: String(discountAmount),
-            discountCodeId,
-            discountCode,
-            paymentStatus: calculatedPaymentStatus(Number(booking.amountPaid ?? 0), finalAmount),
-          })
-          .where(eq(massageBookings.id, booking.id));
-        await syncMassageSale(booking.id);
-        return {
-          success: true,
-          originalAmountClp: originalAmount,
-          discountAmountClp: discountAmount,
-          finalAmountClp: finalAmount,
-          overpaymentAmountClp: Math.max(0, Number(booking.amountPaid ?? 0) - finalAmount),
-        };
+
+          const [technique] = await tx
+            .select()
+            .from(massageTechniques)
+            .where(and(eq(massageTechniques.id, input.techniqueId), eq(massageTechniques.active, 1)))
+            .limit(1);
+          if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Tipo de masaje no disponible" });
+          const allowedDurations = technique.durations.split(",").map(Number);
+          if (!allowedDurations.includes(input.duration))
+            throw new TRPCError({ code: "BAD_REQUEST", message: "La duración no está disponible para este masaje" });
+          const originalAmount = massagePriceForDuration(technique, input.duration);
+          if (!originalAmount)
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El masaje no tiene un valor configurado para esa duración" });
+
+          const start = parseTimeMin(booking.startTime);
+          const end = start + input.duration;
+          const blockers = await loadBlockingMassageBookings(tx, bookingDate, {
+            excludeMassageBookingId: booking.id,
+          });
+          const ownGroup = booking.coupleBookingId ? `booking-group:${booking.coupleBookingId}` : null;
+          const roomBusy = blockers.some(blocker =>
+            blocker.roomId === booking.roomId &&
+            (!ownGroup || blocker.groupKey !== ownGroup) &&
+            overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
+          );
+          const therapistBusy = booking.therapistId != null && blockers.some(blocker =>
+            blocker.therapistId === booking.therapistId &&
+            overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
+          );
+          if (roomBusy || therapistBusy)
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: roomBusy
+                ? "La sala no está disponible durante toda la nueva duración"
+                : "El terapeuta no está disponible durante toda la nueva duración",
+            });
+
+          let discountAmount = 0;
+          let discountCodeId: number | null = null;
+          let discountCode: string | null = null;
+          if (booking.discountCode) {
+            try {
+              const discount = await calculateWellnessCartDiscount(tx, booking.discountCode, [{
+                service: "masajes",
+                serviceId: input.techniqueId,
+                techniqueId: input.techniqueId,
+                originalAmount,
+              }]);
+              discountAmount = discount.discountTotal;
+              discountCodeId = discount.discountCodeId;
+              discountCode = discount.code;
+            } catch (error) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: error instanceof Error
+                  ? `No se pudo mantener el descuento: ${error.message}`
+                  : "No se pudo mantener el descuento aplicado",
+              });
+            }
+          }
+          const finalAmount = Math.max(0, originalAmount - discountAmount);
+          await tx
+            .update(massageBookings)
+            .set({
+              techniqueId: input.techniqueId,
+              duration: input.duration,
+              endTime: formatTimeMin(end),
+              originalAmount: String(originalAmount),
+              discountAmount: String(discountAmount),
+              discountCodeId,
+              discountCode,
+              paymentStatus: calculatedPaymentStatus(Number(booking.amountPaid ?? 0), finalAmount),
+            })
+            .where(eq(massageBookings.id, booking.id));
+          return {
+            success: true,
+            originalAmountClp: originalAmount,
+            discountAmountClp: discountAmount,
+            finalAmountClp: finalAmount,
+            overpaymentAmountClp: Math.max(0, Number(booking.amountPaid ?? 0) - finalAmount),
+          };
+        });
+        await syncMassageSale(input.id);
+        return result;
       });
     }),
 
@@ -3403,39 +3443,53 @@ const agendaRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "La reserva está cancelada" });
       const oldDate = serializeDateOnly(booking.bookingDate)!;
       return withMassageResourceLocks(db, [oldDate, input.bookingDate], async () => {
-        const start = parseTimeMin(input.startTime);
-        const end = start + booking.duration;
-        const blockers = await loadBlockingMassageBookings(db, input.bookingDate, {
-          excludeMassageBookingId: oldDate === input.bookingDate ? booking.id : undefined,
-        });
-        const ownGroup = booking.coupleBookingId ? `booking-group:${booking.coupleBookingId}` : null;
-        const roomBusy = blockers.some(blocker =>
-          blocker.roomId === booking.roomId &&
-          (!ownGroup || blocker.groupKey !== ownGroup) &&
-          overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
-        );
-        const therapistBusy = booking.therapistId != null && blockers.some(blocker =>
-          blocker.therapistId === booking.therapistId &&
-          overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
-        );
-        if (roomBusy || therapistBusy)
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: roomBusy ? "La sala no está disponible en ese horario" : "El terapeuta no está disponible en ese horario",
+        await db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "massages", input.id);
+          const [current] = await tx.select().from(massageBookings)
+            .where(eq(massageBookings.id, input.id)).limit(1);
+          if (!current) throw new TRPCError({ code: "NOT_FOUND" });
+          if (current.status === "cancelled")
+            throw new TRPCError({ code: "BAD_REQUEST", message: "La reserva está cancelada" });
+          if (serializeDateOnly(current.bookingDate)! !== oldDate) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "La reserva cambió mientras se reagendaba. Vuelve a intentarlo",
+            });
+          }
+          const start = parseTimeMin(input.startTime);
+          const end = start + current.duration;
+          const blockers = await loadBlockingMassageBookings(tx, input.bookingDate, {
+            excludeMassageBookingId: oldDate === input.bookingDate ? current.id : undefined,
           });
-        const auditLine = buildRescheduleAuditLine({
-          from: { date: oldDate, time: booking.startTime },
-          to: { date: input.bookingDate, time: input.startTime },
-          reason: input.reason,
-          actor: ctx.user,
+          const ownGroup = current.coupleBookingId ? `booking-group:${current.coupleBookingId}` : null;
+          const roomBusy = blockers.some(blocker =>
+            blocker.roomId === current.roomId &&
+            (!ownGroup || blocker.groupKey !== ownGroup) &&
+            overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
+          );
+          const therapistBusy = current.therapistId != null && blockers.some(blocker =>
+            blocker.therapistId === current.therapistId &&
+            overlaps(start, end + 10, parseTimeMin(blocker.startTime), parseTimeMin(blocker.endTime) + 10)
+          );
+          if (roomBusy || therapistBusy)
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: roomBusy ? "La sala no está disponible en ese horario" : "El terapeuta no está disponible en ese horario",
+            });
+          const auditLine = buildRescheduleAuditLine({
+            from: { date: oldDate, time: current.startTime },
+            to: { date: input.bookingDate, time: input.startTime },
+            reason: input.reason,
+            actor: ctx.user,
+          });
+          await tx.update(massageBookings).set({
+            bookingDate: input.bookingDate as any,
+            startTime: input.startTime,
+            endTime: formatTimeMin(end),
+            rescheduleCount: current.rescheduleCount + 1,
+            notes: appendRescheduleAuditLine(current.notes, auditLine),
+          }).where(eq(massageBookings.id, current.id));
         });
-        await db.update(massageBookings).set({
-          bookingDate: input.bookingDate as any,
-          startTime: input.startTime,
-          endTime: formatTimeMin(end),
-          rescheduleCount: booking.rescheduleCount + 1,
-          notes: appendRescheduleAuditLine(booking.notes, auditLine),
-        }).where(eq(massageBookings.id, booking.id));
         await syncMassageSale(booking.id);
         return { success: true };
       });
@@ -3477,18 +3531,7 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      // Detectar cambio a "paid" para enviar notificaciones
       let sendConfirmation = false;
-      if (input.paymentStatus === "paid") {
-        const [current] = await db
-          .select({ paymentStatus: massageBookings.paymentStatus })
-          .from(massageBookings)
-          .where(eq(massageBookings.id, input.id))
-          .limit(1);
-        if (current && current.paymentStatus !== "paid")
-          sendConfirmation = true;
-      }
-
       if (
         input.status === "cancelled" &&
         (!input.cancellationCategory || !input.cancellationReason)
@@ -3506,21 +3549,54 @@ const agendaRouter = router({
         cancellationReason,
         ...data
       } = input;
-      await db
-        .update(massageBookings)
-        .set({
-          ...data,
-          ...(bookingDate ? { bookingDate: bookingDate as any } : {}),
-          ...(input.status === "cancelled"
-            ? {
-            cancellationCategory,
-            cancellationReason,
-            cancelledAt: new Date(),
-            cancelledByUserId: ctx.user.id,
-              }
-            : {}),
-        })
-        .where(eq(massageBookings.id, id));
+      const changesSchedule =
+        bookingDate !== undefined ||
+        input.startTime !== undefined ||
+        input.endTime !== undefined;
+      await db.transaction(async tx => {
+        if (changesPayment || changesSchedule || input.status === "cancelled") {
+          await assertNoLiveReservationPaymentAttempt(tx, "massages", id);
+        }
+        const [current] = await tx
+          .select()
+          .from(massageBookings)
+          .where(eq(massageBookings.id, id))
+          .limit(1);
+        if (!current) throw new TRPCError({ code: "NOT_FOUND" });
+        if (changesPayment) {
+          const [protectedPayment] = await tx
+            .select({ id: reservationPayments.id })
+            .from(reservationPayments)
+            .where(and(
+              eq(reservationPayments.module, "massages"),
+              eq(reservationPayments.reservationId, id),
+              inArray(reservationPayments.method, [...PROTECTED_ELECTRONIC_PAYMENT_METHODS]),
+            ))
+            .limit(1);
+          if (protectedPayment || current.getnetRequestId) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Los pagos electrónicos confirmados por Webpay o Getnet están protegidos",
+            });
+          }
+        }
+        sendConfirmation = input.paymentStatus === "paid" && current.paymentStatus !== "paid";
+        await tx
+          .update(massageBookings)
+          .set({
+            ...data,
+            ...(bookingDate ? { bookingDate: bookingDate as any } : {}),
+            ...(input.status === "cancelled"
+              ? {
+                  cancellationCategory,
+                  cancellationReason,
+                  cancelledAt: new Date(),
+                  cancelledByUserId: ctx.user.id,
+                }
+              : {}),
+          })
+          .where(eq(massageBookings.id, id));
+      });
       if (input.status && input.status !== "pending") {
         await stopTherapistAssignmentForBooking("massage", id);
       }

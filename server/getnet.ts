@@ -41,6 +41,10 @@ export interface GetnetSessionParams {
   clientName: string;
   clientEmail?: string;
   clientPhone?: string;
+  /** Retorno y webhook específicos para checkouts que no pertenecen al flujo público de Masajes. */
+  returnUrl?: string;
+  notificationUrl?: string;
+  expiration?: Date;
 }
 
 export interface GetnetSessionResult {
@@ -65,9 +69,9 @@ export async function createGetnetSession(
         total: amountCLP,
       },
     },
-    expiration: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().replace("Z", "+00:00"),
-    returnUrl: `${ENV.appUrl}/masajes/reserva/confirmacion?ref=${reference}`,
-    notificationUrl: `${ENV.appUrl}/api/webhooks/getnet`,
+    expiration: (params.expiration ?? new Date(Date.now() + 2 * 60 * 60 * 1000)).toISOString().replace("Z", "+00:00"),
+    returnUrl: params.returnUrl ?? `${ENV.appUrl}/masajes/reserva/confirmacion?ref=${reference}`,
+    notificationUrl: params.notificationUrl ?? `${ENV.appUrl}/api/webhooks/getnet`,
     ipAddress: "127.0.0.1",
     userAgent: "CancaguaWebApp/1.0",
   };
@@ -84,8 +88,10 @@ export async function createGetnetSession(
     reference,
     amountCLP,
     baseUrl: ENV.getnetBaseUrl,
-    returnUrl: body.returnUrl,
-    notificationUrl: body.notificationUrl,
+    // No registrar las URLs completas: los retornos de cobros manuales
+    // contienen el token privado que identifica el link del cliente.
+    returnHost: new URL(String(body.returnUrl)).host,
+    notificationHost: new URL(String(body.notificationUrl)).host,
   });
   const res = await fetch(`${ENV.getnetBaseUrl}/api/session/`, {
     method: "POST",

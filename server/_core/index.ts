@@ -32,12 +32,14 @@ import { ensureSaunaSchema } from "../ensureSaunaSchema";
 import { ensureHotTubOrdersSchema } from "../ensureHotTubOrdersSchema";
 import { ensureGiftCardServiceSchema } from "../ensureGiftCardServiceSchema";
 import { ensureCashRegisterSchema } from "../ensureCashRegisterSchema";
+import { ensureReservationPaymentLinksSchema } from "../ensureReservationPaymentLinksSchema";
 import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
 import biopoolWebpayReturnRouter, { startBiopoolCheckoutScheduler } from "../biopoolWebpay";
 import saunaWebpayReturnRouter, { startSaunaCheckoutScheduler } from "../saunaWebpay";
 import { startSaunaSyncScheduler } from "../saunaSync";
 import navegaRelaxWebhook from "../navegaRelaxWebhook";
+import reservationPaymentLinksWebpay from "../reservationPaymentLinksWebpay";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -75,6 +77,7 @@ async function startServer() {
   await ensureHotTubOrdersSchema();
   await ensureGiftCardServiceSchema();
   await ensureCashRegisterSchema();
+  await ensureReservationPaymentLinksSchema();
   await ensureMaintenanceShiftSchema();
   startTherapistAssignmentExpiryWorker();
   const app = express();
@@ -131,6 +134,8 @@ async function startServer() {
   app.use("/api/biopiscinas/webpay", biopoolWebpayReturnRouter);
   // Retorno servidor-a-servidor de Webpay Plus para Sauna.
   app.use("/api/sauna/webpay", saunaWebpayReturnRouter);
+  // Retorno Webpay de links creados para reservas manuales existentes.
+  app.use("/api/reservation-payment-links/webpay", reservationPaymentLinksWebpay);
   // Unsubscribe route for newsletters
   app.use("/api/unsubscribe", unsubscribeRouter);
   // Cerebro: grafo de conocimiento del proyecto (solo admins)

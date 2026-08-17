@@ -206,6 +206,90 @@ export const reservationPayments = mysqlTable("reservation_payments", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
+/**
+ * Mutex estable por reserva para serializar la creación de links con las
+ * modificaciones financieras del CMS. A diferencia del propio link, esta fila
+ * existe antes de que haya una solicitud y evita dos links activos creados al
+ * mismo tiempo para la misma reserva.
+ */
+export const reservationPaymentLocks = mysqlTable("reservation_payment_locks", {
+  lockKey: varchar("lock_key", { length: 100 }).primaryKey(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * Enlace estable que recepción puede enviar al cliente para pagar una o más
+ * reservas ya creadas. La solicitud no es una orden del catálogo público: sus
+ * montos se vuelven a comprobar contra las reservas antes de iniciar y
+ * acreditar cada intento.
+ */
+export const reservationPaymentRequests = mysqlTable("reservation_payment_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  publicToken: varchar("public_token", { length: 64 }).notNull().unique(),
+  provider: mysqlEnum("provider", ["getnet", "webpay"]).notNull(),
+  status: mysqlEnum("status", [
+    "active",
+    "processing",
+    "paid",
+    "cancelled",
+    "expired",
+    "failed",
+    "reconciliation_required",
+  ]).default("active").notNull(),
+  totalClp: int("total_clp").notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }),
+  clientPhone: varchar("client_phone", { length: 40 }),
+  expiresAt: timestamp("expires_at").notNull(),
+  paidAt: timestamp("paid_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  reconciliationReason: text("reconciliation_reason"),
+  createdByUserId: int("created_by_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const reservationPaymentAllocations = mysqlTable("reservation_payment_allocations", {
+  id: int("id").autoincrement().primaryKey(),
+  requestId: int("request_id").notNull(),
+  service: mysqlEnum("service", ["massages", "massage_programs", "biopools", "sauna"]).notNull(),
+  reservationId: int("reservation_id").notNull(),
+  amountClp: int("amount_clp").notNull(),
+  paymentId: int("payment_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const reservationPaymentAttempts = mysqlTable("reservation_payment_attempts", {
+  id: int("id").autoincrement().primaryKey(),
+  requestId: int("request_id").notNull(),
+  provider: mysqlEnum("provider", ["getnet", "webpay"]).notNull(),
+  status: mysqlEnum("status", [
+    "initiating",
+    "pending",
+    "approved",
+    "rejected",
+    "aborted",
+    "expired",
+    "failed",
+    "reconciliation_required",
+  ]).default("initiating").notNull(),
+  reference: varchar("reference", { length: 80 }).notNull().unique(),
+  expectedAmountClp: int("expected_amount_clp").notNull(),
+  providerRequestId: varchar("provider_request_id", { length: 80 }).unique(),
+  webpayToken: varchar("webpay_token", { length: 180 }).unique(),
+  providerUrl: text("provider_url"),
+  reportedAmountClp: int("reported_amount_clp"),
+  reportedCurrency: varchar("reported_currency", { length: 10 }),
+  providerStatus: varchar("provider_status", { length: 40 }),
+  authorizationCode: varchar("authorization_code", { length: 80 }),
+  rawResponse: mediumtext("raw_response"),
+  error: text("error"),
+  expiresAt: timestamp("expires_at").notNull(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
 // Movimientos manuales de la caja de recepción. Los ingresos provenientes de
 // reservas no se duplican aquí: se leen directamente desde
 // reservation_payments cuando son pagos en efectivo confirmados. Esta tabla

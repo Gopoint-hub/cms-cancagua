@@ -15,6 +15,7 @@ import { markCheckoutPaid, markCheckoutPaymentFailed } from "./massageCheckout";
 import { emitMassagePurchase } from "./googleAnalytics";
 import { cancelRegularClassPayment, confirmRegularClassPayment } from "./regularClassesPurchase";
 import { recordPaidWellnessDiscountUsage } from "./massageDiscounts";
+import { handleReservationPaymentLinkGetnetWebhook } from "./reservationPaymentLinks";
 
 console.log("[SERVER] getnetWebhook v3 cargado — freelance approval activo");
 
@@ -43,6 +44,16 @@ router.post("/", async (req: Request, res: Response) => {
 
   const db = await getDb();
   if (!db) return res.status(500).json({ error: "DB no disponible" });
+
+  // Los links emitidos desde Calendario 360 comparten el webhook de Getnet,
+  // pero tienen su propio ledger. Se resuelven antes del flujo legado para que
+  // un rechazo nunca cancele la reserva manual asociada.
+  const paymentLink = await handleReservationPaymentLinkGetnetWebhook(body);
+  if (paymentLink.handled) {
+    return paymentLink.retry
+      ? res.status(503).json({ error: "No se pudo verificar el estado del pago" })
+      : res.status(200).json({ ok: true });
+  }
 
   const bookings = await db
     .select({ id: massageBookings.id, paymentStatus: massageBookings.paymentStatus })

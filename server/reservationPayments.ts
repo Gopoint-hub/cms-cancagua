@@ -19,6 +19,17 @@ export const reservationPaymentInputSchema = z.object({
 
 export type ReservationPaymentInput = z.infer<typeof reservationPaymentInputSchema>;
 
+export const PROTECTED_ELECTRONIC_PAYMENT_METHODS = ["webpay", "webpay_plus", "getnet"] as const;
+
+export function assertReservationPaymentEditable(payment: { method: string }): void {
+  if (PROTECTED_ELECTRONIC_PAYMENT_METHODS.includes(payment.method as any)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Los pagos electrónicos confirmados por Webpay o Getnet están protegidos",
+    });
+  }
+}
+
 export function validateReservationPayment(payment: ReservationPaymentInput): void {
   if (payment.method === "pending_payment" && payment.status !== "pending") {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Selecciona el medio de pago real antes de marcarlo como pagado" });

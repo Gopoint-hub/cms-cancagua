@@ -83,6 +83,7 @@ import SaunaServices from "./pages/cms/sauna/Services";
 import SaunaConfiguration from "./pages/cms/sauna/Configuration";
 import SaunaCheckout from "./pages/sauna/Checkout";
 import SaunaPaymentResult from "./pages/sauna/PaymentResult";
+import ReservationPaymentPage from "./pages/ReservationPaymentPage";
 // Módulo Clases Regulares
 import RegularClassesDashboard from "./pages/cms/clases-regulares/Dashboard";
 import RegularClassesAttendance from "./pages/cms/clases-regulares/Attendance";
@@ -107,6 +108,9 @@ function Router() {
       <Route path="/biopiscinas/pago/resultado" component={BiopoolPaymentResult} />
       <Route path="/reservar/sauna" component={SaunaCheckout} />
       <Route path="/sauna/pago/resultado" component={SaunaPaymentResult} />
+      <Route path="/pagar" component={ReservationPaymentPage} />
+      <Route path="/pagar/:token" component={ReservationPaymentPage} />
+      <Route path="/pagar-reserva/:token" component={ReservationPaymentPage} />
 
       {/* CMS Dashboard pages */}
       <Route path="/" component={CMSDashboard} />

@@ -19,6 +19,7 @@ import { saunaRouter } from "./saunaRouter";
 import { operations360Router } from "./operations360Router";
 import { discounts360Router } from "./discounts360Router";
 import { cashRegisterRouter } from "./cashRegisterRouter";
+import { reservationPaymentLinksRouter } from "./reservationPaymentLinks";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS, hasCmsPermission } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
@@ -103,6 +104,8 @@ export const appRouter = router({
   discounts360: discounts360Router,
   // Caja transversal: pagos en efectivo de todos los servicios y retiros.
   cashRegister: cashRegisterRouter,
+  // Links estables enviados por recepción para pagar reservas ya creadas.
+  reservationPaymentLinks: reservationPaymentLinksRouter,
   sidebar: router({
     getOrder: protectedProcedure.query(async () => {
       const settings = await db.getSiteSettings();

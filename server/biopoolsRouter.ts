@@ -70,6 +70,8 @@ import {
 } from "./giftCardRedemption";
 import { inferGiftCardServiceKey } from "@shared/giftCardServices";
 import { validatePublicGiftCard } from "./publicGiftCards";
+import { assertReservationPaymentEditable } from "./reservationPayments";
+import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -1940,6 +1942,7 @@ export const biopoolsRouter = router({
         }
         const db = await database();
         return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "biopools", input.bookingId);
           const lockName = `biopool:payment:${input.bookingId}`;
           await acquireCapacityLock(tx, lockName);
           try {
@@ -2143,6 +2146,9 @@ export const biopoolsRouter = router({
         requirePermission(ctx.user, "biopools.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          const [targetPayment] = await tx.select().from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "biopools", targetPayment.reservationId);
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -2220,6 +2226,9 @@ export const biopoolsRouter = router({
           });
         const db = await database();
         return db.transaction(async tx => {
+          const [targetPayment] = await tx.select().from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "biopools", targetPayment.reservationId);
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -2235,6 +2244,7 @@ export const biopoolsRouter = router({
               code: "NOT_FOUND",
               message: "Pago no encontrado",
             });
+          assertReservationPaymentEditable(payment);
           if (payment.giftCardId)
             throw new TRPCError({
               code: "BAD_REQUEST",
@@ -2328,6 +2338,9 @@ export const biopoolsRouter = router({
         requirePermission(ctx.user, "biopools.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          const [targetPayment] = await tx.select().from(reservationPayments)
+            .where(eq(reservationPayments.id, input.paymentId)).limit(1);
+          if (targetPayment) await assertNoLiveReservationPaymentAttempt(tx, "biopools", targetPayment.reservationId);
           const [payment] = await tx
             .select()
             .from(reservationPayments)
@@ -2343,6 +2356,7 @@ export const biopoolsRouter = router({
               code: "NOT_FOUND",
               message: "Pago no encontrado",
             });
+          assertReservationPaymentEditable(payment);
           const [booking] = await tx
             .select()
             .from(biopoolBookings)
@@ -2447,57 +2461,46 @@ export const biopoolsRouter = router({
       .mutation(async ({ ctx, input }) => {
         requirePermission(ctx.user, "biopools.manage_agenda");
         const db = await database();
-        const [booking] = await db
-          .select()
-          .from(biopoolBookings)
-          .where(eq(biopoolBookings.id, input.bookingId))
-          .limit(1);
-        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-        let result: Awaited<
-          ReturnType<typeof calculateWellnessCartDiscount>
-        > | null = null;
-        if (input.code) {
-          try {
-            result = await calculateWellnessCartDiscount(db, input.code, [
-              {
+        return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "biopools", input.bookingId);
+          const [booking] = await tx
+            .select()
+            .from(biopoolBookings)
+            .where(eq(biopoolBookings.id, input.bookingId))
+            .limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+          let result: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
+          if (input.code) {
+            try {
+              result = await calculateWellnessCartDiscount(tx, input.code, [{
                 service: "biopiscinas",
                 serviceId: booking.serviceId,
                 originalAmount: booking.originalAmountClp,
-              },
-            ]);
-          } catch (error) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "El código no es válido",
-            });
+              }]);
+            } catch (error) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: error instanceof Error ? error.message : "El código no es válido",
+              });
+            }
           }
-        }
-        const discount = result?.discountTotal ?? 0;
-        const total = booking.originalAmountClp - discount;
-        await db
-          .update(biopoolBookings)
-          .set({
+          const discount = result?.discountTotal ?? 0;
+          const total = booking.originalAmountClp - discount;
+          await tx.update(biopoolBookings).set({
             discountCodeId: result?.discountCodeId ?? null,
             discountCode: result?.code ?? null,
             discountAmountClp: discount,
             paymentStatus: bookingPaymentStatus(booking.amountPaidClp, total),
-          })
-          .where(eq(biopoolBookings.id, booking.id));
-        await addActivity(
-          db,
-          booking.id,
-          result ? "discount_updated" : "discount_removed",
-          { code: result?.code ?? null, amountClp: discount },
-          ctx.user.id
-        );
-        return {
-          success: true,
-          discountCode: result?.code ?? null,
-          discountAmount: discount,
-        };
+          }).where(eq(biopoolBookings.id, booking.id));
+          await addActivity(
+            tx,
+            booking.id,
+            result ? "discount_updated" : "discount_removed",
+            { code: result?.code ?? null, amountClp: discount },
+            ctx.user.id,
+          );
+          return { success: true, discountCode: result?.code ?? null, discountAmount: discount };
+        });
       }),
     hideCancelledFromAgenda: protectedProcedure
       .input(z.object({ id: z.number() }))
@@ -2505,6 +2508,7 @@ export const biopoolsRouter = router({
         requirePermission(ctx.user, "biopools.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "biopools", input.id);
           const [booking] = await tx
             .select()
             .from(biopoolBookings)
@@ -2541,6 +2545,7 @@ export const biopoolsRouter = router({
         requirePermission(ctx.user, "biopools.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "biopools", input.id);
           const [booking] = await tx
             .select()
             .from(biopoolBookings)
@@ -2648,6 +2653,7 @@ export const biopoolsRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: quantityError });
         const db = await database();
         return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "biopools", input.id);
           const [booking] = await tx
             .select()
             .from(biopoolBookings)
@@ -2765,6 +2771,7 @@ export const biopoolsRouter = router({
         requirePermission(ctx.user, "biopools.manage_agenda");
         const db = await database();
         const result = await db.transaction(async tx => {
+          if (input.status === "cancelled") await assertNoLiveReservationPaymentAttempt(tx, "biopools", input.id);
           const [booking] = await tx
             .select()
             .from(biopoolBookings)
@@ -2951,6 +2958,7 @@ export const biopoolsRouter = router({
         requirePermission(ctx.user, "biopools.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(tx, "biopools", input.id);
           const [booking] = await tx
             .select()
             .from(biopoolBookings)
