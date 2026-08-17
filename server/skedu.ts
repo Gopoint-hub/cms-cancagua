@@ -3,6 +3,18 @@ import axios from "axios";
 const SKEDU_API_BASE_URL = "https://api.getskedu.com";
 const STORE_UUID = "c5e0a893-7eff-42b8-815a-296b1a9c345d";
 
+/** Evita que Axios serialice headers de autenticación en los logs. */
+function safeSkeduError(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    return {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+    };
+  }
+  return error instanceof Error ? { message: error.message } : { message: "Error desconocido" };
+}
+
 // Las credenciales se configurarán mediante variables de entorno
 const getHeaders = () => {
   const appId = process.env.SKEDU_APP_ID;
@@ -61,6 +73,31 @@ export async function getSkeduBusinessUser(businessUuid: string, userUuid: strin
 }
 
 /**
+ * Descarga el directorio completo de usuarios de un negocio sin hacer una
+ * solicitud por cada cita. Skedu limita cada página a 100 filas.
+ */
+export async function getAllSkeduBusinessUsers(businessUuid: string): Promise<any[]> {
+  const pageSize = 100;
+  const users: any[] = [];
+  let total = 0;
+  do {
+    const response = await axios.get(
+      `${SKEDU_API_BASE_URL}/businesses/${businessUuid}/users`,
+      {
+        headers: getHeaders(),
+        params: { limit: pageSize, offset: users.length },
+      }
+    );
+    const data = response.data?.Data ?? response.data;
+    const page = Array.isArray(data) ? data : data?.Items ?? [];
+    total = Array.isArray(data) ? page.length : Number(data?.Count ?? page.length);
+    users.push(...page);
+    if (page.length < pageSize) break;
+  } while (users.length < total);
+  return users;
+}
+
+/**
  * Obtener lista de servicios desde Skedu
  */
 export async function getSkeduServices() {
@@ -71,7 +108,7 @@ export async function getSkeduServices() {
     });
     return response.data;
   } catch (error) {
-    console.error("[Skedu] Error fetching services:", error);
+    console.error("[Skedu] Error fetching services:", safeSkeduError(error));
     throw error;
   }
 }
@@ -90,7 +127,7 @@ export async function getSkeduServiceById(serviceId: string) {
     );
     return response.data;
   } catch (error) {
-    console.error(`[Skedu] Error fetching service ${serviceId}:`, error);
+    console.error(`[Skedu] Error fetching service ${serviceId}:`, safeSkeduError(error));
     throw error;
   }
 }
@@ -102,7 +139,7 @@ export async function getSkeduEvents(params?: SkeduAppointmentQuery) {
   try {
     return { Data: await getAllSkeduAppointments(params) };
   } catch (error) {
-    console.error("[Skedu] Error fetching events:", error);
+    console.error("[Skedu] Error fetching events:", safeSkeduError(error));
     throw error;
   }
 }
@@ -121,7 +158,7 @@ export async function getSkeduAppointmentById(appointmentId: string) {
     );
     return response.data;
   } catch (error) {
-    console.error(`[Skedu] Error fetching appointment ${appointmentId}:`, error);
+    console.error(`[Skedu] Error fetching appointment ${appointmentId}:`, safeSkeduError(error));
     throw error;
   }
 }
@@ -144,7 +181,7 @@ export async function getSkeduClients(params?: {
     });
     return response.data;
   } catch (error) {
-    console.error("[Skedu] Error fetching clients:", error);
+    console.error("[Skedu] Error fetching clients:", safeSkeduError(error));
     throw error;
   }
 }
@@ -170,7 +207,7 @@ export async function createSkeduBooking(data: {
     );
     return response.data;
   } catch (error) {
-    console.error("[Skedu] Error creating booking:", error);
+    console.error("[Skedu] Error creating booking:", safeSkeduError(error));
     throw error;
   }
 }
@@ -198,7 +235,7 @@ export async function getSkeduPayments(appointmentUuid: string) {
     });
     return response.data;
   } catch (error) {
-    console.error(`[Skedu] Error fetching payments for ${appointmentUuid}:`, error);
+    console.error(`[Skedu] Error fetching payments for ${appointmentUuid}:`, safeSkeduError(error));
     throw error;
   }
 }
@@ -283,7 +320,7 @@ export async function registerSkeduPayment(
     );
     return response.data;
   } catch (error) {
-    console.error("[Skedu] Error registering payment:", error);
+    console.error("[Skedu] Error registering payment:", safeSkeduError(error));
     throw error;
   }
 }

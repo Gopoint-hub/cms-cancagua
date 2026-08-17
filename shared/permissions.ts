@@ -408,7 +408,7 @@ export function canAccessCmsPath(
         .some(permission => explicitPermissions.includes(permission as CmsPermissionKey));
     }
     if (path === "/cms/clientes-360") {
-      return ["massages.view_clients", "biopools.view_clients", "regular_classes.students"]
+      return ["massages.view_clients", "biopools.view_clients", "sauna.view_clients", "regular_classes.students"]
         .some(permission => explicitPermissions.includes(permission as CmsPermissionKey));
     }
     const required = resolvePathPermission(path);
@@ -427,7 +427,7 @@ export function canAccessCmsPath(
   if (path === "/cms/clientes-360") {
     return hasAnyCmsPermission(
       { role, permissions, regularClassesTeacher },
-      ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
+      ["massages.view_clients", "biopools.view_clients", "sauna.view_clients", "regular_classes.students"],
     );
   }
 

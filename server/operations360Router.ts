@@ -8,6 +8,12 @@ import {
   biopoolNotifications,
   biopoolServices,
   biopoolTicketTypes,
+  client360Audit,
+  client360ExternalEvents,
+  client360Identities,
+  client360Profiles,
+  client360ReservationLinks,
+  clients as skeduClients,
   giftCards,
   giftCardTransactions,
   massageBookings,
@@ -27,10 +33,12 @@ import {
   reservationPayments,
   saunaBookings,
   saunaCheckoutOrders,
+  saunaProgramQueue,
 } from "../drizzle/schema";
 import {
   hasCmsPermission,
   hasMassagePaymentAccess,
+  isAdminRole,
   type PermissionUser,
 } from "../shared/permissions";
 import { protectedProcedure, router } from "./_core/trpc";
@@ -39,6 +47,7 @@ import { redeemGiftCardPayment } from "./reservationPayments";
 import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
 import { parseRescheduleAuditLines } from "./rescheduleAudit";
 import { syncMassageSale } from "./massageSales";
+import { getAllSkeduAppointments, getAllSkeduBusinessUsers } from "./skedu";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const serviceSchema = z.enum(["massages", "biopools", "sauna", "regular_classes"]);
@@ -58,26 +67,127 @@ const eventKindSchema = z.enum([
   "sauna",
   "regular_class",
   "regular_class_schedule",
+  "regular_class_membership",
+]);
+const clientReservationKindSchema = z.enum([
+  "massage",
+  "massage_program",
+  "biopool",
+  "sauna",
+  "regular_class",
+  "regular_class_membership",
+]);
+type ClientReservationKind = z.infer<typeof clientReservationKindSchema>;
+const clientReservationReferenceSchema = z.union([
+  z.object({
+    kind: clientReservationKindSchema,
+    entityId: z.number().int().positive(),
+  }),
+  // Forma exacta entregada por UnifiedBookingDialog al crear reservas.
+  z.object({
+    service: z.enum(["massages", "massage_programs", "biopools", "sauna", "regular_classes"]),
+    reservationId: z.number().int().positive(),
+  }),
 ]);
 type ClientEvent = {
   id: string;
+  sourceKey: string;
+  entityId: number;
+  kind: ClientReservationKind | "external";
   clientKey: string;
   // Código que recibe el cliente al confirmar (BIO-…, SAU-…). Los masajes y las
   // clases no lo tienen, por eso es opcional.
   bookingCode?: string | null;
+  profileId?: number;
   service: ServiceKey;
   date: string;
   startTime: string | null;
+  endTime: string | null;
   title: string;
   status: string;
   paymentStatus: string | null;
   amountClp: number;
+  totalAmountClp: number;
+  balanceAmountClp: number;
+  people: number | null;
+  href: string;
   clientName: string;
   clientEmail: string | null;
   clientPhone: string | null;
   detail: string | null;
   npsScore?: number | null;
   npsComment?: string | null;
+};
+type ClientEventActivityEntry = {
+  id: string;
+  label: string;
+  detail?: string | null;
+  at?: Date | string | null;
+};
+type ClientEventResponse = ClientEvent & {
+  paidAmountClp: number;
+  activityBucket: "upcoming" | "past" | "cancelled";
+  activity: ClientEventActivityEntry[];
+  hasPaymentRecord: boolean;
+  canOpenDetail: boolean;
+};
+type ClientSummary = {
+  key: string;
+  profileId: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  services: ServiceKey[];
+  reservations: number;
+  upcomingReservations: number;
+  totalSpentClp: number;
+  pendingBalanceClp: number;
+  lastActivity: string;
+  nextReservation: string | null;
+  nextReservationEvent: ClientEventResponse | null;
+};
+type ClientProfileResponse = {
+  profile: {
+    id: number;
+    key: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    notes: string | null;
+    status: string;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+  aliases: Array<{
+    id: number;
+    kind: "email" | "phone";
+    value: string;
+    normalizedValue: string;
+    source: string;
+  }>;
+  summary: Partial<ClientSummary> & {
+    reservations: number;
+    upcomingReservations: number;
+    totalSpentClp: number;
+    pendingBalanceClp: number;
+    nextReservation: string | null;
+    services: ServiceKey[];
+    lastActivity: string;
+  };
+  giftCards: Array<{
+    id: number;
+    code: string;
+    amountClp: number;
+    balanceClp: number;
+    status: string;
+    redemptionMode: string;
+    serviceKey: string | null;
+    serviceName: string | null;
+    expiresAt: Date;
+  }>;
+  activity: Array<typeof client360Audit.$inferSelect>;
+  canManageProfile: boolean;
+  canMergeProfiles: boolean;
 };
 
 function serializeDate(value: unknown): string {
@@ -86,8 +196,26 @@ function serializeDate(value: unknown): string {
   return String(value ?? "").slice(0, 10);
 }
 
-function normalizedPhone(value?: string | null): string {
-  return (value ?? "").replace(/\D/g, "");
+export function normalizeClientEmail(value?: string | null): string | null {
+  const normalized = String(value ?? "").trim().toLocaleLowerCase();
+  return normalized && normalized.includes("@") ? normalized : null;
+}
+
+export function normalizeClientPhone(value?: string | null): string | null {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length === 9 && digits.startsWith("9")) return `56${digits}`;
+  if (digits.length === 11 && digits.startsWith("56")) return digits;
+  return digits.length >= 8 ? digits : null;
+}
+
+function clientIdentityKeys(input: {
+  email?: string | null;
+  phone?: string | null;
+}): string[] {
+  const email = normalizeClientEmail(input.email);
+  const phone = normalizeClientPhone(input.phone);
+  return [email ? `email:${email}` : null, phone ? `phone:${phone}` : null]
+    .filter((value): value is string => Boolean(value));
 }
 
 function massageProgramTotalClp(input: {
@@ -123,12 +251,57 @@ export function buildClientKey(input: {
   email?: string | null;
   phone?: string | null;
   name?: string | null;
+  sourceKey?: string;
 }): string {
-  const email = input.email?.trim().toLocaleLowerCase();
+  const email = normalizeClientEmail(input.email);
   if (email) return `email:${email}`;
-  const phone = normalizedPhone(input.phone);
-  if (phone.length >= 8) return `phone:${phone}`;
-  return `name:${(input.name ?? "sin nombre").trim().toLocaleLowerCase()}`;
+  const phone = normalizeClientPhone(input.phone);
+  if (phone) return `phone:${phone}`;
+  // Nunca se fusionan dos personas solo por compartir nombre. Si no existe
+  // identidad utilizable, cada registro operativo conserva su propia clave.
+  return `unidentified:${input.sourceKey ?? crypto.randomUUID()}`;
+}
+
+export function chooseClientProfileCandidate(input: {
+  linkedProfileId?: number | null;
+  emailProfileId?: number | null;
+  phoneProfileId?: number | null;
+}) {
+  if (input.linkedProfileId) {
+    return { profileId: input.linkedProfileId, conflict: false };
+  }
+  if (
+    input.emailProfileId &&
+    input.phoneProfileId &&
+    input.emailProfileId !== input.phoneProfileId
+  ) {
+    // El correo tiene precedencia para este registro, pero no se fusionan las
+    // fichas ni se mueve el teléfono: eso requiere una acción humana auditada.
+    return { profileId: input.emailProfileId, conflict: true };
+  }
+  return {
+    profileId: input.emailProfileId ?? input.phoneProfileId ?? null,
+    conflict: false,
+  };
+}
+
+export function resolveMergedClientProfileIds(
+  profileIds: number[],
+  profiles: Array<{ id: number; status: string; mergedIntoProfileId: number | null }>
+): number[] {
+  const byId = new Map(profiles.map(profile => [profile.id, profile]));
+  const resolved = profileIds.map(profileId => {
+    let current = profileId;
+    const seen = new Set<number>();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const profile = byId.get(current);
+      if (profile?.status !== "merged" || !profile.mergedIntoProfileId) break;
+      current = profile.mergedIntoProfileId;
+    }
+    return current;
+  });
+  return Array.from(new Set(resolved));
 }
 
 export function isVisibleCalendarReservation(status?: string | null): boolean {
@@ -333,6 +506,34 @@ function clientServices(user: PermissionUser): ServiceKey[] {
   ];
 }
 
+function canManageClientProfiles(user: PermissionUser): boolean {
+  return (
+    hasCmsPermission(user, "massages.manage_agenda") ||
+    hasCmsPermission(user, "biopools.manage_agenda") ||
+    hasCmsPermission(user, "sauna.manage_agenda") ||
+    hasCmsPermission(user, "regular_classes.students")
+  );
+}
+
+function assertClientProfileAccess(user: PermissionUser) {
+  if (!clientServices(user).length) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permisos para ver información de clientes",
+    });
+  }
+}
+
+function assertClientProfileManageAccess(user: PermissionUser) {
+  assertClientProfileAccess(user);
+  if (!canManageClientProfiles(user)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permisos para modificar fichas de clientes",
+    });
+  }
+}
+
 function assertRange(from: string, to: string) {
   const days =
     (new Date(`${to}T12:00:00Z`).getTime() -
@@ -357,7 +558,7 @@ function datesBetween(from: string, to: string): string[] {
   return dates;
 }
 
-async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
+async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
   const db = await database();
   const allowed = clientServices(user);
   if (!allowed.length) {
@@ -378,9 +579,12 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
           phone: massageBookings.clientPhone,
           date: massageBookings.bookingDate,
           time: massageBookings.startTime,
+          endTime: massageBookings.endTime,
           status: massageBookings.status,
           paymentStatus: massageBookings.paymentStatus,
           amount: massageBookings.amountPaid,
+          originalAmount: massageBookings.originalAmount,
+          discountAmount: massageBookings.discountAmount,
           title: massageTechniques.name,
           notes: massageBookings.notes,
         })
@@ -392,17 +596,33 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
         .where(eq(reservationPayments.module, "massage_programs")),
     ]);
     for (const row of standard) {
+      const sourceKey = `massage:${row.id}`;
       const nps = npsResponses.find(item => item.bookingType === "massage" && item.bookingId === row.id);
+      const amountClp = row.paymentStatus === "refunded" ? 0 : money(row.amount);
+      const totalAmountClp = Math.max(
+        0,
+        row.originalAmount == null
+          ? amountClp
+          : money(row.originalAmount) - money(row.discountAmount)
+      );
       events.push({
-        id: `massage:${row.id}`,
-        clientKey: buildClientKey(row),
+        id: sourceKey,
+        sourceKey,
+        entityId: row.id,
+        kind: "massage",
+        clientKey: buildClientKey({ ...row, sourceKey }),
         service: "massages",
         date: serializeDate(row.date),
         startTime: row.time,
+        endTime: row.endTime,
         title: row.title ?? "Masaje",
         status: row.status,
         paymentStatus: row.paymentStatus,
-        amountClp: money(row.amount),
+        amountClp,
+        totalAmountClp,
+        balanceAmountClp: row.status === "cancelled" ? 0 : Math.max(0, totalAmountClp - amountClp),
+        people: 1,
+        href: `/cms/masajes/agenda?date=${serializeDate(row.date)}`,
         clientName: row.name,
         clientEmail: row.email,
         clientPhone: row.phone,
@@ -412,6 +632,7 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
       });
     }
     for (const row of programs) {
+      const sourceKey = `massage_program:${row.id}`;
       const nps = npsResponses.find(item => item.bookingType === "skedu_program" && item.bookingId === row.id);
       const payment = massageProgramPaymentState(
         row,
@@ -419,20 +640,28 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
       );
       events.push({
         id: `massage-program:${row.id}`,
-        clientKey: buildClientKey({ email: row.clientEmail, phone: row.clientPhone, name: row.clientName }),
+        sourceKey,
+        entityId: row.id,
+        kind: "massage_program",
+        clientKey: buildClientKey({ email: row.clientEmail, phone: row.clientPhone, name: row.clientName, sourceKey }),
         service: "massages",
         date: serializeDate(row.bookingDate),
         startTime: row.startTime,
+        endTime: row.endTime,
         title: `Programa ${row.program.replaceAll("_", " ")}`,
         status: row.status,
         paymentStatus: payment.status,
         amountClp: payment.paidClp,
-        clientName: row.secondClientName
-          ? `${row.clientName} / ${row.secondClientName}`
-          : row.clientName,
+        totalAmountClp: payment.totalClp,
+        balanceAmountClp: row.status === "cancelled" ? 0 : Math.max(0, payment.totalClp - payment.paidClp),
+        people: row.modality === "double" ? 2 : 1,
+        href: `/cms/masajes/agenda?date=${serializeDate(row.bookingDate)}`,
+        clientName: row.clientName,
         clientEmail: row.clientEmail,
         clientPhone: row.clientPhone,
-        detail: row.notes,
+        detail: [row.secondClientName ? `Acompañante: ${row.secondClientName}` : null, row.notes]
+          .filter(Boolean)
+          .join(" · ") || null,
         npsScore: nps?.score ?? null,
         npsComment: nps?.comment ?? null,
       });
@@ -445,21 +674,34 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
       .from(biopoolBookings)
       .innerJoin(biopoolServices, eq(biopoolBookings.serviceId, biopoolServices.id));
     for (const { booking, serviceName } of rows) {
+      const sourceKey = `biopool:${booking.id}`;
+      const totalAmountClp = Math.max(0, booking.originalAmountClp - booking.discountAmountClp);
       events.push({
-        id: `biopool:${booking.id}`,
+        id: sourceKey,
+        sourceKey,
+        entityId: booking.id,
+        kind: "biopool",
         bookingCode: booking.bookingCode,
         clientKey: buildClientKey({
           email: booking.clientEmail,
           phone: booking.clientPhone,
           name: booking.clientName,
+          sourceKey,
         }),
         service: "biopools",
         date: serializeDate(booking.bookingDate),
         startTime: booking.startTime,
+        endTime: booking.endTime,
         title: serviceName,
         status: booking.status,
         paymentStatus: booking.paymentStatus,
-        amountClp: booking.amountPaidClp,
+        amountClp: Math.max(0, booking.amountPaidClp - booking.refundAmountClp),
+        totalAmountClp,
+        balanceAmountClp: booking.status === "cancelled"
+          ? 0
+          : Math.max(0, totalAmountClp - Math.max(0, booking.amountPaidClp - booking.refundAmountClp)),
+        people: booking.totalGuests,
+        href: `/cms/biopiscinas/agenda?date=${serializeDate(booking.bookingDate)}`,
         clientName: booking.clientName,
         clientEmail: booking.clientEmail,
         clientPhone: booking.clientPhone,
@@ -473,55 +715,127 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
   if (allowed.includes("sauna")) {
     const rows = await db.select().from(saunaBookings);
     for (const booking of rows) {
+      const sourceKey = `sauna:${booking.id}`;
+      // Sauna no conserva el monto parcial reembolsado. Un reembolso total no
+      // se cuenta; partially_refunded mantiene el monto informado como mejor
+      // aproximación hasta que el proveedor exponga el neto.
+      const amountClp = booking.paymentStatus === "refunded" ? 0 : booking.amountPaidClp;
+      const totalAmountClp = booking.amountClp;
       events.push({
-        id: `sauna:${booking.id}`,
+        id: sourceKey,
+        sourceKey,
+        entityId: booking.id,
+        kind: "sauna",
         bookingCode: booking.bookingCode,
         clientKey: buildClientKey({
           email: booking.clientEmail,
           phone: booking.clientPhone,
           name: booking.clientName,
+          sourceKey,
         }),
         service: "sauna",
         date: serializeDate(booking.bookingDate),
         startTime: booking.startTime,
+        endTime: booking.endTime,
         title: booking.serviceName,
         status: booking.status,
         paymentStatus: booking.paymentStatus,
-        amountClp: booking.amountPaidClp,
-        clientName: booking.clientName ?? "",
+        amountClp,
+        totalAmountClp,
+        balanceAmountClp: booking.status === "cancelled" ? 0 : Math.max(0, totalAmountClp - amountClp),
+        people: booking.guests,
+        href: `/cms/sauna/agenda?date=${serializeDate(booking.bookingDate)}`,
+        clientName: booking.clientName ?? "Sin cliente registrado",
         clientEmail: booking.clientEmail,
         clientPhone: booking.clientPhone,
-        detail: `${booking.guests} persona(s)${booking.isPrivate ? " · privado" : ""}`,
+        detail: [
+          `${booking.guests} persona(s)${booking.isPrivate ? " · privado" : ""}`,
+          booking.notes,
+        ].filter(Boolean).join(" · "),
       });
     }
   }
 
   if (allowed.includes("regular_classes")) {
-    const rows = await db
-      .select({
-        membership: regularClassMemberships,
-        student: regularClassStudents,
-        planName: regularClassPlans.name,
-      })
-      .from(regularClassMemberships)
-      .innerJoin(regularClassStudents, eq(regularClassMemberships.studentId, regularClassStudents.id))
-      .innerJoin(regularClassPlans, eq(regularClassMemberships.planId, regularClassPlans.id));
-    for (const { membership, student, planName } of rows) {
+    const [membershipRows, attendanceRows] = await Promise.all([
+      db
+        .select({
+          membership: regularClassMemberships,
+          student: regularClassStudents,
+          planName: regularClassPlans.name,
+        })
+        .from(regularClassMemberships)
+        .innerJoin(regularClassStudents, eq(regularClassMemberships.studentId, regularClassStudents.id))
+        .innerJoin(regularClassPlans, eq(regularClassMemberships.planId, regularClassPlans.id)),
+      db
+        .select({
+          attendance: regularClassAttendances,
+          session: regularClassSessions,
+          disciplineName: regularClassDisciplines.name,
+          student: regularClassStudents,
+        })
+        .from(regularClassAttendances)
+        .innerJoin(regularClassSessions, eq(regularClassAttendances.sessionId, regularClassSessions.id))
+        .innerJoin(regularClassDisciplines, eq(regularClassSessions.disciplineId, regularClassDisciplines.id))
+        .innerJoin(regularClassStudents, eq(regularClassAttendances.studentId, regularClassStudents.id)),
+    ]);
+    for (const { membership, student, planName } of membershipRows) {
       const name = [student.firstName, student.lastName].filter(Boolean).join(" ");
+      const sourceKey = `regular_class_membership:${membership.id}`;
+      const totalAmountClp = Math.max(0, membership.originalAmountClp - membership.discountAmountClp);
+      const amountClp = membership.paymentStatus === "paid" ? membership.pricePaidClp : 0;
       events.push({
-        id: `regular-class:${membership.id}`,
-        clientKey: buildClientKey({ email: student.email, phone: student.phone, name }),
+        id: `regular-class-membership:${membership.id}`,
+        sourceKey,
+        entityId: membership.id,
+        kind: "regular_class_membership",
+        clientKey: buildClientKey({ email: student.email, phone: student.phone, name, sourceKey }),
         service: "regular_classes",
         date: serializeDate(membership.periodStart),
         startTime: null,
+        endTime: null,
         title: planName,
         status: membership.status,
         paymentStatus: membership.paymentStatus,
-        amountClp: membership.pricePaidClp,
+        amountClp,
+        totalAmountClp,
+        balanceAmountClp: membership.status === "cancelled" ? 0 : Math.max(0, totalAmountClp - amountClp),
+        people: 1,
+        href: "/cms/clases-regulares/alumnos",
         clientName: name,
         clientEmail: student.email,
         clientPhone: student.phone,
         detail: `Vigencia hasta ${serializeDate(membership.periodEnd)}`,
+      });
+    }
+    for (const row of attendanceRows) {
+      const name = [row.student.firstName, row.student.lastName].filter(Boolean).join(" ");
+      const sourceKey = `regular_class_attendance:${row.attendance.id}`;
+      const cancelled = row.session.status === "cancelled" || row.attendance.status === "void";
+      events.push({
+        id: `regular-class-attendance:${row.attendance.id}`,
+        sourceKey,
+        // ReservationDetail abre la sesión; sourceKey mantiene individual a la persona.
+        entityId: row.session.id,
+        kind: "regular_class",
+        clientKey: buildClientKey({ email: row.student.email, phone: row.student.phone, name, sourceKey }),
+        service: "regular_classes",
+        date: serializeDate(row.session.sessionDate),
+        startTime: row.session.startTime,
+        endTime: row.session.endTime,
+        title: row.disciplineName,
+        status: cancelled ? "cancelled" : row.session.status,
+        // La membresía es el registro financiero; la asistencia no duplica ese pago.
+        paymentStatus: null,
+        amountClp: 0,
+        totalAmountClp: 0,
+        balanceAmountClp: 0,
+        people: 1,
+        href: `/cms/clases-regulares/asistencia?date=${serializeDate(row.session.sessionDate)}`,
+        clientName: name,
+        clientEmail: row.student.email,
+        clientPhone: row.student.phone,
+        detail: row.attendance.notes,
       });
     }
   }
@@ -592,10 +906,572 @@ function pareceA(termino: string, texto: string): boolean {
   });
 }
 
+async function materializeClientProfiles(
+  events: ClientEvent[]
+): Promise<ClientEvent[]> {
+  if (!events.length) return events;
+  const db = await database();
+  const [profiles, identities, links] = await Promise.all([
+    db.select().from(client360Profiles),
+    db.select().from(client360Identities),
+    db.select().from(client360ReservationLinks),
+  ]);
+  const profilesById = new Map(profiles.map(profile => [profile.id, profile]));
+  const profilesByIdentity = new Map<string, Set<number>>();
+  for (const identity of identities) {
+    const current = profilesByIdentity.get(identity.identityKey) ?? new Set<number>();
+    current.add(identity.profileId);
+    profilesByIdentity.set(identity.identityKey, current);
+  }
+  const linksBySource = new Map(links.map(link => [link.sourceKey, link.profileId]));
+
+  const activeProfileId = (profileId: number): number => {
+    let currentId = profileId;
+    const seen = new Set<number>();
+    while (!seen.has(currentId)) {
+      seen.add(currentId);
+      const current = profilesById.get(currentId);
+      if (current?.status !== "merged" || !current.mergedIntoProfileId) break;
+      currentId = current.mergedIntoProfileId;
+    }
+    return currentId;
+  };
+  const singleActiveProfileForIdentity = (key: string | null) => {
+    if (!key) return null;
+    const candidates = profilesByIdentity.get(key);
+    if (!candidates) return null;
+    const activeCandidates = new Set(Array.from(candidates).map(activeProfileId));
+    return activeCandidates.size === 1 ? Array.from(activeCandidates)[0] : null;
+  };
+
+  for (const event of events) {
+    const keys = clientIdentityKeys({ email: event.clientEmail, phone: event.clientPhone });
+    const emailKey = keys.find(key => key.startsWith("email:")) ?? null;
+    const phoneKey = keys.find(key => key.startsWith("phone:")) ?? null;
+    const linkedProfileId = linksBySource.get(event.sourceKey);
+    const decision = chooseClientProfileCandidate({
+      linkedProfileId: linkedProfileId ? activeProfileId(linkedProfileId) : null,
+      emailProfileId: singleActiveProfileForIdentity(emailKey),
+      phoneProfileId: singleActiveProfileForIdentity(phoneKey),
+    });
+    let profileId = decision.profileId ? activeProfileId(decision.profileId) : null;
+
+    if (!profileId) {
+      const originKey = `reservation:${event.sourceKey}`;
+      const [existing] = await db.select().from(client360Profiles)
+        .where(eq(client360Profiles.originKey, originKey)).limit(1);
+      if (existing) {
+        profileId = activeProfileId(existing.id);
+        profilesById.set(existing.id, existing);
+      } else {
+        const profileValues = {
+          originKey,
+          displayName: event.clientName || "Cliente sin identificar",
+          primaryEmail: normalizeClientEmail(event.clientEmail),
+          primaryPhone: event.clientPhone?.trim() || null,
+        };
+        await db.insert(client360Profiles).values(profileValues)
+          .onDuplicateKeyUpdate({ set: { updatedAt: new Date() } });
+        const [persisted] = await db.select().from(client360Profiles)
+          .where(eq(client360Profiles.originKey, originKey)).limit(1);
+        if (!persisted) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "No fue posible crear la ficha del cliente",
+          });
+        }
+        profileId = activeProfileId(persisted.id);
+        profilesById.set(persisted.id, persisted);
+        await db.insert(client360Audit).values({
+          profileId,
+          action: "profile_created_automatically",
+          detail: JSON.stringify({ sourceKey: event.sourceKey }),
+        });
+      }
+    }
+
+    for (const key of keys) {
+      const current = profilesByIdentity.get(key) ?? new Set<number>();
+      if (current.has(profileId)) continue;
+      const [kind, ...valueParts] = key.split(":");
+      const normalizedValue = valueParts.join(":");
+      await db.insert(client360Identities).values({
+        profileId,
+        kind: kind as "email" | "phone",
+        identityKey: key,
+        normalizedValue,
+        displayValue: kind === "email" ? event.clientEmail : event.clientPhone,
+        source: event.service,
+      }).onDuplicateKeyUpdate({ set: { displayValue: kind === "email" ? event.clientEmail : event.clientPhone } });
+      current.add(profileId);
+      profilesByIdentity.set(key, current);
+    }
+
+    if (!linkedProfileId) {
+      await db.insert(client360ReservationLinks).values({
+        profileId,
+        reservationKind: event.kind,
+        reservationId: event.entityId,
+        sourceKey: event.sourceKey,
+        linkedBy: "automatic",
+      }).onDuplicateKeyUpdate({ set: { updatedAt: new Date() } });
+      linksBySource.set(event.sourceKey, profileId);
+      await db.insert(client360Audit).values({
+        profileId,
+        action: decision.conflict ? "reservation_linked_with_identity_conflict" : "reservation_linked_automatically",
+        detail: JSON.stringify({
+          sourceKey: event.sourceKey,
+          emailKey,
+          phoneKey,
+        }),
+      });
+    }
+    event.profileId = profileId;
+    event.clientKey = `profile:${profileId}`;
+  }
+  return events;
+}
+
+async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
+  const localEvents = await materializeClientProfiles(await loadRawClientEvents(user));
+  const db = await database();
+  const allowed = clientServices(user);
+  const externalRows = await db.select().from(client360ExternalEvents);
+  const externalEvents: ClientEvent[] = externalRows.flatMap(row => {
+    if (!row.profileId || row.nativeKind || row.nativeReservationId) return [];
+    const parsedService = serviceSchema.safeParse(row.serviceKey);
+    if (!parsedService.success || !allowed.includes(parsedService.data)) return [];
+    return [{
+      id: `external:${row.externalId}`,
+      sourceKey: row.externalKey,
+      entityId: row.id,
+      kind: "external" as const,
+      clientKey: `profile:${row.profileId}`,
+      profileId: row.profileId,
+      service: parsedService.data,
+      date: serializeDate(row.eventDate),
+      startTime: row.startTime,
+      endTime: row.endTime,
+      title: row.serviceName,
+      status: row.status,
+      paymentStatus: row.paymentStatus,
+      // El precio de sesión de Skedu no acredita un pago.
+      amountClp: 0,
+      totalAmountClp: row.listedAmountClp,
+      balanceAmountClp: 0,
+      people: null,
+      href: "",
+      clientName: row.clientName ?? "Cliente Skedu",
+      clientEmail: row.clientEmail,
+      clientPhone: row.clientPhone,
+      detail: [row.variantName, "Historial Skedu (solo lectura)"].filter(Boolean).join(" · "),
+    }];
+  });
+  return [...localEvents, ...externalEvents];
+}
+
+function cancaguaNowKey(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(part => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")}`;
+}
+
+function clientEventActivity(
+  event: ClientEvent,
+  nowKey = cancaguaNowKey()
+): "upcoming" | "past" | "cancelled" {
+  if (event.status === "cancelled") return "cancelled";
+  return `${event.date} ${event.startTime ?? "00:00"}` >= nowKey ? "upcoming" : "past";
+}
+
+function clientEventResponse(event: ClientEvent, user: PermissionUser) {
+  const classAttendance = event.sourceKey.startsWith("regular_class_attendance:");
+  const classMembership = event.kind === "regular_class_membership";
+  const external = event.kind === "external";
+  return {
+    ...event,
+    paidAmountClp: event.amountClp,
+    activityBucket: clientEventActivity(event),
+    activity: [],
+    hasPaymentRecord: !classAttendance && !external,
+    canOpenDetail:
+      !classAttendance &&
+      !classMembership &&
+      !external &&
+      calendarServices(user).includes(event.service),
+  };
+}
+
+function inferLegacyServices(raw: string | null): ServiceKey[] {
+  if (!raw) return [];
+  let values: string[] = [];
+  try {
+    const parsed = JSON.parse(raw);
+    values = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+  } catch {
+    values = [raw];
+  }
+  const joined = values.join(" ").toLocaleLowerCase();
+  return Array.from(new Set<ServiceKey>([
+    ...(/masaj|programa/.test(joined) ? ["massages" as const] : []),
+    ...(/biopisc|geoterm/.test(joined) ? ["biopools" as const] : []),
+    ...(/sauna/.test(joined) ? ["sauna" as const] : []),
+    ...(/yoga|pilates|clase|actividad/.test(joined) ? ["regular_classes" as const] : []),
+  ]));
+}
+
+type ClientListFilters = {
+  search?: string;
+  service?: ServiceKey;
+};
+
+async function clientListData(user: PermissionUser, input: ClientListFilters) {
+  assertClientProfileAccess(user);
+  const db = await database();
+  const allowed = clientServices(user);
+  const events = await loadClientEvents(user);
+  const includeLegacy = allowed.length === 4;
+  const [allProfiles, legacyRows, identities] = await Promise.all([
+    db.select().from(client360Profiles),
+    includeLegacy ? db.select().from(skeduClients) : Promise.resolve([]),
+    db.select().from(client360Identities),
+  ]);
+  const profilesById = new Map(allProfiles.map(profile => [profile.id, profile]));
+  const activeProfileId = (profileId: number) => {
+    let current = profileId;
+    const seen = new Set<number>();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const profile = profilesById.get(current);
+      if (profile?.status !== "merged" || !profile.mergedIntoProfileId) break;
+      current = profile.mergedIntoProfileId;
+    }
+    return current;
+  };
+  const profiles = allProfiles.filter(profile => profile.status === "active");
+  const aliasesByProfile = new Map<number, string[]>();
+  for (const identity of identities) {
+    const ownerId = activeProfileId(identity.profileId);
+    const current = aliasesByProfile.get(ownerId) ?? [];
+    current.push(identity.displayValue ?? identity.normalizedValue);
+    aliasesByProfile.set(ownerId, current);
+  }
+  const legacyByProfileId = new Map<number, Array<typeof skeduClients.$inferSelect>>();
+  const profilesByOrigin = new Map(
+    allProfiles
+      .filter(profile => profile.originKey)
+      .map(profile => [profile.originKey!, profilesById.get(activeProfileId(profile.id))!])
+  );
+  for (const legacy of legacyRows) {
+    const profile = profilesByOrigin.get(`legacy_client:${legacy.id}`);
+    if (profile) {
+      const current = legacyByProfileId.get(profile.id) ?? [];
+      current.push(legacy);
+      legacyByProfileId.set(profile.id, current);
+    }
+  }
+  const eventsByProfile = new Map<number, ClientEvent[]>();
+  for (const event of events) {
+    if (!event.profileId) continue;
+    const current = eventsByProfile.get(event.profileId) ?? [];
+    current.push(event);
+    eventsByProfile.set(event.profileId, current);
+  }
+  const search = input.search?.trim().toLocaleLowerCase() ?? "";
+  const nowKey = cancaguaNowKey();
+
+  return profiles
+    .filter(profile => {
+      if (eventsByProfile.has(profile.id) || legacyByProfileId.has(profile.id)) return true;
+      return (
+        profile.originKey?.startsWith("regular_class_student:") &&
+        allowed.includes("regular_classes")
+      );
+    })
+    .map(profile => {
+      const history = (eventsByProfile.get(profile.id) ?? []).sort((a, b) =>
+        `${b.date} ${b.startTime ?? ""}`.localeCompare(`${a.date} ${a.startTime ?? ""}`)
+      );
+      const legacy = legacyByProfileId.get(profile.id) ?? [];
+      const services = Array.from(new Set<ServiceKey>([
+        ...history.map(item => item.service),
+        ...legacy.flatMap(row => inferLegacyServices(row.serviciosUsados)),
+        ...(profile.originKey?.startsWith("regular_class_student:") ? ["regular_classes" as const] : []),
+      ]));
+      const upcoming = history
+        .filter(item => clientEventActivity(item, nowKey) === "upcoming")
+        .sort((a, b) => `${a.date} ${a.startTime ?? ""}`.localeCompare(`${b.date} ${b.startTime ?? ""}`));
+      const detailedSpentClp = history.reduce((sum, item) => sum + item.amountClp, 0);
+      const detailedReservations = history.length;
+      const legacySpentClp = legacy.reduce((sum, row) => sum + money(row.totalGasto), 0);
+      const legacyReservations = legacy.reduce((sum, row) => sum + money(row.totalVisitas), 0);
+      const latestEventDate = history[0]?.date ?? "";
+      const legacyActivity = legacy
+        .map(row => row.ultimaVisita ? serializeDate(row.ultimaVisita) : "")
+        .filter(Boolean)
+        .sort()
+        .at(-1) ?? "";
+      const activityAfterLegacy = legacyActivity
+        ? history.filter(item => item.date > legacyActivity)
+        : [];
+      const totalSpentClp = legacyActivity
+        ? legacySpentClp + activityAfterLegacy.reduce((sum, item) => sum + item.amountClp, 0)
+        : Math.max(detailedSpentClp, legacySpentClp);
+      const reservations = legacyActivity
+        ? legacyReservations + activityAfterLegacy.length
+        : Math.max(detailedReservations, legacyReservations);
+      return {
+        key: `profile:${profile.id}`,
+        profileId: profile.id,
+        name: profile.displayName,
+        email: profile.primaryEmail,
+        phone: profile.primaryPhone,
+        services,
+        reservations,
+        upcomingReservations: upcoming.length,
+        totalSpentClp,
+        pendingBalanceClp: history.reduce((sum, item) => sum + item.balanceAmountClp, 0),
+        lastActivity: [latestEventDate, legacyActivity, serializeDate(profile.updatedAt)]
+          .filter(Boolean)
+          .sort()
+          .at(-1)!,
+        nextReservation: upcoming[0]?.date ?? null,
+        nextReservationEvent: upcoming[0] ? clientEventResponse(upcoming[0], user) : null,
+      };
+    })
+    .filter(client => !input.service || client.services.includes(input.service))
+    .filter(client =>
+      !search ||
+      [client.name, client.email, client.phone]
+        .concat(aliasesByProfile.get(client.profileId) ?? [])
+        .filter(Boolean)
+        .some(value => value!.toLocaleLowerCase().includes(search))
+    )
+    .sort((a, b) =>
+      b.lastActivity.localeCompare(a.lastActivity) || b.profileId - a.profileId
+    );
+}
+
+async function assertClientProfileVisible(user: PermissionUser, profileId: number) {
+  assertClientProfileAccess(user);
+  const db = await database();
+  const [profile] = await db.select().from(client360Profiles)
+    .where(eq(client360Profiles.id, profileId)).limit(1);
+  if (!profile) throw new TRPCError({ code: "NOT_FOUND" });
+  const allowed = clientServices(user);
+  if (allowed.length === 4) return profile;
+  if (
+    profile.originKey?.startsWith("regular_class_student:") &&
+    allowed.includes("regular_classes")
+  ) return profile;
+  const events = await loadClientEvents(user);
+  if (!events.some(event => event.profileId === profileId)) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+  return profile;
+}
+
+async function resolveClientProfileId(input: {
+  profileId?: number;
+  clientKey?: string;
+}): Promise<number> {
+  if (input.profileId) return input.profileId;
+  if (input.clientKey?.startsWith("profile:")) {
+    const parsed = Number(input.clientKey.slice("profile:".length));
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+  if (input.clientKey?.startsWith("email:") || input.clientKey?.startsWith("phone:")) {
+    const db = await database();
+    const rows = await db.select().from(client360Identities)
+      .where(eq(client360Identities.identityKey, input.clientKey));
+    const rawProfileIds = Array.from(new Set(rows.map(row => row.profileId)));
+    const profiles = rawProfileIds.length
+      ? await db.select({
+          id: client360Profiles.id,
+          status: client360Profiles.status,
+          mergedIntoProfileId: client360Profiles.mergedIntoProfileId,
+        }).from(client360Profiles).where(inArray(client360Profiles.id, rawProfileIds))
+      : [];
+    const profileIds = resolveMergedClientProfileIds(rawProfileIds, profiles);
+    if (profileIds.length === 1) return profileIds[0];
+    if (profileIds.length > 1) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "El correo o teléfono pertenece a más de una ficha; selecciona la ficha exacta",
+      });
+    }
+  }
+  throw new TRPCError({ code: "NOT_FOUND", message: "Ficha de cliente no encontrada" });
+}
+
+function normalizeReservationReference(
+  reference: z.infer<typeof clientReservationReferenceSchema>
+): { kind: ClientReservationKind; entityId: number } {
+  if ("kind" in reference) return reference;
+  const kindByService = {
+    massages: "massage",
+    massage_programs: "massage_program",
+    biopools: "biopool",
+    sauna: "sauna",
+    regular_classes: "regular_class",
+  } as const;
+  return {
+    kind: kindByService[reference.service],
+    entityId: reference.reservationId,
+  };
+}
+
+function assertCanLinkReservation(user: PermissionUser, kind: ClientReservationKind) {
+  const permitted =
+    (kind === "massage" || kind === "massage_program")
+      ? hasCmsPermission(user, "massages.manage_agenda")
+      : kind === "biopool"
+        ? hasCmsPermission(user, "biopools.manage_agenda")
+        : kind === "sauna"
+          ? hasCmsPermission(user, "sauna.manage_agenda")
+          : hasCmsPermission(user, "regular_classes.students");
+  if (!permitted) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permisos para vincular una reserva de este servicio",
+    });
+  }
+}
+
+async function reservationReferenceExists(
+  db: Awaited<ReturnType<typeof database>>,
+  reference: { kind: ClientReservationKind; entityId: number }
+): Promise<boolean> {
+  if (reference.kind === "massage") {
+    return Boolean((await db.select({ id: massageBookings.id }).from(massageBookings)
+      .where(eq(massageBookings.id, reference.entityId)).limit(1))[0]);
+  }
+  if (reference.kind === "massage_program") {
+    return Boolean((await db.select({ id: massageProgramBookings.id }).from(massageProgramBookings)
+      .where(eq(massageProgramBookings.id, reference.entityId)).limit(1))[0]);
+  }
+  if (reference.kind === "biopool") {
+    return Boolean((await db.select({ id: biopoolBookings.id }).from(biopoolBookings)
+      .where(eq(biopoolBookings.id, reference.entityId)).limit(1))[0]);
+  }
+  if (reference.kind === "sauna") {
+    return Boolean((await db.select({ id: saunaBookings.id }).from(saunaBookings)
+      .where(eq(saunaBookings.id, reference.entityId)).limit(1))[0]);
+  }
+  if (reference.kind === "regular_class_membership") {
+    return Boolean((await db.select({ id: regularClassMemberships.id }).from(regularClassMemberships)
+      .where(eq(regularClassMemberships.id, reference.entityId)).limit(1))[0]);
+  }
+  return Boolean((await db.select({ id: regularClassSessions.id }).from(regularClassSessions)
+    .where(eq(regularClassSessions.id, reference.entityId)).limit(1))[0]);
+}
+
+export function inferSkeduClientService(serviceName: unknown): ServiceKey | "other" {
+  const value = String(serviceName ?? "").toLocaleLowerCase();
+  if (/masaj|pulso|reconecta|programa/.test(value)) return "massages";
+  if (/biopisc|geoterm/.test(value)) return "biopools";
+  if (/sauna/.test(value)) return "sauna";
+  if (/yoga|pilates|clase|entrenamiento|nataci[oó]n|hatha/.test(value)) return "regular_classes";
+  return "other";
+}
+
+function skeduLocalDateTime(value: unknown): { date: string; time: string | null } | null {
+  const parsed = new Date(String(value ?? ""));
+  if (Number.isNaN(parsed.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(parsed);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(item => item.type === type)?.value ?? "";
+  return {
+    date: `${part("year")}-${part("month")}-${part("day")}`,
+    time: `${part("hour")}:${part("minute")}`,
+  };
+}
+
+export function santiagoLocalMidnightUtc(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const target = Date.UTC(year, month - 1, day, 0, 0, 0);
+  let guess = target;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Santiago",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(guess));
+    const value = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find(part => part.type === type)?.value ?? 0);
+    const renderedAsUtc = Date.UTC(
+      value("year"),
+      value("month") - 1,
+      value("day"),
+      value("hour"),
+      value("minute"),
+      value("second"),
+    );
+    const delta = target - renderedAsUtc;
+    guess += delta;
+    if (delta === 0) break;
+  }
+  return new Date(guess).toISOString();
+}
+
+function nextDate(date: string): string {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() + 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
+export function skeduClientEventStatus(appointment: Record<string, any>) {
+  if (appointment.DeletedAt || appointment.RealDeletedAt) return "cancelled";
+  if (appointment.IsTemporary || appointment.IsConfirmed === false) return "pending";
+  return "confirmed";
+}
+
+export function deduplicateSkeduAppointments(rows: Array<Record<string, any>>) {
+  const byUuid = new Map<string, Record<string, any>>();
+  for (const row of rows) {
+    const uuid = String(row.UUID ?? "").trim();
+    if (!uuid) continue;
+    const previous = byUuid.get(uuid);
+    const previousUpdated = new Date(previous?.UpdatedAt ?? previous?.CreatedAt ?? 0).getTime();
+    const nextUpdated = new Date(row.UpdatedAt ?? row.CreatedAt ?? 0).getTime();
+    if (!previous || nextUpdated >= previousUpdated) byUuid.set(uuid, row);
+  }
+  return Array.from(byUuid.values());
+}
+
+function nullableDate(value: unknown): Date | null {
+  if (!value) return null;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export const operations360Router = router({
   access: protectedProcedure.query(({ ctx }) => ({
     calendarServices: calendarServices(ctx.user),
     clientServices: clientServices(ctx.user),
+    canSyncClientHistory: isAdminRole(ctx.user.role),
     manualBookingServices: ([
       hasCmsPermission(ctx.user, "massages.manage_agenda") ? "massages" : null,
       hasCmsPermission(ctx.user, "biopools.manage_agenda") ? "biopools" : null,
@@ -869,7 +1745,10 @@ export const operations360Router = router({
         if (codigo && terminoCodigo.length >= 4 && codigo.includes(terminoCodigo)) return true;
         if (normalizarBusqueda(evento.clientName ?? "").includes(termino)) return true;
         if (normalizarBusqueda(evento.clientEmail ?? "").includes(termino)) return true;
-        if (soloDigitos.length >= 6 && normalizedPhone(evento.clientPhone).includes(soloDigitos)) return true;
+        if (
+          soloDigitos.length >= 6 &&
+          (normalizeClientPhone(evento.clientPhone) ?? "").includes(soloDigitos)
+        ) return true;
         return false;
       };
 
@@ -1180,6 +2059,57 @@ export const operations360Router = router({
       }
 
       if (!allowed.includes("regular_classes")) throw new TRPCError({ code: "FORBIDDEN" });
+      if (input.kind === "regular_class_membership") {
+        const [row] = await db.select({
+          membership: regularClassMemberships,
+          student: regularClassStudents,
+          planName: regularClassPlans.name,
+        }).from(regularClassMemberships)
+          .innerJoin(regularClassStudents, eq(regularClassMemberships.studentId, regularClassStudents.id))
+          .innerJoin(regularClassPlans, eq(regularClassMemberships.planId, regularClassPlans.id))
+          .where(eq(regularClassMemberships.id, input.entityId)).limit(1);
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        const name = [row.student.firstName, row.student.lastName].filter(Boolean).join(" ");
+        const totalAmountClp = Math.max(
+          0,
+          row.membership.originalAmountClp - row.membership.discountAmountClp
+        );
+        return {
+          service: "regular_classes" as const,
+          canManagePayments: false,
+          canManageReservation: false,
+          title: row.planName,
+          client: { name, email: row.student.email, phone: row.student.phone },
+          schedule: {
+            date: serializeDate(row.membership.periodStart),
+            startTime: "",
+            endTime: "",
+          },
+          status: row.membership.status,
+          payment: buildPaymentDetail({
+            status: row.membership.paymentStatus,
+            method: row.membership.paymentMethod,
+            reference: row.membership.paymentReference,
+            originalAmountClp: row.membership.originalAmountClp,
+            discountAmountClp: row.membership.discountAmountClp,
+            discountCode: row.membership.discountCode,
+            amountPaidClp: row.membership.paymentStatus === "paid"
+              ? row.membership.pricePaidClp
+              : 0,
+            createdAt: row.membership.createdAt,
+          }),
+          notes: row.membership.notes,
+          detail: `Vigencia ${serializeDate(row.membership.periodStart)}–${serializeDate(row.membership.periodEnd)}`,
+          activity: [{
+            id: `created:${row.membership.id}`,
+            type: "activity" as const,
+            label: "Plan registrado",
+            detail: row.planName,
+            at: row.membership.createdAt,
+          }],
+          href: "/cms/clases-regulares/alumnos",
+        };
+      }
       if (input.kind === "regular_class") {
         const [row] = await db.select({
           session: regularClassSessions,
@@ -1421,48 +2351,722 @@ export const operations360Router = router({
         })
       )
       .query(async ({ ctx, input }) => {
-        const events = await loadClientEvents(ctx.user);
-        const grouped = new Map<string, ClientEvent[]>();
-        for (const event of events) {
-          const current = grouped.get(event.clientKey) ?? [];
-          current.push(event);
-          grouped.set(event.clientKey, current);
-        }
-        const search = input.search?.toLocaleLowerCase() ?? "";
-        return Array.from(grouped.entries())
-          .map(([key, history]) => {
-            const ordered = history.sort((a, b) => b.date.localeCompare(a.date));
-            const latest = ordered[0];
-            return {
-              key,
-              name: latest.clientName,
-              email: latest.clientEmail,
-              phone: latest.clientPhone,
-              services: Array.from(new Set(history.map(item => item.service))),
-              reservations: history.length,
-              totalSpentClp: history.reduce((sum, item) => sum + item.amountClp, 0),
-              lastActivity: latest.date,
-            };
-          })
-          .filter(client => !input.service || client.services.includes(input.service))
-          .filter(client =>
-            !search ||
-            [client.name, client.email, client.phone]
-              .filter(Boolean)
-              .some(value => value!.toLocaleLowerCase().includes(search))
-          )
-          .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity))
-          .slice(0, 500);
+        return clientListData(ctx.user, input);
+      }),
+
+    listPage: protectedProcedure
+      .input(z.object({
+        search: z.string().trim().max(100).optional(),
+        service: serviceSchema.optional(),
+        cursor: z.number().int().nonnegative().default(0),
+        limit: z.number().int().min(1).max(100).default(30),
+      }))
+      .query(async ({ ctx, input }) => {
+        const clients = await clientListData(ctx.user, input);
+        const items = clients.slice(input.cursor, input.cursor + input.limit);
+        const nextCursor = input.cursor + items.length < clients.length
+          ? input.cursor + items.length
+          : null;
+        return {
+          items,
+          total: clients.length,
+          nextCursor,
+          summary: {
+            clients: clients.length,
+            upcomingReservations: clients.reduce((sum, client) => sum + client.upcomingReservations, 0),
+            pendingBalanceClp: clients.reduce((sum, client) => sum + client.pendingBalanceClp, 0),
+          },
+        };
       }),
 
     history: protectedProcedure
-      .input(z.object({ clientKey: z.string().min(3), service: serviceSchema.optional() }))
+      .input(z.object({
+        clientKey: z.string().min(3).optional(),
+        profileId: z.number().int().positive().optional(),
+        service: serviceSchema.optional(),
+      }).refine(value => Boolean(value.clientKey || value.profileId), {
+        message: "Debes indicar la ficha del cliente",
+      }))
       .query(async ({ ctx, input }) => {
+        const profileId = await resolveClientProfileId(input);
+        await assertClientProfileVisible(ctx.user, profileId);
         const events = await loadClientEvents(ctx.user);
         return events
-          .filter(event => event.clientKey === input.clientKey)
+          .filter(event => event.profileId === profileId)
           .filter(event => !input.service || event.service === input.service)
+          .sort((a, b) => `${b.date} ${b.startTime ?? ""}`.localeCompare(`${a.date} ${a.startTime ?? ""}`))
+          .map(event => clientEventResponse(event, ctx.user));
+      }),
+
+    historyPage: protectedProcedure
+      .input(z.object({
+        profileId: z.number().int().positive(),
+        service: serviceSchema.optional(),
+        activityBucket: z.enum(["upcoming", "past", "cancelled"]).optional(),
+        cursor: z.number().int().nonnegative().default(0),
+        limit: z.number().int().min(1).max(100).default(30),
+      }))
+      .query(async ({ ctx, input }) => {
+        await assertClientProfileVisible(ctx.user, input.profileId);
+        const events = (await loadClientEvents(ctx.user))
+          .filter(event => event.profileId === input.profileId)
+          .filter(event => !input.service || event.service === input.service)
+          .map(event => clientEventResponse(event, ctx.user))
+          .filter(event => !input.activityBucket || event.activityBucket === input.activityBucket)
           .sort((a, b) => `${b.date} ${b.startTime ?? ""}`.localeCompare(`${a.date} ${a.startTime ?? ""}`));
+        const items = events.slice(input.cursor, input.cursor + input.limit);
+        return {
+          items,
+          total: events.length,
+          nextCursor: input.cursor + items.length < events.length
+            ? input.cursor + items.length
+            : null,
+        };
+      }),
+
+    profile: protectedProcedure
+      .input(z.object({ profileId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const profile = await assertClientProfileVisible(ctx.user, input.profileId);
+        const db = await database();
+        const [identities, auditRows, allGiftCards, summaries, events] = await Promise.all([
+          db.select().from(client360Identities)
+            .where(eq(client360Identities.profileId, input.profileId)),
+          db.select().from(client360Audit)
+            .where(eq(client360Audit.profileId, input.profileId)),
+          db.select().from(giftCards),
+          clientListData(ctx.user, {}),
+          loadClientEvents(ctx.user),
+        ]);
+        const identityKeys = new Set(identities.map(identity => identity.identityKey));
+        const clientGiftCards = allGiftCards
+          .filter(card => {
+            const email = normalizeClientEmail(card.recipientEmail);
+            const phone = normalizeClientPhone(card.recipientPhone);
+            return Boolean(
+              (email && identityKeys.has(`email:${email}`)) ||
+              (phone && identityKeys.has(`phone:${phone}`))
+            );
+          })
+          .map(card => ({
+            id: card.id,
+            code: card.code,
+            amountClp: card.amount,
+            balanceClp: card.balance,
+            status: card.status,
+            redemptionMode: card.redemptionMode,
+            serviceKey: card.serviceKey,
+            serviceName: card.serviceName,
+            expiresAt: card.expiresAt,
+          }));
+        const profileEvents = events.filter(event => event.profileId === input.profileId);
+        return {
+          profile: {
+            id: profile.id,
+            key: `profile:${profile.id}`,
+            name: profile.displayName,
+            email: profile.primaryEmail,
+            phone: profile.primaryPhone,
+            notes: profile.notes,
+            status: profile.status,
+            createdAt: profile.createdAt,
+            updatedAt: profile.updatedAt,
+          },
+          aliases: identities
+            .filter(identity => identity.kind !== "external")
+            .map(identity => ({
+              id: identity.id,
+              kind: identity.kind,
+              value: identity.displayValue ?? identity.normalizedValue,
+              normalizedValue: identity.normalizedValue,
+              source: identity.source,
+            })),
+          summary: summaries.find(item => item.profileId === input.profileId) ?? {
+            reservations: profileEvents.length,
+            upcomingReservations: profileEvents.filter(event => clientEventActivity(event) === "upcoming").length,
+            totalSpentClp: profileEvents.reduce((sum, event) => sum + event.amountClp, 0),
+            pendingBalanceClp: profileEvents.reduce((sum, event) => sum + event.balanceAmountClp, 0),
+            nextReservation: null,
+            services: Array.from(new Set(profileEvents.map(event => event.service))),
+            lastActivity: serializeDate(profile.updatedAt),
+          },
+          giftCards: clientGiftCards,
+          activity: auditRows
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+            .slice(0, 100),
+          canManageProfile: canManageClientProfiles(ctx.user),
+          canMergeProfiles: isAdminRole(ctx.user.role),
+        };
+      }),
+
+    updateProfile: protectedProcedure
+      .input(z.object({
+        profileId: z.number().int().positive(),
+        name: z.string().trim().min(1).max(200).optional(),
+        email: z.string().trim().email().max(320).nullable().optional(),
+        phone: z.string().trim().max(40).nullable().optional(),
+        notes: z.string().trim().max(5_000).nullable().optional(),
+      }).refine(value =>
+        value.name !== undefined ||
+        value.email !== undefined ||
+        value.phone !== undefined ||
+        value.notes !== undefined,
+      { message: "No hay cambios para guardar" }))
+      .mutation(async ({ ctx, input }) => {
+        assertClientProfileManageAccess(ctx.user);
+        const current = await assertClientProfileVisible(ctx.user, input.profileId);
+        if (current.status !== "active") {
+          throw new TRPCError({ code: "CONFLICT", message: "La ficha fue fusionada" });
+        }
+        const db = await database();
+        const updates: Partial<typeof client360Profiles.$inferInsert> = {
+          updatedByUserId: ctx.user.id,
+        };
+        if (input.name !== undefined) updates.displayName = input.name;
+        if (input.email !== undefined) updates.primaryEmail = normalizeClientEmail(input.email);
+        if (input.phone !== undefined) updates.primaryPhone = input.phone?.trim() || null;
+        if (input.notes !== undefined) updates.notes = input.notes || null;
+        await db.transaction(async tx => {
+          await tx.update(client360Profiles).set(updates)
+            .where(eq(client360Profiles.id, input.profileId));
+          const identityValues = [
+            input.email
+              ? {
+                  profileId: input.profileId,
+                  kind: "email" as const,
+                  identityKey: `email:${normalizeClientEmail(input.email)}`,
+                  normalizedValue: normalizeClientEmail(input.email)!,
+                  displayValue: input.email,
+                  source: "profile_edit",
+                }
+              : null,
+            input.phone && normalizeClientPhone(input.phone)
+              ? {
+                  profileId: input.profileId,
+                  kind: "phone" as const,
+                  identityKey: `phone:${normalizeClientPhone(input.phone)}`,
+                  normalizedValue: normalizeClientPhone(input.phone)!,
+                  displayValue: input.phone,
+                  source: "profile_edit",
+                }
+              : null,
+          ].filter((value): value is NonNullable<typeof value> => Boolean(value));
+          for (const identity of identityValues) {
+            await tx.insert(client360Identities).values(identity)
+              .onDuplicateKeyUpdate({ set: { displayValue: identity.displayValue, source: "profile_edit" } });
+          }
+          await tx.insert(client360Audit).values({
+            profileId: input.profileId,
+            action: "profile_updated",
+            actorUserId: ctx.user.id,
+            detail: JSON.stringify({
+              before: {
+                name: current.displayName,
+                email: current.primaryEmail,
+                phone: current.primaryPhone,
+                notes: current.notes,
+              },
+              after: input,
+            }),
+          });
+        });
+        return { success: true, profileId: input.profileId };
+      }),
+
+    linkReservations: protectedProcedure
+      .input(z.object({
+        profileId: z.number().int().positive(),
+        reservations: z.array(clientReservationReferenceSchema).min(1).max(20),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        assertClientProfileManageAccess(ctx.user);
+        const profile = await assertClientProfileVisible(ctx.user, input.profileId);
+        if (profile.status !== "active") {
+          throw new TRPCError({ code: "CONFLICT", message: "La ficha fue fusionada" });
+        }
+        const references = input.reservations.map(normalizeReservationReference);
+        for (const reference of references) assertCanLinkReservation(ctx.user, reference.kind);
+        const db = await database();
+        let linked = 0;
+        await db.transaction(async tx => {
+          for (const reference of references) {
+            if (!(await reservationReferenceExists(tx as any, reference))) {
+              throw new TRPCError({ code: "NOT_FOUND", message: "Reserva no encontrada" });
+            }
+            const sourceKey = `${reference.kind}:${reference.entityId}`;
+            const [existing] = await tx.select().from(client360ReservationLinks)
+              .where(eq(client360ReservationLinks.sourceKey, sourceKey)).limit(1);
+            if (existing && existing.profileId !== input.profileId) {
+              if (existing.linkedBy !== "automatic") {
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: "La reserva ya pertenece a otra ficha; fusiona las fichas para continuar",
+                });
+              }
+              await tx.update(client360ReservationLinks).set({
+                profileId: input.profileId,
+                linkedBy: "manual",
+                createdByUserId: ctx.user.id,
+              }).where(eq(client360ReservationLinks.id, existing.id));
+              await tx.insert(client360Audit).values([
+                {
+                  profileId: input.profileId,
+                  relatedProfileId: existing.profileId,
+                  action: "automatic_reservation_link_corrected",
+                  actorUserId: ctx.user.id,
+                  detail: JSON.stringify({ sourceKey }),
+                },
+                {
+                  profileId: existing.profileId,
+                  relatedProfileId: input.profileId,
+                  action: "automatic_reservation_link_moved",
+                  actorUserId: ctx.user.id,
+                  detail: JSON.stringify({ sourceKey }),
+                },
+              ]);
+              linked += 1;
+              continue;
+            }
+            if (existing) continue;
+            await tx.insert(client360ReservationLinks).values({
+              profileId: input.profileId,
+              reservationKind: reference.kind,
+              reservationId: reference.entityId,
+              sourceKey,
+              linkedBy: "manual",
+              createdByUserId: ctx.user.id,
+            });
+            await tx.insert(client360Audit).values({
+              profileId: input.profileId,
+              action: "reservation_linked_manually",
+              actorUserId: ctx.user.id,
+              detail: JSON.stringify({ sourceKey }),
+            });
+            linked += 1;
+          }
+        });
+        return { success: true, linked };
+      }),
+
+    syncSkeduHistory: protectedProcedure
+      .input(z.object({ from: dateSchema, to: dateSchema }))
+      .mutation(async ({ ctx, input }) => {
+        assertClientProfileAccess(ctx.user);
+        if (!isAdminRole(ctx.user.role)) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Solo administración puede importar el historial de Skedu",
+          });
+        }
+        const rangeDays = Math.floor(
+          (new Date(`${input.to}T12:00:00Z`).getTime() -
+            new Date(`${input.from}T12:00:00Z`).getTime()) /
+            86_400_000
+        );
+        if (rangeDays < 0 || rangeDays > 366) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "El rango de importación debe ser de hasta 366 días",
+          });
+        }
+
+        // Asegura primero los enlaces de las reservas locales para no duplicar
+        // programas o Sauna que ya fueron sincronizados desde Skedu.
+        await loadClientEvents(ctx.user);
+        const fetched = await getAllSkeduAppointments({
+          startDate: santiagoLocalMidnightUtc(input.from),
+          endDate: santiagoLocalMidnightUtc(nextDate(input.to)),
+        });
+        const uniqueFetched = deduplicateSkeduAppointments(fetched);
+        const appointments = uniqueFetched.filter(appointment => {
+          const local = skeduLocalDateTime(appointment.StartsAt);
+          return local && local.date >= input.from && local.date <= input.to;
+        });
+        const db = await database();
+        const [
+          profiles,
+          identities,
+          links,
+          existingExternalRows,
+          programRows,
+          saunaRows,
+          saunaQueueRows,
+        ] = await Promise.all([
+          db.select().from(client360Profiles),
+          db.select().from(client360Identities),
+          db.select().from(client360ReservationLinks),
+          db.select().from(client360ExternalEvents),
+          db.select({ id: massageProgramBookings.id, externalReference: massageProgramBookings.externalReference })
+            .from(massageProgramBookings),
+          db.select({ id: saunaBookings.id, appointmentUuid: saunaBookings.skeduAppointmentUuid })
+            .from(saunaBookings),
+          db.select({ id: saunaProgramQueue.id, appointmentUuid: saunaProgramQueue.skeduAppointmentUuid })
+            .from(saunaProgramQueue),
+        ]);
+        const profilesById = new Map(profiles.map(profile => [profile.id, profile]));
+        const profilesByOrigin = new Map(
+          profiles.filter(profile => profile.originKey).map(profile => [profile.originKey!, profile.id])
+        );
+        const activeProfileId = (profileId: number): number => {
+          let current = profileId;
+          const seen = new Set<number>();
+          while (!seen.has(current)) {
+            seen.add(current);
+            const profile = profilesById.get(current);
+            if (profile?.status !== "merged" || !profile.mergedIntoProfileId) break;
+            current = profile.mergedIntoProfileId;
+          }
+          return current;
+        };
+        const profileIdsByIdentity = new Map<string, Set<number>>();
+        for (const identity of identities) {
+          const current = profileIdsByIdentity.get(identity.identityKey) ?? new Set<number>();
+          current.add(activeProfileId(identity.profileId));
+          profileIdsByIdentity.set(identity.identityKey, current);
+        }
+        const uniqueProfileForIdentity = (key: string | null) => {
+          if (!key) return null;
+          const candidates = profileIdsByIdentity.get(key);
+          return candidates?.size === 1 ? Array.from(candidates)[0] : null;
+        };
+        const profileBySource = new Map(links.map(link => [link.sourceKey, activeProfileId(link.profileId)]));
+        const existingExternal = new Map(existingExternalRows.map(row => [row.externalKey, row]));
+        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const nativeByAppointment = new Map<string, { kind: string; id: number; sourceKey?: string }>();
+        for (const row of programRows) {
+          const uuid = row.externalReference?.trim();
+          if (uuid && uuidPattern.test(uuid)) {
+            nativeByAppointment.set(uuid, {
+              kind: "massage_program",
+              id: row.id,
+              sourceKey: `massage_program:${row.id}`,
+            });
+          }
+        }
+        for (const row of saunaRows) {
+          if (row.appointmentUuid) {
+            nativeByAppointment.set(row.appointmentUuid, {
+              kind: "sauna",
+              id: row.id,
+              sourceKey: `sauna:${row.id}`,
+            });
+          }
+        }
+        for (const row of saunaQueueRows) {
+          if (row.appointmentUuid && !nativeByAppointment.has(row.appointmentUuid)) {
+            nativeByAppointment.set(row.appointmentUuid, {
+              kind: "sauna_program_queue",
+              id: row.id,
+            });
+          }
+        }
+
+        // Solo descarga el directorio de usuarios de los negocios que todavía
+        // tienen UUID sin identidad canónica; reintentos ya vinculados no lo necesitan.
+        const businessIdsNeedingUsers = new Set<string>();
+        for (const appointment of appointments) {
+          const userUuid = String(appointment.UserUUID ?? "").trim();
+          const businessUuid = String(appointment.BusinessUUID ?? "").trim();
+          const native = nativeByAppointment.get(String(appointment.UUID ?? ""));
+          const nativeProfile = native?.sourceKey ? profileBySource.get(native.sourceKey) : null;
+          if (
+            userUuid &&
+            businessUuid &&
+            !nativeProfile &&
+            !uniqueProfileForIdentity(`external:skedu:${userUuid}`)
+          ) {
+            businessIdsNeedingUsers.add(businessUuid);
+          }
+        }
+        const usersByUuid = new Map<string, Record<string, any>>();
+        let usersRead = 0;
+        let usersFailed = 0;
+        for (const businessUuid of businessIdsNeedingUsers) {
+          try {
+            const users = await getAllSkeduBusinessUsers(businessUuid);
+            usersRead += users.length;
+            for (const user of users) {
+              const uuid = String(user.UUID ?? "").trim();
+              if (uuid) usersByUuid.set(uuid, user);
+            }
+          } catch {
+            usersFailed += 1;
+          }
+        }
+
+        const stats = {
+          from: input.from,
+          to: input.to,
+          fetchedRows: fetched.length,
+          uniqueAppointments: appointments.length,
+          apiDuplicates: Math.max(0, fetched.length - uniqueFetched.length),
+          inserted: 0,
+          updated: 0,
+          linkedToNative: 0,
+          profilesCreated: 0,
+          identitiesCreated: 0,
+          usersRead,
+          usersFailed,
+          unmatched: 0,
+        };
+        const externalEventUpserts: Array<{
+          values: typeof client360ExternalEvents.$inferInsert;
+          existed: boolean;
+        }> = [];
+
+        const addIdentity = async (inputIdentity: {
+          profileId: number;
+          kind: "email" | "phone" | "external";
+          key: string;
+          normalizedValue: string;
+          displayValue: string | null;
+        }) => {
+          const current = profileIdsByIdentity.get(inputIdentity.key) ?? new Set<number>();
+          if (current.has(inputIdentity.profileId)) return;
+          await db.insert(client360Identities).values({
+            profileId: inputIdentity.profileId,
+            kind: inputIdentity.kind,
+            identityKey: inputIdentity.key,
+            normalizedValue: inputIdentity.normalizedValue,
+            displayValue: inputIdentity.displayValue,
+            source: "skedu_history",
+          }).onDuplicateKeyUpdate({ set: { displayValue: inputIdentity.displayValue } });
+          current.add(inputIdentity.profileId);
+          profileIdsByIdentity.set(inputIdentity.key, current);
+          stats.identitiesCreated += 1;
+        };
+
+        for (const appointment of appointments) {
+          const appointmentUuid = String(appointment.UUID ?? "").trim();
+          const start = skeduLocalDateTime(appointment.StartsAt);
+          if (!appointmentUuid || !start) continue;
+          const end = skeduLocalDateTime(appointment.EndsAt);
+          const externalKey = `skedu:${appointmentUuid}`;
+          const previous = existingExternal.get(externalKey);
+          const native = nativeByAppointment.get(appointmentUuid);
+          let profileId = native?.sourceKey
+            ? profileBySource.get(native.sourceKey) ?? null
+            : null;
+          const userUuid = String(appointment.UserUUID ?? "").trim();
+          const user = usersByUuid.get(userUuid);
+          const userName = [user?.FirstName, user?.LastName].filter(Boolean).join(" ").trim();
+          const userEmail = String(user?.Email ?? "").trim() || null;
+          const userPhone = String(user?.Phone ?? "").trim() || null;
+          const email = normalizeClientEmail(userEmail);
+          const phone = normalizeClientPhone(userPhone);
+
+          if (!profileId && userUuid) {
+            profileId = uniqueProfileForIdentity(`external:skedu:${userUuid}`);
+          }
+          if (!profileId && (email || phone)) {
+            profileId = chooseClientProfileCandidate({
+              emailProfileId: uniqueProfileForIdentity(email ? `email:${email}` : null),
+              phoneProfileId: uniqueProfileForIdentity(phone ? `phone:${phone}` : null),
+            }).profileId;
+          }
+          if (!profileId && userUuid) {
+            const originKey = `skedu_user:${userUuid}`;
+            profileId = profilesByOrigin.get(originKey) ?? null;
+            if (!profileId) {
+              const [created] = await db.insert(client360Profiles).values({
+                originKey,
+                displayName: userName || email || `Cliente Skedu ${userUuid.slice(0, 8)}`,
+                primaryEmail: email,
+                primaryPhone: userPhone,
+              }).$returningId();
+              profileId = created.id;
+              profilesByOrigin.set(originKey, profileId);
+              profilesById.set(profileId, {
+                id: profileId,
+                originKey,
+                displayName: userName || email || `Cliente Skedu ${userUuid.slice(0, 8)}`,
+                primaryEmail: email,
+                primaryPhone: userPhone,
+                notes: null,
+                status: "active",
+                mergedIntoProfileId: null,
+                createdByUserId: ctx.user.id,
+                updatedByUserId: ctx.user.id,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              });
+              stats.profilesCreated += 1;
+              await db.insert(client360Audit).values({
+                profileId,
+                action: "profile_created_from_skedu_history",
+                actorUserId: ctx.user.id,
+                detail: JSON.stringify({ userUuid }),
+              });
+            }
+          }
+          if (!profileId) {
+            profileId = previous?.profileId ?? null;
+          }
+          if (profileId && userUuid) {
+            await addIdentity({
+              profileId,
+              kind: "external",
+              key: `external:skedu:${userUuid}`,
+              normalizedValue: userUuid,
+              displayValue: userUuid,
+            });
+          }
+          if (profileId && email) {
+            await addIdentity({
+              profileId,
+              kind: "email",
+              key: `email:${email}`,
+              normalizedValue: email,
+              displayValue: userEmail ?? email,
+            });
+          }
+          if (profileId && phone) {
+            await addIdentity({
+              profileId,
+              kind: "phone",
+              key: `phone:${phone}`,
+              normalizedValue: phone,
+              displayValue: userPhone ?? phone,
+            });
+          }
+          if (!profileId) stats.unmatched += 1;
+          if (native) stats.linkedToNative += 1;
+
+          const serviceName = String(
+            appointment.Service?.Name ?? appointment.ServiceName ?? "Servicio Skedu"
+          );
+          const values: typeof client360ExternalEvents.$inferInsert = {
+            profileId,
+            provider: "skedu",
+            externalId: appointmentUuid,
+            externalKey,
+            userExternalId: userUuid || null,
+            businessExternalId: String(appointment.BusinessUUID ?? "").trim() || null,
+            serviceKey: inferSkeduClientService(serviceName),
+            serviceName,
+            variantName: String(appointment.Variant?.Name ?? appointment.VariantName ?? "").trim() || null,
+            eventDate: start.date,
+            startTime: start.time,
+            endTime: end?.time ?? null,
+            status: skeduClientEventStatus(appointment),
+            paymentStatus: "unknown",
+            listedAmountClp: money(
+              appointment.SessionPriceWithDiscount ?? appointment.SessionPrice ?? 0
+            ),
+            clientName: userName || null,
+            clientEmail: userEmail,
+            clientPhone: userPhone,
+            nativeKind: native?.kind ?? null,
+            nativeReservationId: native?.id ?? null,
+            sourceCreatedAt: nullableDate(appointment.CreatedAt),
+            sourceUpdatedAt: nullableDate(appointment.UpdatedAt),
+            rawJson: JSON.stringify(appointment),
+            lastSyncedAt: new Date(),
+          };
+          externalEventUpserts.push({ values, existed: Boolean(previous) });
+        }
+
+        // Una importación anual puede contener miles de citas. Las escrituras
+        // individuales siguen siendo idempotentes, pero se ejecutan con
+        // concurrencia acotada para evitar miles de viajes secuenciales a TiDB
+        // sin saturar el pool de conexiones.
+        const externalUpsertConcurrency = 25;
+        for (let index = 0; index < externalEventUpserts.length; index += externalUpsertConcurrency) {
+          const chunk = externalEventUpserts.slice(index, index + externalUpsertConcurrency);
+          await Promise.all(chunk.map(item =>
+            db.insert(client360ExternalEvents).values(item.values)
+              .onDuplicateKeyUpdate({ set: item.values })
+          ));
+          for (const item of chunk) {
+            if (item.existed) stats.updated += 1;
+            else stats.inserted += 1;
+          }
+        }
+
+        return stats;
+      }),
+
+    mergeProfiles: protectedProcedure
+      .input(z.object({
+        sourceProfileId: z.number().int().positive(),
+        targetProfileId: z.number().int().positive(),
+        reason: z.string().trim().min(5).max(500),
+      }).refine(value => value.sourceProfileId !== value.targetProfileId, {
+        message: "Selecciona dos fichas diferentes",
+      }))
+      .mutation(async ({ ctx, input }) => {
+        assertClientProfileAccess(ctx.user);
+        if (!isAdminRole(ctx.user.role)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Solo administración puede fusionar fichas" });
+        }
+        const db = await database();
+        await db.transaction(async tx => {
+          const [[source], [target]] = await Promise.all([
+            tx.select().from(client360Profiles)
+              .where(eq(client360Profiles.id, input.sourceProfileId)).limit(1),
+            tx.select().from(client360Profiles)
+              .where(eq(client360Profiles.id, input.targetProfileId)).limit(1),
+          ]);
+          if (!source || !target) throw new TRPCError({ code: "NOT_FOUND" });
+          if (source.status !== "active" || target.status !== "active") {
+            throw new TRPCError({ code: "CONFLICT", message: "Una de las fichas ya fue fusionada" });
+          }
+          const [sourceIdentities, targetIdentities] = await Promise.all([
+            tx.select().from(client360Identities)
+              .where(eq(client360Identities.profileId, source.id)),
+            tx.select().from(client360Identities)
+              .where(eq(client360Identities.profileId, target.id)),
+          ]);
+          const targetAliases = new Set(
+            targetIdentities.map(identity => `${identity.kind}:${identity.normalizedValue}`)
+          );
+          for (const identity of sourceIdentities) {
+            if (targetAliases.has(`${identity.kind}:${identity.normalizedValue}`)) continue;
+            await tx.update(client360Identities).set({ profileId: target.id })
+              .where(eq(client360Identities.id, identity.id));
+          }
+          await tx.update(client360ReservationLinks).set({
+            profileId: target.id,
+            linkedBy: "merge",
+            createdByUserId: ctx.user.id,
+          }).where(eq(client360ReservationLinks.profileId, source.id));
+          await tx.update(client360ExternalEvents).set({ profileId: target.id })
+            .where(eq(client360ExternalEvents.profileId, source.id));
+          await tx.update(client360Profiles).set({
+            displayName: target.displayName || source.displayName,
+            primaryEmail: target.primaryEmail ?? source.primaryEmail,
+            primaryPhone: target.primaryPhone ?? source.primaryPhone,
+            notes: target.notes ?? source.notes,
+            updatedByUserId: ctx.user.id,
+          }).where(eq(client360Profiles.id, target.id));
+          await tx.update(client360Profiles).set({
+            status: "merged",
+            mergedIntoProfileId: target.id,
+            updatedByUserId: ctx.user.id,
+          }).where(eq(client360Profiles.id, source.id));
+          const detail = JSON.stringify({
+            reason: input.reason,
+            source: { id: source.id, name: source.displayName, email: source.primaryEmail, phone: source.primaryPhone },
+            target: { id: target.id, name: target.displayName, email: target.primaryEmail, phone: target.primaryPhone },
+          });
+          await tx.insert(client360Audit).values([
+            {
+              profileId: target.id,
+              relatedProfileId: source.id,
+              action: "profiles_merged_into_target",
+              actorUserId: ctx.user.id,
+              detail,
+            },
+            {
+              profileId: source.id,
+              relatedProfileId: target.id,
+              action: "profile_merged_into_another",
+              actorUserId: ctx.user.id,
+              detail,
+            },
+          ]);
+        });
+        return { success: true, profileId: input.targetProfileId };
       }),
   }),
 });

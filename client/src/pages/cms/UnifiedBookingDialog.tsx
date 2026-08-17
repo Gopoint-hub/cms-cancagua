@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -39,11 +39,12 @@ import {
 } from "@/components/cms/ReservationPaymentLinks";
 
 type DirectService = "massages" | "biopools" | "sauna";
-type CreatedReservation = {
+export type CreatedReservation = {
   service: DirectService | "massage_programs";
   reservationId: number;
 };
-type ClientDraft = { name: string; email: string; phone: string };
+export type BookingClientDraft = { name: string; email: string; phone: string };
+type ClientDraft = BookingClientDraft;
 type PaymentDraft = {
   method: string;
   status: "paid" | "pending";
@@ -132,6 +133,13 @@ function localDateTime() {
   }).formatToParts(new Date());
   const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
+}
+function validClientEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+function validClientPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15;
 }
 function payment(amount = ""): PaymentDraft {
   return {
@@ -341,7 +349,9 @@ function PaymentEditor({
           <div>
             <Label>Estado</Label>
             <Select
-              disabled={item.method === "gift_card" || item.method === "pending_payment"}
+              disabled={
+                item.method === "gift_card" || item.method === "pending_payment"
+              }
               value={item.status}
               onValueChange={(status: "paid" | "pending") =>
                 update(index, { status })
@@ -1321,7 +1331,7 @@ function BookingEditor({
               </SelectContent>
             </Select>
           </div>
-          {!['pending_payment', 'cash', 'skedu_program'].includes(
+          {!["pending_payment", "cash", "skedu_program"].includes(
             value.programPaymentMethod
           ) && (
             <div>
@@ -1385,13 +1395,27 @@ export function UnifiedBookingDialog({
   onOpenChange,
   initialDate,
   allowedServices,
+  initialClient,
+  lockClient = false,
+  onReservationsCreated,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialDate: string;
   allowedServices: string[];
-  onCreated: () => Promise<unknown> | void;
+  initialClient?: Partial<BookingClientDraft> | null;
+  lockClient?: boolean;
+  /** Paso crítico e idempotente para asociar las reservas recién creadas. */
+  onReservationsCreated?: (result: {
+    reservations: CreatedReservation[];
+    client: BookingClientDraft;
+  }) => Promise<unknown> | void;
+  /** Refresco posterior; si falla, las reservas y su asociación siguen válidas. */
+  onCreated: (result?: {
+    reservations: CreatedReservation[];
+    client: BookingClientDraft;
+  }) => Promise<unknown> | void;
 }) {
   const available = (
     ["massages", "biopools", "sauna"] as DirectService[]
@@ -1412,36 +1436,64 @@ export function UnifiedBookingDialog({
   const [createdReservations, setCreatedReservations] = useState<
     CreatedReservation[]
   >([]);
-  const [paymentLinks, setPaymentLinks] = useState<ReservationPaymentLink[]>([]);
+  const [paymentLinks, setPaymentLinks] = useState<ReservationPaymentLink[]>(
+    []
+  );
   const [paymentLinkPhone, setPaymentLinkPhone] = useState("");
   const [savedCount, setSavedCount] = useState(0);
   const [partialSaveError, setPartialSaveError] = useState("");
+  const [pendingAssociation, setPendingAssociation] = useState<{
+    reservations: CreatedReservation[];
+    client: BookingClientDraft;
+  } | null>(null);
+  const [associationError, setAssociationError] = useState("");
+  const wasOpenRef = useRef(false);
   const massageCreate = trpc.masajes.agenda.create.useMutation();
   const programCreate =
     trpc.masajes.agenda.createSkeduProgramBooking.useMutation();
   const bioCreate = trpc.biopools.bookings.create.useMutation();
   const saunaCreate = trpc.sauna.agenda.create.useMutation();
-  const createPaymentLinks =
-    trpc.reservationPaymentLinks.create.useMutation();
+  const createPaymentLinks = trpc.reservationPaymentLinks.create.useMutation();
   const clientSearch = trpc.operations360.clients.list.useQuery(
     { search: client.name.trim() || undefined },
-    { enabled: open && !clientSelected && client.name.trim().length >= 2 }
+    {
+      enabled:
+        open &&
+        !lockClient &&
+        !clientSelected &&
+        client.name.trim().length >= 2,
+    }
   );
 
   useEffect(() => {
-    if (open) {
-      setClient({ name: "", email: "", phone: "" });
-      setClientSelected(false);
-      setItems([booking(first, initialDate)]);
-      setStep(0);
-      setActiveIndex(0);
-      setCreatedReservations([]);
-      setPaymentLinks([]);
-      setPaymentLinkPhone("");
-      setSavedCount(0);
-      setPartialSaveError("");
-    }
-  }, [open, initialDate, first]);
+    const justOpened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!justOpened) return;
+
+    setClient({
+      name: initialClient?.name ?? "",
+      email: initialClient?.email ?? "",
+      phone: initialClient?.phone ?? "",
+    });
+    setClientSelected(Boolean(initialClient));
+    setItems([booking(first, initialDate)]);
+    setStep(0);
+    setActiveIndex(0);
+    setCreatedReservations([]);
+    setPaymentLinks([]);
+    setPaymentLinkPhone("");
+    setSavedCount(0);
+    setPartialSaveError("");
+    setPendingAssociation(null);
+    setAssociationError("");
+  }, [
+    open,
+    initialDate,
+    first,
+    initialClient?.name,
+    initialClient?.email,
+    initialClient?.phone,
+  ]);
   const total = useMemo(
     () =>
       items.reduce(
@@ -1458,7 +1510,7 @@ export function UnifiedBookingDialog({
   );
   const paidTotal = items.reduce(
     (sum, item) =>
-          sum +
+      sum +
       (item.serviceKind === "massage_program"
         ? item.programPaymentMethod === "pending_payment"
           ? 0
@@ -1474,8 +1526,8 @@ export function UnifiedBookingDialog({
   );
   const valid =
     client.name.trim().length >= 2 &&
-    client.email.includes("@") &&
-    client.phone.trim().length >= 8 &&
+    validClientEmail(client.email) &&
+    validClientPhone(client.phone) &&
     items.every(item => {
       const program =
         item.service === "massages" && item.serviceKind === "massage_program";
@@ -1507,8 +1559,8 @@ export function UnifiedBookingDialog({
   const activeItem = items[activeIndex] ?? items[0];
   const clientValid =
     client.name.trim().length >= 2 &&
-    client.email.includes("@") &&
-    client.phone.trim().length >= 8;
+    validClientEmail(client.email) &&
+    validClientPhone(client.phone);
   const variantValid =
     Boolean(activeItem?.serviceId) &&
     (activeItem?.service === "sauna" || activeItem?.amountClp > 0) &&
@@ -1584,17 +1636,23 @@ export function UnifiedBookingDialog({
       return toast.error("Completa los datos obligatorios y revisa los pagos");
     setSaving(true);
     const created: CreatedReservation[] = [];
+    const allCreated: CreatedReservation[] = [];
+    // Sin callback crítico no existe una vinculación adicional pendiente.
+    // Esto evita dejar el diálogo bloqueado en contextos que solo crean
+    // reservas (por ejemplo, cuando se abre desde Calendario 360).
+    let reservationsAssociated = !onReservationsCreated;
     let completed = 0;
     try {
       for (const item of items) {
         const due = Math.max(0, item.amountClp - item.discountAmountClp);
-        const paid = item.serviceKind === "massage_program"
-          ? item.programPaymentMethod === "pending_payment"
-            ? 0
-            : due
-          : item.payments
-              .filter(row => row.status === "paid")
-              .reduce((sum, row) => sum + Number(row.amountClp || 0), 0);
+        const paid =
+          item.serviceKind === "massage_program"
+            ? item.programPaymentMethod === "pending_payment"
+              ? 0
+              : due
+            : item.payments
+                .filter(row => row.status === "paid")
+                .reduce((sum, row) => sum + Number(row.amountClp || 0), 0);
         const payments = due > 0 ? item.payments.map(paymentInput) : [];
         if (
           item.service === "massages" &&
@@ -1619,6 +1677,10 @@ export function UnifiedBookingDialog({
             paymentReference: item.programPaymentReference.trim() || undefined,
             notes: item.notes.trim() || undefined,
           });
+          allCreated.push({
+            service: "massage_programs",
+            reservationId: result.id,
+          });
           if (due > paid)
             created.push({
               service: "massage_programs",
@@ -1641,6 +1703,7 @@ export function UnifiedBookingDialog({
             discountCode: item.discountCode.trim() || undefined,
             notes: item.notes.trim() || undefined,
           });
+          allCreated.push({ service: "massages", reservationId: result.id });
           if (due > paid)
             created.push({ service: "massages", reservationId: result.id });
         } else if (item.service === "biopools") {
@@ -1659,6 +1722,7 @@ export function UnifiedBookingDialog({
             notes: item.notes.trim() || undefined,
             source: "cms",
           });
+          allCreated.push({ service: "biopools", reservationId: result.id });
           if (due > paid)
             created.push({ service: "biopools", reservationId: result.id });
         } else {
@@ -1682,15 +1746,20 @@ export function UnifiedBookingDialog({
             notes: item.notes.trim() || undefined,
             isConfirmed: true,
           });
+          allCreated.push({ service: "sauna", reservationId: result.id });
           if (due > paid)
             created.push({ service: "sauna", reservationId: result.id });
         }
         completed += 1;
       }
+      await onReservationsCreated?.({ reservations: allCreated, client });
+      reservationsAssociated = true;
       try {
-        await onCreated();
+        await onCreated({ reservations: allCreated, client });
       } catch {
-        toast.warning("Las reservas se guardaron, pero el calendario demoró en actualizarse");
+        toast.warning(
+          "Las reservas se guardaron, pero el calendario demoró en actualizarse"
+        );
       }
       setCreatedReservations(created);
       setPaymentLinks([]);
@@ -1704,26 +1773,67 @@ export function UnifiedBookingDialog({
           : `${items.length} reservas creadas para ${client.name}`
       );
     } catch (error) {
-      const message =
+      let message =
         error instanceof Error
           ? error.message
           : "No se pudieron crear las reservas";
       if (completed > 0) {
+        let associationFailure = "";
+        if (
+          !reservationsAssociated &&
+          onReservationsCreated &&
+          allCreated.length
+        ) {
+          try {
+            await onReservationsCreated({ reservations: allCreated, client });
+            reservationsAssociated = true;
+          } catch (associationError) {
+            const associationMessage =
+              associationError instanceof Error
+                ? associationError.message
+                : "no fue posible vincularlas a la ficha del cliente";
+            associationFailure = associationMessage;
+          }
+        }
         try {
-          await onCreated();
+          await onCreated({ reservations: allCreated, client });
         } catch {
           // Las reservas confirmadas por el servidor siguen siendo válidas;
           // Calendario 360 las recogerá en su siguiente actualización.
+        }
+        const creationIncomplete = completed < items.length;
+        const fullyRecovered = !creationIncomplete && reservationsAssociated;
+        if (!reservationsAssociated) {
+          setPendingAssociation({
+            reservations: allCreated,
+            client: { ...client },
+          });
+          setAssociationError(
+            associationFailure ||
+              "No fue posible vincular las reservas a esta ficha"
+          );
         }
         setCreatedReservations(created);
         setPaymentLinks([]);
         setPaymentLinkPhone(client.phone.trim());
         setSavedCount(completed);
-        setPartialSaveError(message);
+        setPartialSaveError(creationIncomplete ? message : "");
         setStep(7);
-        toast.warning(
-          `${completed} ${completed === 1 ? "reserva fue guardada" : "reservas fueron guardadas"}; una reserva no pudo crearse`
-        );
+        if (fullyRecovered) {
+          toast.success(
+            items.length === 1
+              ? "Reserva creada y vinculada"
+              : `${items.length} reservas creadas y vinculadas`
+          );
+        } else if (!reservationsAssociated) {
+          toast.warning(
+            "Las reservas se crearon, pero falta vincularlas a la ficha del cliente"
+          );
+        } else {
+          toast.warning(
+            `${completed} ${completed === 1 ? "reserva fue guardada" : "reservas fueron guardadas"}; una reserva no pudo crearse`
+          );
+        }
       } else {
         toast.error(message);
       }
@@ -1755,14 +1865,54 @@ export function UnifiedBookingDialog({
     }
   };
 
+  const retryAssociation = async () => {
+    if (!pendingAssociation || !onReservationsCreated) return;
+    setSaving(true);
+    try {
+      await onReservationsCreated(pendingAssociation);
+      setPendingAssociation(null);
+      setAssociationError("");
+      try {
+        await onCreated(pendingAssociation);
+      } catch {
+        // El vínculo ya quedó confirmado; la ficha se refrescará después.
+      }
+      toast.success("Reservas vinculadas a la ficha del cliente");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "No fue posible completar la vinculación";
+      setAssociationError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const progress = step === 7 ? 100 : Math.min(100, ((step + 1) / 7) * 100);
   const updateActive = (nextValue: BookingDraft) =>
     setItems(current =>
       current.map((row, index) => (index === activeIndex ? nextValue : row))
     );
+  const closeBlocked = saving || Boolean(pendingAssociation);
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && closeBlocked) return;
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[96vh] max-w-3xl overflow-y-auto border-stone-200 bg-[#f8f6f2] p-4 sm:p-6">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="max-h-[96vh] max-w-3xl overflow-y-auto border-stone-200 bg-[#f8f6f2] p-4 sm:p-6"
+        showCloseButton={!closeBlocked}
+        onEscapeKeyDown={event => {
+          if (closeBlocked) event.preventDefault();
+        }}
+        onPointerDownOutside={event => {
+          if (closeBlocked) event.preventDefault();
+        }}
+      >
         <DialogHeader>
           <div className="flex items-start gap-3">
             {step > 0 && step < 7 && (
@@ -1771,6 +1921,8 @@ export function UnifiedBookingDialog({
                 size="icon"
                 variant="outline"
                 className="rounded-full"
+                aria-label="Volver al paso anterior"
+                disabled={saving}
                 onClick={back}
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -1781,19 +1933,23 @@ export function UnifiedBookingDialog({
                 {step === 0
                   ? "Selecciona el servicio a reservar"
                   : step === 7
-                    ? "Reserva creada con éxito"
-                  : step === 6
-                    ? "Resumen de la reserva"
-                    : "Completa los datos para reservar"}
+                    ? pendingAssociation
+                      ? "Reservas creadas; vinculación pendiente"
+                      : "Reserva creada con éxito"
+                    : step === 6
+                      ? "Resumen de la reserva"
+                      : "Completa los datos para reservar"}
               </DialogTitle>
               <DialogDescription>
                 {step === 7
-                  ? createdReservations.length
-                    ? "Ya puedes generar y enviar el pago al cliente"
-                    : "La reserva quedó registrada correctamente"
+                  ? pendingAssociation
+                    ? "Reintenta la vinculación antes de cerrar esta ventana"
+                    : createdReservations.length
+                      ? "Ya puedes generar y enviar el pago al cliente"
+                      : "La reserva quedó registrada correctamente"
                   : items.length > 1
-                  ? `${items.length} reservas para el mismo cliente`
-                  : "Reserva manual desde Calendario 360"}
+                    ? `${items.length} reservas para el mismo cliente`
+                    : "Reserva manual desde Calendario 360"}
               </DialogDescription>
             </div>
           </div>
@@ -1835,48 +1991,67 @@ export function UnifiedBookingDialog({
               <div className="sm:col-span-2">
                 <h3 className="text-xl font-semibold">Cliente</h3>
                 <p className="text-sm text-muted-foreground">
-                  Selecciona un cliente existente o crea uno nuevo.
+                  {lockClient
+                    ? "La reserva quedará vinculada a esta ficha de Cliente 360."
+                    : "Selecciona un cliente existente o crea uno nuevo."}
                 </p>
               </div>
-              <div className="relative sm:col-span-2">
-                <Label>Buscar por nombre, teléfono o correo</Label>
-                <Input
-                  autoFocus
-                  value={client.name}
-                  onChange={event => {
-                    setClient({ ...client, name: event.target.value });
-                    setClientSelected(false);
-                  }}
-                />
-                {!clientSelected && (clientSearch.data?.length ?? 0) > 0 && (
-                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border bg-background p-1 shadow-lg">
-                    {clientSearch.data?.slice(0, 8).map((row: any) => (
-                      <button
-                        key={row.key}
-                        type="button"
-                        className="block w-full rounded-lg px-3 py-3 text-left hover:bg-muted"
-                        onClick={() => {
-                          setClient({
-                            name: row.name ?? "",
-                            email: row.email ?? "",
-                            phone: row.phone ?? "",
-                          });
-                          setClientSelected(true);
-                        }}
-                      >
-                        <strong>{row.name}</strong>
-                        <span className="block text-xs text-muted-foreground">
-                          {row.phone || "Sin teléfono"} ·{" "}
-                          {row.email || "Sin correo"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {lockClient ? (
+                <div className="rounded-xl border border-stone-200 bg-stone-50 p-3 sm:col-span-2">
+                  <Label htmlFor="unified-booking-client-name">Nombre</Label>
+                  <Input
+                    id="unified-booking-client-name"
+                    className="mt-1 bg-white"
+                    value={client.name}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                </div>
+              ) : (
+                <div className="relative sm:col-span-2">
+                  <Label htmlFor="unified-booking-client-search">
+                    Buscar por nombre, teléfono o correo
+                  </Label>
+                  <Input
+                    id="unified-booking-client-search"
+                    autoFocus
+                    value={client.name}
+                    onChange={event => {
+                      setClient({ ...client, name: event.target.value });
+                      setClientSelected(false);
+                    }}
+                  />
+                  {!clientSelected && (clientSearch.data?.length ?? 0) > 0 && (
+                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border bg-background p-1 shadow-lg">
+                      {clientSearch.data?.slice(0, 8).map((row: any) => (
+                        <button
+                          key={row.key}
+                          type="button"
+                          className="block w-full rounded-lg px-3 py-3 text-left hover:bg-muted"
+                          onClick={() => {
+                            setClient({
+                              name: row.name ?? "",
+                              email: row.email ?? "",
+                              phone: row.phone ?? "",
+                            });
+                            setClientSelected(true);
+                          }}
+                        >
+                          <strong>{row.name}</strong>
+                          <span className="block text-xs text-muted-foreground">
+                            {row.phone || "Sin teléfono"} ·{" "}
+                            {row.email || "Sin correo"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
-                <Label>WhatsApp *</Label>
+                <Label htmlFor="unified-booking-client-phone">WhatsApp *</Label>
                 <Input
+                  id="unified-booking-client-phone"
                   value={client.phone}
                   onChange={event =>
                     setClient({ ...client, phone: event.target.value })
@@ -1884,8 +2059,9 @@ export function UnifiedBookingDialog({
                 />
               </div>
               <div>
-                <Label>Correo *</Label>
+                <Label htmlFor="unified-booking-client-email">Correo *</Label>
                 <Input
+                  id="unified-booking-client-email"
                   type="email"
                   value={client.email}
                   onChange={event =>
@@ -2038,7 +2214,9 @@ export function UnifiedBookingDialog({
                     Total de {items.length}{" "}
                     {items.length === 1 ? "reserva" : "reservas"}
                   </span>
-                  <strong className="break-words text-xl sm:text-2xl">{clp(total)}</strong>
+                  <strong className="break-words text-xl sm:text-2xl">
+                    {clp(total)}
+                  </strong>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Saldo pendiente</span>
@@ -2053,12 +2231,12 @@ export function UnifiedBookingDialog({
                 <span
                   className={cn(
                     "mx-auto flex h-14 w-14 items-center justify-center rounded-full",
-                    partialSaveError
+                    partialSaveError || pendingAssociation
                       ? "bg-amber-100 text-amber-700"
                       : "bg-emerald-100 text-emerald-700"
                   )}
                 >
-                  {partialSaveError ? (
+                  {partialSaveError || pendingAssociation ? (
                     <AlertTriangle className="h-8 w-8" />
                   ) : (
                     <CheckCircle2 className="h-8 w-8" />
@@ -2070,9 +2248,11 @@ export function UnifiedBookingDialog({
                     : `${savedCount} reservas guardadas`}
                 </h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {partialSaveError
-                    ? "No vuelvas a confirmar el grupo: las reservas indicadas ya existen."
-                    : "Calendario 360 y los módulos correspondientes ya están actualizados."}
+                  {pendingAssociation
+                    ? "Las reservas existen, pero todavía no aparecen asociadas a esta ficha."
+                    : partialSaveError
+                      ? "No vuelvas a confirmar el grupo: las reservas indicadas ya existen."
+                      : "Calendario 360 y los módulos correspondientes ya están actualizados."}
                 </p>
               </div>
 
@@ -2083,8 +2263,26 @@ export function UnifiedBookingDialog({
                     No se completó la siguiente reserva: {partialSaveError}
                   </p>
                   <p className="mt-2 text-xs">
-                    Las reservas posteriores no se intentaron. Cierra esta ventana y agrega únicamente las faltantes para evitar duplicados.
+                    Las reservas posteriores no se intentaron. Cierra esta
+                    ventana y agrega únicamente las faltantes para evitar
+                    duplicados.
                   </p>
+                </div>
+              )}
+
+              {pendingAssociation && (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+                  <p className="font-semibold">Vinculación pendiente</p>
+                  <p className="mt-1 text-sm">{associationError}</p>
+                  <Button
+                    type="button"
+                    className="mt-3 w-full sm:w-auto"
+                    variant="outline"
+                    disabled={saving}
+                    onClick={retryAssociation}
+                  >
+                    {saving ? "Reintentando…" : "Reintentar vinculación"}
+                  </Button>
                 </div>
               )}
 
@@ -2138,7 +2336,7 @@ export function UnifiedBookingDialog({
               <Button
                 type="button"
                 variant="outline"
-                onClick={step === 0 ? () => onOpenChange(false) : back}
+                onClick={step === 0 ? () => handleOpenChange(false) : back}
               >
                 {step === 0 ? "Cancelar" : "Atrás"}
               </Button>
@@ -2152,6 +2350,7 @@ export function UnifiedBookingDialog({
               <Button
                 type="button"
                 variant="outline"
+                disabled={saving}
                 onClick={() => setStep(5)}
               >
                 Atrás
@@ -2166,7 +2365,11 @@ export function UnifiedBookingDialog({
             </>
           )}
           {step === 7 && (
-            <Button type="button" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              disabled={closeBlocked}
+              onClick={() => handleOpenChange(false)}
+            >
               Cerrar
             </Button>
           )}

@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildClientKey,
   buildPaymentDetail,
+  chooseClientProfileCandidate,
+  deduplicateSkeduAppointments,
+  inferSkeduClientService,
   isVisibleCalendarReservation,
+  normalizeClientEmail,
+  normalizeClientPhone,
+  resolveMergedClientProfileIds,
+  santiagoLocalMidnightUtc,
+  skeduClientEventStatus,
 } from "./operations360Router";
 import { canAccessCmsPath } from "../shared/permissions";
 
@@ -15,6 +23,67 @@ describe("Cliente 360", () => {
   it("usa teléfono cuando no existe correo", () => {
     expect(buildClientKey({ phone: "+56 9 1111 2222", name: "Cliente" }))
       .toBe("phone:56911112222");
+  });
+
+  it("normaliza formatos móviles chilenos al mismo alias", () => {
+    expect(normalizeClientPhone("9 5360 0260")).toBe("56953600260");
+    expect(normalizeClientPhone("+56 9 5360 0260")).toBe("56953600260");
+    expect(normalizeClientEmail(" Persona@Example.COM ")).toBe("persona@example.com");
+  });
+
+  it("jamás agrupa personas solo por compartir nombre", () => {
+    expect(buildClientKey({ name: "María", sourceKey: "massage:1" }))
+      .toBe("unidentified:massage:1");
+    expect(buildClientKey({ name: "María", sourceKey: "massage:2" }))
+      .toBe("unidentified:massage:2");
+  });
+
+  it("no fusiona automáticamente identidades contradictorias", () => {
+    expect(chooseClientProfileCandidate({ emailProfileId: 10, phoneProfileId: 20 }))
+      .toEqual({ profileId: 10, conflict: true });
+    expect(chooseClientProfileCandidate({ emailProfileId: 10, phoneProfileId: 10 }))
+      .toEqual({ profileId: 10, conflict: false });
+  });
+
+  it("resuelve aliases conservados en una ficha fusionada hacia el destino", () => {
+    expect(resolveMergedClientProfileIds([10, 20], [
+      { id: 10, status: "merged", mergedIntoProfileId: 20 },
+      { id: 20, status: "active", mergedIntoProfileId: null },
+    ])).toEqual([20]);
+  });
+});
+
+describe("historial Skedu de Cliente 360", () => {
+  it("clasifica servicios conocidos y conserva fallback extensible", () => {
+    expect(inferSkeduClientService("Masaje Relajante")).toBe("massages");
+    expect(inferSkeduClientService("Biopiscinas Geotermales")).toBe("biopools");
+    expect(inferSkeduClientService("Sauna Nativo")).toBe("sauna");
+    expect(inferSkeduClientService("Hatha Yoga")).toBe("regular_classes");
+    expect(inferSkeduClientService("Servicio futuro")).toBe("other");
+  });
+
+  it("deduplica UUID y conserva la actualización más reciente", () => {
+    const rows = deduplicateSkeduAppointments([
+      { UUID: "a", UpdatedAt: "2026-01-01T10:00:00Z", Service: { Name: "Antiguo" } },
+      { UUID: "a", UpdatedAt: "2026-01-01T11:00:00Z", Service: { Name: "Nuevo" } },
+      { UUID: "b", UpdatedAt: "2026-01-01T09:00:00Z" },
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows.find(row => row.UUID === "a")?.Service.Name).toBe("Nuevo");
+  });
+
+  it("no inventa asistencia a partir de estados opacos", () => {
+    expect(skeduClientEventStatus({ DeletedAt: "2026-01-01" })).toBe("cancelled");
+    expect(skeduClientEventStatus({ IsTemporary: true })).toBe("pending");
+    expect(skeduClientEventStatus({ IsConfirmed: false })).toBe("pending");
+    expect(skeduClientEventStatus({ IsConfirmed: true })).toBe("confirmed");
+  });
+
+  it("convierte el rango local de Chile a límites UTC", () => {
+    expect(santiagoLocalMidnightUtc("2026-08-17"))
+      .toBe("2026-08-17T04:00:00.000Z");
+    expect(santiagoLocalMidnightUtc("2026-01-17"))
+      .toBe("2026-01-17T03:00:00.000Z");
   });
 });
 
@@ -29,6 +98,12 @@ describe("acceso a vistas 360", () => {
   it("requiere permiso de clientes para Cliente 360", () => {
     const permissions = JSON.stringify(["module.biopools", "biopools.view_clients"]);
     expect(canAccessCmsPath("editor", "/cms/clientes-360", false, permissions)).toBe(true);
+    expect(canAccessCmsPath(
+      "editor",
+      "/cms/clientes-360",
+      false,
+      JSON.stringify(["module.sauna", "sauna.view_clients"]),
+    )).toBe(true);
   });
 
   it("reserva el Dashboard BI exclusivamente para superadministradores", () => {

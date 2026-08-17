@@ -82,14 +82,14 @@ import {
 
 type ViewMode = "day" | "week" | "month";
 type DayMode = "list" | "summary" | "services";
-type ServiceKey = "massages" | "biopools" | "sauna" | "regular_classes";
-type EventKind = "massage" | "massage_program" | "biopool" | "sauna" | "regular_class" | "regular_class_schedule";
+export type Calendar360ServiceKey = "massages" | "biopools" | "sauna" | "regular_classes";
+export type Calendar360EventKind = "massage" | "massage_program" | "biopool" | "sauna" | "regular_class" | "regular_class_schedule";
 
-type CalendarEvent = {
+export type Calendar360ReservationEvent = {
   id: string;
   entityId: number;
-  kind: EventKind;
-  service: ServiceKey;
+  kind: Calendar360EventKind;
+  service: Calendar360ServiceKey;
   date: string;
   startTime: string;
   endTime: string;
@@ -100,6 +100,10 @@ type CalendarEvent = {
   people: number;
   href: string;
 };
+
+type ServiceKey = Calendar360ServiceKey;
+type EventKind = Calendar360EventKind;
+type CalendarEvent = Calendar360ReservationEvent;
 
 const SERVICE_META: Record<ServiceKey, { label: string; dot: string; panel: string; solid: string }> = {
   massages: {
@@ -1246,7 +1250,20 @@ function ReservationActions({
   </>;
 }
 
-function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+export type Calendar360ReservationDetailProps = {
+  event: Calendar360ReservationEvent | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Refresca la ficha que aloja el detalle después de cualquier cambio operativo. */
+  onChanged?: () => Promise<unknown> | void;
+};
+
+export function Calendar360ReservationDetail({
+  event,
+  open,
+  onOpenChange,
+  onChanged,
+}: Calendar360ReservationDetailProps) {
   const utils = trpc.useUtils();
   const [tab, setTab] = useState("general");
   const query = trpc.operations360.detail.useQuery(
@@ -1281,6 +1298,12 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
             ? utils.masajes.agenda.getByDateRange.invalidate()
             : Promise.resolve(),
     ]);
+    try {
+      await onChanged?.();
+    } catch {
+      // La mutación y las vistas operativas ya se actualizaron. Un fallo al
+      // refrescar la pantalla anfitriona no debe informar falsamente que falló.
+    }
   };
 
   return (
@@ -1298,7 +1321,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
           <p className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive">No se pudo cargar el detalle: {query.error.message}</p>
         ) : detail ? (
           <>
-            {detail.payment?.balanceAmountClp > 0 && (
+            {detail.status !== "cancelled" && detail.payment?.balanceAmountClp > 0 && (
               <div className="flex flex-col gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-red-950 sm:flex-row sm:items-center sm:justify-between">
                 <div><p className="font-semibold">Pendiente de pago · {money(detail.payment.balanceAmountClp)}</p><p className="text-sm text-red-800">Al hacer check-in, confirma el cobro y selecciona el medio realmente utilizado.</p></div>
                 {detail.canManagePayments && ["massages", "biopools", "sauna"].includes(event?.service ?? "") && <Button variant="destructive" onClick={() => setTab("payments")}>Registrar pago del check-in</Button>}
@@ -1334,7 +1357,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
 
                     {detail.payment.overpaymentAmountClp > 0 && <div className="flex flex-col gap-1 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"><span>Excedente pagado por regularizar</span><strong className="text-amber-800">{money(detail.payment.overpaymentAmountClp)}</strong></div>}
 
-                    {detail.canManagePayments && event && ["massages", "biopools", "sauna"].includes(event.service) && (event.kind !== "massage_program" || detail.payment.balanceAmountClp > 0) ? event.kind === "massage_program" ? <ProgramPaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <PaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <div className="overflow-hidden rounded-xl border">
+                    {detail.status !== "cancelled" && detail.canManagePayments && event && ["massages", "biopools", "sauna"].includes(event.service) && (event.kind !== "massage_program" || detail.payment.balanceAmountClp > 0) ? event.kind === "massage_program" ? <ProgramPaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <PaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <div className="overflow-hidden rounded-xl border">
                       {detail.payment.lines.map((line: any) => (
                         <div key={line.id} className="grid min-w-0 gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] sm:items-center">
                           <div>
@@ -1552,7 +1575,7 @@ export default function Calendario360() {
           <span className="flex items-center gap-2"><RefreshCw className={cn("h-3.5 w-3.5", calendar.isFetching && "animate-spin")} />Actualización automática cada 30 segundos</span>
         </div>
       </div>
-      <ReservationDetail event={selectedEvent} open={Boolean(selectedEvent)} onOpenChange={open => !open && setSelectedEvent(null)} />
+      <Calendar360ReservationDetail event={selectedEvent} open={Boolean(selectedEvent)} onOpenChange={open => !open && setSelectedEvent(null)} />
       {canCreateReservation && <Button aria-label="Crear nueva reserva" title="Crear nueva reserva" className="cms-mobile-fab fixed right-4 bottom-4 z-40 h-14 w-14 rounded-full shadow-xl sm:right-6 sm:bottom-6" onClick={() => setBookingOpen(true)}><Plus className="h-6 w-6" /></Button>}
       <UnifiedBookingDialog open={bookingOpen} onOpenChange={setBookingOpen} initialDate={dateKey(selectedDate)} allowedServices={manualBookingServices} onCreated={async () => { await calendar.refetch(); }} />
     </DashboardLayout>

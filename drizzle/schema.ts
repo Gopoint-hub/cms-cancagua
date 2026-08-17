@@ -745,6 +745,122 @@ export const clients = mysqlTable("clients", {
 export type Client = typeof clients.$inferSelect;
 export type InsertClient = typeof clients.$inferInsert;
 
+/**
+ * Ficha canónica de Cliente 360.
+ *
+ * Las fuentes operativas (Masajes, Biopiscinas, Sauna y Clases) conservan sus
+ * propios datos históricos. Esta tabla entrega una identidad estable para
+ * agruparlos sin depender de que el nombre esté escrito exactamente igual.
+ */
+export const client360Profiles = mysqlTable("client_360_profiles", {
+  id: int("id").autoincrement().primaryKey(),
+  originKey: varchar("origin_key", { length: 160 }).unique(),
+  displayName: varchar("display_name", { length: 200 }).notNull(),
+  primaryEmail: varchar("primary_email", { length: 320 }),
+  primaryPhone: varchar("primary_phone", { length: 40 }),
+  notes: text("notes"),
+  status: mysqlEnum("status", ["active", "merged"]).default("active").notNull(),
+  mergedIntoProfileId: int("merged_into_profile_id"),
+  createdByUserId: int("created_by_user_id"),
+  updatedByUserId: int("updated_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+/**
+ * Alias normalizados de una ficha. `identityKey` incluye el tipo
+ * (`email:...`/`phone:...`). Un contacto puede estar compartido por una familia,
+ * por eso el lookup no es único globalmente: la resolución automática solo lo
+ * usa cuando conduce a una única ficha.
+ */
+export const client360Identities = mysqlTable("client_360_identities", {
+  id: int("id").autoincrement().primaryKey(),
+  profileId: int("profile_id").notNull(),
+  kind: mysqlEnum("kind", ["email", "phone", "external"]).notNull(),
+  identityKey: varchar("identity_key", { length: 400 }).notNull(),
+  normalizedValue: varchar("normalized_value", { length: 320 }).notNull(),
+  displayValue: varchar("display_value", { length: 320 }),
+  source: varchar("source", { length: 60 }).default("operations_360").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** Enlace estable entre una ficha y el registro operativo original. */
+export const client360ReservationLinks = mysqlTable(
+  "client_360_reservation_links",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    profileId: int("profile_id").notNull(),
+    // varchar para permitir que servicios futuros se incorporen sin ALTER ENUM.
+    reservationKind: varchar("reservation_kind", { length: 60 }).notNull(),
+    reservationId: int("reservation_id").notNull(),
+    // Para Clases el detalle abre la sesión, pero el origen estable puede ser
+    // una asistencia. sourceKey evita colisiones entre participantes.
+    sourceKey: varchar("source_key", { length: 120 }).notNull().unique(),
+    linkedBy: mysqlEnum("linked_by", ["automatic", "manual", "merge"])
+      .default("automatic")
+      .notNull(),
+    createdByUserId: int("created_by_user_id"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  }
+);
+
+/** Snapshot read-only de citas antiguas importadas desde Skedu. */
+export const client360ExternalEvents = mysqlTable(
+  "client_360_external_events",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    profileId: int("profile_id"),
+    provider: varchar("provider", { length: 40 }).default("skedu").notNull(),
+    externalId: varchar("external_id", { length: 255 }).notNull(),
+    externalKey: varchar("external_key", { length: 320 }).notNull().unique(),
+    userExternalId: varchar("user_external_id", { length: 255 }),
+    businessExternalId: varchar("business_external_id", { length: 255 }),
+    serviceKey: varchar("service_key", { length: 60 })
+      .default("other")
+      .notNull(),
+    serviceName: varchar("service_name", { length: 220 }).notNull(),
+    variantName: varchar("variant_name", { length: 220 }),
+    eventDate: date("event_date", { mode: "string" }).notNull(),
+    startTime: varchar("start_time", { length: 5 }),
+    endTime: varchar("end_time", { length: 5 }),
+    status: varchar("status", { length: 40 }).default("confirmed").notNull(),
+    paymentStatus: varchar("payment_status", { length: 40 })
+      .default("unknown")
+      .notNull(),
+    listedAmountClp: int("listed_amount_clp").default(0).notNull(),
+    clientName: varchar("client_name", { length: 200 }),
+    clientEmail: varchar("client_email", { length: 320 }),
+    clientPhone: varchar("client_phone", { length: 40 }),
+    nativeKind: varchar("native_kind", { length: 60 }),
+    nativeReservationId: int("native_reservation_id"),
+    sourceCreatedAt: timestamp("source_created_at"),
+    sourceUpdatedAt: timestamp("source_updated_at"),
+    rawJson: mediumtext("raw_json"),
+    lastSyncedAt: timestamp("last_synced_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  }
+);
+
+/** Auditoría mínima de altas, ediciones, enlaces, conflictos y fusiones. */
+export const client360Audit = mysqlTable("client_360_audit", {
+  id: int("id").autoincrement().primaryKey(),
+  profileId: int("profile_id").notNull(),
+  action: varchar("action", { length: 60 }).notNull(),
+  relatedProfileId: int("related_profile_id"),
+  detail: text("detail"),
+  actorUserId: int("actor_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type Client360Profile = typeof client360Profiles.$inferSelect;
+export type Client360Identity = typeof client360Identities.$inferSelect;
+export type Client360ReservationLink =
+  typeof client360ReservationLinks.$inferSelect;
+export type Client360ExternalEvent =
+  typeof client360ExternalEvents.$inferSelect;
+
 // Suscriptores de newsletter
 export const newsletterSubscribers = mysqlTable("newsletter_subscribers", {
   id: int("id").autoincrement().primaryKey(),

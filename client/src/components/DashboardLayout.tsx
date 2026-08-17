@@ -129,14 +129,14 @@ export const categories: Category[] = [
     description: "Historial y análisis de clientes",
     color: "bg-slate-500",
     permission: "massages.view_clients",
-    permissionsAny: ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
+    permissionsAny: ["massages.view_clients", "biopools.view_clients", "sauna.view_clients", "regular_classes.students"],
     items: [
       {
         icon: Users,
         label: "Clientes",
         path: "/cms/clientes-360",
         permission: "massages.view_clients",
-        permissionsAny: ["massages.view_clients", "biopools.view_clients", "regular_classes.students"],
+        permissionsAny: ["massages.view_clients", "biopools.view_clients", "sauna.view_clients", "regular_classes.students"],
       },
       {
         icon: TrendingUp,
