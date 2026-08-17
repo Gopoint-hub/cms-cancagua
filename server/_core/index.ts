@@ -33,6 +33,7 @@ import { ensureHotTubOrdersSchema } from "../ensureHotTubOrdersSchema";
 import { ensureGiftCardServiceSchema } from "../ensureGiftCardServiceSchema";
 import { ensureCashRegisterSchema } from "../ensureCashRegisterSchema";
 import { ensureReservationPaymentLinksSchema } from "../ensureReservationPaymentLinksSchema";
+import { ensureServiceCartCheckoutSchema } from "../ensureServiceCartCheckoutSchema";
 import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
 import biopoolWebpayReturnRouter, { startBiopoolCheckoutScheduler } from "../biopoolWebpay";
@@ -40,6 +41,7 @@ import saunaWebpayReturnRouter, { startSaunaCheckoutScheduler } from "../saunaWe
 import { startSaunaSyncScheduler } from "../saunaSync";
 import navegaRelaxWebhook from "../navegaRelaxWebhook";
 import reservationPaymentLinksWebpay from "../reservationPaymentLinksWebpay";
+import serviceCartWebpay, { startServiceCartCheckoutScheduler } from "../serviceCartWebpay";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -78,6 +80,7 @@ async function startServer() {
   await ensureGiftCardServiceSchema();
   await ensureCashRegisterSchema();
   await ensureReservationPaymentLinksSchema();
+  await ensureServiceCartCheckoutSchema();
   await ensureMaintenanceShiftSchema();
   startTherapistAssignmentExpiryWorker();
   const app = express();
@@ -134,6 +137,8 @@ async function startServer() {
   app.use("/api/biopiscinas/webpay", biopoolWebpayReturnRouter);
   // Retorno servidor-a-servidor de Webpay Plus para Sauna.
   app.use("/api/sauna/webpay", saunaWebpayReturnRouter);
+  // Retorno de la compra pública que combina Biopiscinas y Sauna.
+  app.use("/api/servicios/webpay", serviceCartWebpay);
   // Retorno Webpay de links creados para reservas manuales existentes.
   app.use("/api/reservation-payment-links/webpay", reservationPaymentLinksWebpay);
   // Unsubscribe route for newsletters
@@ -177,6 +182,7 @@ startServer()
     startBiopoolNotificationScheduler();
     startBiopoolCheckoutScheduler();
     startSaunaCheckoutScheduler();
+    startServiceCartCheckoutScheduler();
     startSaunaSyncScheduler();
     try {
       const { runInitialMassageTherapistInvitations } = await import("../massageTherapistInvitations");

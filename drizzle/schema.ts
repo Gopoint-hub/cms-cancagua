@@ -570,9 +570,63 @@ export const saunaCheckoutOrders = mysqlTable("sauna_checkout_orders", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
+// Checkout público transversal. Mantiene una sola transacción Webpay para una
+// compra que puede combinar Biopiscinas y Sauna, mientras cada línea conserva
+// su hold de aforo en el módulo correspondiente.
+export const serviceCartCheckoutOrders = mysqlTable("service_cart_checkout_orders", {
+  id: int("id").autoincrement().primaryKey(),
+  publicToken: varchar("public_token", { length: 64 }).notNull().unique(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }).notNull(),
+  clientPhone: varchar("client_phone", { length: 40 }).notNull(),
+  totalClp: int("total_clp").notNull(),
+  status: mysqlEnum("status", [
+    "initiating",
+    "payment_pending",
+    "paid",
+    "rejected",
+    "aborted",
+    "expired",
+    "failed",
+    "refunded",
+    "manual_review",
+  ]).default("initiating").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  webpayToken: varchar("webpay_token", { length: 180 }).unique(),
+  buyOrder: varchar("buy_order", { length: 26 }).unique(),
+  sessionId: varchar("session_id", { length: 61 }),
+  webpayStatus: varchar("webpay_status", { length: 40 }),
+  responseCode: int("response_code"),
+  authorizationCode: varchar("authorization_code", { length: 80 }),
+  cardNumber: varchar("card_number", { length: 40 }),
+  paymentTypeCode: varchar("payment_type_code", { length: 10 }),
+  transactionDate: varchar("transaction_date", { length: 60 }),
+  rawResponse: mediumtext("raw_response"),
+  error: text("error"),
+  paidAt: timestamp("paid_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const serviceCartCheckoutItems = mysqlTable("service_cart_checkout_items", {
+  id: int("id").autoincrement().primaryKey(),
+  cartOrderId: int("cart_order_id").notNull(),
+  module: mysqlEnum("module", ["biopools", "sauna"]).notNull(),
+  childOrderId: int("child_order_id").notNull(),
+  itemName: varchar("item_name", { length: 220 }).notNull(),
+  bookingDate: date("booking_date", { mode: "string" }).notNull(),
+  startTime: varchar("start_time", { length: 5 }).notNull(),
+  endTime: varchar("end_time", { length: 5 }).notNull(),
+  guests: int("guests").notNull(),
+  totalClp: int("total_clp").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export type SaunaBooking = typeof saunaBookings.$inferSelect;
 export type SaunaService = typeof saunaServices.$inferSelect;
 export type SaunaCheckoutOrder = typeof saunaCheckoutOrders.$inferSelect;
+export type ServiceCartCheckoutOrder = typeof serviceCartCheckoutOrders.$inferSelect;
 
 // Servicios de Skedu
 export const services = mysqlTable("services", {

@@ -68,6 +68,7 @@ import {
 import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
 const kindSchema = z.enum(["shared", "private", "staff", "detox", "manual"]);
 const statusSchema = z.enum([
@@ -125,6 +126,12 @@ function dayOfWeek(date: string): number {
   return new Date(`${date}T12:00:00Z`).getUTCDay();
 }
 
+function datesInMonth(month: string): string[] {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const totalDays = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return Array.from({ length: totalDays }, (_, index) => `${month}-${String(index + 1).padStart(2, "0")}`);
+}
+
 type SaunaScheduleDay = {
   enabled: boolean;
   open: string | null;
@@ -140,7 +147,7 @@ function parseSchedule(value: string): SaunaSchedule {
   }
 }
 
-async function settings(executor: any) {
+export async function settings(executor: any) {
   const [row] = await executor
     .select()
     .from(saunaSettings)
@@ -235,7 +242,7 @@ function availabilityForInterval(
   return availableSaunaSeats(overlapping);
 }
 
-async function availabilityForDay(
+export async function availabilityForDay(
   executor: any,
   date: string,
   excludeCheckoutOrderId?: number
@@ -298,7 +305,7 @@ async function assertCapacity(
   return available;
 }
 
-async function acquireCapacityLock(
+export async function acquireCapacityLock(
   executor: any,
   _date: string
 ): Promise<void> {
@@ -310,7 +317,7 @@ async function acquireCapacityLock(
   );
 }
 
-async function releaseCapacityLock(
+export async function releaseCapacityLock(
   _executor: any,
   _date: string
 ): Promise<void> {
@@ -1553,6 +1560,8 @@ export const saunaRouter = router({
           date: input.date,
           slots: result.slots.filter(
             slot =>
+              slot.startTime >= "10:00" &&
+              slot.startTime <= "20:00" &&
               hasSaunaBookingLeadTime(
                 chileLocalDateTimeToUtc(input.date, slot.startTime),
                 config.bookingLeadHours
@@ -1562,6 +1571,42 @@ export const saunaRouter = router({
                 : slot.availableSeats >= service.capacityUsed)
           ),
         };
+      }),
+    availableDates: publicProcedure
+      .input(z.object({ serviceId: z.number().int().positive(), month: monthSchema }))
+      .query(async ({ input }) => {
+        const db = await database();
+        const config = await settings(db);
+        if (!config.checkoutEnabled) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La venta online de Sauna todavía no está habilitada" });
+        const [service] = await db.select().from(saunaServices).where(and(eq(saunaServices.id, input.serviceId), eq(saunaServices.published, 1))).limit(1);
+        if (!service || ["staff", "program"].includes(service.kind)) throw new TRPCError({ code: "NOT_FOUND" });
+        const dates = datesInMonth(input.month);
+        const from = dates[0];
+        const to = dates[dates.length - 1];
+        const [bookings, blocks, holds] = await Promise.all([
+          db.select().from(saunaBookings).where(and(gte(saunaBookings.bookingDate, from), lte(saunaBookings.bookingDate, to), ne(saunaBookings.status, "cancelled"))),
+          db.select().from(saunaBlocks).where(and(gte(saunaBlocks.blockDate, from), lte(saunaBlocks.blockDate, to), eq(saunaBlocks.active, 1))),
+          db.select().from(saunaCheckoutOrders).where(and(gte(saunaCheckoutOrders.bookingDate, from), lte(saunaCheckoutOrders.bookingDate, to), inArray(saunaCheckoutOrders.status, ["initiating", "payment_pending"]), gt(saunaCheckoutOrders.expiresAt, new Date()))),
+        ]);
+        const schedule = parseSchedule(config.scheduleJson);
+        const isPrivate = service.kind === "private" || service.partySize >= 4;
+        const availableDates = dates.filter(date => {
+          const day = schedule[String(dayOfWeek(date))];
+          if (!day?.enabled || !day.open || !day.close) return false;
+          const occupancy = [
+            ...bookings.filter(item => serializeDate(item.bookingDate) === date),
+            ...blocks.filter(item => serializeDate(item.blockDate) === date).map(item => ({ ...item, guests: item.blockedCapacity, capacityUsed: item.blockedCapacity, isPrivate: 0 })),
+            ...holds.filter(item => serializeDate(item.bookingDate) === date),
+          ];
+          return buildSaunaSlots(day.open, day.close, config.slotIntervalMinutes, config.durationMinutes).some(slot => {
+            if (slot.startTime < "10:00" || slot.startTime > "20:00") return false;
+            if (!hasSaunaBookingLeadTime(chileLocalDateTimeToUtc(date, slot.startTime), config.bookingLeadHours)) return false;
+            const overlapping = occupancy.filter(item => saunaIntervalsOverlap(slot.startTime, slot.endTime, item.startTime, item.endTime));
+            const available = availableSaunaSeats(overlapping);
+            return isPrivate ? available === SAUNA_CAPACITY : available >= service.capacityUsed;
+          });
+        });
+        return { dates: availableDates };
       }),
     startPayment: publicProcedure
       .input(
@@ -1605,6 +1650,11 @@ export const saunaRouter = router({
         const partyError = validateSaunaParty(guests, isPrivate);
         if (partyError)
           throw new TRPCError({ code: "BAD_REQUEST", message: partyError });
+        if (input.startTime < "10:00" || input.startTime > "20:00")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Elige un horario entre las 10:00 y las 20:00",
+          });
         if (
           !hasSaunaBookingLeadTime(
             chileLocalDateTimeToUtc(input.bookingDate, input.startTime),

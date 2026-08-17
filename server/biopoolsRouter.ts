@@ -210,7 +210,7 @@ function hoursUntil(date: string, time: string): number {
   );
 }
 
-async function availabilityForDay(
+export async function availabilityForDay(
   executor: any,
   serviceId: number,
   date: string,
@@ -339,28 +339,23 @@ async function addActivity(
   });
 }
 
-async function acquireCapacityLock(
+export async function acquireCapacityLock(
   executor: any,
-  lockName: string
+  _lockName: string
 ): Promise<void> {
-  const result = await executor.execute(
-    sql`SELECT GET_LOCK(${lockName}, 10) AS acquired`
+  // El aforo es compartido entre las modalidades. Bloquear todas las filas de
+  // servicios publicables serializa las mutaciones hasta COMMIT/ROLLBACK y no
+  // deja la ventana que producía RELEASE_LOCK antes del commit de Drizzle.
+  await executor.execute(
+    sql`SELECT id FROM biopool_services WHERE status <> 'archived' ORDER BY id FOR UPDATE`
   );
-  const rows = (result as any)?.[0];
-  const acquired = Array.isArray(rows) ? rows[0]?.acquired : rows?.acquired;
-  if (Number(acquired) !== 1) {
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: "La disponibilidad está siendo actualizada. Intenta nuevamente.",
-    });
-  }
 }
 
-async function releaseCapacityLock(
-  executor: any,
-  lockName: string
+export async function releaseCapacityLock(
+  _executor: any,
+  _lockName: string
 ): Promise<void> {
-  await executor.execute(sql`SELECT RELEASE_LOCK(${lockName})`);
+  // El bloqueo de filas se libera automáticamente al cerrar la transacción.
 }
 
 const serviceUpdateSchema = z.object({

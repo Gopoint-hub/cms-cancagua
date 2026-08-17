@@ -20,6 +20,7 @@ import { operations360Router } from "./operations360Router";
 import { discounts360Router } from "./discounts360Router";
 import { cashRegisterRouter } from "./cashRegisterRouter";
 import { reservationPaymentLinksRouter } from "./reservationPaymentLinks";
+import { serviceCartRouter } from "./serviceCartRouter";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS, hasCmsPermission } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
@@ -98,6 +99,8 @@ export const appRouter = router({
   biopools: biopoolsRouter,
   // Módulo Sauna - aforo compartido, pases Detox, Skedu y Transbank.
   sauna: saunaRouter,
+  // Carrito público compartido entre servicios con un único pago Webpay.
+  serviceCart: serviceCartRouter,
   // Vista transversal de agenda y clientes entre los módulos operativos.
   operations360: operations360Router,
   // Códigos transversales para todos los módulos de servicios.

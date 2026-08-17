@@ -1,0 +1,42 @@
+CREATE TABLE IF NOT EXISTS `service_cart_checkout_orders` (
+  `id` int AUTO_INCREMENT PRIMARY KEY,
+  `public_token` varchar(64) NOT NULL UNIQUE,
+  `client_name` varchar(200) NOT NULL,
+  `client_email` varchar(320) NOT NULL,
+  `client_phone` varchar(40) NOT NULL,
+  `total_clp` int NOT NULL,
+  `status` enum('initiating','payment_pending','paid','rejected','aborted','expired','failed','refunded','manual_review') NOT NULL DEFAULT 'initiating',
+  `expires_at` timestamp NOT NULL,
+  `webpay_token` varchar(180) NULL UNIQUE,
+  `buy_order` varchar(26) NULL UNIQUE,
+  `session_id` varchar(61) NULL,
+  `webpay_status` varchar(40) NULL,
+  `response_code` int NULL,
+  `authorization_code` varchar(80) NULL,
+  `card_number` varchar(40) NULL,
+  `payment_type_code` varchar(10) NULL,
+  `transaction_date` varchar(60) NULL,
+  `raw_response` mediumtext NULL,
+  `error` text NULL,
+  `paid_at` timestamp NULL,
+  `completed_at` timestamp NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `service_cart_checkout_hold_idx` (`status`, `expires_at`)
+);
+
+CREATE TABLE IF NOT EXISTS `service_cart_checkout_items` (
+  `id` int AUTO_INCREMENT PRIMARY KEY,
+  `cart_order_id` int NOT NULL,
+  `module` enum('biopools','sauna') NOT NULL,
+  `child_order_id` int NOT NULL,
+  `item_name` varchar(220) NOT NULL,
+  `booking_date` date NOT NULL,
+  `start_time` varchar(5) NOT NULL,
+  `end_time` varchar(5) NOT NULL,
+  `guests` int NOT NULL,
+  `total_clp` int NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `service_cart_checkout_parent_idx` (`cart_order_id`),
+  UNIQUE KEY `service_cart_checkout_child_unique` (`module`, `child_order_id`)
+);
