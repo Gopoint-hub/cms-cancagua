@@ -206,6 +206,40 @@ export const reservationPayments = mysqlTable("reservation_payments", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
+// Movimientos manuales de la caja de recepción. Los ingresos provenientes de
+// reservas no se duplican aquí: se leen directamente desde
+// reservation_payments cuando son pagos en efectivo confirmados. Esta tabla
+// conserva retiros e ingresos excepcionales de servicios que aún no tienen una
+// reserva nativa en el CMS.
+export const cashRegisterMovements = mysqlTable("cash_register_movements", {
+  id: int("id").autoincrement().primaryKey(),
+  kind: mysqlEnum("kind", ["manual_income", "withdrawal"]).notNull(),
+  service: varchar("service", { length: 40 }),
+  amountClp: int("amount_clp").notNull(),
+  category: mysqlEnum("category", [
+    "bank_deposit",
+    "maintenance",
+    "operations",
+    "other",
+  ]),
+  reason: varchar("reason", { length: 500 }).notNull(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  createdByUserId: int("created_by_user_id").notNull(),
+  voidedAt: timestamp("voided_at"),
+  voidedByUserId: int("voided_by_user_id"),
+  voidReason: varchar("void_reason", { length: 500 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+// Fecha de apertura del libro. Evita interpretar como efectivo físicamente
+// disponible los cobros históricos realizados antes de que existiera la caja.
+export const cashRegisterSettings = mysqlTable("cash_register_settings", {
+  id: int("id").primaryKey(),
+  openedAt: timestamp("opened_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const biopoolBookingActivity = mysqlTable("biopool_booking_activity", {
   id: int("id").autoincrement().primaryKey(),
   bookingId: int("booking_id").notNull(),
@@ -1592,6 +1626,7 @@ export const massageBookings = mysqlTable("massage_bookings", {
   paymentStatus: mysqlEnum("payment_status", ["pending", "partially_paid", "paid", "refunded"]).default("pending").notNull(),
   getnetRequestId: varchar("getnet_request_id", { length: 64 }),
   manualPaymentMethod: mysqlEnum("manual_payment_method", [
+    "pending_payment",
     "getnet_link",
     "getnet_pos",
     "bank_transfer",
@@ -1687,6 +1722,7 @@ export const massageProgramBookings = mysqlTable("massage_program_bookings", {
   roomId: int("room_id").notNull(),
   externalReference: varchar("external_reference", { length: 100 }),
   paymentMethod: mysqlEnum("payment_method", [
+    "pending_payment",
     "getnet_link",
     "getnet_pos",
     "bank_transfer",

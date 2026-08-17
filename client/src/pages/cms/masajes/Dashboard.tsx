@@ -273,7 +273,7 @@ export default function MasajesDashboard() {
               ) : (
                 <div className="space-y-3">
                   {confirmed.map(b => (
-                    <div key={`${b.bookingKind}-${b.id}`} className="flex items-start justify-between border rounded-lg p-3">
+                    <div key={`${b.bookingKind}-${b.id}`} className={`flex items-start justify-between rounded-lg border p-3 ${b.paymentStatus && b.paymentStatus !== "paid" ? "border-red-300 bg-red-50" : ""}`}>
                       <div>
                         <p className="font-medium text-sm flex items-center gap-2">
                           {b.clientName}
@@ -293,6 +293,7 @@ export default function MasajesDashboard() {
                         <Badge variant={b.status === "confirmed" ? "default" : "secondary"} className="text-xs mt-1">
                           {b.status === "confirmed" ? "Confirmada" : "Pendiente"}
                         </Badge>
+                        {b.paymentStatus && <Badge variant={b.paymentStatus === "paid" ? "secondary" : "destructive"} className="ml-1 mt-1 text-xs">{b.paymentStatus === "paid" ? "Pagado" : "Pendiente de pago"}</Badge>}
                       </div>
                     </div>
                   ))}

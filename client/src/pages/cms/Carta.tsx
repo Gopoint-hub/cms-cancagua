@@ -21,6 +21,8 @@ export default function CMSCarta() {
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
+  const [paymentOrder, setPaymentOrder] = useState<any | null>(null);
+  const [paymentForm, setPaymentForm] = useState({ method: "cash", reference: "" });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
 
@@ -98,6 +100,15 @@ export default function CMSCarta() {
   const updateOrderStatusMutation = trpc.menuAdmin.updateHotTubOrderStatus.useMutation({
     onSuccess: () => refetchOrders(),
     onError: (error) => toast.error(error.message || "No fue posible actualizar la comanda"),
+  });
+  const recordOrderPayment = trpc.menuAdmin.recordHotTubOrderPayment.useMutation({
+    onSuccess: async () => {
+      await refetchOrders();
+      setPaymentOrder(null);
+      setPaymentForm({ method: "cash", reference: "" });
+      toast.success("Pago registrado");
+    },
+    onError: error => toast.error(error.message || "No fue posible registrar el pago"),
   });
 
   // Verificar permisos
@@ -843,13 +854,14 @@ export default function CMSCarta() {
                 };
                 const next = nextStatus[order.status];
                 return (
-                  <Card key={order.id} className={order.status === "submitted" ? "border-red-300 shadow-sm" : ""}>
+                  <Card key={order.id} className={order.paymentStatus !== "paid" ? "border-red-400 bg-red-50/40 shadow-sm" : order.status === "submitted" ? "border-amber-300 shadow-sm" : ""}>
                     <CardHeader className="pb-3">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <CardTitle className="text-lg">{order.orderNumber}</CardTitle>
                             <Badge className={statusInfo[order.status]?.className}>{statusInfo[order.status]?.label || order.status}</Badge>
+                            <Badge variant={order.paymentStatus === "paid" ? "secondary" : "destructive"}>{order.paymentStatus === "paid" ? "Pagado" : "Pendiente de pago"}</Badge>
                           </div>
                           <CardDescription className="mt-1">
                             {order.customerName} · {order.customerPhone} · {order.identificationLabel}
@@ -876,13 +888,16 @@ export default function CMSCarta() {
                         <span className="inline-flex items-center gap-1"><Coffee className="w-3.5 h-3.5" /> Café: {order.cafeNotificationStatus === "sent" ? "WhatsApp enviado" : order.cafeNotificationStatus === "not_configured" ? "grupo no configurado; usar walkie" : order.cafeNotificationStatus === "not_required" ? "no requerido" : order.cafeNotificationStatus}</span>
                         {order.readyAt && <span className="inline-flex items-center gap-1"><Clock3 className="w-3.5 h-3.5" /> Lista en {elapsedMinutes(order.requestedAt, order.readyAt)} min</span>}
                         {order.deliveredAt && <span className="inline-flex items-center gap-1"><PackageCheck className="w-3.5 h-3.5" /> Entregada en {elapsedMinutes(order.requestedAt, order.deliveredAt)} min</span>}
-                        <strong className="ml-auto text-sm text-gray-900">Total {formatMoney(order.subtotal)} · pago en recepción</strong>
+                        <strong className="ml-auto text-sm text-gray-900">Total {formatMoney(order.subtotal)} · {order.paymentStatus === "paid" ? "pagado" : "pendiente de pago"}</strong>
                       </div>
                       {!["delivered", "cancelled"].includes(order.status) && (
                         <div className="flex flex-wrap gap-2">
                           {next && <Button onClick={() => updateOrderStatusMutation.mutate({ id: order.id, status: next.status })} disabled={updateOrderStatusMutation.isPending}>{next.label}</Button>}
                           <Button variant="ghost" className="text-red-700" onClick={() => confirm("¿Cancelar esta comanda?") && updateOrderStatusMutation.mutate({ id: order.id, status: "cancelled" })}>Cancelar</Button>
                         </div>
+                      )}
+                      {order.paymentStatus !== "paid" && order.status !== "cancelled" && (
+                        <Button variant="destructive" onClick={() => setPaymentOrder(order)}>Registrar pago en recepción</Button>
                       )}
                     </CardContent>
                   </Card>
@@ -891,6 +906,18 @@ export default function CMSCarta() {
             </div>
           </TabsContent>
         </Tabs>
+
+        <Dialog open={Boolean(paymentOrder)} onOpenChange={(open) => !open && setPaymentOrder(null)}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Registrar pago · {paymentOrder?.orderNumber}</DialogTitle><DialogDescription>Confirma el medio usado al entregar la comanda. Los pagos en efectivo ingresan automáticamente a Caja efectivo.</DialogDescription></DialogHeader>
+            <div className="space-y-4">
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">Total pendiente: <strong>{formatMoney(paymentOrder?.subtotal ?? 0)}</strong></div>
+              <div><Label>Medio de pago</Label><select className="mt-1 w-full rounded-md border bg-background px-3 py-2" value={paymentForm.method} onChange={event => setPaymentForm({ method: event.target.value, reference: "" })}><option value="cash">Efectivo</option><option value="transbank_machine">Máquina Transbank</option><option value="getnet_pos">Máquina Getnet</option><option value="bank_transfer">Transferencia</option></select></div>
+              {paymentForm.method !== "cash" && <div><Label>Referencia</Label><Input value={paymentForm.reference} onChange={event => setPaymentForm({ ...paymentForm, reference: event.target.value })} /></div>}
+            </div>
+            <DialogFooter><Button variant="outline" onClick={() => setPaymentOrder(null)}>Cancelar</Button><Button disabled={recordOrderPayment.isPending || (paymentForm.method !== "cash" && !paymentForm.reference.trim())} onClick={() => recordOrderPayment.mutate({ id: paymentOrder.id, method: paymentForm.method as any, reference: paymentForm.reference.trim() || undefined })}>{recordOrderPayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirmar pago</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={Boolean(editingItem)} onOpenChange={(open) => !open && setEditingItem(null)}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

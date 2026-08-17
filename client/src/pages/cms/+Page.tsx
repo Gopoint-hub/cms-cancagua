@@ -26,6 +26,7 @@ import CMSMarketing from "./Marketing";
 import CMSMarketingROI from "./MarketingROI";
 import CMSMetricas from "./Metricas";
 import CMSAdmin from "./Admin";
+import CajaEfectivo from "./CajaEfectivo";
 import CMSTraducciones from "./Traducciones";
 import CMSReportesMantencion from "./ReportesMantencion";
 import CMSMantencionTurnos from "./MantencionTurnos";
@@ -78,6 +79,7 @@ export default function CMSPage() {
       <Route path="/cms/metricas" component={CMSMetricas} />
       <Route path="/cms/integraciones" component={CMSIntegraciones} />
       <Route path="/cms/admin" component={CMSAdmin} />
+      <Route path="/cms/caja-efectivo" component={CajaEfectivo} />
       <Route path="/cms/gift-cards-sales" component={CMSGiftCardsSales} />
       <Route path="/cms/traducciones" component={CMSTraducciones} />
       <Route path="/cms/reportes-mantencion" component={CMSReportesMantencion} />

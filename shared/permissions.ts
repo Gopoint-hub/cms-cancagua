@@ -171,6 +171,7 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, CmsPermissionKey[]> = {
     "module.massages",
     "massages.manage_agenda",
     "massages.assign_therapists",
+    "massages.manage_payments",
   ],
   [MASSAGE_THERAPIST_ROLE]: ["module.massages"],
 };
@@ -341,6 +342,7 @@ const EXACT_PATH_PERMISSIONS = new Map<string, CmsPermissionKey>([
   ["/cms/traducciones", "module.admin"],
   ["/cms/integraciones", "module.admin"],
   ["/cms/configuracion", "module.admin"],
+  ["/cms/caja-efectivo", "module.admin"],
   ["/cms/ayuda/newsletters", "module.help"],
   ["/cms/biopiscinas", "module.biopools"],
   ["/cms/biopiscinas/agenda", "biopools.manage_agenda"],

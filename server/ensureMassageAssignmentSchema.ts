@@ -2,8 +2,8 @@ import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 
 const columnDefinitions = [
-  "ALTER TABLE `massage_bookings` ADD COLUMN `manual_payment_method` enum('getnet_link','getnet_pos','bank_transfer','cash','gift_card','transbank') NULL AFTER `getnet_request_id`",
-  "ALTER TABLE `massage_program_bookings` ADD COLUMN `payment_method` enum('getnet_link','getnet_pos','bank_transfer','cash','gift_card','transbank','skedu_program') NOT NULL DEFAULT 'skedu_program' AFTER `external_reference`",
+  "ALTER TABLE `massage_bookings` ADD COLUMN `manual_payment_method` enum('pending_payment','getnet_link','getnet_pos','bank_transfer','cash','gift_card','transbank') NULL AFTER `getnet_request_id`",
+  "ALTER TABLE `massage_program_bookings` ADD COLUMN `payment_method` enum('pending_payment','getnet_link','getnet_pos','bank_transfer','cash','gift_card','transbank','skedu_program') NOT NULL DEFAULT 'skedu_program' AFTER `external_reference`",
   "ALTER TABLE `massage_program_bookings` ADD COLUMN `payment_reference` varchar(100) NULL AFTER `payment_method`",
 ] as const;
 

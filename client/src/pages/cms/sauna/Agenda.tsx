@@ -58,6 +58,7 @@ import {
 
 type ViewMode = "day" | "week" | "month";
 type SaunaPaymentMethod =
+  | "pending_payment"
   | "payment_link"
   | "bank_transfer"
   | "cash"
@@ -73,6 +74,7 @@ type PaymentDraft = {
   giftCardCode: string;
 };
 const SAUNA_PAYMENT_METHODS: SaunaPaymentMethod[] = [
+  "pending_payment",
   "payment_link",
   "bank_transfer",
   "cash",
@@ -180,7 +182,7 @@ function PaymentFields({
           onChange={event => onChange({ amountClp: event.target.value })}
         />
       </Field>
-      {PENDING_PAYMENT_METHODS.includes(
+      {payment.method !== "pending_payment" && PENDING_PAYMENT_METHODS.includes(
         payment.method as ReservationPaymentMethod
       ) && (
         <Field label="Estado">

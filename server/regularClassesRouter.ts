@@ -475,7 +475,7 @@ export const regularClassesRouter = router({
     const db = await requireDb();
     const period = currentPeriod();
     await ensureSessions(period.start, period.end);
-    const [students, paidMemberships, sessions, attendances] = await Promise.all([
+    const [students, paidMemberships, pendingMemberships, sessions, attendances] = await Promise.all([
       db.select({ count: sql<number>`count(*)` }).from(regularClassStudents)
         .where(eq(regularClassStudents.status, "active")),
       db.select({
@@ -483,6 +483,11 @@ export const regularClassesRouter = router({
         income: sql<number>`coalesce(sum(${regularClassMemberships.pricePaidClp}), 0)`,
       }).from(regularClassMemberships).where(and(
         eq(regularClassMemberships.paymentStatus, "paid"),
+        lte(regularClassMemberships.periodStart, period.end),
+        gte(regularClassMemberships.periodEnd, period.start),
+      )),
+      db.select({ count: sql<number>`count(*)` }).from(regularClassMemberships).where(and(
+        eq(regularClassMemberships.paymentStatus, "pending"),
         lte(regularClassMemberships.periodStart, period.end),
         gte(regularClassMemberships.periodEnd, period.start),
       )),
@@ -500,6 +505,7 @@ export const regularClassesRouter = router({
       period,
       activeStudents: hasRegularClassesAdminAccess(ctx.user.role) ? Number(students[0]?.count ?? 0) : 0,
       paidMemberships: hasRegularClassesAdminAccess(ctx.user.role) ? Number(paidMemberships[0]?.count ?? 0) : 0,
+      pendingMemberships: hasRegularClassesAdminAccess(ctx.user.role) ? Number(pendingMemberships[0]?.count ?? 0) : 0,
       incomeClp: hasRegularClassesAdminAccess(ctx.user.role) ? Number(paidMemberships[0]?.income ?? 0) : 0,
       sessions: hasRegularClassesAdminAccess(ctx.user.role) ? Number(sessions[0]?.count ?? 0) : 0,
       attendances: hasRegularClassesAdminAccess(ctx.user.role) ? Number(attendances[0]?.count ?? 0) : 0,
@@ -934,6 +940,14 @@ export const regularClassesRouter = router({
       const created = await db.transaction(async tx => {
       const isGiftCard = Boolean(input.giftCardCode);
       const paymentStatus = isGiftCard ? "paid" as const : input.paymentStatus;
+      const paymentMethod = isGiftCard
+        ? "gift_card"
+        : paymentStatus === "pending"
+          ? (input.paymentMethod || "pending_payment")
+          : input.paymentMethod;
+      if (paymentStatus === "paid" && (!paymentMethod || paymentMethod === "pending_payment")) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Selecciona el medio con que se realizó el pago" });
+      }
       const totalClp = input.pricePaidClp ?? plan.priceClp;
       const [created] = await tx.insert(regularClassMemberships).values({
         studentId: input.studentId,
@@ -945,7 +959,7 @@ export const regularClassesRouter = router({
         creditsTotal: plan.creditsPerPeriod,
         status: paymentStatus === "paid" ? "active" : "pending_payment",
         paymentStatus,
-        paymentMethod: isGiftCard ? "gift_card" : input.paymentMethod,
+        paymentMethod,
         paymentReference: isGiftCard ? input.giftCardCode!.trim().toUpperCase() : input.paymentReference,
         paidAt: paymentStatus === "paid" ? new Date() : null,
         createdByUserId: ctx.user.id,
@@ -953,6 +967,17 @@ export const regularClassesRouter = router({
       if (isGiftCard) {
         const gift = await redeemGiftCardPayment({ tx, payment: { method: "gift_card", status: "paid", amountClp: totalClp, paidAt: new Date().toISOString().slice(0, 16), giftCardCode: input.giftCardCode }, totalClp, module: "regular_classes", reservationId: created.id, note: `Canje en plan de Clases Regulares ${plan.name}`, serviceKey: "regular_classes" });
         await tx.insert(reservationPayments).values({ module: "regular_classes", reservationId: created.id, method: "gift_card", status: "paid", amountClp: totalClp, paidAt: new Date(), reference: gift.code, giftCardId: gift.id, createdByUserId: ctx.user.id });
+      } else {
+        await tx.insert(reservationPayments).values({
+          module: "regular_classes",
+          reservationId: created.id,
+          method: paymentMethod || "pending_payment",
+          status: paymentStatus,
+          amountClp: totalClp,
+          paidAt: paymentStatus === "paid" ? new Date() : null,
+          reference: input.paymentReference || null,
+          createdByUserId: ctx.user.id,
+        });
       }
       if (paymentStatus === "paid") {
         await tx.update(regularClassStudents).set({ status: "active" })
@@ -973,6 +998,63 @@ export const regularClassesRouter = router({
       });
       await writeAudit("membership", created.id, "created", ctx.user.id, input);
       return { success: true, id: created.id };
+    }),
+    settlePayment: protectedProcedure.input(z.object({
+      membershipId: z.number().int().positive(),
+      paymentMethod: z.enum(["cash", "bank_transfer", "transbank_machine", "getnet_pos"]),
+      paymentReference: z.string().trim().max(160).optional(),
+    })).mutation(async ({ ctx, input }) => {
+      requireReception(ctx.user);
+      if (input.paymentMethod !== "cash" && !input.paymentReference) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa la referencia del pago" });
+      }
+      const db = await requireDb();
+      await db.transaction(async tx => {
+        const [membership] = await tx.select().from(regularClassMemberships)
+          .where(eq(regularClassMemberships.id, input.membershipId)).limit(1);
+        if (!membership) throw new TRPCError({ code: "NOT_FOUND", message: "Plan no encontrado" });
+        if (membership.paymentStatus === "paid") throw new TRPCError({ code: "CONFLICT", message: "Este plan ya figura pagado" });
+        const [pending] = await tx.select().from(reservationPayments).where(and(
+          eq(reservationPayments.module, "regular_classes"),
+          eq(reservationPayments.reservationId, membership.id),
+          eq(reservationPayments.status, "pending"),
+        )).limit(1);
+        if (pending) {
+          await tx.update(reservationPayments).set({
+            method: input.paymentMethod,
+            status: "paid",
+            paidAt: new Date(),
+            reference: input.paymentReference || null,
+          }).where(eq(reservationPayments.id, pending.id));
+        } else {
+          await tx.insert(reservationPayments).values({
+            module: "regular_classes",
+            reservationId: membership.id,
+            method: input.paymentMethod,
+            status: "paid",
+            amountClp: membership.pricePaidClp,
+            paidAt: new Date(),
+            reference: input.paymentReference || null,
+            createdByUserId: ctx.user.id,
+          });
+        }
+        await tx.update(regularClassMemberships).set({
+          status: "active",
+          paymentStatus: "paid",
+          paymentMethod: input.paymentMethod,
+          paymentReference: input.paymentReference || null,
+          paidAt: new Date(),
+        }).where(eq(regularClassMemberships.id, membership.id));
+        await tx.update(regularClassStudents).set({ status: "active" })
+          .where(eq(regularClassStudents.id, membership.studentId));
+        await tx.update(regularClassAttendances).set({ membershipId: membership.id, status: "present" })
+          .where(and(eq(regularClassAttendances.studentId, membership.studentId), eq(regularClassAttendances.status, "pending_payment")));
+      });
+      await writeAudit("membership", input.membershipId, "payment_settled", ctx.user.id, {
+        paymentMethod: input.paymentMethod,
+        paymentReference: input.paymentReference || null,
+      });
+      return { success: true };
     }),
     carryForward: protectedProcedure.input(z.object({
       membershipId: z.number().int().positive(),

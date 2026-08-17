@@ -57,7 +57,8 @@ export default function BiopiscinasDashboard() {
       label: "Pagos pendientes",
       value: data?.pendingPayment ?? 0,
       icon: AlertTriangle,
-      tone: "text-amber-700",
+      tone: "text-red-700",
+      warning: Boolean(data?.pendingPayment),
     },
   ];
 
@@ -88,8 +89,8 @@ export default function BiopiscinasDashboard() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {cards.map(({ label, value, icon: Icon, tone }) => (
-            <Card key={label}>
+          {cards.map(({ label, value, icon: Icon, tone, warning }) => (
+            <Card key={label} className={warning ? "border-red-300 bg-red-50" : ""}>
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-muted-foreground">{label}</p>

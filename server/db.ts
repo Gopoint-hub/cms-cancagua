@@ -752,7 +752,7 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
   const database = await getDb();
   if (!database) throw new Error("Base de datos no disponible");
 
-  const { hotTubOrders, hotTubOrderItems, menuItems } = await import("../drizzle/schema");
+  const { hotTubOrders, hotTubOrderItems, menuItems, reservationPayments } = await import("../drizzle/schema");
   return await database.transaction(async (tx) => {
     const { findHotTubCatalogItem, resolveHotTubCatalogPrice } = await import("./hotTubMenu");
     if (input.identificationType === "hot_tub" && !input.hotTubCode)
@@ -828,6 +828,14 @@ export async function createHotTubOrder(input: HotTubOrderDraft) {
     if (!orderId) throw new Error("No fue posible registrar el pedido");
 
     await tx.insert(hotTubOrderItems).values(lines.map(line => ({ ...line, orderId })));
+    await tx.insert(reservationPayments).values({
+      module: "hot_tub_menu",
+      reservationId: orderId,
+      method: "pending_payment",
+      status: "pending",
+      amountClp: subtotal,
+      createdByUserId: null,
+    });
     return {
       id: orderId,
       orderNumber,
@@ -855,11 +863,16 @@ export async function updateHotTubOrderNotificationStatus(
 export async function getHotTubOrders(limit = 200) {
   const database = await getDb();
   if (!database) return [];
-  const { hotTubOrders, hotTubOrderItems } = await import("../drizzle/schema");
+  const { hotTubOrders, hotTubOrderItems, reservationPayments } = await import("../drizzle/schema");
   const orders = await database.select().from(hotTubOrders).orderBy(desc(hotTubOrders.requestedAt)).limit(limit);
   if (!orders.length) return [];
   const orderItems = await database.select().from(hotTubOrderItems)
     .where(inArray(hotTubOrderItems.orderId, orders.map(order => order.id)));
+  const paymentRows = await database.select().from(reservationPayments)
+    .where(and(
+      eq(reservationPayments.module, "hot_tub_menu"),
+      inArray(reservationPayments.reservationId, orders.map(order => order.id)),
+    ));
   return orders.map(order => ({
     ...order,
     hotTubName: order.hotTubCode ? HOT_TUB_NAMES[order.hotTubCode] : null,
@@ -868,7 +881,58 @@ export async function getHotTubOrders(limit = 200) {
         ? `Llavero ${order.keyFobNumber}`
         : `Hot Tub ${order.hotTubCode} — ${order.hotTubCode ? HOT_TUB_NAMES[order.hotTubCode] : ""}`,
     items: orderItems.filter(item => item.orderId === order.id),
+    payments: paymentRows.filter(item => item.reservationId === order.id),
+    amountPaidClp: paymentRows
+      .filter(item => item.reservationId === order.id && item.status === "paid")
+      .reduce((sum, item) => sum + item.amountClp, 0),
+    paymentStatus: paymentRows
+      .filter(item => item.reservationId === order.id && item.status === "paid")
+      .reduce((sum, item) => sum + item.amountClp, 0) >= order.subtotal
+      ? "paid"
+      : "pending",
   }));
+}
+
+export async function recordHotTubOrderPayment(input: {
+  id: number;
+  method: "cash" | "bank_transfer" | "transbank_machine" | "getnet_pos";
+  reference?: string;
+  userId: number;
+}) {
+  const database = await getDb();
+  if (!database) throw new Error("Base de datos no disponible");
+  const { hotTubOrders, reservationPayments } = await import("../drizzle/schema");
+  return database.transaction(async tx => {
+    const [order] = await tx.select().from(hotTubOrders).where(eq(hotTubOrders.id, input.id)).limit(1);
+    if (!order) throw new Error("Comanda no encontrada");
+    const rows = await tx.select().from(reservationPayments).where(and(
+      eq(reservationPayments.module, "hot_tub_menu"),
+      eq(reservationPayments.reservationId, order.id),
+    ));
+    if (rows.some(row => row.status === "paid")) throw new Error("La comanda ya figura pagada");
+    const pending = rows.find(row => row.status === "pending");
+    if (pending) {
+      await tx.update(reservationPayments).set({
+        method: input.method,
+        status: "paid",
+        amountClp: order.subtotal,
+        paidAt: new Date(),
+        reference: input.reference || null,
+      }).where(eq(reservationPayments.id, pending.id));
+    } else {
+      await tx.insert(reservationPayments).values({
+        module: "hot_tub_menu",
+        reservationId: order.id,
+        method: input.method,
+        status: "paid",
+        amountClp: order.subtotal,
+        paidAt: new Date(),
+        reference: input.reference || null,
+        createdByUserId: input.userId,
+      });
+    }
+    return { success: true };
+  });
 }
 
 export async function updateHotTubOrderStatus(

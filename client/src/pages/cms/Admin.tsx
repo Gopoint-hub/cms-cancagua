@@ -1,7 +1,7 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Users, Settings, ArrowRight, Shield, Key, RefreshCw
+  Users, Settings, ArrowRight, Shield, Key, RefreshCw, Banknote
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { SEOHead } from "@/components/SEOHead";
@@ -23,6 +23,13 @@ export default function CMSAdmin() {
       icon: Users,
       path: "/cms/usuarios",
       color: "bg-slate-500",
+    },
+    {
+      title: "Caja efectivo",
+      description: "Ingresos en efectivo, saldo y retiros",
+      icon: Banknote,
+      path: "/cms/caja-efectivo",
+      color: "bg-emerald-700",
     },
     {
       title: "Configuración",

@@ -156,6 +156,7 @@ describe("therapist assignment rotation", () => {
 describe("manual massage payment methods", () => {
   it("includes every requested payment option with a readable label", () => {
     expect(MANUAL_MASSAGE_PAYMENT_METHODS).toEqual([
+      "pending_payment",
       "getnet_link",
       "getnet_pos",
       "bank_transfer",

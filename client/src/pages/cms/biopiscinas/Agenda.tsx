@@ -53,6 +53,7 @@ const statusLabel: Record<string, string> = {
   no_show: "No asistió",
 };
 const paymentMethodLabel: Record<string, string> = {
+  pending_payment: "Pendiente de pago",
   payment_link: "Link de pago",
   bank_transfer: "Transferencia",
   cash: "Efectivo",
@@ -73,6 +74,7 @@ function serviceTone(name: string) {
       };
 }
 type PaymentMethod =
+  | "pending_payment"
   | "payment_link"
   | "bank_transfer"
   | "cash"
@@ -526,7 +528,8 @@ export default function BiopiscinasAgenda() {
       return false;
     if (payment.method === "gift_card")
       return Boolean(payment.giftCardCode.trim());
-    if (payment.status === "pending") return payment.method === "payment_link";
+    if (payment.status === "pending")
+      return ["pending_payment", "payment_link"].includes(payment.method);
     if (!payment.paidAt) return false;
     if (payment.method !== "cash" && !payment.reference.trim()) return false;
     if (
@@ -1263,7 +1266,7 @@ export default function BiopiscinasAgenda() {
                               reference: "",
                               cardType: "",
                               status:
-                                value === "payment_link" ? "pending" : "paid",
+                                ["pending_payment", "payment_link"].includes(value) ? "pending" : "paid",
                             })
                           }
                         >
@@ -1271,6 +1274,9 @@ export default function BiopiscinasAgenda() {
                             <SelectValue placeholder="Selecciona" />
                           </SelectTrigger>
                         <SelectContent>
+                            <SelectItem value="pending_payment">
+                              Pendiente de pago
+                            </SelectItem>
                             <SelectItem value="payment_link">
                               Link de pago
                             </SelectItem>
@@ -1611,7 +1617,7 @@ export default function BiopiscinasAgenda() {
                             ...current,
                             method: value as PaymentMethod,
                             status:
-                              value === "payment_link" ? "pending" : "paid",
+                              ["pending_payment", "payment_link"].includes(value) ? "pending" : "paid",
                             reference: "",
                             cardType: "",
                           }))
@@ -1621,6 +1627,9 @@ export default function BiopiscinasAgenda() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="pending_payment">
+                            Pendiente de pago
+                          </SelectItem>
                           <SelectItem value="payment_link">
                             Link de pago
                           </SelectItem>
@@ -1879,7 +1888,7 @@ export default function BiopiscinasAgenda() {
                       setAdditionalPayment(current => ({
                         ...current,
                         method: value as PaymentMethod,
-                        status: value === "payment_link" ? "pending" : "paid",
+                        status: ["pending_payment", "payment_link"].includes(value) ? "pending" : "paid",
                         reference: "",
                         giftCardCode: "",
                         cardType: "",
@@ -1890,6 +1899,7 @@ export default function BiopiscinasAgenda() {
                       <SelectValue placeholder="Selecciona" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="pending_payment">Pendiente de pago</SelectItem>
                       <SelectItem value="payment_link">Link de pago</SelectItem>
                       <SelectItem value="bank_transfer">
                         Transferencia

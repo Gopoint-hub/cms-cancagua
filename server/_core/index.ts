@@ -31,6 +31,7 @@ import { ensureBiopoolsSchema } from "../ensureBiopoolsSchema";
 import { ensureSaunaSchema } from "../ensureSaunaSchema";
 import { ensureHotTubOrdersSchema } from "../ensureHotTubOrdersSchema";
 import { ensureGiftCardServiceSchema } from "../ensureGiftCardServiceSchema";
+import { ensureCashRegisterSchema } from "../ensureCashRegisterSchema";
 import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
 import biopoolWebpayReturnRouter, { startBiopoolCheckoutScheduler } from "../biopoolWebpay";
@@ -73,6 +74,7 @@ async function startServer() {
   await ensureSaunaSchema();
   await ensureHotTubOrdersSchema();
   await ensureGiftCardServiceSchema();
+  await ensureCashRegisterSchema();
   await ensureMaintenanceShiftSchema();
   startTherapistAssignmentExpiryWorker();
   const app = express();

@@ -221,7 +221,7 @@ function PaymentFields({
           onChange={event => onChange({ amountClp: event.target.value })}
         />
       </div>
-      {PENDING_PAYMENT_METHODS.includes(
+      {payment.method !== "pending_payment" && PENDING_PAYMENT_METHODS.includes(
         payment.method as ReservationPaymentMethod
       ) && (
         <div>

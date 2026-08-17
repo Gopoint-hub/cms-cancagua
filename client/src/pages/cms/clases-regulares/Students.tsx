@@ -50,13 +50,15 @@ export default function RegularClassesStudents() {
   const [newOpen, setNewOpen] = useState(false);
   const [enrollStudent, setEnrollStudent] = useState<any | null>(null);
   const [carryStudent, setCarryStudent] = useState<any | null>(null);
+  const [paymentStudent, setPaymentStudent] = useState<any | null>(null);
   const [deleteStudent, setDeleteStudent] = useState<any | null>(null);
   const [studentForm, setStudentForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   const [enrollForm, setEnrollForm] = useState({
     planId: "", month: currentMonthString(),
-    paymentStatus: "paid" as "paid" | "pending", paymentMethod: "recepcion", paymentReference: "", giftCardCode: "",
+    paymentStatus: "paid" as "paid" | "pending", paymentMethod: "cash", paymentReference: "", giftCardCode: "",
   });
   const [carryReason, setCarryReason] = useState("");
+  const [paymentForm, setPaymentForm] = useState({ method: "cash", reference: "" });
   const students = trpc.regularClasses.students.list.useQuery();
   const plans = trpc.regularClasses.plans.list.useQuery();
   const access = trpc.regularClasses.access.useQuery();
@@ -73,10 +75,29 @@ export default function RegularClassesStudents() {
     onSuccess: () => {
       toast.success("Plan registrado");
       setEnrollStudent(null);
+      setEnrollForm({
+        planId: "",
+        month: currentMonthString(),
+        paymentStatus: "paid",
+        paymentMethod: "cash",
+        paymentReference: "",
+        giftCardCode: "",
+      });
       utils.regularClasses.students.list.invalidate();
       utils.regularClasses.dashboard.invalidate();
     },
     onError: (error) => toast.error(error.message),
+  });
+  const settlePayment = trpc.regularClasses.students.settlePayment.useMutation({
+    onSuccess: () => {
+      toast.success("Pago registrado y plan activado");
+      setPaymentStudent(null);
+      setPaymentForm({ method: "cash", reference: "" });
+      utils.regularClasses.students.list.invalidate();
+      utils.regularClasses.dashboard.invalidate();
+      utils.cashRegister.summary.invalidate();
+    },
+    onError: error => toast.error(error.message),
   });
   const invite = trpc.regularClasses.students.sendPaymentInvitation.useMutation({
     onSuccess: (result) => result.sent
@@ -154,8 +175,8 @@ export default function RegularClassesStudents() {
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={student.membership?.paymentStatus === "paid" ? "default" : "outline"}>
-                        {student.membership?.paymentStatus === "paid" ? "Pagado" : "Pendiente"}
+                      <Badge variant={student.membership?.paymentStatus === "paid" ? "default" : "destructive"}>
+                        {student.membership?.paymentStatus === "paid" ? "Pagado" : "Pendiente de pago"}
                       </Badge>
                       {student.membership && <p className="mt-1 text-xs">{clp(student.membership.pricePaidClp)}</p>}
                     </TableCell>
@@ -172,6 +193,11 @@ export default function RegularClassesStudents() {
                         <Button size="sm" onClick={() => setEnrollStudent(student)}>
                           Inscribir
                         </Button>
+                        {student.membership?.paymentStatus === "pending" && (
+                          <Button size="sm" variant="destructive" onClick={() => setPaymentStudent(student)}>
+                            Registrar pago
+                          </Button>
+                        )}
                         {access.data?.isAdmin && student.membership?.paymentStatus === "paid" && student.membership.creditsUsed === 0 && (
                           <Button size="sm" variant="outline" onClick={() => setCarryStudent(student)}>
                             <ArrowRight className="mr-1 h-4 w-4" /> Postergar
@@ -247,12 +273,12 @@ export default function RegularClassesStudents() {
             </div>
             <div className="space-y-2">
               <Label>Estado del pago</Label>
-              <Select value={enrollForm.paymentStatus} onValueChange={(value: "paid" | "pending") => setEnrollForm({ ...enrollForm, paymentStatus: value })}>
+              <Select value={enrollForm.paymentStatus} onValueChange={(value: "paid" | "pending") => setEnrollForm({ ...enrollForm, paymentStatus: value, paymentMethod: value === "pending" ? "pending_payment" : enrollForm.paymentMethod === "pending_payment" ? "cash" : enrollForm.paymentMethod })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente</SelectItem></SelectContent>
+                <SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente de pago</SelectItem></SelectContent>
               </Select>
             </div>
-            <div className="space-y-2"><Label>Medio de pago</Label><Select value={enrollForm.paymentMethod} onValueChange={(paymentMethod) => setEnrollForm({ ...enrollForm, paymentMethod, paymentStatus: paymentMethod === "gift_card" ? "paid" : enrollForm.paymentStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="recepcion">Recepción</SelectItem><SelectItem value="cash">Efectivo</SelectItem><SelectItem value="bank_transfer">Transferencia</SelectItem><SelectItem value="transbank_machine">Transbank</SelectItem><SelectItem value="gift_card">Gift Card</SelectItem></SelectContent></Select></div>
+            <div className="space-y-2"><Label>Medio de pago</Label><Select value={enrollForm.paymentMethod} onValueChange={(paymentMethod) => setEnrollForm({ ...enrollForm, paymentMethod, paymentStatus: paymentMethod === "pending_payment" ? "pending" : "paid" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pending_payment">Pendiente de pago</SelectItem><SelectItem value="cash">Efectivo</SelectItem><SelectItem value="bank_transfer">Transferencia</SelectItem><SelectItem value="transbank_machine">Transbank</SelectItem><SelectItem value="gift_card">Gift Card</SelectItem></SelectContent></Select></div>
             {enrollForm.paymentMethod === "gift_card" ? <div className="space-y-2"><Label>Código de Gift Card</Label><Input value={enrollForm.giftCardCode} onChange={(e) => setEnrollForm({ ...enrollForm, giftCardCode: e.target.value.toUpperCase() })} placeholder="GC-..." /></div> : <div className="space-y-2"><Label>Referencia</Label><Input value={enrollForm.paymentReference} onChange={(e) => setEnrollForm({ ...enrollForm, paymentReference: e.target.value })} /></div>}
             {selectedPlan && <p className="rounded-lg bg-muted p-3 text-sm">Se registrarán {selectedPlan.creditsPerPeriod} clases por {clp(selectedPlan.priceClp)}.</p>}
           </div>
@@ -267,6 +293,42 @@ export default function RegularClassesStudents() {
               paymentReference: enrollForm.paymentReference || undefined,
               giftCardCode: enrollForm.paymentMethod === "gift_card" ? enrollForm.giftCardCode || undefined : undefined,
             })}>Registrar plan</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(paymentStudent)} onOpenChange={(open) => !open && setPaymentStudent(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Registrar pago de {paymentStudent?.firstName}</DialogTitle>
+            <DialogDescription>
+              Confirma el medio utilizado durante el check-in. Si fue efectivo, ingresará automáticamente a Caja efectivo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+              Saldo pendiente: <strong>{clp(paymentStudent?.membership?.pricePaidClp ?? 0)}</strong>
+            </div>
+            <div className="space-y-2">
+              <Label>Medio de pago</Label>
+              <Select value={paymentForm.method} onValueChange={method => setPaymentForm({ method, reference: "" })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Efectivo</SelectItem>
+                  <SelectItem value="transbank_machine">Máquina Transbank</SelectItem>
+                  <SelectItem value="getnet_pos">Máquina Getnet</SelectItem>
+                  <SelectItem value="bank_transfer">Transferencia</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {paymentForm.method !== "cash" && <div className="space-y-2"><Label>Referencia</Label><Input value={paymentForm.reference} onChange={event => setPaymentForm({ ...paymentForm, reference: event.target.value })} /></div>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaymentStudent(null)}>Cancelar</Button>
+            <Button disabled={settlePayment.isPending || (paymentForm.method !== "cash" && !paymentForm.reference.trim())} onClick={() => settlePayment.mutate({ membershipId: paymentStudent.membership.id, paymentMethod: paymentForm.method as any, paymentReference: paymentForm.reference.trim() || undefined })}>
+              {settlePayment.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirmar pago
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

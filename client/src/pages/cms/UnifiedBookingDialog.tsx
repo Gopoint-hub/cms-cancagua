@@ -73,6 +73,7 @@ const labels: Record<DirectService, string> = {
 };
 const paymentMethods: Record<DirectService, Array<[string, string]>> = {
   massages: [
+    ["pending_payment", "Pendiente de pago"],
     ["getnet_link", "Link Getnet"],
     ["getnet_pos", "Máquina Getnet"],
     ["bank_transfer", "Transferencia"],
@@ -81,6 +82,7 @@ const paymentMethods: Record<DirectService, Array<[string, string]>> = {
     ["transbank", "Transbank"],
   ],
   biopools: [
+    ["pending_payment", "Pendiente de pago"],
     ["payment_link", "Link de pago"],
     ["bank_transfer", "Transferencia"],
     ["cash", "Efectivo"],
@@ -88,6 +90,7 @@ const paymentMethods: Record<DirectService, Array<[string, string]>> = {
     ["transbank_machine", "Máquina Transbank"],
   ],
   sauna: [
+    ["pending_payment", "Pendiente de pago"],
     ["payment_link", "Link de pago"],
     ["bank_transfer", "Transferencia"],
     ["cash", "Efectivo"],
@@ -184,6 +187,14 @@ function paymentComplete(item: PaymentDraft) {
     return false;
   return !cardMethods.has(item.method) || Boolean(item.cardType);
 }
+function programPaymentComplete(item: BookingDraft) {
+  if (!item.programPaymentMethod) return false;
+  return (
+    ["pending_payment", "cash", "skedu_program"].includes(
+      item.programPaymentMethod
+    ) || Boolean(item.programPaymentReference.trim())
+  );
+}
 function paymentInput(item: PaymentDraft) {
   return {
     method: item.method as any,
@@ -243,7 +254,12 @@ function PaymentEditor({
               onValueChange={method =>
                 update(index, {
                   method,
-                  status: method === "gift_card" ? "paid" : item.status,
+                  status:
+                    method === "pending_payment"
+                      ? "pending"
+                      : method === "gift_card"
+                        ? "paid"
+                        : item.status,
                   reference: "",
                   cardType: "",
                   giftCardCode: "",
@@ -276,7 +292,7 @@ function PaymentEditor({
           <div>
             <Label>Estado</Label>
             <Select
-              disabled={item.method === "gift_card"}
+              disabled={item.method === "gift_card" || item.method === "pending_payment"}
               value={item.status}
               onValueChange={(status: "paid" | "pending") =>
                 update(index, { status })
@@ -287,7 +303,7 @@ function PaymentEditor({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="paid">Pagado</SelectItem>
-                <SelectItem value="pending">Pendiente</SelectItem>
+                <SelectItem value="pending">Pendiente de pago</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1232,18 +1248,27 @@ function BookingEditor({
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label>Referencia de pago</Label>
-            <Input
-              value={value.programPaymentReference}
-              onChange={event =>
-                onChange({
-                  ...value,
-                  programPaymentReference: event.target.value,
-                })
-              }
-            />
-          </div>
+          {!['pending_payment', 'cash', 'skedu_program'].includes(
+            value.programPaymentMethod
+          ) && (
+            <div>
+              <Label>Referencia de pago</Label>
+              <Input
+                value={value.programPaymentReference}
+                onChange={event =>
+                  onChange({
+                    ...value,
+                    programPaymentReference: event.target.value,
+                  })
+                }
+              />
+            </div>
+          )}
+          {value.programPaymentMethod === "pending_payment" && (
+            <p className="self-end rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
+              Quedará en rojo hasta registrar el pago real durante el check-in.
+            </p>
+          )}
           <div className="sm:col-span-2">
             <Label>Referencia Skedu</Label>
             <Input
@@ -1345,9 +1370,11 @@ export function UnifiedBookingDialog({
   );
   const paidTotal = items.reduce(
     (sum, item) =>
-      sum +
+          sum +
       (item.serviceKind === "massage_program"
-        ? Math.max(0, item.amountClp - item.discountAmountClp)
+        ? item.programPaymentMethod === "pending_payment"
+          ? 0
+          : Math.max(0, item.amountClp - item.discountAmountClp)
         : item.payments
             .filter(payment => payment.status === "paid")
             .reduce(
@@ -1377,7 +1404,7 @@ export function UnifiedBookingDialog({
         (program || !item.discountCode.trim() || item.discountAmountClp > 0) &&
         (item.service !== "massages" || item.roomId) &&
         (!program ||
-          (item.programPaymentMethod &&
+          (programPaymentComplete(item) &&
             (item.modality === "simple" ||
               item.secondClientName.trim().length >= 2))) &&
         (item.service !== "biopools" ||
@@ -1409,7 +1436,7 @@ export function UnifiedBookingDialog({
   const paymentValid = activeItem
     ? (() => {
         if (activeItem.serviceKind === "massage_program")
-          return Boolean(activeItem.programPaymentMethod);
+          return programPaymentComplete(activeItem);
         const due = Math.max(
           0,
           activeItem.amountClp - activeItem.discountAmountClp
@@ -1764,6 +1791,9 @@ export function UnifiedBookingDialog({
                         {item.serviceKind === "massage_program" && (
                           <p>
                             {item.programPaymentMethod.replaceAll("_", " ")}
+                            {item.programPaymentMethod === "pending_payment"
+                              ? " · Pendiente de pago"
+                              : " · Pagado"}
                             {item.programPaymentReference
                               ? ` · ${item.programPaymentReference}`
                               : ""}

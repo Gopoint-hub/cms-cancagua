@@ -60,6 +60,7 @@ describe("Usuario Personal Cancagua permissions", () => {
     expect(hasB2CAccess(CANCAGUA_STAFF_ROLE)).toBe(true);
     expect(hasMaintenanceAccess(CANCAGUA_STAFF_ROLE)).toBe(true);
     expect(hasMassageOperationsAccess(CANCAGUA_STAFF_ROLE)).toBe(true);
+    expect(hasMassagePaymentAccess({ role: CANCAGUA_STAFF_ROLE })).toBe(true);
   });
 
   it("denies massage administration", () => {
@@ -78,7 +79,7 @@ describe("Usuario Personal Cancagua permissions", () => {
   });
 
   it("allows only the requested CMS routes", () => {
-    expect(canAccessCmsPath(CANCAGUA_STAFF_ROLE, "/cms/clientes")).toBe(true);
+    expect(canAccessCmsPath(CANCAGUA_STAFF_ROLE, "/cms/clientes")).toBe(false);
     expect(canAccessCmsPath(CANCAGUA_STAFF_ROLE, "/cms/reportes-mantencion")).toBe(true);
     expect(canAccessCmsPath(CANCAGUA_STAFF_ROLE, "/cms/masajes/agenda")).toBe(true);
 

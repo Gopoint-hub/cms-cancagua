@@ -20,6 +20,9 @@ export const reservationPaymentInputSchema = z.object({
 export type ReservationPaymentInput = z.infer<typeof reservationPaymentInputSchema>;
 
 export function validateReservationPayment(payment: ReservationPaymentInput): void {
+  if (payment.method === "pending_payment" && payment.status !== "pending") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Selecciona el medio de pago real antes de marcarlo como pagado" });
+  }
   if (payment.method === "gift_card" && payment.status !== "paid") {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Una Gift Card canjeada debe registrarse como pagada" });
   }

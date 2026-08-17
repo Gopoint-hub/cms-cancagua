@@ -89,8 +89,10 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
     onError: (error) => toast.error(error.message),
   });
 
+  const paymentComplete = ["pending_payment", "cash"].includes(paymentMethod)
+    || Boolean(paymentReference.trim());
   const canSubmit = !!clientName.trim() && !!bookingDate && !!startTime && !!roomId &&
-    (modality === "simple" || !!secondClientName.trim());
+    (modality === "simple" || !!secondClientName.trim()) && paymentComplete;
 
   const submit = () => {
     if (!canSubmit) return toast.error("Completa los datos y recursos requeridos");
@@ -223,14 +225,21 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
               </SelectContent>
             </Select>
           </div>
-          <div className="sm:col-span-2">
-            <Label>Referencia de pago</Label>
-            <Input
-              value={paymentReference}
-              onChange={(event) => setPaymentReference(event.target.value)}
-              placeholder="Código Getnet, Gift Card, comprobante o referencia (opcional)"
-            />
-          </div>
+          {!["pending_payment", "cash"].includes(paymentMethod) && (
+            <div className="sm:col-span-2">
+              <Label>Referencia de pago *</Label>
+              <Input
+                value={paymentReference}
+                onChange={(event) => setPaymentReference(event.target.value)}
+                placeholder="Código Getnet, Gift Card o comprobante"
+              />
+            </div>
+          )}
+          {paymentMethod === "pending_payment" && (
+            <div className="sm:col-span-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
+              La reserva quedará en rojo hasta registrar el medio real durante el check-in.
+            </div>
+          )}
           <div className="sm:col-span-2">
             <Label>Notas</Label>
             <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />

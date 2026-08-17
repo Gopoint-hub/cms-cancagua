@@ -75,7 +75,9 @@ export async function syncMassageSale(bookingId: number): Promise<void> {
     discountValue: booking.discountValue,
     paymentMethod: booking.getnetRequestId
       ? ("getnet" as const)
-      : (booking.manualPaymentMethod ?? ("cms_manual" as const)),
+      : booking.manualPaymentMethod === "pending_payment"
+        ? ("cms_manual" as const)
+        : (booking.manualPaymentMethod ?? ("cms_manual" as const)),
     paymentReference: booking.getnetRequestId,
     status:
       booking.paymentStatus === "refunded"

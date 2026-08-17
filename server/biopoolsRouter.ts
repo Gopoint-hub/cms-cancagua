@@ -75,6 +75,7 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
 const manualPaymentMethodSchema = z.enum([
+  "pending_payment",
   "payment_link",
   "bank_transfer",
   "cash",
@@ -97,6 +98,12 @@ const manualPaymentSchema = z.object({
 function validateManualPayment(
   payment: z.infer<typeof manualPaymentSchema>
 ): void {
+  if (payment.method === "pending_payment" && payment.status !== "pending") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Selecciona el medio de pago real antes de marcarlo como pagado",
+    });
+  }
   if (payment.method === "gift_card" && payment.status !== "paid") {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -446,7 +453,7 @@ export const biopoolsRouter = router({
       revenueClp: bookings
         .filter(item => item.paymentStatus === "paid")
         .reduce((sum, item) => sum + item.amountPaidClp, 0),
-      pendingPayment: bookings.filter(item => item.paymentStatus === "pending")
+      pendingPayment: bookings.filter(item => item.paymentStatus !== "paid")
         .length,
       confirmed: bookings.filter(item => item.status === "confirmed").length,
       capacity: Math.max(...services.map(service => service.capacity)),

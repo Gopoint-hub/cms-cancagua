@@ -1,4 +1,5 @@
 export const RESERVATION_PAYMENT_METHODS = [
+  "pending_payment",
   "payment_link",
   "bank_transfer",
   "cash",
@@ -13,6 +14,7 @@ export type ReservationPaymentMethod = typeof RESERVATION_PAYMENT_METHODS[number
 export type ReservationPaymentStatus = "pending" | "paid" | "refunded";
 
 export const RESERVATION_PAYMENT_LABELS: Record<ReservationPaymentMethod, string> = {
+  pending_payment: "Pendiente de pago",
   payment_link: "Link de pago",
   bank_transfer: "Transferencia",
   cash: "Efectivo",
@@ -32,6 +34,7 @@ export const CARD_PAYMENT_METHODS: readonly ReservationPaymentMethod[] = [
 ];
 
 export const PENDING_PAYMENT_METHODS: readonly ReservationPaymentMethod[] = [
+  "pending_payment",
   "payment_link",
   "getnet_link",
 ];

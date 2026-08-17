@@ -27,7 +27,7 @@ import {
   TrendingUp, Shield, Megaphone, ChevronDown, ChevronRight, Home, UtensilsCrossed,
   CalendarCheck, UserCheck, Kanban, ListChecks, MailPlus, UsersRound, Tag, Languages, RefreshCw, Gift,
   Wrench, HardHat, Handshake, ShoppingCart, DollarSign, HelpCircle, Sparkles, Brain, BookOpen, Dumbbell, ClipboardList, Waves, Ban,
-  GripVertical, Check, Flame
+  GripVertical, Check, Flame, Banknote
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useLocation, Link } from "wouter";
@@ -250,6 +250,7 @@ export const categories: Category[] = [
       { icon: Languages, label: "Traducciones", path: "/cms/traducciones" },
       { icon: RefreshCw, label: "Integraciones", path: "/cms/integraciones" },
       { icon: Tag, label: "Códigos de descuento", path: "/cms/codigos-descuento" },
+      { icon: Banknote, label: "Caja efectivo", path: "/cms/caja-efectivo" },
       { icon: Settings, label: "Configuración", path: "/cms/configuracion" },
     ],
   },

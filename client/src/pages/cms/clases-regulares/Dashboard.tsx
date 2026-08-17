@@ -11,6 +11,7 @@ import {
   Mail,
   Users,
   WalletCards,
+  AlertTriangle,
 } from "lucide-react";
 import { Link } from "wouter";
 import { clp } from "./shared";
@@ -64,15 +65,16 @@ export default function RegularClassesDashboard() {
         </div>
 
         {access.data?.isAdmin && (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             {[
               { label: "Alumnos activos", value: dashboard.data?.activeStudents ?? 0, Icon: Users },
               { label: "Planes pagados", value: dashboard.data?.paidMemberships ?? 0, Icon: WalletCards },
+              { label: "Pendientes de pago", value: dashboard.data?.pendingMemberships ?? 0, Icon: AlertTriangle, warning: Boolean(dashboard.data?.pendingMemberships) },
               { label: "Ingresos período", value: clp(dashboard.data?.incomeClp), Icon: CircleDollarSign },
               { label: "Sesiones", value: dashboard.data?.sessions ?? 0, Icon: CalendarDays },
               { label: "Asistencias", value: dashboard.data?.attendances ?? 0, Icon: ClipboardCheck },
-            ].map(({ label, value, Icon }) => (
-              <Card key={label}>
+            ].map(({ label, value, Icon, warning }) => (
+              <Card key={label} className={warning ? "border-red-300 bg-red-50" : ""}>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                     <Icon className="h-4 w-4" /> {label}

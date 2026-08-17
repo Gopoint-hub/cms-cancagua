@@ -1,4 +1,5 @@
 export const MANUAL_MASSAGE_PAYMENT_METHODS = [
+  "pending_payment",
   "getnet_link",
   "getnet_pos",
   "bank_transfer",
@@ -17,6 +18,7 @@ export type MassagePaymentMethod =
   | "skedu_program";
 
 export const MASSAGE_PAYMENT_METHOD_LABELS: Record<MassagePaymentMethod, string> = {
+  pending_payment: "Pendiente de pago",
   getnet: "Link de pago Getnet",
   getnet_link: "Link de pago Getnet",
   getnet_pos: "Máquina Getnet en recepción",

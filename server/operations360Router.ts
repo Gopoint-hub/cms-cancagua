@@ -86,6 +86,35 @@ function normalizedPhone(value?: string | null): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
+function massageProgramTotalClp(input: {
+  duration: number;
+  modality: "simple" | "double";
+}) {
+  const unitPrice = input.duration === 30 ? 35_000 : 45_000;
+  return unitPrice * (input.modality === "double" ? 2 : 1);
+}
+
+function massageProgramPaymentState(
+  booking: typeof massageProgramBookings.$inferSelect,
+  rows: Array<typeof reservationPayments.$inferSelect>
+) {
+  const totalClp = massageProgramTotalClp(booking);
+  const paidClp = rows
+    .filter(row => row.status === "paid")
+    .reduce((sum, row) => sum + row.amountClp, 0);
+  const legacyPaid = !rows.length && booking.paymentMethod !== "pending_payment";
+  return {
+    totalClp,
+    paidClp: legacyPaid ? totalClp : paidClp,
+    status:
+      booking.status === "cancelled"
+        ? null
+        : legacyPaid || paidClp >= totalClp
+          ? "paid"
+          : "pending",
+  };
+}
+
 export function buildClientKey(input: {
   email?: string | null;
   phone?: string | null;
@@ -328,7 +357,7 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
 
   const events: ClientEvent[] = [];
   if (allowed.includes("massages")) {
-    const [standard, programs, npsResponses] = await Promise.all([
+    const [standard, programs, npsResponses, programPaymentRows] = await Promise.all([
       db
         .select({
           id: massageBookings.id,
@@ -347,6 +376,8 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
         .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id)),
       db.select().from(massageProgramBookings),
       db.select().from(massageNpsResponses),
+      db.select().from(reservationPayments)
+        .where(eq(reservationPayments.module, "massage_programs")),
     ]);
     for (const row of standard) {
       const nps = npsResponses.find(item => item.bookingType === "massage" && item.bookingId === row.id);
@@ -370,6 +401,10 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
     }
     for (const row of programs) {
       const nps = npsResponses.find(item => item.bookingType === "skedu_program" && item.bookingId === row.id);
+      const payment = massageProgramPaymentState(
+        row,
+        programPaymentRows.filter(item => item.reservationId === row.id)
+      );
       events.push({
         id: `massage-program:${row.id}`,
         clientKey: buildClientKey({ email: row.clientEmail, phone: row.clientPhone, name: row.clientName }),
@@ -378,8 +413,8 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
         startTime: row.startTime,
         title: `Programa ${row.program.replaceAll("_", " ")}`,
         status: row.status,
-        paymentStatus: row.status === "cancelled" ? null : "paid",
-        amountClp: 0,
+        paymentStatus: payment.status,
+        amountClp: payment.paidClp,
         clientName: row.secondClientName
           ? `${row.clientName} / ${row.secondClientName}`
           : row.clientName,
@@ -482,7 +517,7 @@ export const operations360Router = router({
       const events: Array<Record<string, unknown>> = [];
 
       if (selected.includes("massages")) {
-        const [standard, programs] = await Promise.all([
+        const [standard, programs, programPaymentRows] = await Promise.all([
           db
             .select({
               id: massageBookings.id,
@@ -511,6 +546,10 @@ export const operations360Router = router({
                 lte(massageProgramBookings.bookingDate, input.to as any)
               )
             ),
+          db
+            .select()
+            .from(reservationPayments)
+            .where(eq(reservationPayments.module, "massage_programs")),
         ]);
         events.push(
           ...standard.map(row => ({
@@ -541,7 +580,10 @@ export const operations360Router = router({
               ? `${row.clientName} / ${row.secondClientName}`
               : row.clientName,
             status: row.status,
-            paymentStatus: row.status === "cancelled" ? null : "paid",
+            paymentStatus: massageProgramPaymentState(
+              row,
+              programPaymentRows.filter(item => item.reservationId === row.id)
+            ).status,
             people: row.modality === "double" ? 2 : 1,
             href: `/cms/masajes/agenda?date=${serializeDate(row.bookingDate)}`,
           }))
@@ -860,26 +902,36 @@ export const operations360Router = router({
         const [booking] = await db.select().from(massageProgramBookings)
           .where(eq(massageProgramBookings.id, input.entityId)).limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-        const [nps] = await db.select().from(massageNpsResponses)
-          .where(and(
-            eq(massageNpsResponses.bookingType, "skedu_program"),
-            eq(massageNpsResponses.bookingId, input.entityId),
-          )).limit(1);
+        const [[nps], paymentRows] = await Promise.all([
+          db.select().from(massageNpsResponses)
+            .where(and(
+              eq(massageNpsResponses.bookingType, "skedu_program"),
+              eq(massageNpsResponses.bookingId, input.entityId),
+            )).limit(1),
+          db.select().from(reservationPayments)
+            .where(and(
+              eq(reservationPayments.module, "massage_programs"),
+              eq(reservationPayments.reservationId, input.entityId),
+            )),
+        ]);
+        const programPayment = massageProgramPaymentState(booking, paymentRows);
         return {
           service: "massages" as const,
-          canManagePayments: false,
+          canManagePayments: hasMassagePaymentAccess(ctx.user),
           canManageReservation: false,
           title: `Programa ${booking.program.replaceAll("_", " ")}`,
           client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
           schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
           status: booking.status,
           payment: buildPaymentDetail({
-            status: booking.status === "cancelled" ? null : "paid",
+            status: programPayment.status,
             method: booking.paymentMethod,
             reference: booking.paymentReference,
-            amountPaidClp: 0,
+            originalAmountClp: programPayment.totalClp,
+            amountPaidClp: programPayment.paidClp,
             refundAmountClp: 0,
             createdAt: booking.createdAt,
+            rows: paymentRows,
           }),
           notes: booking.notes,
           detail: `${booking.modality === "double" ? "Doble" : "Simple"} · ${booking.duration} min`,

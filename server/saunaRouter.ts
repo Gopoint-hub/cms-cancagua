@@ -75,6 +75,7 @@ const statusSchema = z.enum([
   "no_show",
 ]);
 const saunaPaymentMethods = [
+  "pending_payment",
   "payment_link",
   "bank_transfer",
   "cash",
@@ -371,6 +372,12 @@ export const saunaRouter = router({
         alerts.push({
           type: "unconfirmed",
           message: `${booking.startTime}: reserva sin confirmar`,
+          bookingId: booking.id,
+        });
+      if (booking.paymentStatus !== "paid")
+        alerts.push({
+          type: "payment_pending",
+          message: `${booking.startTime}: ${booking.clientName || "reserva"} pendiente de pago`,
           bookingId: booking.id,
         });
     }

@@ -174,6 +174,7 @@ function paymentLabel(value?: string | null) {
   const labels: Record<string, string> = {
     paid: "Pagado",
     pending: "Pendiente",
+    pending_payment: "Pendiente de pago",
     partially_paid: "Pago parcial",
     partially_refunded: "Reembolso parcial",
     refunded: "Reembolsado",
@@ -228,9 +229,9 @@ function emptyPayment(amountClp = ""): PaymentDraft {
 }
 
 const PAYMENT_METHODS: Record<"massages" | "biopools" | "sauna", string[]> = {
-  massages: ["getnet_link", "getnet_pos", "bank_transfer", "cash", "gift_card", "transbank"],
-  biopools: ["payment_link", "bank_transfer", "cash", "gift_card", "transbank_machine"],
-  sauna: ["payment_link", "bank_transfer", "cash", "gift_card", "transbank_machine"],
+  massages: ["pending_payment", "getnet_link", "getnet_pos", "bank_transfer", "cash", "gift_card", "transbank"],
+  biopools: ["pending_payment", "payment_link", "bank_transfer", "cash", "gift_card", "transbank_machine"],
+  sauna: ["pending_payment", "payment_link", "bank_transfer", "cash", "gift_card", "transbank_machine"],
 };
 const CARD_METHODS = new Set(["getnet_link", "getnet_pos", "payment_link", "transbank", "transbank_machine"]);
 
@@ -278,7 +279,9 @@ function CalendarEventButton({
       style={style}
       className={cn(
         "w-full overflow-hidden rounded-lg border p-2 text-left transition hover:z-20 hover:-translate-y-0.5 hover:shadow-md",
-        meta.panel,
+        event.paymentStatus && event.paymentStatus !== "paid"
+          ? "border-red-400 bg-red-50 text-red-950 ring-1 ring-red-300"
+          : meta.panel,
         className
       )}
     >
@@ -292,7 +295,7 @@ function CalendarEventButton({
       {!compact && (
         <div className="mt-2 flex flex-wrap gap-1">
           <Badge variant="outline" className="bg-white/75 text-[10px]">{event.status}</Badge>
-          {event.paymentStatus && <Badge variant="outline" className="bg-white/75 text-[10px]">{paymentLabel(event.paymentStatus)}</Badge>}
+          {event.paymentStatus && <Badge variant="outline" className={cn("bg-white/75 text-[10px]", event.paymentStatus !== "paid" && "border-red-500 bg-red-100 font-semibold text-red-800")}>{event.paymentStatus === "paid" ? "Pagado" : "Pendiente de pago"}</Badge>}
           {event.people > 1 && <Badge variant="outline" className="bg-white/75 text-[10px]"><UsersRound className="mr-1 h-3 w-3" />{event.people}</Badge>}
         </div>
       )}
@@ -501,7 +504,7 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
     </div>
 
     {(detail.payment.balanceAmountClp > 0 || editingId) && <div className="space-y-3 rounded-xl border border-dashed bg-background/80 p-3"><div className="flex items-center justify-between"><p className="font-semibold">{editingId ? "Editar pago" : "Agregar pago"}</p>{editingId && <Button type="button" size="sm" variant="ghost" onClick={() => { setEditingId(null); setDraft(emptyPayment(String(detail.payment.balanceAmountClp || ""))); }}><X className="mr-1 h-4 w-4" />Cancelar</Button>}</div>
-      <div className="grid gap-3 sm:grid-cols-2"><div><Label>Medio de pago</Label><Select value={draft.method} disabled={editingId !== null && draft.method === "gift_card"} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "gift_card" ? "paid" : current.status }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{PAYMENT_METHODS[service].map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent></Select></div><div><Label>Estado</Label><Select value={draft.status} disabled={draft.method === "gift_card"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente</SelectItem></SelectContent></Select></div><div><Label>Monto</Label><Input type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>{draft.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}{draft.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código de Gift Card</Label><Input value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div> : draft.method !== "cash" && draft.status === "paid" ? <div><Label>Referencia</Label><Input value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div> : null}{CARD_METHODS.has(draft.method) && draft.status === "paid" && <div><Label>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}</div>
+      <div className="grid gap-3 sm:grid-cols-2"><div><Label>Medio de pago</Label><Select value={draft.method} disabled={editingId !== null && draft.method === "gift_card"} onValueChange={method => setDraft(current => ({ ...current, method, reference: "", giftCardCode: "", cardType: "", status: method === "pending_payment" ? "pending" : method === "gift_card" ? "paid" : current.status }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent>{PAYMENT_METHODS[service].map(method => <SelectItem key={method} value={method}>{paymentLabel(method)}</SelectItem>)}</SelectContent></Select></div><div><Label>Estado</Label><Select value={draft.status} disabled={draft.method === "gift_card" || draft.method === "pending_payment"} onValueChange={(status: "pending" | "paid") => setDraft(current => ({ ...current, status }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="paid">Pagado</SelectItem><SelectItem value="pending">Pendiente de pago</SelectItem></SelectContent></Select></div><div><Label>Monto</Label><Input type="number" min={1} value={draft.amountClp} onChange={e => setDraft(current => ({ ...current, amountClp: e.target.value }))} /></div>{draft.status === "paid" && <div><Label>Fecha y hora</Label><Input type="datetime-local" value={draft.paidAt} onChange={e => setDraft(current => ({ ...current, paidAt: e.target.value }))} /></div>}{draft.method === "gift_card" ? <div className="sm:col-span-2"><Label>Código de Gift Card</Label><Input value={draft.giftCardCode} onChange={e => setDraft(current => ({ ...current, giftCardCode: e.target.value.toUpperCase() }))} /></div> : draft.method !== "cash" && draft.status === "paid" ? <div><Label>Referencia</Label><Input value={draft.reference} onChange={e => setDraft(current => ({ ...current, reference: e.target.value }))} /></div> : null}{CARD_METHODS.has(draft.method) && draft.status === "paid" && <div><Label>Tipo de tarjeta</Label><Select value={draft.cardType} onValueChange={(cardType: "credit" | "debit") => setDraft(current => ({ ...current, cardType }))}><SelectTrigger><SelectValue placeholder="Selecciona" /></SelectTrigger><SelectContent><SelectItem value="credit">Crédito</SelectItem><SelectItem value="debit">Débito</SelectItem></SelectContent></Select></div>}</div>
       <Button type="button" disabled={busy || !validPayment(draft)} onClick={savePayment}><Plus className="mr-2 h-4 w-4" />{editingId ? "Guardar cambios" : "Agregar pago"}</Button>
     </div>}
 
@@ -509,6 +512,76 @@ function PaymentManager({ event, detail, onChanged }: { event: CalendarEvent; de
 
     {detail.payment.balanceAmountClp > 0 && <div className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/70 p-3"><div><p className="font-semibold">Aplicar Gift Card</p><p className="text-xs text-muted-foreground">Se descontará el monto utilizado y se conservará automáticamente cualquier saldo a favor.</p></div><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto]"><div><Label>Código de Gift Card</Label><Input value={giftCardCode} onChange={e => setGiftCardCode(e.target.value.toUpperCase())} placeholder="Código" /></div><div><Label>Monto a utilizar</Label><Input type="number" min={1} max={detail.payment.balanceAmountClp} value={giftCardAmount} onChange={e => setGiftCardAmount(e.target.value)} /></div><Button className="self-end" type="button" disabled={busy || !giftCardCode.trim() || !giftCardAmount} onClick={applyGiftCard}>Aplicar</Button></div></div>}
   </div>;
+}
+
+function ProgramPaymentManager({
+  event,
+  detail,
+  onChanged,
+}: {
+  event: CalendarEvent;
+  detail: any;
+  onChanged: () => Promise<unknown> | void;
+}) {
+  const [method, setMethod] = useState<
+    "cash" | "bank_transfer" | "getnet_pos" | "transbank"
+  >("cash");
+  const [reference, setReference] = useState("");
+  const settle = trpc.masajes.agenda.settleSkeduProgramPayment.useMutation();
+  const save = async () => {
+    if (method !== "cash" && !reference.trim()) {
+      return toast.error("Indica la referencia del pago");
+    }
+    try {
+      await settle.mutateAsync({
+        id: event.entityId,
+        method,
+        reference: reference.trim() || undefined,
+      });
+      await onChanged();
+      toast.success("Pago del programa registrado");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "No se pudo registrar el pago"
+      );
+    }
+  };
+  return (
+    <div className="space-y-3 rounded-xl border border-red-200 bg-red-50/60 p-4">
+      <div>
+        <p className="font-semibold">
+          Cobrar saldo del check-in · {money(detail.payment.balanceAmountClp)}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Al elegir efectivo, el monto entra automáticamente a Caja efectivo.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label>Medio utilizado</Label>
+          <Select value={method} onValueChange={(value: typeof method) => setMethod(value)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cash">Efectivo</SelectItem>
+              <SelectItem value="bank_transfer">Transferencia</SelectItem>
+              <SelectItem value="getnet_pos">Máquina Getnet</SelectItem>
+              <SelectItem value="transbank">Transbank</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {method !== "cash" && (
+          <div>
+            <Label>Referencia</Label>
+            <Input value={reference} onChange={event => setReference(event.target.value)} />
+          </div>
+        )}
+      </div>
+      <Button type="button" variant="destructive" disabled={settle.isPending} onClick={save}>
+        <CircleDollarSign className="mr-2 h-4 w-4" />
+        Confirmar pago completo
+      </Button>
+    </div>
+  );
 }
 
 function ReservationActions({
@@ -708,11 +781,15 @@ function ReservationActions({
 
 function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   const utils = trpc.useUtils();
+  const [tab, setTab] = useState("general");
   const query = trpc.operations360.detail.useQuery(
     { kind: event?.kind ?? "biopool", entityId: event?.entityId ?? 1, date: event?.date ?? dateKey(new Date()) },
     { enabled: open && Boolean(event) }
   );
   const detail: any = query.data;
+  useEffect(() => {
+    if (open) setTab("general");
+  }, [open, event?.id]);
   const meta = event ? SERVICE_META[event.service] : null;
   const paymentTone = !detail?.payment
     ? "border-slate-200 bg-background"
@@ -750,12 +827,18 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
           <p className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive">No se pudo cargar el detalle: {query.error.message}</p>
         ) : detail ? (
           <>
+            {detail.payment?.balanceAmountClp > 0 && (
+              <div className="flex flex-col gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-red-950 sm:flex-row sm:items-center sm:justify-between">
+                <div><p className="font-semibold">Pendiente de pago · {money(detail.payment.balanceAmountClp)}</p><p className="text-sm text-red-800">Al hacer check-in, confirma el cobro y selecciona el medio realmente utilizado.</p></div>
+                {detail.canManagePayments && ["massages", "biopools", "sauna"].includes(event?.service ?? "") && <Button variant="destructive" onClick={() => setTab("payments")}>Registrar pago del check-in</Button>}
+              </div>
+            )}
             <div className="grid min-w-0 gap-3 sm:grid-cols-3">
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Fecha y hora</p><p className="mt-1 font-semibold capitalize">{format(new Date(`${detail.schedule.date}T12:00:00`), "EEE d MMM", { locale: es })}</p><p className="text-sm">{detail.schedule.startTime.slice(0, 5)} – {detail.schedule.endTime.slice(0, 5)}</p></CardContent></Card>
               <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Cliente / responsable</p><p className="mt-1 font-semibold">{detail.client.name}</p><p className="text-xs text-muted-foreground">{detail.detail}</p></CardContent></Card>
               <Card className={cn(detail.payment && paymentTone)}><CardContent className="p-4"><p className="text-xs text-muted-foreground">Estado de pago</p><p className="mt-1 font-semibold">{detail.payment ? detail.payment.balanceAmountClp <= 0 ? "Pagada" : detail.payment.amountClp > 0 ? "Abonada" : "No pagada" : "No corresponde"}</p><p className="text-sm text-muted-foreground">{detail.payment ? money(detail.payment.amountClp) : "Clase programada"}</p></CardContent></Card>
             </div>
-            <Tabs defaultValue="general">
+            <Tabs value={tab} onValueChange={setTab}>
               <TabsList className="grid h-auto w-full grid-cols-3">
                 <TabsTrigger value="general">General</TabsTrigger>
                 <TabsTrigger value="payments">Pagos</TabsTrigger>
@@ -780,7 +863,7 @@ function ReservationDetail({ event, open, onOpenChange }: { event: CalendarEvent
 
                     {detail.payment.overpaymentAmountClp > 0 && <div className="flex flex-col gap-1 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"><span>Excedente pagado por regularizar</span><strong className="text-amber-800">{money(detail.payment.overpaymentAmountClp)}</strong></div>}
 
-                    {detail.canManagePayments && event && ["massages", "biopools", "sauna"].includes(event.service) ? <PaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <div className="overflow-hidden rounded-xl border">
+                    {detail.canManagePayments && event && ["massages", "biopools", "sauna"].includes(event.service) && (event.kind !== "massage_program" || detail.payment.balanceAmountClp > 0) ? event.kind === "massage_program" ? <ProgramPaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <PaymentManager event={event} detail={detail} onChanged={refreshReservationViews} /> : <div className="overflow-hidden rounded-xl border">
                       {detail.payment.lines.map((line: any) => (
                         <div key={line.id} className="grid min-w-0 gap-2 border-b p-4 last:border-b-0 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] sm:items-center">
                           <div>

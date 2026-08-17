@@ -18,6 +18,7 @@ import { biopoolsRouter } from "./biopoolsRouter";
 import { saunaRouter } from "./saunaRouter";
 import { operations360Router } from "./operations360Router";
 import { discounts360Router } from "./discounts360Router";
+import { cashRegisterRouter } from "./cashRegisterRouter";
 import { hasB2CAccess, hasGiftCardAccess, hasMaintenanceAccess } from "@shared/permissions";
 import { ALL_CMS_PERMISSIONS, hasCmsPermission } from "@shared/permissions";
 import { canRedeemGiftCard } from "./giftCardRedemption";
@@ -100,6 +101,8 @@ export const appRouter = router({
   operations360: operations360Router,
   // Códigos transversales para todos los módulos de servicios.
   discounts360: discounts360Router,
+  // Caja transversal: pagos en efectivo de todos los servicios y retiros.
+  cashRegister: cashRegisterRouter,
   sidebar: router({
     getOrder: protectedProcedure.query(async () => {
       const settings = await db.getSiteSettings();
@@ -650,6 +653,20 @@ export const appRouter = router({
         if (!hasB2CAccess(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
         await db.updateHotTubOrderStatus(input.id, input.status);
         return { success: true };
+      }),
+
+    recordHotTubOrderPayment: protectedProcedure
+      .input(z.object({
+        id: z.number().int().positive(),
+        method: z.enum(["cash", "bank_transfer", "transbank_machine", "getnet_pos"]),
+        reference: z.string().trim().max(160).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!hasB2CAccess(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
+        if (input.method !== "cash" && !input.reference) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ingresa la referencia del pago" });
+        }
+        return db.recordHotTubOrderPayment({ ...input, userId: ctx.user.id });
       }),
   }),
 

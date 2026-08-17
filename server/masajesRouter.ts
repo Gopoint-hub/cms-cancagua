@@ -113,6 +113,16 @@ import {
 } from "./rescheduleAudit";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
+const skeduProgramPaymentMethodSchema = z.enum([
+  ...MANUAL_MASSAGE_PAYMENT_METHODS,
+  "skedu_program",
+]);
+const skeduProgramSettlementMethodSchema = z.enum([
+  "cash",
+  "bank_transfer",
+  "getnet_pos",
+  "transbank",
+]);
 
 export function massagePriceForDuration(
   technique: Pick<
@@ -1642,7 +1652,7 @@ const agendaRouter = router({
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       roomId: z.number(),
       externalReference: z.string().max(100).optional(),
-      paymentMethod: manualMassagePaymentMethodSchema,
+      paymentMethod: skeduProgramPaymentMethodSchema,
       paymentReference: z.string().max(100).optional(),
       notes: z.string().optional(),
       })
@@ -1668,6 +1678,22 @@ const agendaRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Un masaje doble requiere dos clientes",
+        });
+      }
+
+      const programTotalClp =
+        getSkeduMassageUnitPrice(input.duration) *
+        getSkeduMassageQuantity(input.modality);
+      const paymentStatus =
+        input.paymentMethod === "pending_payment" ? "pending" : "paid";
+      if (
+        paymentStatus === "paid" &&
+        !["cash", "skedu_program"].includes(input.paymentMethod) &&
+        !input.paymentReference?.trim()
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Indica la referencia del pago",
         });
       }
 
@@ -1730,36 +1756,141 @@ const agendaRouter = router({
         });
       }
 
-      const [inserted] = await db
-        .insert(massageProgramBookings)
-        .values({
-        program: input.program,
-        duration: input.duration,
-        modality: input.modality,
-        clientName: input.clientName.trim(),
-          secondClientName:
-            input.modality === "double" ? input.secondClientName!.trim() : null,
-        clientPhone: input.clientPhone?.trim() || null,
-        clientEmail: input.clientEmail?.trim() || null,
-        bookingDate: input.bookingDate as any,
-        startTime: input.startTime,
-        endTime: resources.endTime,
-        therapistId: selectedTherapists[0].id,
-          secondTherapistId:
-            input.modality === "double" ? selectedTherapists[1].id : null,
-        roomId: input.roomId,
-        externalReference: input.externalReference?.trim() || null,
-        paymentMethod: input.paymentMethod,
-        paymentReference: input.paymentReference?.trim() || null,
-        notes: input.notes?.trim() || null,
-        status: "pending",
-        createdByUserId: ctx.user.id,
-        })
-        .$returningId();
+      const inserted = await db.transaction(async tx => {
+        const [created] = await tx
+          .insert(massageProgramBookings)
+          .values({
+            program: input.program,
+            duration: input.duration,
+            modality: input.modality,
+            clientName: input.clientName.trim(),
+            secondClientName:
+              input.modality === "double"
+                ? input.secondClientName!.trim()
+                : null,
+            clientPhone: input.clientPhone?.trim() || null,
+            clientEmail: input.clientEmail?.trim() || null,
+            bookingDate: input.bookingDate as any,
+            startTime: input.startTime,
+            endTime: resources.endTime,
+            therapistId: selectedTherapists[0].id,
+            secondTherapistId:
+              input.modality === "double" ? selectedTherapists[1].id : null,
+            roomId: input.roomId,
+            externalReference: input.externalReference?.trim() || null,
+            paymentMethod: input.paymentMethod,
+            paymentReference: input.paymentReference?.trim() || null,
+            notes: input.notes?.trim() || null,
+            status: "pending",
+            createdByUserId: ctx.user.id,
+          })
+          .$returningId();
+        await tx.insert(reservationPayments).values({
+          module: "massage_programs",
+          reservationId: created.id,
+          method: input.paymentMethod,
+          status: paymentStatus,
+          amountClp: programTotalClp,
+          paidAt: paymentStatus === "paid" ? new Date() : null,
+          reference: input.paymentReference?.trim() || null,
+          createdByUserId: ctx.user.id,
+        });
+        return created;
+      });
 
       await startTherapistAssignmentForBooking("skedu_program", inserted.id);
 
       return { success: true, id: inserted.id };
+    }),
+
+  settleSkeduProgramPayment: protectedProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        method: skeduProgramSettlementMethodSchema,
+        reference: z.string().trim().max(160).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!hasMassagePaymentAccess(ctx.user)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para registrar pagos de masajes",
+        });
+      }
+      if (input.method !== "cash" && !input.reference?.trim()) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Indica la referencia del pago",
+        });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.transaction(async tx => {
+        const [booking] = await tx
+          .select()
+          .from(massageProgramBookings)
+          .where(eq(massageProgramBookings.id, input.id))
+          .limit(1);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        if (booking.status === "cancelled") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "No puedes cobrar una reserva cancelada",
+          });
+        }
+        const [existing] = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.module, "massage_programs"),
+              eq(reservationPayments.reservationId, input.id)
+            )
+          )
+          .limit(1);
+        if (existing?.status === "paid") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Este programa ya figura pagado",
+          });
+        }
+        const totalClp =
+          getSkeduMassageUnitPrice(booking.duration) *
+          getSkeduMassageQuantity(booking.modality);
+        if (existing) {
+          await tx
+            .update(reservationPayments)
+            .set({
+              method: input.method,
+              status: "paid",
+              amountClp: totalClp,
+              paidAt: new Date(),
+              reference: input.reference?.trim() || null,
+              createdByUserId: ctx.user.id,
+            })
+            .where(eq(reservationPayments.id, existing.id));
+        } else {
+          await tx.insert(reservationPayments).values({
+            module: "massage_programs",
+            reservationId: input.id,
+            method: input.method,
+            status: "paid",
+            amountClp: totalClp,
+            paidAt: new Date(),
+            reference: input.reference?.trim() || null,
+            createdByUserId: ctx.user.id,
+          });
+        }
+        await tx
+          .update(massageProgramBookings)
+          .set({
+            paymentMethod: input.method,
+            paymentReference: input.reference?.trim() || null,
+          })
+          .where(eq(massageProgramBookings.id, input.id));
+      });
+      return { success: true };
     }),
 
   updateSkeduProgramTherapists: protectedProcedure
@@ -2005,6 +2136,21 @@ const agendaRouter = router({
             inArray(massageProgramBookings.status, [...SKEDU_AGENDA_STATUSES])
           )
         );
+      const programIds = programRows.map(row => row.id);
+      const programPaymentRows = programIds.length
+        ? await db
+            .select()
+            .from(reservationPayments)
+            .where(
+              and(
+                eq(reservationPayments.module, "massage_programs"),
+                inArray(reservationPayments.reservationId, programIds)
+              )
+            )
+        : [];
+      const programPayments = new Map(
+        programPaymentRows.map(payment => [payment.reservationId, payment])
+      );
       const therapists = await db
         .select({ id: massageTherapists.id, name: massageTherapists.name })
         .from(massageTherapists);
@@ -2025,7 +2171,15 @@ const agendaRouter = router({
         secondTherapistName: null,
         externalReference: null,
       }));
-      const skeduBookings = programRows.map(row => ({
+      const skeduBookings = programRows.map(row => {
+        const payment = programPayments.get(row.id);
+        const totalClp =
+          getSkeduMassageUnitPrice(row.duration) *
+          getSkeduMassageQuantity(row.modality);
+        const paid = payment
+          ? payment.status === "paid"
+          : row.paymentMethod !== "pending_payment";
+        return {
         id: row.id,
         bookingKind: "skedu_program" as const,
         clientName: row.secondClientName
@@ -2049,14 +2203,9 @@ const agendaRouter = router({
         startTime: row.startTime,
         endTime: row.endTime,
         status: row.status,
-        paymentStatus: row.status === "cancelled" ? null : ("paid" as const),
-        amountPaid:
-          row.status === "cancelled"
-          ? null
-            : String(
-                getSkeduMassageUnitPrice(row.duration) *
-                  getSkeduMassageQuantity(row.modality)
-              ),
+        paymentStatus:
+          row.status === "cancelled" ? null : paid ? ("paid" as const) : ("pending" as const),
+        amountPaid: row.status === "cancelled" ? null : String(paid ? totalClp : 0),
         manualPaymentMethod: row.paymentMethod,
         notes: row.notes,
         cancellationCategory: row.cancellationCategory,
@@ -2069,7 +2218,8 @@ const agendaRouter = router({
         modality: row.modality,
         program: row.program,
         externalReference: row.externalReference,
-      }));
+        };
+      });
 
       const bookings = [...standardBookings, ...skeduBookings].sort(
         (a, b) =>
@@ -2576,8 +2726,10 @@ const agendaRouter = router({
       });
       if (derivedPaymentStatus === "paid") {
         await syncMassageSale(inserted.id);
-        await startTherapistAssignmentForBooking("massage", inserted.id);
       }
+      // Una reserva manual bloquea agenda y debe asignar terapeuta aunque el
+      // cliente vaya a pagar recién durante el check-in.
+      await startTherapistAssignmentForBooking("massage", inserted.id);
       return { success: true, id: inserted.id };
     }),
 
