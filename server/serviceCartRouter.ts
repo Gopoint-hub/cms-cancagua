@@ -6,6 +6,7 @@ import {
   biopoolBookings,
   biopoolCheckoutItems,
   biopoolCheckoutOrders,
+  biopoolServices,
   biopoolTicketTypes,
   saunaBookings,
   saunaCheckoutOrders,
@@ -68,6 +69,80 @@ async function database() {
 
 export const serviceCartRouter = router({
   public: router({
+    // Previsualización del código: valida y devuelve el desglose SIN cobrar ni
+    // tomar cupo, para que el botón "Aplicar código" del carrito pueda decir al
+    // instante si el código sirve y sobre qué líneas opera.
+    validateDiscount: publicProcedure
+      .input(z.object({
+        code: z.string().trim().min(1).max(50),
+        items: z.array(z.discriminatedUnion("module", [biopoolItemSchema, saunaItemSchema])).min(1).max(2),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await database();
+        const lines: Array<{
+          module: "biopools" | "sauna";
+          itemName: string;
+          service: "biopiscinas" | "sauna";
+          serviceId: number;
+          originalAmount: number;
+        }> = [];
+        for (const item of input.items) {
+          if (item.module === "biopools") {
+            const [service] = await db.select().from(biopoolServices).where(eq(biopoolServices.id, item.serviceId)).limit(1);
+            if (!service) throw new TRPCError({ code: "NOT_FOUND", message: "El servicio de Biopiscinas no existe" });
+            const tickets = await db.select().from(biopoolTicketTypes).where(and(eq(biopoolTicketTypes.serviceId, item.serviceId), eq(biopoolTicketTypes.active, 1)));
+            const adult = tickets.find((ticket: any) => ticket.code === "adult");
+            const child = tickets.find((ticket: any) => ticket.code === "child");
+            if (!adult) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La venta de Biopiscinas no está configurada" });
+            lines.push({
+              module: "biopools",
+              itemName: service.name,
+              service: "biopiscinas",
+              serviceId: item.serviceId,
+              originalAmount: adult.priceClp * item.adultQuantity + (child?.priceClp ?? 0) * item.childQuantity,
+            });
+          } else {
+            const [service] = await db.select().from(saunaServices).where(and(eq(saunaServices.id, item.serviceId), eq(saunaServices.published, 1))).limit(1);
+            if (!service) throw new TRPCError({ code: "NOT_FOUND", message: "La opción de Sauna no está disponible" });
+            lines.push({
+              module: "sauna",
+              itemName: service.name,
+              service: "sauna",
+              serviceId: service.id,
+              originalAmount: service.priceClp,
+            });
+          }
+        }
+        try {
+          const discount = await calculateWellnessCartDiscount(
+            db,
+            input.code,
+            lines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount })),
+          );
+          return {
+            valid: true as const,
+            code: discount.code,
+            discountTotal: discount.discountTotal,
+            originalTotal: discount.originalTotal,
+            finalTotal: discount.finalTotal,
+            lines: lines.map((line, index) => ({
+              module: line.module,
+              itemName: line.itemName,
+              originalAmount: line.originalAmount,
+              discountClp: discount.lineDiscounts[index] ?? 0,
+              totalClp: line.originalAmount - (discount.lineDiscounts[index] ?? 0),
+              applied: (discount.lineDiscounts[index] ?? 0) > 0,
+            })),
+          };
+        } catch (error) {
+          // La función lanza mensajes ya redactados para el cliente ("no existe",
+          // "está vencido", "no aplica a los productos seleccionados").
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error instanceof Error ? error.message : "Código de descuento inválido",
+          });
+        }
+      }),
     startPayment: publicProcedure
       .input(z.object({
         clientName: z.string().trim().min(2).max(200),
