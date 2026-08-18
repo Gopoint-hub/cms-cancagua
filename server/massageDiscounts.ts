@@ -26,7 +26,7 @@ export type MassageDiscountResult = {
 };
 
 export type WellnessDiscountLine = {
-  service: "masajes" | "clases" | "biopiscinas";
+  service: "masajes" | "clases" | "biopiscinas" | "sauna";
   originalAmount: number;
   serviceId?: number | string;
   techniqueId?: number;

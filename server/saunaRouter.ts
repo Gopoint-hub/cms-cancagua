@@ -46,6 +46,7 @@ import {
   generateSessionId,
 } from "./webpay";
 import { calculatedPaymentStatus } from "../shared/reservationPayments";
+import { calculateWellnessCartDiscount } from "./massageDiscounts";
 import { canRedeemGiftCard } from "./giftCardRedemption";
 import { validatePublicGiftCard } from "./publicGiftCards";
 import { finalizeApprovedSaunaOrder, saunaResultUrl } from "./saunaWebpay";
@@ -1621,6 +1622,7 @@ export const saunaRouter = router({
           acceptedSharedUse: z.literal(true),
           acceptedTerms: z.literal(true),
           giftCardCode: z.string().trim().min(1).max(20).optional(),
+          discountCode: z.string().trim().min(1).max(50).optional(),
         })
       )
       .mutation(async ({ input }) => {
@@ -1668,6 +1670,22 @@ export const saunaRouter = router({
         let orderId = 0;
         let publicToken = "";
         const normalizedGiftCardCode = input.giftCardCode?.trim().toUpperCase();
+        const normalizedDiscountCode = input.discountCode?.trim().toUpperCase();
+        // Gift card y código de descuento no se combinan: la gift card paga el
+        // total y cierra la orden al instante, así que un descuento encima
+        // dejaría el monto cobrado y el registrado en desacuerdo.
+        if (normalizedGiftCardCode && normalizedDiscountCode)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No se puede usar una gift card y un código de descuento en la misma reserva",
+          });
+        let discountOrderFields: {
+          subtotalClp: number;
+          discountClp: number;
+          discountCodeId: number | null;
+          discountCode: string | null;
+          totalClp: number;
+        } | null = null;
         await db.transaction(async tx => {
           await acquireCapacityLock(tx, input.bookingDate);
           try {
@@ -1697,6 +1715,25 @@ export const saunaRouter = router({
                 .limit(1);
               validatePublicGiftCard(card, "sauna", service.priceClp);
             }
+            // El código se valida y calcula acá, dentro de la transacción y con
+            // el cupo ya tomado: si no aplica, revienta antes de crear la orden.
+            const discount = normalizedDiscountCode
+              ? await calculateWellnessCartDiscount(tx, normalizedDiscountCode, [
+                  {
+                    service: "sauna",
+                    serviceId: service.id,
+                    originalAmount: service.priceClp,
+                  },
+                ])
+              : null;
+            const orderAmounts = {
+              subtotalClp: service.priceClp,
+              discountClp: discount?.discountTotal ?? 0,
+              discountCodeId: discount?.discountCodeId ?? null,
+              discountCode: discount?.code ?? null,
+              totalClp: discount?.finalTotal ?? service.priceClp,
+            };
+            discountOrderFields = orderAmounts;
             const [created] = await tx
               .insert(saunaCheckoutOrders)
               .values({
@@ -1711,7 +1748,11 @@ export const saunaRouter = router({
                 guests,
                 capacityUsed: service.capacityUsed,
                 isPrivate: isPrivate ? 1 : 0,
-                totalClp: service.priceClp,
+                subtotalClp: orderAmounts.subtotalClp,
+                discountClp: orderAmounts.discountClp,
+                discountCodeId: orderAmounts.discountCodeId,
+                discountCode: orderAmounts.discountCode,
+                totalClp: orderAmounts.totalClp,
                 giftCardCode: normalizedGiftCardCode ?? null,
                 status: "initiating",
                 expiresAt: new Date(Date.now() + 40 * 60_000),
@@ -1751,6 +1792,37 @@ export const saunaRouter = router({
                 });
           }
         }
+        // Un código que cubre el 100% deja el total en $0 y Webpay no acepta
+        // cobrar cero: la orden se cierra igual que con una gift card.
+        if (
+          discountOrderFields
+          && discountOrderFields.subtotalClp > 0
+          && discountOrderFields.totalClp === 0
+          && discountOrderFields.discountClp === discountOrderFields.subtotalClp
+          && discountOrderFields.discountCodeId
+        ) {
+          try {
+            await finalizeApprovedSaunaOrder(orderId, { kind: "discount" });
+            return {
+              paymentRequired: false as const,
+              paymentUrl: null,
+              token: null,
+              orderToken: publicToken,
+              resultUrl: saunaResultUrl(publicToken, "pagado"),
+            };
+          } catch (error) {
+            await db
+              .update(saunaCheckoutOrders)
+              .set({ status: "failed", error: String(error).slice(0, 2000) })
+              .where(eq(saunaCheckoutOrders.id, orderId));
+            throw error instanceof TRPCError
+              ? error
+              : new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: "No pudimos aplicar el código de descuento",
+                });
+          }
+        }
         const buyOrder = generateSaunaBuyOrder(orderId);
         const sessionId = generateSessionId();
         const origin = (ENV.appUrl || "https://cms.cancagua.cl").replace(
@@ -1761,7 +1833,7 @@ export const saunaRouter = router({
           const payment = await createTransaction(
             buyOrder,
             sessionId,
-            service.priceClp,
+            discountOrderFields?.totalClp ?? service.priceClp,
             `${origin}/api/sauna/webpay/return`
           );
           await db

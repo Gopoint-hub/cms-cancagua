@@ -15,6 +15,7 @@ import {
   isTransactionApproved,
   refundTransaction,
 } from "./webpay";
+import { recordMassageDiscountUsage } from "./massageDiscounts";
 import { redeemGiftCardPayment } from "./reservationPayments";
 import { availableSaunaSeats, saunaIntervalsOverlap } from "../shared/sauna";
 
@@ -221,7 +222,7 @@ export async function finalizeApprovedSaunaOrder(
 ): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
-  return db.transaction(async tx => {
+  const bookingId = await db.transaction(async tx => {
     const giftCardCode =
       result?.kind === "gift_card" ? String(result.code) : null;
     // Todas las operaciones que consumen aforo toman primero este mismo lock.
@@ -341,6 +342,33 @@ export async function finalizeApprovedSaunaOrder(
       .where(eq(saunaCheckoutOrders.id, order.id));
     return created.id;
   });
+
+  // El uso del código se anota FUERA de la transacción, igual que en
+  // Biopiscinas: si esto falla, la reserva ya quedó pagada y confirmada, que es
+  // lo que no se puede perder.
+  try {
+    const [paidOrder] = await db
+      .select()
+      .from(saunaCheckoutOrders)
+      .where(eq(saunaCheckoutOrders.id, orderId))
+      .limit(1);
+    if (paidOrder?.discountCodeId && paidOrder.discountClp > 0) {
+      await recordMassageDiscountUsage(db, {
+        discountCodeId: paidOrder.discountCodeId,
+        requestId: paidOrder.buyOrder || paidOrder.publicToken,
+        email: paidOrder.clientEmail,
+        originalAmount: paidOrder.subtotalClp,
+        discountAmount: paidOrder.discountClp,
+        finalAmount: paidOrder.totalClp,
+      });
+    }
+  } catch (error) {
+    console.error(
+      "[sauna:checkout] Reserva confirmada; no se pudo registrar el uso del descuento",
+      { orderId, error }
+    );
+  }
+  return bookingId;
 }
 
 export const saunaWebpayReturnRouter = express.Router();

@@ -51,6 +51,7 @@ const saunaItemSchema = z.object({
   bookingDate: dateSchema,
   startTime: timeSchema,
   privateGuestCount: z.number().int().min(1).max(6).optional(),
+  discountCode: z.string().trim().max(50).optional(),
 });
 
 function generateCartBuyOrder(orderId: number): string {
@@ -175,6 +176,10 @@ export const serviceCartRouter = router({
               const availability = await saunaAvailabilityForDay(tx, saunaItem.bookingDate);
               const slot = availability.slots.find(candidate => candidate.startTime === saunaItem.startTime);
               if (!slot || slot.availableSeats < service.capacityUsed || (isPrivate && !slot.privateAvailable)) throw new TRPCError({ code: "CONFLICT", message: "El horario de Sauna ya no tiene los cupos necesarios" });
+              const saunaDiscount = saunaItem.discountCode
+                ? await calculateWellnessCartDiscount(tx, saunaItem.discountCode, [{ service: "sauna", serviceId: service.id, originalAmount: service.priceClp }])
+                : null;
+              const saunaItemTotal = saunaDiscount?.finalTotal ?? service.priceClp;
               const [created] = await tx.insert(saunaCheckoutOrders).values({
                 publicToken: nanoid(48),
                 serviceId: service.id,
@@ -187,13 +192,17 @@ export const serviceCartRouter = router({
                 guests,
                 capacityUsed: service.capacityUsed,
                 isPrivate: isPrivate ? 1 : 0,
-                totalClp: service.priceClp,
+                subtotalClp: service.priceClp,
+                discountClp: saunaDiscount?.discountTotal ?? 0,
+                discountCodeId: saunaDiscount?.discountCodeId ?? null,
+                discountCode: saunaDiscount?.code ?? null,
+                totalClp: saunaItemTotal,
                 status: "initiating",
                 expiresAt,
               }).$returningId();
-              childOrders.push({ module: "sauna", id: created.id, totalClp: service.priceClp });
-              prepared.push({ module: "sauna", childOrderId: created.id, itemName: service.name, bookingDate: saunaItem.bookingDate, startTime: saunaItem.startTime, endTime: slot.endTime, guests, totalClp: service.priceClp });
-              totalClp += service.priceClp;
+              childOrders.push({ module: "sauna", id: created.id, totalClp: saunaItemTotal });
+              prepared.push({ module: "sauna", childOrderId: created.id, itemName: service.name, bookingDate: saunaItem.bookingDate, startTime: saunaItem.startTime, endTime: slot.endTime, guests, totalClp: saunaItemTotal });
+              totalClp += saunaItemTotal;
             }
 
             const [cart] = await tx.insert(serviceCartCheckoutOrders).values({

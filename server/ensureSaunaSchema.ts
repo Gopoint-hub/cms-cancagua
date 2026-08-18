@@ -48,6 +48,39 @@ export async function ensureSaunaSchema(): Promise<void> {
       "ALTER TABLE `sauna_checkout_orders` MODIFY COLUMN `status` enum('initiating','payment_pending','paid','rejected','aborted','expired','failed','refunded','manual_review') NOT NULL DEFAULT 'initiating'"
     )
   );
+  // Códigos de descuento en el checkout de Sauna. Van con SHOW COLUMNS y no con
+  // "ADD COLUMN IF NOT EXISTS" para seguir el mismo patrón que el resto del
+  // módulo y no depender de la variante de SQL del motor.
+  const [checkoutColumns] = await db.execute(
+    sql`SHOW COLUMNS FROM sauna_checkout_orders`
+  );
+  const checkoutFields = new Set(
+    (checkoutColumns as unknown as any[]).map(column => column.Field)
+  );
+  if (!checkoutFields.has("subtotal_clp")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_checkout_orders ADD COLUMN subtotal_clp int NOT NULL DEFAULT 0 AFTER is_private`
+    );
+    // Las órdenes que ya existen nunca tuvieron descuento: su subtotal es el total.
+    await db.execute(
+      sql`UPDATE sauna_checkout_orders SET subtotal_clp = total_clp WHERE subtotal_clp = 0`
+    );
+  }
+  if (!checkoutFields.has("discount_clp")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_checkout_orders ADD COLUMN discount_clp int NOT NULL DEFAULT 0 AFTER subtotal_clp`
+    );
+  }
+  if (!checkoutFields.has("discount_code_id")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_checkout_orders ADD COLUMN discount_code_id int NULL AFTER discount_clp`
+    );
+  }
+  if (!checkoutFields.has("discount_code")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_checkout_orders ADD COLUMN discount_code varchar(50) NULL AFTER discount_code_id`
+    );
+  }
   await db.execute(
     sql`INSERT INTO sauna_settings (id, schedule_json) VALUES (1, ${DEFAULT_SCHEDULE}) ON DUPLICATE KEY UPDATE id = id`
   );
