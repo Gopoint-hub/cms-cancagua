@@ -8,12 +8,13 @@ import {
   massageDiscountCodeTechniques,
   massageTechniques,
   regularClassPlans,
+  saunaServices,
 } from "../drizzle/schema";
 import { hasCmsPermission } from "@shared/permissions";
 import { getDb } from "./db";
 import { protectedProcedure, router } from "./_core/trpc";
 
-export const DISCOUNT_MODULES = ["masajes", "clases", "biopiscinas"] as const;
+export const DISCOUNT_MODULES = ["masajes", "clases", "biopiscinas", "sauna"] as const;
 type DiscountModule = typeof DISCOUNT_MODULES[number];
 
 const scopeSchema = z.object({
@@ -138,18 +139,21 @@ export const discounts360Router = router({
     requireAdminDiscountAccess(ctx.user);
     const db = await getDb();
     if (!db) return [];
-    const [techniques, plans, pools] = await Promise.all([
+    const [techniques, plans, pools, saunas] = await Promise.all([
       db.select({ id: massageTechniques.id, name: massageTechniques.name })
         .from(massageTechniques).where(eq(massageTechniques.active, 1)).orderBy(asc(massageTechniques.name)),
       db.select({ id: regularClassPlans.id, name: regularClassPlans.name })
         .from(regularClassPlans).where(eq(regularClassPlans.active, 1)).orderBy(asc(regularClassPlans.displayOrder)),
       db.select({ id: biopoolServices.id, name: biopoolServices.name })
         .from(biopoolServices).where(ne(biopoolServices.status, "archived")).orderBy(asc(biopoolServices.name)),
+      db.select({ id: saunaServices.id, name: saunaServices.name })
+        .from(saunaServices).where(eq(saunaServices.published, 1)).orderBy(asc(saunaServices.partySize)),
     ]);
     return [
       { id: "masajes" as const, name: "Masajes", itemName: "técnicas", services: techniques.map((item) => ({ id: String(item.id), name: item.name })) },
       { id: "clases" as const, name: "Clases regulares", itemName: "planes", services: plans.map((item) => ({ id: String(item.id), name: item.name })) },
       { id: "biopiscinas" as const, name: "Biopiscinas", itemName: "servicios", services: pools.map((item) => ({ id: String(item.id), name: item.name })) },
+      { id: "sauna" as const, name: "Sauna", itemName: "servicios", services: saunas.map((item) => ({ id: String(item.id), name: item.name })) },
     ];
   }),
 

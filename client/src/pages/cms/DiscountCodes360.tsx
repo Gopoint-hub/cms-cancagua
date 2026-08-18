@@ -13,7 +13,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Download, Pencil, Plus, Search,
 import { toast } from "sonner";
 
 type DiscountType = "percentage" | "fixed";
-type ModuleId = "masajes" | "clases" | "biopiscinas";
+type ModuleId = "masajes" | "clases" | "biopiscinas" | "sauna";
 type CatalogModule = {
   id: ModuleId;
   name: string;
@@ -42,6 +42,7 @@ const emptyScopes = (): ScopeState => ({
   masajes: { selected: false, all: true, serviceIds: [] },
   clases: { selected: false, all: true, serviceIds: [] },
   biopiscinas: { selected: false, all: true, serviceIds: [] },
+  sauna: { selected: false, all: true, serviceIds: [] },
 });
 
 const emptyForm = (): FormState => ({
@@ -73,6 +74,7 @@ export default function DiscountCodes360() {
   const massageCatalog = trpc.masajes.public.getCatalog.useQuery();
   const classesCatalog = trpc.regularClasses.public.catalog.useQuery();
   const biopoolsCatalog = trpc.biopools.public.catalog.useQuery();
+  const saunaCatalog = trpc.sauna.public.catalog.useQuery();
   const [search, setSearch] = useState("");
   const [descending, setDescending] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -98,9 +100,21 @@ export default function DiscountCodes360() {
       itemName: "servicios",
       services: (biopoolsCatalog.data?.services ?? []).map((item) => ({ id: String(item.service.id), name: item.service.name })),
     },
-  ], [massageCatalog.data, classesCatalog.data, biopoolsCatalog.data]);
-  const catalogLoading = massageCatalog.isLoading || classesCatalog.isLoading || biopoolsCatalog.isLoading;
-  const catalogErrors = [massageCatalog.error, classesCatalog.error, biopoolsCatalog.error].filter(Boolean);
+    {
+      id: "sauna",
+      name: "Sauna",
+      itemName: "servicios",
+      // El catálogo público repite el servicio privado para 4 y 5 personas, así
+      // que hay que dejar un solo registro por id o el selector los duplica.
+      services: Array.from(
+        new Map(
+          (saunaCatalog.data?.services ?? []).map((item) => [String(item.id), { id: String(item.id), name: item.name }])
+        ).values()
+      ),
+    },
+  ], [massageCatalog.data, classesCatalog.data, biopoolsCatalog.data, saunaCatalog.data]);
+  const catalogLoading = massageCatalog.isLoading || classesCatalog.isLoading || biopoolsCatalog.isLoading || saunaCatalog.isLoading;
+  const catalogErrors = [massageCatalog.error, classesCatalog.error, biopoolsCatalog.error, saunaCatalog.error].filter(Boolean);
 
   const refresh = () => utils.discounts360.list.invalidate();
   const create = trpc.discounts360.create.useMutation({
