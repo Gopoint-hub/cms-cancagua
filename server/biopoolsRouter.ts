@@ -1014,6 +1014,7 @@ export const biopoolsRouter = router({
                 ...Array.from({ length: input.adultQuantity }, () => adult.priceClp),
                 ...Array.from({ length: input.childQuantity }, () => child?.priceClp ?? 0),
               ],
+              bookingDate: input.bookingDate,
             },
           ]);
         } catch (error) {
@@ -1134,6 +1135,7 @@ export const biopoolsRouter = router({
                         ...Array.from({ length: input.adultQuantity }, () => adult.priceClp),
                         ...Array.from({ length: input.childQuantity }, () => child?.priceClp ?? 0),
                       ],
+                      bookingDate: input.bookingDate,
                     },
                   ]
                 );

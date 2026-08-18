@@ -1141,6 +1141,9 @@ export const discountCodes = mysqlTable("discount_codes", {
   name: text("name").notNull(), // Nombre descriptivo
   description: text("description"), // Descripción interna
   discountType: mysqlEnum("discount_type", ["fixed", "percentage", "nth_free"]).default("percentage").notNull(),
+  // Días de la semana en que el código aplica, como "2,3,4,5" con 0=domingo.
+  // Vacío o null = todos los días. Se valida contra la fecha de la VISITA.
+  validWeekdays: varchar("valid_weekdays", { length: 20 }),
   discountValue: int("discount_value").notNull(), // Porcentaje (0-100) o monto fijo en CLP
   minPurchase: int("min_purchase").default(0).notNull(), // Monto mínimo de compra para aplicar
   maxDiscount: int("max_discount"), // Descuento máximo en CLP (para porcentajes)

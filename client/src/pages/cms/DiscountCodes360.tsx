@@ -28,6 +28,7 @@ type FormState = {
   name: string;
   description: string;
   discountType: DiscountType;
+  validWeekdays?: number[];
   discountValue: string;
   indefinite: boolean;
   startsAt: string;
@@ -37,6 +38,17 @@ type FormState = {
 };
 
 const CODES_PER_PAGE = 10;
+
+// 0 = domingo, para que calce con getDay() de JavaScript.
+const DIAS_SEMANA = [
+  { valor: 1, corto: "Lu" },
+  { valor: 2, corto: "Ma" },
+  { valor: 3, corto: "Mi" },
+  { valor: 4, corto: "Ju" },
+  { valor: 5, corto: "Vi" },
+  { valor: 6, corto: "Sá" },
+  { valor: 0, corto: "Do" },
+];
 
 const emptyScopes = (): ScopeState => ({
   masajes: { selected: false, all: true, serviceIds: [] },
@@ -50,6 +62,7 @@ const emptyForm = (): FormState => ({
   name: "",
   description: "",
   discountType: "percentage",
+  validWeekdays: [] as number[],
   discountValue: "",
   indefinite: true,
   startsAt: "",
@@ -181,6 +194,7 @@ export default function DiscountCodes360() {
       name: item.name,
       description: item.description ?? "",
       discountType: item.discountType,
+      validWeekdays: [...((item as any).validWeekdays ?? [])],
       discountValue: String(item.discountValue),
       indefinite: !item.startsAt && !item.expiresAt,
       startsAt: toLocalInput(item.startsAt),
@@ -205,6 +219,7 @@ export default function DiscountCodes360() {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
       discountType: form.discountType,
+      validWeekdays: form.validWeekdays ?? [],
       discountValue: Number(form.discountValue),
       startsAt: form.indefinite || !form.startsAt ? null : new Date(form.startsAt),
       expiresAt: form.indefinite || !form.expiresAt ? null : new Date(form.expiresAt),
@@ -291,7 +306,7 @@ export default function DiscountCodes360() {
                     const itemStatus = status(item);
                     return <tr key={item.id} className="border-b">
                       <td className="py-3 pr-4"><code className="font-semibold">{item.code}</code><p className="text-muted-foreground">{item.name}</p></td>
-                      <td className="pr-4">{item.discountType === "percentage" ? `${item.discountValue}%` : item.discountType === "nth_free" ? `${item.discountValue}x${item.discountValue - 1}` : `$${item.discountValue.toLocaleString("es-CL")}`}</td>
+                      <td className="pr-4">{item.discountType === "percentage" ? `${item.discountValue}%` : item.discountType === "nth_free" ? `${item.discountValue}x${item.discountValue - 1}` : `$${item.discountValue.toLocaleString("es-CL")}`}{((item as any).validWeekdays ?? []).length > 0 && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{DIAS_SEMANA.filter((d) => ((item as any).validWeekdays ?? []).includes(d.valor)).map((d) => d.corto).join(" ")}</span>}</td>
                       <td className="pr-4 max-w-[320px]">{scopeSummary(item)}</td>
                       <td className="pr-4 whitespace-nowrap">{item.expiresAt ? `Hasta ${new Date(item.expiresAt).toLocaleDateString("es-CL")}` : "Indefinida"}</td>
                       <td className="pr-4"><Badge variant={itemStatus.variant}>{itemStatus.label}</Badge></td>
@@ -346,6 +361,37 @@ export default function DiscountCodes360() {
               <div><Label>Código *</Label><Input required minLength={3} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="RELAX20" /></div>
               <div><Label>Nombre *</Label><Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Promoción invierno" /></div>
               <div><Label>Tipo *</Label><Select value={form.discountType} onValueChange={(value: DiscountType) => setForm({ ...form, discountType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Porcentaje</SelectItem><SelectItem value="fixed">Monto fijo CLP</SelectItem><SelectItem value="nth_free">Lleva N, paga N−1 (2x1, 3x2…)</SelectItem></SelectContent></Select></div>
+              <div className="sm:col-span-2">
+                <Label>Días en que aplica</Label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {DIAS_SEMANA.map((dia) => {
+                    const activo = (form.validWeekdays ?? []).includes(dia.valor);
+                    return (
+                      <button
+                        key={dia.valor}
+                        type="button"
+                        onClick={() => {
+                          const actuales = form.validWeekdays ?? [];
+                          setForm({
+                            ...form,
+                            validWeekdays: activo
+                              ? actuales.filter((d) => d !== dia.valor)
+                              : [...actuales, dia.valor],
+                          });
+                        }}
+                        className={`h-9 w-11 rounded-full border text-sm transition ${activo ? "border-transparent bg-primary font-medium text-primary-foreground" : "border-input bg-background hover:bg-accent"}`}
+                      >
+                        {dia.corto}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {(form.validWeekdays ?? []).length === 0
+                    ? "Sin días marcados el código aplica todos los días."
+                    : "Se valida contra el día de la visita, no el de la compra."}
+                </p>
+              </div>
               <div><Label>{form.discountType === "percentage" ? "Porcentaje" : form.discountType === "nth_free" ? "Cada cuántos, uno gratis" : "Monto CLP"} *</Label><Input required type="number" min={form.discountType === "nth_free" ? 2 : 1} max={form.discountType === "percentage" ? 100 : undefined} value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} />{form.discountType === "nth_free" && <p className="mt-1 text-xs text-muted-foreground">2 = 2x1 (la segunda gratis). El sobrante impar paga completo y se regala siempre la unidad más barata.</p>}</div>
             </div>
             <div><Label>Descripción interna</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>

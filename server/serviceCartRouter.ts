@@ -86,6 +86,7 @@ export const serviceCartRouter = router({
           serviceId: number;
           originalAmount: number;
           unitAmounts?: number[];
+          bookingDate: string;
         }> = [];
         for (const item of input.items) {
           if (item.module === "biopools") {
@@ -105,6 +106,7 @@ export const serviceCartRouter = router({
                 ...Array.from({ length: item.adultQuantity }, () => adult.priceClp),
                 ...Array.from({ length: item.childQuantity }, () => child?.priceClp ?? 0),
               ],
+              bookingDate: item.bookingDate,
             });
           } else {
             const [service] = await db.select().from(saunaServices).where(and(eq(saunaServices.id, item.serviceId), eq(saunaServices.published, 1))).limit(1);
@@ -115,6 +117,7 @@ export const serviceCartRouter = router({
               service: "sauna",
               serviceId: service.id,
               originalAmount: service.priceClp,
+              bookingDate: item.bookingDate,
             });
           }
         }
@@ -122,7 +125,7 @@ export const serviceCartRouter = router({
           const discount = await calculateWellnessCartDiscount(
             db,
             input.code,
-            lines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount, unitAmounts: line.unitAmounts })),
+            lines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount, unitAmounts: line.unitAmounts, bookingDate: line.bookingDate })),
           );
           return {
             valid: true as const,
@@ -188,6 +191,7 @@ export const serviceCartRouter = router({
               serviceId: number;
               originalAmount: number;
               unitAmounts?: number[];
+              bookingDate: string;
             }> = [];
             const prepared: Array<{
               module: "biopools" | "sauna";
@@ -258,6 +262,7 @@ export const serviceCartRouter = router({
                   ...Array.from({ length: biopoolItem.adultQuantity }, () => adult.priceClp),
                   ...Array.from({ length: biopoolItem.childQuantity }, () => child?.priceClp ?? 0),
                 ],
+                bookingDate: biopoolItem.bookingDate,
               });
               prepared.push({ module: "biopools", childOrderId: created.id, itemName: availability.service.name, bookingDate: biopoolItem.bookingDate, startTime: biopoolItem.startTime, endTime: slot.endTime, guests, totalClp: itemTotal });
               totalClp += itemTotal;
@@ -299,7 +304,7 @@ export const serviceCartRouter = router({
                 expiresAt,
               }).$returningId();
               childOrders.push({ module: "sauna", id: created.id, totalClp: saunaItemTotal });
-              discountLines.push({ module: "sauna", orderId: created.id, service: "sauna", serviceId: service.id, originalAmount: service.priceClp });
+              discountLines.push({ module: "sauna", orderId: created.id, service: "sauna", serviceId: service.id, originalAmount: service.priceClp, bookingDate: saunaItem.bookingDate });
               prepared.push({ module: "sauna", childOrderId: created.id, itemName: service.name, bookingDate: saunaItem.bookingDate, startTime: saunaItem.startTime, endTime: slot.endTime, guests, totalClp: saunaItemTotal });
               totalClp += saunaItemTotal;
             }
@@ -312,7 +317,7 @@ export const serviceCartRouter = router({
               const cartDiscount = await calculateWellnessCartDiscount(
                 tx,
                 cartDiscountCode,
-                discountLines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount, unitAmounts: line.unitAmounts })),
+                discountLines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount, unitAmounts: line.unitAmounts, bookingDate: line.bookingDate })),
               );
               totalClp = 0;
               for (const [index, line] of discountLines.entries()) {

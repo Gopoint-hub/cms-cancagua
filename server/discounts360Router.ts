@@ -10,6 +10,7 @@ import {
   regularClassPlans,
   saunaServices,
 } from "../drizzle/schema";
+import { parseValidWeekdays } from "./massageDiscounts";
 import { hasCmsPermission } from "@shared/permissions";
 import { getDb } from "./db";
 import { protectedProcedure, router } from "./_core/trpc";
@@ -28,6 +29,8 @@ const discountInput = z.object({
   name: z.string().trim().min(2).max(250),
   description: z.string().trim().max(4000).optional(),
   discountType: z.enum(["percentage", "fixed", "nth_free"]),
+  // Días de la semana en que corre el código (0=domingo). Vacío = todos.
+  validWeekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
   discountValue: z.number().int().positive(),
   startsAt: z.date().nullable().optional(),
   expiresAt: z.date().nullable().optional(),
@@ -102,6 +105,7 @@ async function listCodes(db: any) {
     name: discountCodes.name,
     description: discountCodes.description,
     discountType: discountCodes.discountType,
+    validWeekdays: discountCodes.validWeekdays,
     discountValue: discountCodes.discountValue,
     startsAt: discountCodes.startsAt,
     expiresAt: discountCodes.expiresAt,
@@ -130,6 +134,7 @@ async function listCodes(db: any) {
       ...row,
       totalDiscounted: usageByCode.get(row.id) ?? "0",
       scopes: tokensToScopes(parseServices(row.applicableServices), techniqueIds),
+      validWeekdays: parseValidWeekdays((row as any).validWeekdays),
     };
   });
 }
@@ -185,6 +190,7 @@ export const discounts360Router = router({
       discountType: input.discountType,
       discountValue: input.discountValue,
       applicableServices: JSON.stringify(scopesToTokens(scopes)),
+      validWeekdays: input.validWeekdays?.length ? input.validWeekdays.slice().sort().join(",") : null,
       maxUsesPerUser: 1,
       startsAt: input.startsAt ?? null,
       expiresAt: input.expiresAt ?? null,
@@ -224,6 +230,7 @@ export const discounts360Router = router({
           discountType: input.discountType,
           discountValue: input.discountValue,
           applicableServices: JSON.stringify([...preserved, ...scopesToTokens(scopes)]),
+          validWeekdays: input.validWeekdays?.length ? input.validWeekdays.slice().sort().join(",") : null,
           startsAt: input.startsAt ?? null,
           expiresAt: input.expiresAt ?? null,
           active: input.active,

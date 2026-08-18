@@ -47,6 +47,20 @@ export async function ensureMassageDiscountSchema() {
   await db.execute(sql.raw(
     "ALTER TABLE `discount_codes` MODIFY COLUMN `discount_type` enum('fixed','percentage','nth_free') NOT NULL DEFAULT 'percentage'"
   ));
+  // Días de la semana en que el código aplica ("2,3,4,5" con 0=domingo).
+  try {
+    await db.execute(sql.raw(
+      "ALTER TABLE `discount_codes` ADD COLUMN `valid_weekdays` varchar(20) NULL"
+    ));
+  } catch (error) {
+    if (!isDuplicateColumnError(error)) throw error;
+  }
+  // El 2x1 de biopiscinas corre de martes a viernes. Hasta ahora eso se
+  // controlaba a mano y se aplicaba igual los fines de semana.
+  await db.execute(sql.raw(
+    "UPDATE `discount_codes` SET `valid_weekdays` = '2,3,4,5' "
+    + "WHERE `code` = 'BIOPISCINA2X1' AND (`valid_weekdays` IS NULL OR `valid_weekdays` = '')"
+  ));
   // El cupón de biopiscinas estaba como 50% lineal: pasa a 2x1 de verdad.
   await db.execute(sql.raw(
     "UPDATE `discount_codes` SET `discount_type` = 'nth_free', `discount_value` = 2 "

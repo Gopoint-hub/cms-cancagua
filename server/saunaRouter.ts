@@ -1724,6 +1724,7 @@ export const saunaRouter = router({
                     service: "sauna",
                     serviceId: service.id,
                     originalAmount: service.priceClp,
+                    bookingDate: input.bookingDate,
                   },
                 ])
               : null;

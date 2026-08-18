@@ -36,6 +36,9 @@ export type WellnessDiscountLine = {
   // las promos tipo 2x1: sin saber cuántas unidades hay y cuánto vale cada una,
   // no se puede calcular "una gratis por cada dos".
   unitAmounts?: number[];
+  // Fecha de la VISITA en formato YYYY-MM-DD. Los códigos con días de vigencia
+  // se validan contra este día, no contra el día en que se compra.
+  bookingDate?: string;
   serviceId?: number | string;
   techniqueId?: number;
 };
@@ -107,6 +110,31 @@ export function calculateWellnessDiscountAmounts(
 
 const normalizeCode = (code: string) => code.trim().toUpperCase();
 
+const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
+/** Días permitidos de un código: "2,3,4,5" → [2,3,4,5]. Vacío = todos. */
+export function parseValidWeekdays(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  return String(raw)
+    .split(",")
+    .map(part => Number(part.trim()))
+    .filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+}
+
+/** Día de la semana de una fecha YYYY-MM-DD, leída como día local y no en UTC. */
+export function weekdayOfBookingDate(bookingDate: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(bookingDate);
+  if (!match) return null;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay();
+}
+
+export function describeWeekdays(days: number[]): string {
+  if (days.length === 0) return "";
+  const nombres = [...days].sort((a, b) => a - b).map(day => DIAS[day]);
+  if (nombres.length === 1) return nombres[0];
+  return nombres.slice(0, -1).join(", ") + " y " + nombres[nombres.length - 1];
+}
+
 export function isWellnessDiscountLineEligible(
   applicableServices: string[],
   allowedLegacyMassageTechniqueIds: Set<number>,
@@ -175,11 +203,39 @@ export async function calculateWellnessCartDiscount(
     throw new Error("Este código alcanzó su límite de usos.");
   }
 
+  // Días de vigencia: se miran contra la fecha de la VISITA de cada línea, no
+  // contra el día en que se compra. Comprar el miércoles para el sábado no
+  // habilita un código que solo corre de martes a viernes.
+  const diasValidos = parseValidWeekdays((discount as any).validWeekdays);
+  if (diasValidos.length > 0) {
+    const fechas = lines.map(line => line.bookingDate).filter(Boolean) as string[];
+    if (fechas.length > 0) {
+      const fueraDeDia = fechas.filter(fecha => {
+        const dia = weekdayOfBookingDate(fecha);
+        return dia !== null && !diasValidos.includes(dia);
+      });
+      if (fueraDeDia.length === fechas.length) {
+        throw new Error(
+          `Este código solo aplica los días ${describeWeekdays(diasValidos)}.`
+        );
+      }
+    }
+  }
+
   const mappings = await db.select({ techniqueId: massageDiscountCodeTechniques.techniqueId })
     .from(massageDiscountCodeTechniques)
     .where(eq(massageDiscountCodeTechniques.discountCodeId, discount.id));
   const allowedIds = new Set<number>(mappings.map((row: any) => row.techniqueId));
-  const eligible = lines.map((line) => isWellnessDiscountLineEligible(applicableServices, allowedIds, line));
+  const eligible = lines.map((line) => {
+    if (!isWellnessDiscountLineEligible(applicableServices, allowedIds, line)) return false;
+    // Una línea cuya visita cae fuera de los días del código no recibe descuento,
+    // aunque otra línea del mismo carrito sí lo reciba.
+    if (diasValidos.length > 0 && line.bookingDate) {
+      const dia = weekdayOfBookingDate(line.bookingDate);
+      if (dia !== null && !diasValidos.includes(dia)) return false;
+    }
+    return true;
+  });
   const { eligibleSubtotal, originalTotal, discountTotal, finalTotal, lineDiscounts } = calculateWellnessDiscountAmounts(
     lines,
     eligible,
