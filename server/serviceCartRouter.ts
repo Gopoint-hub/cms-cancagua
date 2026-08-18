@@ -446,16 +446,19 @@ export const serviceCartRouter = router({
 
         const db = await database();
         const email = input.email.toLowerCase();
+        // Se traen las ultimas 5 por tabla y no una sola: el telefono util puede
+        // estar en una reserva anterior a la mas nueva, que es justo lo que
+        // pasaba con el numero al que le faltaba un digito.
         const [bio, sauna, masaje] = await Promise.all([
           db.select({ nombre: biopoolBookings.clientName, telefono: biopoolBookings.clientPhone, creado: biopoolBookings.createdAt })
             .from(biopoolBookings).where(sql`lower(${biopoolBookings.clientEmail}) = ${email}`)
-            .orderBy(desc(biopoolBookings.createdAt)).limit(1),
+            .orderBy(desc(biopoolBookings.createdAt)).limit(5),
           db.select({ nombre: saunaBookings.clientName, telefono: saunaBookings.clientPhone, creado: saunaBookings.createdAt })
             .from(saunaBookings).where(sql`lower(${saunaBookings.clientEmail}) = ${email}`)
-            .orderBy(desc(saunaBookings.createdAt)).limit(1),
+            .orderBy(desc(saunaBookings.createdAt)).limit(5),
           db.select({ nombre: massageBookings.clientName, telefono: massageBookings.clientPhone, creado: massageBookings.createdAt })
             .from(massageBookings).where(sql`lower(${massageBookings.clientEmail}) = ${email}`)
-            .orderBy(desc(massageBookings.createdAt)).limit(1),
+            .orderBy(desc(massageBookings.createdAt)).limit(5),
         ]);
 
         // Se queda con el registro mas reciente que traiga nombre: el ultimo
