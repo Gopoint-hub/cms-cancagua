@@ -980,6 +980,9 @@ export const biopoolsRouter = router({
         adultQuantity: z.number().int().min(1).max(40),
         childQuantity: z.number().int().min(0).max(40),
         code: z.string().trim().min(1).max(50),
+        // Fecha de la visita: los códigos con días de vigencia se validan
+        // contra este día. Sin ella no se puede saber si el código corre.
+        bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         })
       )
       .mutation(async ({ input }) => {
