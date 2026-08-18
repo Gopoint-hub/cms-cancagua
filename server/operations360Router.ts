@@ -538,6 +538,60 @@ function normalizarBusqueda(valor: string): string {
     .trim();
 }
 
+/**
+ * Distancia de edición acotada: si se pasa del tope, corta y devuelve tope+1.
+ * No hace falta el valor exacto, solo saber si entra o no dentro del margen.
+ */
+function distanciaEdicion(a: string, b: string, tope: number): number {
+  if (Math.abs(a.length - b.length) > tope) return tope + 1;
+  let previa = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const actual = [i];
+    for (let j = 1; j <= b.length; j++) {
+      actual.push(
+        Math.min(
+          previa[j] + 1,
+          actual[j - 1] + 1,
+          previa[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+        )
+      );
+    }
+    if (Math.min(...actual) > tope) return tope + 1;
+    previa = actual;
+  }
+  return previa[b.length];
+}
+
+/**
+ * Cuántas letras de diferencia se le perdonan a una palabra según su largo.
+ * Las de 3 letras o menos van exactas: ahí un error de una letra ya es otra
+ * palabra distinta y ensucia los resultados.
+ */
+function margenTipeo(palabra: string): number {
+  if (palabra.length <= 3) return 0;
+  return palabra.length <= 8 ? 1 : 2;
+}
+
+/**
+ * Match tolerante a nombres mal escritos: "Willian Toro" encuentra a
+ * "william toro", "Fernando Mesa" a "FERNANDO MEZA". Exige que TODAS las
+ * palabras buscadas tengan pareja, que es lo que evita que media base entre
+ * por parecerse a una sola palabra.
+ */
+function pareceA(termino: string, texto: string): boolean {
+  const palabras = normalizarBusqueda(termino).split(" ").filter(Boolean);
+  const candidatas = normalizarBusqueda(texto).split(" ").filter(Boolean);
+  if (!palabras.length || !candidatas.length) return false;
+  return palabras.every(palabra => {
+    const margen = margenTipeo(palabra);
+    return candidatas.some(
+      candidata =>
+        candidata.startsWith(palabra) ||
+        (margen > 0 && distanciaEdicion(palabra, candidata, margen) <= margen)
+    );
+  });
+}
+
 export const operations360Router = router({
   access: protectedProcedure.query(({ ctx }) => ({
     calendarServices: calendarServices(ctx.user),
@@ -811,10 +865,27 @@ export const operations360Router = router({
         return false;
       };
 
-      const encontrados = eventos.filter(coincide);
-      encontrados.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      const porFecha = (a: ClientEvent, b: ClientEvent) =>
+        a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+
+      let encontrados = eventos.filter(coincide);
+      // Los parecidos son la segunda pasada, no la primera: si el término
+      // calza exacto con alguien, esos son LOS resultados y no se ensucian
+      // con homónimos aproximados. Recién cuando no hay nada se busca por
+      // parecido, que es cuando el nombre venía mal escrito.
+      let aproximada = false;
+      if (!encontrados.length) {
+        encontrados = eventos.filter(
+          evento =>
+            pareceA(input.termino, evento.clientName ?? "") ||
+            pareceA(input.termino, evento.clientEmail ?? "")
+        );
+        aproximada = encontrados.length > 0;
+      }
+      encontrados.sort(porFecha);
       return {
         total: encontrados.length,
+        aproximada,
         // Tope para no devolver media base si alguien busca "a".
         resultados: encontrados.slice(0, 50),
       };

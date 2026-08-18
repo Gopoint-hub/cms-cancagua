@@ -1462,6 +1462,12 @@ export default function Calendario360() {
                 <Button size="sm" variant="ghost" onClick={() => setSearch("")}>Limpiar</Button>
               </div>
               {busqueda.isFetching && <p className="text-sm text-muted-foreground">Buscando…</p>}
+              {!busqueda.isFetching && busqueda.data?.aproximada && (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  No hay ninguna reserva escrita exactamente así. Estos son los nombres
+                  <strong> parecidos</strong> a “{termino}”.
+                </p>
+              )}
               {!busqueda.isFetching && busqueda.data?.total === 0 && (
                 <p className="text-sm text-muted-foreground">
                   Sin resultados para “{termino}”. Prueba con el correo, que es lo que menos se escribe mal.
