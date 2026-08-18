@@ -1140,7 +1140,7 @@ export const discountCodes = mysqlTable("discount_codes", {
   code: varchar("code", { length: 50 }).notNull().unique(), // Código único (ej: BIENVENIDO_CANCAGUA)
   name: text("name").notNull(), // Nombre descriptivo
   description: text("description"), // Descripción interna
-  discountType: mysqlEnum("discount_type", ["fixed", "percentage"]).default("percentage").notNull(),
+  discountType: mysqlEnum("discount_type", ["fixed", "percentage", "nth_free"]).default("percentage").notNull(),
   discountValue: int("discount_value").notNull(), // Porcentaje (0-100) o monto fijo en CLP
   minPurchase: int("min_purchase").default(0).notNull(), // Monto mínimo de compra para aplicar
   maxDiscount: int("max_discount"), // Descuento máximo en CLP (para porcentajes)

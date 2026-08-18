@@ -85,6 +85,7 @@ export const serviceCartRouter = router({
           service: "biopiscinas" | "sauna";
           serviceId: number;
           originalAmount: number;
+          unitAmounts?: number[];
         }> = [];
         for (const item of input.items) {
           if (item.module === "biopools") {
@@ -100,6 +101,10 @@ export const serviceCartRouter = router({
               service: "biopiscinas",
               serviceId: item.serviceId,
               originalAmount: adult.priceClp * item.adultQuantity + (child?.priceClp ?? 0) * item.childQuantity,
+              unitAmounts: [
+                ...Array.from({ length: item.adultQuantity }, () => adult.priceClp),
+                ...Array.from({ length: item.childQuantity }, () => child?.priceClp ?? 0),
+              ],
             });
           } else {
             const [service] = await db.select().from(saunaServices).where(and(eq(saunaServices.id, item.serviceId), eq(saunaServices.published, 1))).limit(1);
@@ -117,7 +122,7 @@ export const serviceCartRouter = router({
           const discount = await calculateWellnessCartDiscount(
             db,
             input.code,
-            lines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount })),
+            lines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount, unitAmounts: line.unitAmounts })),
           );
           return {
             valid: true as const,
@@ -182,6 +187,7 @@ export const serviceCartRouter = router({
               service: "biopiscinas" | "sauna";
               serviceId: number;
               originalAmount: number;
+              unitAmounts?: number[];
             }> = [];
             const prepared: Array<{
               module: "biopools" | "sauna";
@@ -242,7 +248,17 @@ export const serviceCartRouter = router({
                 ...(biopoolItem.childQuantity > 0 && child ? [{ orderId: created.id, ticketTypeId: child.id, code: child.code, name: child.name, unitPriceClp: child.priceClp, quantity: biopoolItem.childQuantity, subtotalClp: child.priceClp * biopoolItem.childQuantity }] : []),
               ]);
               childOrders.push({ module: "biopools", id: created.id, totalClp: itemTotal, fullyDiscounted: false });
-              discountLines.push({ module: "biopools", orderId: created.id, service: "biopiscinas", serviceId: biopoolItem.serviceId, originalAmount: subtotalClp });
+              discountLines.push({
+                module: "biopools",
+                orderId: created.id,
+                service: "biopiscinas",
+                serviceId: biopoolItem.serviceId,
+                originalAmount: subtotalClp,
+                unitAmounts: [
+                  ...Array.from({ length: biopoolItem.adultQuantity }, () => adult.priceClp),
+                  ...Array.from({ length: biopoolItem.childQuantity }, () => child?.priceClp ?? 0),
+                ],
+              });
               prepared.push({ module: "biopools", childOrderId: created.id, itemName: availability.service.name, bookingDate: biopoolItem.bookingDate, startTime: biopoolItem.startTime, endTime: slot.endTime, guests, totalClp: itemTotal });
               totalClp += itemTotal;
             }
@@ -296,7 +312,7 @@ export const serviceCartRouter = router({
               const cartDiscount = await calculateWellnessCartDiscount(
                 tx,
                 cartDiscountCode,
-                discountLines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount })),
+                discountLines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount, unitAmounts: line.unitAmounts })),
               );
               totalClp = 0;
               for (const [index, line] of discountLines.entries()) {

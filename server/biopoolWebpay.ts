@@ -1,4 +1,5 @@
 import express from "express";
+import { buildBookingCode } from "../shared/bookingCode";
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
@@ -139,7 +140,7 @@ export async function finalizeApprovedBiopoolOrder(
     }
 
     const [createdBooking] = await tx.insert(biopoolBookings).values({
-      bookingCode: `BIO-${dateValue(order.bookingDate).replaceAll("-", "")}-${nanoid(6).toUpperCase()}`,
+      bookingCode: buildBookingCode("BIO", dateValue(order.bookingDate)),
       serviceId: order.serviceId,
       clientId: client.id,
       clientName: order.clientName,

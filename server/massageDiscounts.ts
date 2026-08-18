@@ -21,7 +21,7 @@ export type MassageDiscountResult = {
   discountCodeId: number;
   code: string;
   name: string;
-  discountType: "fixed" | "percentage";
+  discountType: "fixed" | "percentage" | "nth_free";
   discountValue: number;
   originalTotal: number;
   discountTotal: number;
@@ -32,6 +32,10 @@ export type MassageDiscountResult = {
 export type WellnessDiscountLine = {
   service: "masajes" | "clases" | "biopiscinas" | "sauna";
   originalAmount: number;
+  // Precio de cada unidad de la línea (cada ticket, cada persona). Lo necesitan
+  // las promos tipo 2x1: sin saber cuántas unidades hay y cuánto vale cada una,
+  // no se puede calcular "una gratis por cada dos".
+  unitAmounts?: number[];
   serviceId?: number | string;
   techniqueId?: number;
 };
@@ -47,18 +51,45 @@ export function calculateMassageDiscountAmounts(
   return calculateWellnessDiscountAmounts(lines, eligible, discountType, discountValue, maxDiscount);
 }
 
+// "Cada N unidades, una gratis" (un 2x1 es N=2). Regala siempre las unidades
+// MÁS BARATAS, que es la práctica estándar, y las que sobran del último grupo
+// incompleto pagan completo: con 3 personas se regala una, no una y media.
+export function calculateNthFreeDiscount(
+  unitAmounts: number[],
+  everyN: number,
+): number {
+  if (everyN < 2 || unitAmounts.length < everyN) return 0;
+  const gratis = Math.floor(unitAmounts.length / everyN);
+  return [...unitAmounts]
+    .sort((a, b) => a - b)
+    .slice(0, gratis)
+    .reduce((sum, amount) => sum + amount, 0);
+}
+
 export function calculateWellnessDiscountAmounts(
-  lines: Array<{ originalAmount: number }>,
+  lines: Array<{ originalAmount: number; unitAmounts?: number[] }>,
   eligible: boolean[],
-  discountType: "fixed" | "percentage",
+  discountType: "fixed" | "percentage" | "nth_free",
   discountValue: number,
   maxDiscount?: number | null,
 ) {
   const eligibleSubtotal = lines.reduce((sum, line, index) => sum + (eligible[index] ? line.originalAmount : 0), 0);
   const originalTotal = lines.reduce((sum, line) => sum + line.originalAmount, 0);
-  let discountTotal = discountType === "percentage"
-    ? Math.floor(eligibleSubtotal * discountValue / 100)
-    : Math.min(discountValue, eligibleSubtotal);
+  let discountTotal: number;
+  if (discountType === "nth_free") {
+    // Se calcula por línea y se suma: cada servicio tiene sus propias unidades.
+    discountTotal = lines.reduce((sum, line, index) => {
+      if (!eligible[index]) return sum;
+      const unidades = line.unitAmounts?.length
+        ? line.unitAmounts
+        : [line.originalAmount];
+      return sum + calculateNthFreeDiscount(unidades, discountValue);
+    }, 0);
+  } else if (discountType === "percentage") {
+    discountTotal = Math.floor(eligibleSubtotal * discountValue / 100);
+  } else {
+    discountTotal = Math.min(discountValue, eligibleSubtotal);
+  }
   if (discountType === "percentage" && maxDiscount) discountTotal = Math.min(discountTotal, maxDiscount);
   discountTotal = Math.max(0, Math.min(discountTotal, eligibleSubtotal));
   let allocated = 0;

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { buildBookingCode } from "../shared/bookingCode";
 import { and, eq, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
@@ -172,7 +173,7 @@ export async function createBandurriaBooking(data: BandurriaReservation) {
         const [createdClient] = await tx.insert(clients).values({ email: data.clientEmail, name: data.clientName, phone: data.clientPhone, origen: "Catamarán Bandurria" }).$returningId();
         [client] = await tx.select().from(clients).where(eq(clients.id, createdClient.id)).limit(1);
       }
-      const bookingCode = `BIO-${data.bookingDate.replaceAll("-", "")}-${nanoid(6).toUpperCase()}`;
+      const bookingCode = buildBookingCode("BIO", data.bookingDate);
       const [created] = await tx.insert(biopoolBookings).values({
         bookingCode, serviceId: service.id, clientId: client.id, clientName: data.clientName,
         clientEmail: data.clientEmail, clientPhone: data.clientPhone, bookingDate: data.bookingDate,

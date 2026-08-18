@@ -27,7 +27,7 @@ const discountInput = z.object({
   code: z.string().trim().min(3).max(50),
   name: z.string().trim().min(2).max(250),
   description: z.string().trim().max(4000).optional(),
-  discountType: z.enum(["percentage", "fixed"]),
+  discountType: z.enum(["percentage", "fixed", "nth_free"]),
   discountValue: z.number().int().positive(),
   startsAt: z.date().nullable().optional(),
   expiresAt: z.date().nullable().optional(),

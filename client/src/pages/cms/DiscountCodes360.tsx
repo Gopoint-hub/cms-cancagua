@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-type DiscountType = "percentage" | "fixed";
+type DiscountType = "percentage" | "fixed" | "nth_free";
 type ModuleId = "masajes" | "clases" | "biopiscinas" | "sauna";
 type CatalogModule = {
   id: ModuleId;
@@ -220,7 +220,7 @@ export default function DiscountCodes360() {
     const rows = visible.map((item) => ({
       Código: item.code,
       Nombre: item.name,
-      Tipo: item.discountType === "percentage" ? "Porcentaje" : "Monto fijo",
+      Tipo: item.discountType === "percentage" ? "Porcentaje" : item.discountType === "nth_free" ? "Lleva N paga N-1" : "Monto fijo",
       Valor: item.discountValue,
       "Servicios aplicables": scopeSummary(item),
       Inicio: item.startsAt ? new Date(item.startsAt).toLocaleString("es-CL") : "Indefinido",
@@ -291,7 +291,7 @@ export default function DiscountCodes360() {
                     const itemStatus = status(item);
                     return <tr key={item.id} className="border-b">
                       <td className="py-3 pr-4"><code className="font-semibold">{item.code}</code><p className="text-muted-foreground">{item.name}</p></td>
-                      <td className="pr-4">{item.discountType === "percentage" ? `${item.discountValue}%` : `$${item.discountValue.toLocaleString("es-CL")}`}</td>
+                      <td className="pr-4">{item.discountType === "percentage" ? `${item.discountValue}%` : item.discountType === "nth_free" ? `${item.discountValue}x${item.discountValue - 1}` : `$${item.discountValue.toLocaleString("es-CL")}`}</td>
                       <td className="pr-4 max-w-[320px]">{scopeSummary(item)}</td>
                       <td className="pr-4 whitespace-nowrap">{item.expiresAt ? `Hasta ${new Date(item.expiresAt).toLocaleDateString("es-CL")}` : "Indefinida"}</td>
                       <td className="pr-4"><Badge variant={itemStatus.variant}>{itemStatus.label}</Badge></td>
@@ -345,8 +345,8 @@ export default function DiscountCodes360() {
             <div className="grid sm:grid-cols-2 gap-4">
               <div><Label>Código *</Label><Input required minLength={3} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="RELAX20" /></div>
               <div><Label>Nombre *</Label><Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Promoción invierno" /></div>
-              <div><Label>Tipo *</Label><Select value={form.discountType} onValueChange={(value: DiscountType) => setForm({ ...form, discountType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Porcentaje</SelectItem><SelectItem value="fixed">Monto fijo CLP</SelectItem></SelectContent></Select></div>
-              <div><Label>{form.discountType === "percentage" ? "Porcentaje" : "Monto CLP"} *</Label><Input required type="number" min={1} max={form.discountType === "percentage" ? 100 : undefined} value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} /></div>
+              <div><Label>Tipo *</Label><Select value={form.discountType} onValueChange={(value: DiscountType) => setForm({ ...form, discountType: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Porcentaje</SelectItem><SelectItem value="fixed">Monto fijo CLP</SelectItem><SelectItem value="nth_free">Lleva N, paga N−1 (2x1, 3x2…)</SelectItem></SelectContent></Select></div>
+              <div><Label>{form.discountType === "percentage" ? "Porcentaje" : form.discountType === "nth_free" ? "Cada cuántos, uno gratis" : "Monto CLP"} *</Label><Input required type="number" min={form.discountType === "nth_free" ? 2 : 1} max={form.discountType === "percentage" ? 100 : undefined} value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} />{form.discountType === "nth_free" && <p className="mt-1 text-xs text-muted-foreground">2 = 2x1 (la segunda gratis). El sobrante impar paga completo y se regala siempre la unidad más barata.</p>}</div>
             </div>
             <div><Label>Descripción interna</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.indefinite} onChange={(e) => setForm({ ...form, indefinite: e.target.checked })} />Vigencia indefinida</label>

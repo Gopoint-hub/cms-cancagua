@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { buildBookingCode } from "../shared/bookingCode";
 import {
   and,
   asc,
@@ -1007,6 +1008,12 @@ export const biopoolsRouter = router({
               originalAmount:
                 adult.priceClp * input.adultQuantity +
                 (child?.priceClp ?? 0) * input.childQuantity,
+              // Precio de cada ticket: las promos tipo 2x1 necesitan contar
+              // unidades, no solo el monto total.
+              unitAmounts: [
+                ...Array.from({ length: input.adultQuantity }, () => adult.priceClp),
+                ...Array.from({ length: input.childQuantity }, () => child?.priceClp ?? 0),
+              ],
             },
           ]);
         } catch (error) {
@@ -1123,6 +1130,10 @@ export const biopoolsRouter = router({
                       service: "biopiscinas",
                       serviceId: input.serviceId,
                       originalAmount: subtotalClp,
+                      unitAmounts: [
+                        ...Array.from({ length: input.adultQuantity }, () => adult.priceClp),
+                        ...Array.from({ length: input.childQuantity }, () => child?.priceClp ?? 0),
+                      ],
                     },
                   ]
                 );
@@ -1733,7 +1744,7 @@ export const biopoolsRouter = router({
             const [created] = await tx
               .insert(biopoolBookings)
               .values({
-                bookingCode: `BIO-${input.bookingDate.replaceAll("-", "")}-${nanoid(6).toUpperCase()}`,
+                bookingCode: buildBookingCode("BIO", input.bookingDate),
                 serviceId: input.serviceId,
                 clientId: client.id,
                 clientName: input.clientName,

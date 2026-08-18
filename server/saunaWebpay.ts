@@ -1,6 +1,6 @@
 import express from "express";
+import { buildBookingCode } from "../shared/bookingCode";
 import { and, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
 import {
   saunaBookings,
   saunaBlocks,
@@ -256,7 +256,7 @@ export async function finalizeApprovedSaunaOrder(
     const [created] = await tx
       .insert(saunaBookings)
       .values({
-        bookingCode: `SAU-${String(order.bookingDate).slice(0, 10).replaceAll("-", "")}-${nanoid(6).toUpperCase()}`,
+        bookingCode: buildBookingCode("SAU", order.bookingDate),
         skeduServiceUuid: service.skeduServiceUuid,
         serviceName: service.name,
         kind: order.isPrivate ? "private" : "shared",

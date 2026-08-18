@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { buildBookingCode } from "../shared/bookingCode";
 import {
   and,
   asc,
@@ -546,7 +547,7 @@ export const saunaRouter = router({
             const [created] = await tx
               .insert(saunaBookings)
               .values({
-                bookingCode: `SAU-${input.bookingDate.replaceAll("-", "")}-${nanoid(6).toUpperCase()}`,
+                bookingCode: buildBookingCode("SAU", input.bookingDate),
                 serviceName: input.serviceName,
                 kind: privateBooking ? "private" : input.kind,
                 clientName: input.clientName || null,
@@ -1413,7 +1414,7 @@ export const saunaRouter = router({
             const [created] = await tx
               .insert(saunaBookings)
               .values({
-                bookingCode: `DTX-${input.bookingDate.replaceAll("-", "")}-${nanoid(6).toUpperCase()}`,
+                bookingCode: buildBookingCode("DTX", input.bookingDate),
                 skeduGroupUuid: program.skeduGroupUuid,
                 skeduUserUuid: program.skeduUserUuid,
                 skeduServiceUuid: program.skeduServiceUuid,

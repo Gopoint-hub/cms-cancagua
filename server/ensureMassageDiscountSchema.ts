@@ -41,6 +41,18 @@ export async function ensureMassageDiscountSchema() {
     )
   `));
 
+  // "nth_free" = cada N unidades, una gratis. Un 2x1 real no es un 50%: con
+  // número impar el 50% regala más de lo debido (una persona sola pagaba la
+  // mitad). El ALTER es aditivo, así que no afecta a los cupones existentes.
+  await db.execute(sql.raw(
+    "ALTER TABLE `discount_codes` MODIFY COLUMN `discount_type` enum('fixed','percentage','nth_free') NOT NULL DEFAULT 'percentage'"
+  ));
+  // El cupón de biopiscinas estaba como 50% lineal: pasa a 2x1 de verdad.
+  await db.execute(sql.raw(
+    "UPDATE `discount_codes` SET `discount_type` = 'nth_free', `discount_value` = 2 "
+    + "WHERE `code` = 'BIOPISCINA2X1' AND `discount_type` = 'percentage' AND `discount_value` = 50"
+  ));
+
   for (const statement of addColumnStatements) {
     try {
       await db.execute(sql.raw(statement));
