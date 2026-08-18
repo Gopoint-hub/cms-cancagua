@@ -41,7 +41,7 @@ import { parseRescheduleAuditLines } from "./rescheduleAudit";
 import { syncMassageSale } from "./massageSales";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const serviceSchema = z.enum(["massages", "biopools", "regular_classes"]);
+const serviceSchema = z.enum(["massages", "biopools", "sauna", "regular_classes"]);
 const calendarServiceSchema = z.enum([
   "massages",
   "biopools",
@@ -62,6 +62,9 @@ const eventKindSchema = z.enum([
 type ClientEvent = {
   id: string;
   clientKey: string;
+  // Código que recibe el cliente al confirmar (BIO-…, SAU-…). Los masajes y las
+  // clases no lo tienen, por eso es opcional.
+  bookingCode?: string | null;
   service: ServiceKey;
   date: string;
   startTime: string | null;
@@ -325,6 +328,7 @@ function clientServices(user: PermissionUser): ServiceKey[] {
   return [
     ...(hasCmsPermission(user, "massages.view_clients") ? ["massages" as const] : []),
     ...(hasCmsPermission(user, "biopools.view_clients") ? ["biopools" as const] : []),
+    ...(hasCmsPermission(user, "sauna.view_clients") ? ["sauna" as const] : []),
     ...(hasCmsPermission(user, "regular_classes.students") ? ["regular_classes" as const] : []),
   ];
 }
@@ -443,6 +447,7 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
     for (const { booking, serviceName } of rows) {
       events.push({
         id: `biopool:${booking.id}`,
+        bookingCode: booking.bookingCode,
         clientKey: buildClientKey({
           email: booking.clientEmail,
           phone: booking.clientPhone,
@@ -459,6 +464,34 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
         clientEmail: booking.clientEmail,
         clientPhone: booking.clientPhone,
         detail: `${booking.adultQuantity} adulto(s) · ${booking.childQuantity} niño(s)`,
+      });
+    }
+  }
+
+  // El sauna no estaba en esta función, así que sus reservas no aparecían ni en
+  // la ficha del cliente ni en las búsquedas.
+  if (allowed.includes("sauna")) {
+    const rows = await db.select().from(saunaBookings);
+    for (const booking of rows) {
+      events.push({
+        id: `sauna:${booking.id}`,
+        bookingCode: booking.bookingCode,
+        clientKey: buildClientKey({
+          email: booking.clientEmail,
+          phone: booking.clientPhone,
+          name: booking.clientName,
+        }),
+        service: "sauna",
+        date: serializeDate(booking.bookingDate),
+        startTime: booking.startTime,
+        title: booking.serviceName,
+        status: booking.status,
+        paymentStatus: booking.paymentStatus,
+        amountClp: booking.amountPaidClp,
+        clientName: booking.clientName ?? "",
+        clientEmail: booking.clientEmail,
+        clientPhone: booking.clientPhone,
+        detail: `${booking.guests} persona(s)${booking.isPrivate ? " · privado" : ""}`,
       });
     }
   }
@@ -493,6 +526,16 @@ async function loadClientEvents(user: PermissionUser): Promise<ClientEvent[]> {
     }
   }
   return events;
+}
+
+/** Quita tildes, pasa a minúsculas y colapsa espacios: "Andrés  Ñuñez" → "andres nunez". */
+function normalizarBusqueda(valor: string): string {
+  return valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export const operations360Router = router({
@@ -744,6 +787,37 @@ export const operations360Router = router({
         .sort((left: any, right: any) =>
           `${left.date} ${left.startTime}`.localeCompare(`${right.date} ${right.startTime}`)
         );
+    }),
+
+  // Buscador de reservas: por código, nombre, correo o teléfono. Existe porque
+  // buscar por el nombre que da el cliente falla cuando quien reservó puso otro
+  // (una clienta preguntaba por "Maria Court" y la reserva decía solo "claudia").
+  buscar: protectedProcedure
+    .input(z.object({ termino: z.string().trim().min(2).max(120) }))
+    .query(async ({ ctx, input }) => {
+      const eventos = await loadClientEvents(ctx.user);
+      const termino = normalizarBusqueda(input.termino);
+      const soloDigitos = input.termino.replace(/\D/g, "");
+
+      const coincide = (evento: ClientEvent) => {
+        // El código se compara sin guiones ni espacios, así que da lo mismo si
+        // lo copian con el doble guión que salía antes o lo escriben a mano.
+        const codigo = normalizarBusqueda(evento.bookingCode ?? "").replace(/[\s-]/g, "");
+        const terminoCodigo = termino.replace(/[\s-]/g, "");
+        if (codigo && terminoCodigo.length >= 4 && codigo.includes(terminoCodigo)) return true;
+        if (normalizarBusqueda(evento.clientName ?? "").includes(termino)) return true;
+        if (normalizarBusqueda(evento.clientEmail ?? "").includes(termino)) return true;
+        if (soloDigitos.length >= 6 && normalizedPhone(evento.clientPhone).includes(soloDigitos)) return true;
+        return false;
+      };
+
+      const encontrados = eventos.filter(coincide);
+      encontrados.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      return {
+        total: encontrados.length,
+        // Tope para no devolver media base si alguien busca "a".
+        resultados: encontrados.slice(0, 50),
+      };
     }),
 
   detail: protectedProcedure
