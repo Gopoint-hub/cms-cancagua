@@ -1385,6 +1385,14 @@ export default function Calendario360() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const { data: access } = trpc.operations360.access.useQuery();
+  // El filtro de arriba solo recorta lo que ya está en pantalla. Esta búsqueda va
+  // contra TODAS las reservas, que es lo que se necesita cuando alguien llega
+  // con un código o un nombre y no se sabe la fecha.
+  const termino = search.trim();
+  const busqueda = trpc.operations360.buscar.useQuery(
+    { termino },
+    { enabled: termino.length >= 3, staleTime: 15_000 }
+  );
 
   useEffect(() => {
     if (isMobile && !mobileViewInitialized.current) {
@@ -1441,7 +1449,71 @@ export default function Calendario360() {
           <div className="grid w-full grid-cols-3 rounded-lg border bg-background p-1 sm:flex sm:w-auto">{(["day", "week", "month"] as ViewMode[]).map(mode => <Button key={mode} size="sm" variant={view === mode ? "default" : "ghost"} onClick={() => setView(mode)}>{mode === "day" ? "Día" : mode === "week" ? "Semana" : "Mes"}</Button>)}</div>
         </div>
 
-        <Card><CardContent className="space-y-4 p-3 sm:p-4"><div className="grid gap-3 sm:flex sm:flex-wrap sm:items-center"><h2 className="order-first min-w-0 text-center text-lg font-semibold capitalize sm:order-none sm:min-w-56 sm:flex-1">{title}</h2><div className="grid grid-cols-[auto_1fr_auto] gap-2 sm:flex"><Button variant="outline" size="icon" aria-label="Periodo anterior" onClick={() => move(-1)}><ChevronLeft className="h-4 w-4" /></Button><Button className="w-full sm:w-auto" variant="outline" onClick={() => setSelectedDate(new Date())}>Hoy</Button><Button variant="outline" size="icon" aria-label="Periodo siguiente" onClick={() => move(1)}><ChevronRight className="h-4 w-4" /></Button></div>{view === "day" && <Select value={dayMode} onValueChange={value => value === "week" ? setView("week") : setDayMode(value as DayMode)}><SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="week">Volver a la semana</SelectItem><SelectItem value="list">Lista del día</SelectItem><SelectItem value="summary">Resumen del día</SelectItem><SelectItem value="services">Agendas por servicio</SelectItem></SelectContent></Select>}<Input className="w-full sm:w-60" placeholder="Buscar cliente o servicio…" value={search} onChange={event => setSearch(event.target.value)} /></div><div className="-mx-1 flex flex-nowrap items-center gap-2 overflow-x-auto border-t px-1 pt-3 pb-1"><Filter className="h-4 w-4 shrink-0 text-muted-foreground" /><Button className="shrink-0" size="sm" variant={!services.length ? "default" : "outline"} onClick={() => setServices([])}>Todos</Button>{allowedServices.map(key => <Button key={key} size="sm" variant={services.includes(key) ? "default" : "outline"} onClick={() => toggleService(key)} className="shrink-0 gap-2"><span className={cn("h-2 w-2 rounded-full", SERVICE_META[key].dot)} />{SERVICE_META[key].label}</Button>)}</div></CardContent></Card>
+        <Card><CardContent className="space-y-4 p-3 sm:p-4"><div className="grid gap-3 sm:flex sm:flex-wrap sm:items-center"><h2 className="order-first min-w-0 text-center text-lg font-semibold capitalize sm:order-none sm:min-w-56 sm:flex-1">{title}</h2><div className="grid grid-cols-[auto_1fr_auto] gap-2 sm:flex"><Button variant="outline" size="icon" aria-label="Periodo anterior" onClick={() => move(-1)}><ChevronLeft className="h-4 w-4" /></Button><Button className="w-full sm:w-auto" variant="outline" onClick={() => setSelectedDate(new Date())}>Hoy</Button><Button variant="outline" size="icon" aria-label="Periodo siguiente" onClick={() => move(1)}><ChevronRight className="h-4 w-4" /></Button></div>{view === "day" && <Select value={dayMode} onValueChange={value => value === "week" ? setView("week") : setDayMode(value as DayMode)}><SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="week">Volver a la semana</SelectItem><SelectItem value="list">Lista del día</SelectItem><SelectItem value="summary">Resumen del día</SelectItem><SelectItem value="services">Agendas por servicio</SelectItem></SelectContent></Select>}<Input className="w-full sm:w-60" placeholder="Buscar por código, nombre o correo…" value={search} onChange={event => setSearch(event.target.value)} /></div><div className="-mx-1 flex flex-nowrap items-center gap-2 overflow-x-auto border-t px-1 pt-3 pb-1"><Filter className="h-4 w-4 shrink-0 text-muted-foreground" /><Button className="shrink-0" size="sm" variant={!services.length ? "default" : "outline"} onClick={() => setServices([])}>Todos</Button>{allowedServices.map(key => <Button key={key} size="sm" variant={services.includes(key) ? "default" : "outline"} onClick={() => toggleService(key)} className="shrink-0 gap-2"><span className={cn("h-2 w-2 rounded-full", SERVICE_META[key].dot)} />{SERVICE_META[key].label}</Button>)}</div></CardContent></Card>
+
+        {termino.length >= 3 && (
+          <Card>
+            <CardContent className="space-y-3 p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">
+                  Resultados en todas las fechas
+                  {busqueda.data ? ` · ${busqueda.data.total}` : ""}
+                </h3>
+                <Button size="sm" variant="ghost" onClick={() => setSearch("")}>Limpiar</Button>
+              </div>
+              {busqueda.isFetching && <p className="text-sm text-muted-foreground">Buscando…</p>}
+              {!busqueda.isFetching && busqueda.data?.total === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Sin resultados para “{termino}”. Prueba con el correo, que es lo que menos se escribe mal.
+                </p>
+              )}
+              {!busqueda.isFetching && !!busqueda.data?.resultados?.length && (
+                <div className="-mx-1 overflow-x-auto px-1">
+                  <table className="w-full min-w-[46rem] text-sm">
+                    <thead className="text-left text-xs uppercase text-muted-foreground">
+                      <tr>
+                        <th className="pb-2 pr-3">Fecha</th>
+                        <th className="pb-2 pr-3">Servicio</th>
+                        <th className="pb-2 pr-3">Cliente</th>
+                        <th className="pb-2 pr-3">Contacto</th>
+                        <th className="pb-2 pr-3">Código</th>
+                        <th className="pb-2">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {busqueda.data.resultados.map((fila: any) => (
+                        <tr
+                          key={fila.id}
+                          className="cursor-pointer border-t hover:bg-accent/50"
+                          onClick={() => {
+                            const [anio, mes, dia] = String(fila.date).split("-").map(Number);
+                            if (anio && mes && dia) {
+                              setSelectedDate(new Date(anio, mes - 1, dia));
+                              setView("day");
+                              setDayMode("list");
+                            }
+                          }}
+                        >
+                          <td className="py-2 pr-3 whitespace-nowrap">{fila.date}{fila.startTime ? ` · ${fila.startTime}` : ""}</td>
+                          <td className="py-2 pr-3">{fila.title}</td>
+                          <td className="py-2 pr-3">{fila.clientName || "—"}</td>
+                          <td className="py-2 pr-3 text-muted-foreground">{fila.clientEmail || fila.clientPhone || "—"}</td>
+                          <td className="py-2 pr-3 font-mono text-xs">{fila.bookingCode || "—"}</td>
+                          <td className="py-2">{fila.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {busqueda.data.total > busqueda.data.resultados.length && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Mostrando {busqueda.data.resultados.length} de {busqueda.data.total}. Afina la búsqueda para ver el resto.
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {calendar.isLoading ? <Skeleton className="h-[54rem] w-full" /> : view === "week" ? (
           <TimeGrid days={days} events={filtered} onDay={openDay} onEvent={setSelectedEvent} />
