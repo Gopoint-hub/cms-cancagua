@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
@@ -8,6 +8,7 @@ import {
   biopoolCheckoutOrders,
   biopoolServices,
   biopoolTicketTypes,
+  massageBookings,
   saunaBookings,
   saunaCheckoutOrders,
   saunaServices,
@@ -65,6 +66,32 @@ async function database() {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Base de datos no disponible" });
   return db;
+}
+
+/**
+ * Freno simple a la enumeracion de correos: el endpoint de prellenado responde
+ * con el nombre de quien ya compro, asi que no puede quedar abierto a que
+ * alguien pruebe miles de direcciones. Es en memoria y por instancia; no
+ * pretende ser una defensa fuerte, solo cortar el barrido automatico.
+ */
+const CONSULTAS_PERFIL = new Map<string, { desde: number; total: number }>();
+const PERFIL_VENTANA_MS = 10 * 60_000;
+const PERFIL_TOPE = 30;
+
+function permitirConsultaPerfil(ip: string): boolean {
+  const ahora = Date.now();
+  const actual = CONSULTAS_PERFIL.get(ip);
+  if (!actual || ahora - actual.desde > PERFIL_VENTANA_MS) {
+    CONSULTAS_PERFIL.set(ip, { desde: ahora, total: 1 });
+    if (CONSULTAS_PERFIL.size > 5000) {
+      for (const [clave, valor] of CONSULTAS_PERFIL) {
+        if (ahora - valor.desde > PERFIL_VENTANA_MS) CONSULTAS_PERFIL.delete(clave);
+      }
+    }
+    return true;
+  }
+  actual.total += 1;
+  return actual.total <= PERFIL_TOPE;
 }
 
 export const serviceCartRouter = router({
@@ -398,6 +425,68 @@ export const serviceCartRouter = router({
           });
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No pudimos iniciar el pago con Webpay" });
         }
+      }),
+
+    /**
+     * Prellenado del checkout: si el correo ya compro antes, devuelve el nombre
+     * y el telefono con que quedo registrado. Nace de un caso real: una clienta
+     * reservo como "claudia" mientras por WhatsApp pedia la reserva a nombre de
+     * otra persona, y recepcion no pudo cruzarlas.
+     *
+     * Devuelve null cuando no hay historial: no distingue "no existe" de "no
+     * compro", y nunca dice nada que no se sepa ya teniendo el correo exacto.
+     */
+    perfilPorEmail: publicProcedure
+      .input(z.object({ email: z.string().trim().email().max(160) }))
+      .query(async ({ ctx, input }) => {
+        const ip = String(
+          ctx.req.headers["x-forwarded-for"] ?? ctx.req.socket?.remoteAddress ?? "desconocida"
+        ).split(",")[0].trim();
+        if (!permitirConsultaPerfil(ip)) return { encontrado: false as const };
+
+        const db = await database();
+        const email = input.email.toLowerCase();
+        const [bio, sauna, masaje] = await Promise.all([
+          db.select({ nombre: biopoolBookings.clientName, telefono: biopoolBookings.clientPhone, creado: biopoolBookings.createdAt })
+            .from(biopoolBookings).where(sql`lower(${biopoolBookings.clientEmail}) = ${email}`)
+            .orderBy(desc(biopoolBookings.createdAt)).limit(1),
+          db.select({ nombre: saunaBookings.clientName, telefono: saunaBookings.clientPhone, creado: saunaBookings.createdAt })
+            .from(saunaBookings).where(sql`lower(${saunaBookings.clientEmail}) = ${email}`)
+            .orderBy(desc(saunaBookings.createdAt)).limit(1),
+          db.select({ nombre: massageBookings.clientName, telefono: massageBookings.clientPhone, creado: massageBookings.createdAt })
+            .from(massageBookings).where(sql`lower(${massageBookings.clientEmail}) = ${email}`)
+            .orderBy(desc(massageBookings.createdAt)).limit(1),
+        ]);
+
+        // Se queda con el registro mas reciente que traiga nombre: el ultimo
+        // dato es el que el cliente corrigio, si es que alguna vez lo corrigio.
+        // Se ordena por fecha de creacion y NO por id, porque los id de tres
+        // tablas distintas no son comparables entre si: el de biopiscinas va
+        // por los 270.000 y el de masajes por los cientos.
+        const candidatos = [...bio, ...sauna, ...masaje].filter(fila => (fila.nombre ?? "").trim().length > 1);
+        if (!candidatos.length) return { encontrado: false as const };
+        const elegido = candidatos.sort(
+          (a, b) => new Date(b.creado ?? 0).getTime() - new Date(a.creado ?? 0).getTime()
+        )[0];
+
+        // El telefono no sale del mismo registro que el nombre: se toma el mas
+        // reciente que TENGA pinta de telefono. Un caso real tenia +5692784201
+        // (un 9 de menos) en la reserva ultima y el numero bueno en la anterior;
+        // prellenar el malo es peor que no prellenar nada.
+        const telefonoUtil = candidatos
+          .map(fila => (fila.telefono ?? "").trim())
+          .find(valor => {
+            // Un movil chileno son 9 digitos que parten en 9, con o sin el 56
+            // adelante. El numero malo del caso real quedaba en 8 y asi se cae.
+            const digitos = valor.replace(/\D/g, "").replace(/^56/, "");
+            return digitos.length === 9 && digitos.startsWith("9");
+          });
+
+        return {
+          encontrado: true as const,
+          nombre: (elegido.nombre ?? "").trim(),
+          telefono: telefonoUtil || null,
+        };
       }),
 
     paymentStatus: publicProcedure.input(z.object({ orderToken: z.string().min(20) })).query(async ({ input }) => {
