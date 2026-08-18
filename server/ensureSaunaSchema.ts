@@ -7,6 +7,7 @@ const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS sauna_bookings (id int AUTO_INCREMENT PRIMARY KEY, booking_code varchar(40) NOT NULL UNIQUE, skedu_appointment_uuid varchar(64) NULL UNIQUE, skedu_group_uuid varchar(64) NULL, skedu_user_uuid varchar(64) NULL, skedu_service_uuid varchar(64) NULL, service_name varchar(220) NOT NULL, kind enum('shared','private','staff','detox','manual') NOT NULL DEFAULT 'shared', client_name varchar(200) NULL, client_email varchar(320) NULL, client_phone varchar(40) NULL, booking_date date NOT NULL, start_time varchar(5) NOT NULL, end_time varchar(5) NOT NULL, guests int NOT NULL, capacity_used int NOT NULL, is_private int NOT NULL DEFAULT 0, status enum('pending','confirmed','completed','cancelled','no_show') NOT NULL DEFAULT 'confirmed', is_confirmed int NOT NULL DEFAULT 0, payment_status enum('unknown','pending','partially_paid','paid','partially_refunded','refunded') NOT NULL DEFAULT 'unknown', payment_method varchar(60) NULL, payment_reference varchar(160) NULL, amount_clp int NOT NULL DEFAULT 0, amount_paid_clp int NOT NULL DEFAULT 0, source enum('skedu','web','cms','detox') NOT NULL DEFAULT 'cms', origin varchar(40) NULL, reschedule_count int NOT NULL DEFAULT 0, notes text NULL, external_updated_at timestamp NULL, last_synced_at timestamp NULL, cancelled_at timestamp NULL, created_by_user_id int NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX sauna_booking_slot_idx (booking_date, start_time, end_time, status), INDEX sauna_booking_source_idx (source, skedu_service_uuid))`,
   `CREATE TABLE IF NOT EXISTS sauna_blocks (id int AUTO_INCREMENT PRIMARY KEY, block_date date NOT NULL, start_time varchar(5) NOT NULL, end_time varchar(5) NOT NULL, blocked_capacity int NOT NULL DEFAULT 6, reason enum('maintenance','private_event','detox','operational','other') NOT NULL, notes text NULL, active int NOT NULL DEFAULT 1, created_by_user_id int NOT NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX sauna_block_slot_idx (block_date, start_time, end_time, active))`,
   `CREATE TABLE IF NOT EXISTS sauna_program_queue (id int AUTO_INCREMENT PRIMARY KEY, skedu_appointment_uuid varchar(64) NOT NULL UNIQUE, skedu_group_uuid varchar(64) NULL, skedu_user_uuid varchar(64) NULL, skedu_service_uuid varchar(64) NULL, service_name varchar(240) NOT NULL, variant_name varchar(240) NULL, program_starts_at timestamp NOT NULL, guests int NOT NULL, client_name varchar(200) NULL, client_email varchar(320) NULL, client_phone varchar(40) NULL, status enum('pending','scheduled','dismissed','cancelled') NOT NULL DEFAULT 'pending', sauna_booking_id int NULL, last_synced_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX sauna_program_status_idx (status, program_starts_at))`,
+  `CREATE TABLE IF NOT EXISTS sauna_notifications (id int AUTO_INCREMENT PRIMARY KEY, booking_id int NOT NULL, type enum('confirmation') NOT NULL, channel enum('email','whatsapp') NOT NULL, status enum('pending','sending','sent','failed','skipped') NOT NULL DEFAULT 'pending', scheduled_at timestamp NULL, sent_at timestamp NULL, provider_id varchar(180) NULL, error text NULL, attempt_count int NOT NULL DEFAULT 0, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX sauna_notif_queue_idx (status, scheduled_at), INDEX sauna_notif_booking_idx (booking_id))`,
   `CREATE TABLE IF NOT EXISTS sauna_sync_runs (id int AUTO_INCREMENT PRIMARY KEY, status enum('running','completed','failed') NOT NULL DEFAULT 'running', range_from date NOT NULL, range_to date NOT NULL, appointments_read int NOT NULL DEFAULT 0, bookings_upserted int NOT NULL DEFAULT 0, programs_queued int NOT NULL DEFAULT 0, error text NULL, started_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at timestamp NULL)`,
   `CREATE TABLE IF NOT EXISTS sauna_checkout_orders (id int AUTO_INCREMENT PRIMARY KEY, public_token varchar(64) NOT NULL UNIQUE, booking_id int NULL, service_id int NOT NULL, client_name varchar(200) NOT NULL, client_email varchar(320) NOT NULL, client_phone varchar(40) NOT NULL, booking_date date NOT NULL, start_time varchar(5) NOT NULL, end_time varchar(5) NOT NULL, guests int NOT NULL, capacity_used int NOT NULL, is_private int NOT NULL DEFAULT 0, total_clp int NOT NULL, status enum('initiating','payment_pending','paid','rejected','aborted','expired','failed','refunded','manual_review') NOT NULL DEFAULT 'initiating', expires_at timestamp NOT NULL, webpay_token varchar(180) NULL UNIQUE, buy_order varchar(26) NULL UNIQUE, session_id varchar(61) NULL, webpay_status varchar(40) NULL, response_code int NULL, authorization_code varchar(80) NULL, card_number varchar(40) NULL, payment_type_code varchar(10) NULL, transaction_date varchar(60) NULL, raw_response mediumtext NULL, error text NULL, paid_at timestamp NULL, completed_at timestamp NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX sauna_checkout_hold_idx (booking_date, start_time, status, expires_at), INDEX sauna_checkout_booking_idx (booking_id))`,
 ];
@@ -20,6 +21,45 @@ const DEFAULT_SCHEDULE = JSON.stringify({
   5: { enabled: true, open: "10:00", close: "22:00" },
   6: { enabled: true, open: "10:30", close: "21:30" },
 });
+
+const DEFAULT_STAFF_EMAIL = "contacto@cancagua.cl";
+const DEFAULT_EMAIL_SUBJECT = "Confirmación de tu reserva de Sauna — Cancagua";
+const DEFAULT_EMAIL_BODY = `¡Muchas gracias por tu compra!
+
+Reserva: {{bookingCode}}
+Servicio: {{serviceName}}
+Fecha: {{date}}
+Horario de ingreso: {{startTime}}
+Personas: {{guests}}
+
+Tu reserva incluye:
+• 60 minutos de sesión en nuestro sauna nativo.
+• Acceso a estacionamientos, camarines y baños.
+• De 1 a 3 personas el aforo es compartido; desde 4 personas el sauna queda privado para tu grupo.
+
+Qué llevar:
+• Traje de baño y toalla (en sauna no van incluidos).
+
+Condiciones de servicio:
+• Al momento del check-in se solicita cédula de identidad.
+• Te pedimos llegar 15 minutos antes de tu horario.
+• Cambios con 48 horas de anticipación y devoluciones con 72 horas.
+
+Estamos en el km 2 camino a Los Bajos, Frutillar.
+{{mapsUrl}}
+
+¡Te esperamos!
+Equipo Cancagua`;
+const DEFAULT_WHATSAPP_BODY = `Hola {{firstName}}! Tu reserva de Sauna en Cancagua quedó confirmada 🌿
+
+Reserva: {{bookingCode}}
+{{serviceName}}
+{{date}} a las {{startTime}}
+Personas: {{guests}}
+
+Son 60 minutos de sesión. Recuerda traer traje de baño y toalla, que en sauna no van incluidos, y llegar 15 minutos antes.
+
+Estamos en el km 2 camino a Los Bajos, Frutillar. Cualquier cosa nos escribes por aquí 🌱`;
 
 export async function ensureSaunaSchema(): Promise<void> {
   const db = await getDb();
@@ -81,8 +121,44 @@ export async function ensureSaunaSchema(): Promise<void> {
       sql`ALTER TABLE sauna_checkout_orders ADD COLUMN discount_code varchar(50) NULL AFTER discount_code_id`
     );
   }
+  const [settingsColumns] = await db.execute(
+    sql`SHOW COLUMNS FROM sauna_settings`
+  );
+  const settingsFields = new Set(
+    (settingsColumns as unknown as any[]).map(column => column.Field)
+  );
+  if (!settingsFields.has("notification_email")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_settings ADD COLUMN notification_email varchar(320) NULL`
+    );
+  }
+  if (!settingsFields.has("confirmation_email_subject")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_settings ADD COLUMN confirmation_email_subject varchar(220) NULL`
+    );
+  }
+  if (!settingsFields.has("confirmation_email_body")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_settings ADD COLUMN confirmation_email_body text NULL`
+    );
+  }
+  if (!settingsFields.has("confirmation_whatsapp_body")) {
+    await db.execute(
+      sql`ALTER TABLE sauna_settings ADD COLUMN confirmation_whatsapp_body text NULL`
+    );
+  }
   await db.execute(
     sql`INSERT INTO sauna_settings (id, schedule_json) VALUES (1, ${DEFAULT_SCHEDULE}) ON DUPLICATE KEY UPDATE id = id`
   );
+  // Textos por defecto: solo se escriben si están vacíos, así que una edición
+  // desde el CMS nunca se pisa al reiniciar.
+  await db.execute(sql`
+    UPDATE sauna_settings
+       SET notification_email = COALESCE(notification_email, ${DEFAULT_STAFF_EMAIL}),
+           confirmation_email_subject = COALESCE(confirmation_email_subject, ${DEFAULT_EMAIL_SUBJECT}),
+           confirmation_email_body = COALESCE(confirmation_email_body, ${DEFAULT_EMAIL_BODY}),
+           confirmation_whatsapp_body = COALESCE(confirmation_whatsapp_body, ${DEFAULT_WHATSAPP_BODY})
+     WHERE id = 1
+  `);
   console.log("[database] Módulo Sauna verificado");
 }

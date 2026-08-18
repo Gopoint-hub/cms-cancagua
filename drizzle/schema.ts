@@ -430,6 +430,25 @@ export const saunaSettings = mysqlTable("sauna_settings", {
   maxReschedules: int("max_reschedules").default(2).notNull(),
   checkoutEnabled: int("checkout_enabled").default(0).notNull(),
   scheduleJson: text("schedule_json").notNull(),
+  notificationEmail: varchar("notification_email", { length: 320 }),
+  confirmationEmailSubject: varchar("confirmation_email_subject", { length: 220 }),
+  confirmationEmailBody: text("confirmation_email_body"),
+  confirmationWhatsappBody: text("confirmation_whatsapp_body"),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export const saunaNotifications = mysqlTable("sauna_notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingId: int("booking_id").notNull(),
+  type: mysqlEnum("type", ["confirmation"]).notNull(),
+  channel: mysqlEnum("channel", ["email", "whatsapp"]).notNull(),
+  status: mysqlEnum("status", ["pending", "sending", "sent", "failed", "skipped"]).default("pending").notNull(),
+  scheduledAt: timestamp("scheduled_at"),
+  sentAt: timestamp("sent_at"),
+  providerId: varchar("provider_id", { length: 180 }),
+  error: text("error"),
+  attemptCount: int("attempt_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 

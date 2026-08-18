@@ -43,6 +43,9 @@ const biopoolItemSchema = z.object({
   startTime: timeSchema,
   adultQuantity: z.number().int().min(1).max(40),
   childQuantity: z.number().int().min(0).max(40),
+  // Compatibilidad: la web todavía puede mandar el código dentro del ítem. El
+  // que manda es el del carrito; este queda como respaldo para no dejar sin
+  // descuento a una versión del front que aún no se actualizó.
   discountCode: z.string().trim().max(50).optional(),
 });
 const saunaItemSchema = z.object({
@@ -51,7 +54,6 @@ const saunaItemSchema = z.object({
   bookingDate: dateSchema,
   startTime: timeSchema,
   privateGuestCount: z.number().int().min(1).max(6).optional(),
-  discountCode: z.string().trim().max(50).optional(),
 });
 
 function generateCartBuyOrder(orderId: number): string {
@@ -72,6 +74,7 @@ export const serviceCartRouter = router({
         clientEmail: z.string().trim().email(),
         clientPhone: z.string().trim().min(8).max(40),
         items: z.array(z.discriminatedUnion("module", [biopoolItemSchema, saunaItemSchema])).min(1).max(2),
+        discountCode: z.string().trim().max(50).optional(),
         acceptedTerms: z.literal(true),
         utmSource: z.string().max(100).optional(),
         utmMedium: z.string().max(100).optional(),
@@ -98,6 +101,13 @@ export const serviceCartRouter = router({
           if (saunaItem) await acquireSaunaCapacityLock(tx, saunaItem.bookingDate);
           if (biopoolLockName) await acquireBiopoolCapacityLock(tx, biopoolLockName);
           try {
+            const discountLines: Array<{
+              module: "biopools" | "sauna";
+              orderId: number;
+              service: "biopiscinas" | "sauna";
+              serviceId: number;
+              originalAmount: number;
+            }> = [];
             const prepared: Array<{
               module: "biopools" | "sauna";
               childOrderId: number;
@@ -125,10 +135,9 @@ export const serviceCartRouter = router({
               const child = tickets.find((ticket: any) => ticket.code === "child");
               if (!adult || (biopoolItem.childQuantity > 0 && !child)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La venta de Biopiscinas no está configurada" });
               const subtotalClp = adult.priceClp * biopoolItem.adultQuantity + (child?.priceClp ?? 0) * biopoolItem.childQuantity;
-              const discount = biopoolItem.discountCode
-                ? await calculateWellnessCartDiscount(tx, biopoolItem.discountCode, [{ service: "biopiscinas", serviceId: biopoolItem.serviceId, originalAmount: subtotalClp }])
-                : null;
-              const itemTotal = discount?.finalTotal ?? subtotalClp;
+              // El código del carrito se aplica después, cuando ya están todas
+              // las líneas: así un cupón de biopiscinas no toca el sauna.
+              const itemTotal = subtotalClp;
               const childToken = nanoid(48);
               const [created] = await tx.insert(biopoolCheckoutOrders).values({
                 publicToken: childToken,
@@ -143,9 +152,9 @@ export const serviceCartRouter = router({
                 childQuantity: biopoolItem.childQuantity,
                 totalGuests: guests,
                 subtotalClp,
-                discountClp: discount?.discountTotal ?? 0,
-                discountCodeId: discount?.discountCodeId ?? null,
-                discountCode: discount?.code ?? null,
+                discountClp: 0,
+                discountCodeId: null,
+                discountCode: null,
                 totalClp: itemTotal,
                 status: "initiating",
                 expiresAt,
@@ -157,7 +166,8 @@ export const serviceCartRouter = router({
                 { orderId: created.id, ticketTypeId: adult.id, code: adult.code, name: adult.name, unitPriceClp: adult.priceClp, quantity: biopoolItem.adultQuantity, subtotalClp: adult.priceClp * biopoolItem.adultQuantity },
                 ...(biopoolItem.childQuantity > 0 && child ? [{ orderId: created.id, ticketTypeId: child.id, code: child.code, name: child.name, unitPriceClp: child.priceClp, quantity: biopoolItem.childQuantity, subtotalClp: child.priceClp * biopoolItem.childQuantity }] : []),
               ]);
-              childOrders.push({ module: "biopools", id: created.id, totalClp: itemTotal, fullyDiscounted: isFullyDiscountedBiopoolOrder({ subtotalClp, discountClp: discount?.discountTotal ?? 0, totalClp: itemTotal, discountCodeId: discount?.discountCodeId ?? null }) });
+              childOrders.push({ module: "biopools", id: created.id, totalClp: itemTotal, fullyDiscounted: false });
+              discountLines.push({ module: "biopools", orderId: created.id, service: "biopiscinas", serviceId: biopoolItem.serviceId, originalAmount: subtotalClp });
               prepared.push({ module: "biopools", childOrderId: created.id, itemName: availability.service.name, bookingDate: biopoolItem.bookingDate, startTime: biopoolItem.startTime, endTime: slot.endTime, guests, totalClp: itemTotal });
               totalClp += itemTotal;
             }
@@ -176,10 +186,7 @@ export const serviceCartRouter = router({
               const availability = await saunaAvailabilityForDay(tx, saunaItem.bookingDate);
               const slot = availability.slots.find(candidate => candidate.startTime === saunaItem.startTime);
               if (!slot || slot.availableSeats < service.capacityUsed || (isPrivate && !slot.privateAvailable)) throw new TRPCError({ code: "CONFLICT", message: "El horario de Sauna ya no tiene los cupos necesarios" });
-              const saunaDiscount = saunaItem.discountCode
-                ? await calculateWellnessCartDiscount(tx, saunaItem.discountCode, [{ service: "sauna", serviceId: service.id, originalAmount: service.priceClp }])
-                : null;
-              const saunaItemTotal = saunaDiscount?.finalTotal ?? service.priceClp;
+              const saunaItemTotal = service.priceClp;
               const [created] = await tx.insert(saunaCheckoutOrders).values({
                 publicToken: nanoid(48),
                 serviceId: service.id,
@@ -193,18 +200,61 @@ export const serviceCartRouter = router({
                 capacityUsed: service.capacityUsed,
                 isPrivate: isPrivate ? 1 : 0,
                 subtotalClp: service.priceClp,
-                discountClp: saunaDiscount?.discountTotal ?? 0,
-                discountCodeId: saunaDiscount?.discountCodeId ?? null,
-                discountCode: saunaDiscount?.code ?? null,
+                discountClp: 0,
+                discountCodeId: null,
+                discountCode: null,
                 totalClp: saunaItemTotal,
                 status: "initiating",
                 expiresAt,
               }).$returningId();
               childOrders.push({ module: "sauna", id: created.id, totalClp: saunaItemTotal });
+              discountLines.push({ module: "sauna", orderId: created.id, service: "sauna", serviceId: service.id, originalAmount: service.priceClp });
               prepared.push({ module: "sauna", childOrderId: created.id, itemName: service.name, bookingDate: saunaItem.bookingDate, startTime: saunaItem.startTime, endTime: slot.endTime, guests, totalClp: saunaItemTotal });
               totalClp += saunaItemTotal;
             }
 
+            // UN código por carrito, evaluado contra TODAS las líneas: el
+            // descuento se reparte solo entre los servicios a los que aplica y
+            // los demás mantienen su precio original.
+            const cartDiscountCode = input.discountCode?.trim() || biopoolItem?.discountCode?.trim();
+            if (cartDiscountCode && discountLines.length > 0) {
+              const cartDiscount = await calculateWellnessCartDiscount(
+                tx,
+                cartDiscountCode,
+                discountLines.map(line => ({ service: line.service, serviceId: line.serviceId, originalAmount: line.originalAmount })),
+              );
+              totalClp = 0;
+              for (const [index, line] of discountLines.entries()) {
+                const lineDiscount = cartDiscount.lineDiscounts[index] ?? 0;
+                const lineTotal = line.originalAmount - lineDiscount;
+                totalClp += lineTotal;
+                const patch = {
+                  discountClp: lineDiscount,
+                  discountCodeId: lineDiscount > 0 ? cartDiscount.discountCodeId : null,
+                  discountCode: lineDiscount > 0 ? cartDiscount.code : null,
+                  totalClp: lineTotal,
+                };
+                if (line.module === "biopools") {
+                  await tx.update(biopoolCheckoutOrders).set(patch).where(eq(biopoolCheckoutOrders.id, line.orderId));
+                } else {
+                  await tx.update(saunaCheckoutOrders).set(patch).where(eq(saunaCheckoutOrders.id, line.orderId));
+                }
+                const child = childOrders.find(item => item.id === line.orderId && item.module === line.module);
+                if (child) {
+                  child.totalClp = lineTotal;
+                  if (line.module === "biopools") {
+                    child.fullyDiscounted = isFullyDiscountedBiopoolOrder({
+                      subtotalClp: line.originalAmount,
+                      discountClp: lineDiscount,
+                      totalClp: lineTotal,
+                      discountCodeId: lineDiscount > 0 ? cartDiscount.discountCodeId : null,
+                    });
+                  }
+                }
+                const preparedItem = prepared.find(item => item.childOrderId === line.orderId && item.module === line.module);
+                if (preparedItem) preparedItem.totalClp = lineTotal;
+              }
+            }
             const [cart] = await tx.insert(serviceCartCheckoutOrders).values({
               publicToken,
               clientName: input.clientName,
