@@ -5,6 +5,7 @@ import {
   saunaBookings,
   saunaBlocks,
   saunaCheckoutOrders,
+  saunaNotifications,
   saunaServices,
   reservationPayments,
 } from "../drizzle/schema";
@@ -16,6 +17,7 @@ import {
   refundTransaction,
 } from "./webpay";
 import { recordMassageDiscountUsage } from "./massageDiscounts";
+import { buildSaunaNotificationSchedule } from "./saunaNotifications";
 import { redeemGiftCardPayment } from "./reservationPayments";
 import { availableSaunaSeats, saunaIntervalsOverlap } from "../shared/sauna";
 
@@ -366,6 +368,28 @@ export async function finalizeApprovedSaunaOrder(
     console.error(
       "[sauna:checkout] Reserva confirmada; no se pudo registrar el uso del descuento",
       { orderId, error }
+    );
+  }
+
+  // Confirmación al cliente (mail + WhatsApp) y copia a recepción. Va encolado y
+  // fuera de la transacción: la reserva ya está pagada y no se puede perder
+  // porque un proveedor de envío esté caído. El chequeo previo evita duplicar si
+  // el retorno de Webpay se reprocesa.
+  try {
+    const yaEncoladas = await db
+      .select({ id: saunaNotifications.id })
+      .from(saunaNotifications)
+      .where(eq(saunaNotifications.bookingId, bookingId))
+      .limit(1);
+    if (yaEncoladas.length === 0) {
+      await db
+        .insert(saunaNotifications)
+        .values(buildSaunaNotificationSchedule({ bookingId }));
+    }
+  } catch (error) {
+    console.error(
+      "[sauna:checkout] Reserva confirmada; no se pudieron encolar las notificaciones",
+      { orderId, bookingId, error }
     );
   }
   return bookingId;

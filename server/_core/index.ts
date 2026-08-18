@@ -180,6 +180,8 @@ startServer()
     startMassageCheckoutScheduler();
     const { startBiopoolNotificationScheduler } = await import("../biopoolNotifications");
     startBiopoolNotificationScheduler();
+    const { startSaunaNotificationScheduler } = await import("../saunaNotifications");
+    startSaunaNotificationScheduler();
     startBiopoolCheckoutScheduler();
     startSaunaCheckoutScheduler();
     startServiceCartCheckoutScheduler();
