@@ -8,6 +8,8 @@ import {
   regularClassStudents,
   serviceCartCheckoutItems,
   serviceCartCheckoutOrders,
+  biopoolCheckoutOrders,
+  saunaCheckoutOrders,
 } from "../drizzle/schema";
 
 export type MassageDiscountLine = {
@@ -243,36 +245,111 @@ export async function recordPaidWellnessDiscountUsage(db: any, requestId: string
   });
 }
 
-// Un carrito con biopiscina + sauna confirma DOS órdenes hijas, y cada una
-// registraría el uso del cupón por separado: el mismo código gastaría 2 usos y
-// los cupones con límite se agotarían al doble de velocidad. Con el token del
-// carrito como requestId, recordMassageDiscountUsage reconoce que es el mismo
-// uso y actualiza en vez de insertar, así que currentUses sube una sola vez.
-export async function resolveWellnessDiscountRequestId(
+// Registra el uso del cupón de un carrito con los montos REALES del carrito
+// completo, no los del producto que se confirmó último.
+//
+// Sigue el mismo patrón que recordPaidWellnessDiscountUsage: en vez de sumar de
+// forma incremental —que duplicaría al reprocesarse—, recalcula los totales
+// desde la base cada vez. Así da igual el orden en que confirmen biopiscinas y
+// sauna, y cuántas veces se reprocese el retorno de Webpay: el registro siempre
+// refleja el estado real.
+export async function recordWellnessCartDiscountUsage(
   db: any,
-  module: "biopools" | "sauna",
-  childOrderId: number,
-  fallback: string,
-): Promise<string> {
+  params: {
+    module: "biopools" | "sauna";
+    childOrderId: number;
+    discountCodeId: number;
+    email?: string | null;
+    fallbackRequestId: string;
+    fallbackOriginalAmount: number;
+    fallbackDiscountAmount: number;
+    fallbackFinalAmount: number;
+  },
+) {
+  let requestId = params.fallbackRequestId;
+  let originalAmount = params.fallbackOriginalAmount;
+  let discountAmount = params.fallbackDiscountAmount;
+  let finalAmount = params.fallbackFinalAmount;
+
   try {
     const [item] = await db.select({ cartOrderId: serviceCartCheckoutItems.cartOrderId })
       .from(serviceCartCheckoutItems)
       .where(and(
-        eq(serviceCartCheckoutItems.module, module),
-        eq(serviceCartCheckoutItems.childOrderId, childOrderId),
+        eq(serviceCartCheckoutItems.module, params.module),
+        eq(serviceCartCheckoutItems.childOrderId, params.childOrderId),
       )).limit(1);
-    if (!item) return fallback;
-    const [cart] = await db.select({
-      buyOrder: serviceCartCheckoutOrders.buyOrder,
-      publicToken: serviceCartCheckoutOrders.publicToken,
-    })
-      .from(serviceCartCheckoutOrders)
-      .where(eq(serviceCartCheckoutOrders.id, item.cartOrderId))
-      .limit(1);
-    return cart?.buyOrder || cart?.publicToken || fallback;
-  } catch {
-    // Si no se puede resolver, es mejor registrar el uso con el token propio que
-    // perder el registro entero.
-    return fallback;
+
+    if (item) {
+      const [cart] = await db.select({
+        buyOrder: serviceCartCheckoutOrders.buyOrder,
+        publicToken: serviceCartCheckoutOrders.publicToken,
+      })
+        .from(serviceCartCheckoutOrders)
+        .where(eq(serviceCartCheckoutOrders.id, item.cartOrderId))
+        .limit(1);
+      requestId = cart?.buyOrder || cart?.publicToken || requestId;
+
+      // Todas las líneas del carrito, con descuento o sin él: el reporte tiene
+      // que decir cuánto costaba el carrito entero.
+      const lineas = await db.select({
+        module: serviceCartCheckoutItems.module,
+        childOrderId: serviceCartCheckoutItems.childOrderId,
+      })
+        .from(serviceCartCheckoutItems)
+        .where(eq(serviceCartCheckoutItems.cartOrderId, item.cartOrderId));
+
+      let original = 0;
+      let descuento = 0;
+      let final = 0;
+      for (const linea of lineas) {
+        if (linea.module === "biopools") {
+          const [orden] = await db.select({
+            subtotalClp: biopoolCheckoutOrders.subtotalClp,
+            discountClp: biopoolCheckoutOrders.discountClp,
+            totalClp: biopoolCheckoutOrders.totalClp,
+          }).from(biopoolCheckoutOrders)
+            .where(eq(biopoolCheckoutOrders.id, linea.childOrderId)).limit(1);
+          if (orden) {
+            original += Number(orden.subtotalClp ?? 0);
+            descuento += Number(orden.discountClp ?? 0);
+            final += Number(orden.totalClp ?? 0);
+          }
+        } else {
+          const [orden] = await db.select({
+            subtotalClp: saunaCheckoutOrders.subtotalClp,
+            discountClp: saunaCheckoutOrders.discountClp,
+            totalClp: saunaCheckoutOrders.totalClp,
+          }).from(saunaCheckoutOrders)
+            .where(eq(saunaCheckoutOrders.id, linea.childOrderId)).limit(1);
+          if (orden) {
+            original += Number(orden.subtotalClp ?? 0);
+            descuento += Number(orden.discountClp ?? 0);
+            final += Number(orden.totalClp ?? 0);
+          }
+        }
+      }
+      if (original > 0) {
+        originalAmount = original;
+        discountAmount = descuento;
+        finalAmount = final;
+      }
+    }
+  } catch (error) {
+    // Con los montos de la orden sola el reporte queda incompleto, pero perder el
+    // registro entero sería peor.
+    console.error("[descuentos] No se pudieron sumar los montos del carrito", {
+      module: params.module,
+      childOrderId: params.childOrderId,
+      error,
+    });
   }
+
+  await recordMassageDiscountUsage(db, {
+    discountCodeId: params.discountCodeId,
+    requestId,
+    email: params.email,
+    originalAmount,
+    discountAmount,
+    finalAmount,
+  });
 }

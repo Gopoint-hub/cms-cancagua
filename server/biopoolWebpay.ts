@@ -14,7 +14,7 @@ import { getDb } from "./db";
 import { commitTransaction, isTransactionApproved } from "./webpay";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { ENV } from "./_core/env";
-import { recordMassageDiscountUsage, resolveWellnessDiscountRequestId } from "./massageDiscounts";
+import { recordWellnessCartDiscountUsage } from "./massageDiscounts";
 import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
 import { redeemGiftCardPayment } from "./reservationPayments";
 
@@ -266,18 +266,15 @@ export async function finalizeApprovedBiopoolOrder(
 
   if (completed.order.discountCodeId && completed.order.discountClp > 0) {
     try {
-      await recordMassageDiscountUsage(db, {
+      await recordWellnessCartDiscountUsage(db, {
+        module: "biopools",
+        childOrderId: completed.order.id,
         discountCodeId: completed.order.discountCodeId,
-        requestId: await resolveWellnessDiscountRequestId(
-          db,
-          "biopools",
-          completed.order.id,
-          completed.order.buyOrder || completed.order.publicToken,
-        ),
         email: completed.normalizedEmail,
-        originalAmount: completed.order.subtotalClp,
-        discountAmount: completed.order.discountClp,
-        finalAmount: completed.order.totalClp,
+        fallbackRequestId: completed.order.buyOrder || completed.order.publicToken,
+        fallbackOriginalAmount: completed.order.subtotalClp,
+        fallbackDiscountAmount: completed.order.discountClp,
+        fallbackFinalAmount: completed.order.totalClp,
       });
     } catch (error) {
       console.error("[biopools:checkout] Reserva confirmada; no se pudo registrar el uso del descuento", {

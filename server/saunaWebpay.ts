@@ -16,7 +16,7 @@ import {
   isTransactionApproved,
   refundTransaction,
 } from "./webpay";
-import { recordMassageDiscountUsage, resolveWellnessDiscountRequestId } from "./massageDiscounts";
+import { recordWellnessCartDiscountUsage } from "./massageDiscounts";
 import { buildSaunaNotificationSchedule } from "./saunaNotifications";
 import { redeemGiftCardPayment } from "./reservationPayments";
 import { availableSaunaSeats, saunaIntervalsOverlap } from "../shared/sauna";
@@ -355,18 +355,15 @@ export async function finalizeApprovedSaunaOrder(
       .where(eq(saunaCheckoutOrders.id, orderId))
       .limit(1);
     if (paidOrder?.discountCodeId && paidOrder.discountClp > 0) {
-      await recordMassageDiscountUsage(db, {
+      await recordWellnessCartDiscountUsage(db, {
+        module: "sauna",
+        childOrderId: paidOrder.id,
         discountCodeId: paidOrder.discountCodeId,
-        requestId: await resolveWellnessDiscountRequestId(
-          db,
-          "sauna",
-          paidOrder.id,
-          paidOrder.buyOrder || paidOrder.publicToken,
-        ),
         email: paidOrder.clientEmail,
-        originalAmount: paidOrder.subtotalClp,
-        discountAmount: paidOrder.discountClp,
-        finalAmount: paidOrder.totalClp,
+        fallbackRequestId: paidOrder.buyOrder || paidOrder.publicToken,
+        fallbackOriginalAmount: paidOrder.subtotalClp,
+        fallbackDiscountAmount: paidOrder.discountClp,
+        fallbackFinalAmount: paidOrder.totalClp,
       });
     }
   } catch (error) {
