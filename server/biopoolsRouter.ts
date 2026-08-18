@@ -1167,7 +1167,7 @@ export const biopoolsRouter = router({
               giftCardCode: normalizedGiftCardCode ?? null,
               totalClp,
               status: "initiating",
-              expiresAt: new Date(Date.now() + 30 * 60_000),
+              expiresAt: new Date(Date.now() + 40 * 60_000),
               utmSource: input.utmSource ?? null,
               utmMedium: input.utmMedium ?? null,
               utmCampaign: input.utmCampaign ?? null,

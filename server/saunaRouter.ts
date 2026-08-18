@@ -1714,7 +1714,7 @@ export const saunaRouter = router({
                 totalClp: service.priceClp,
                 giftCardCode: normalizedGiftCardCode ?? null,
                 status: "initiating",
-                expiresAt: new Date(Date.now() + 30 * 60_000),
+                expiresAt: new Date(Date.now() + 40 * 60_000),
               })
               .$returningId();
             orderId = created.id;

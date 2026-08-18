@@ -84,7 +84,7 @@ export const serviceCartRouter = router({
       }))
       .mutation(async ({ input }) => {
         const db = await database();
-        const expiresAt = new Date(Date.now() + 30 * 60_000);
+        const expiresAt = new Date(Date.now() + 40 * 60_000);
         const publicToken = nanoid(48);
         let cartOrderId = 0;
         let totalClp = 0;
