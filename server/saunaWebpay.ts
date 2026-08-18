@@ -16,7 +16,7 @@ import {
   isTransactionApproved,
   refundTransaction,
 } from "./webpay";
-import { recordMassageDiscountUsage } from "./massageDiscounts";
+import { recordMassageDiscountUsage, resolveWellnessDiscountRequestId } from "./massageDiscounts";
 import { buildSaunaNotificationSchedule } from "./saunaNotifications";
 import { redeemGiftCardPayment } from "./reservationPayments";
 import { availableSaunaSeats, saunaIntervalsOverlap } from "../shared/sauna";
@@ -357,7 +357,12 @@ export async function finalizeApprovedSaunaOrder(
     if (paidOrder?.discountCodeId && paidOrder.discountClp > 0) {
       await recordMassageDiscountUsage(db, {
         discountCodeId: paidOrder.discountCodeId,
-        requestId: paidOrder.buyOrder || paidOrder.publicToken,
+        requestId: await resolveWellnessDiscountRequestId(
+          db,
+          "sauna",
+          paidOrder.id,
+          paidOrder.buyOrder || paidOrder.publicToken,
+        ),
         email: paidOrder.clientEmail,
         originalAmount: paidOrder.subtotalClp,
         discountAmount: paidOrder.discountClp,

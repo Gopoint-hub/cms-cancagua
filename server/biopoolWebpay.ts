@@ -14,7 +14,7 @@ import { getDb } from "./db";
 import { commitTransaction, isTransactionApproved } from "./webpay";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { ENV } from "./_core/env";
-import { recordMassageDiscountUsage } from "./massageDiscounts";
+import { recordMassageDiscountUsage, resolveWellnessDiscountRequestId } from "./massageDiscounts";
 import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
 import { redeemGiftCardPayment } from "./reservationPayments";
 
@@ -268,7 +268,12 @@ export async function finalizeApprovedBiopoolOrder(
     try {
       await recordMassageDiscountUsage(db, {
         discountCodeId: completed.order.discountCodeId,
-        requestId: completed.order.buyOrder || completed.order.publicToken,
+        requestId: await resolveWellnessDiscountRequestId(
+          db,
+          "biopools",
+          completed.order.id,
+          completed.order.buyOrder || completed.order.publicToken,
+        ),
         email: completed.normalizedEmail,
         originalAmount: completed.order.subtotalClp,
         discountAmount: completed.order.discountClp,

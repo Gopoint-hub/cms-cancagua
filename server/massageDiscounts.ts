@@ -6,6 +6,8 @@ import {
   massageDiscountCodeTechniques,
   regularClassMemberships,
   regularClassStudents,
+  serviceCartCheckoutItems,
+  serviceCartCheckoutOrders,
 } from "../drizzle/schema";
 
 export type MassageDiscountLine = {
@@ -239,4 +241,38 @@ export async function recordPaidWellnessDiscountUsage(db: any, requestId: string
     discountAmount: Number(massageTotals?.discountAmount ?? 0) + Number(classTotals?.discountAmount ?? 0),
     finalAmount: Number(massageTotals?.finalAmount ?? 0) + Number(classTotals?.finalAmount ?? 0),
   });
+}
+
+// Un carrito con biopiscina + sauna confirma DOS órdenes hijas, y cada una
+// registraría el uso del cupón por separado: el mismo código gastaría 2 usos y
+// los cupones con límite se agotarían al doble de velocidad. Con el token del
+// carrito como requestId, recordMassageDiscountUsage reconoce que es el mismo
+// uso y actualiza en vez de insertar, así que currentUses sube una sola vez.
+export async function resolveWellnessDiscountRequestId(
+  db: any,
+  module: "biopools" | "sauna",
+  childOrderId: number,
+  fallback: string,
+): Promise<string> {
+  try {
+    const [item] = await db.select({ cartOrderId: serviceCartCheckoutItems.cartOrderId })
+      .from(serviceCartCheckoutItems)
+      .where(and(
+        eq(serviceCartCheckoutItems.module, module),
+        eq(serviceCartCheckoutItems.childOrderId, childOrderId),
+      )).limit(1);
+    if (!item) return fallback;
+    const [cart] = await db.select({
+      buyOrder: serviceCartCheckoutOrders.buyOrder,
+      publicToken: serviceCartCheckoutOrders.publicToken,
+    })
+      .from(serviceCartCheckoutOrders)
+      .where(eq(serviceCartCheckoutOrders.id, item.cartOrderId))
+      .limit(1);
+    return cart?.buyOrder || cart?.publicToken || fallback;
+  } catch {
+    // Si no se puede resolver, es mejor registrar el uso con el token propio que
+    // perder el registro entero.
+    return fallback;
+  }
 }
