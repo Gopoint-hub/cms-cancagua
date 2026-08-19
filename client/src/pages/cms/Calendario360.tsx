@@ -1389,9 +1389,17 @@ export default function Calendario360() {
   // contra TODAS las reservas, que es lo que se necesita cuando alguien llega
   // con un código o un nombre y no se sabe la fecha.
   const termino = search.trim();
+  // La búsqueda recorre TODAS las reservas, así que no puede salir en cada tecla:
+  // se espera a que dejen de escribir. Y no se reintenta, porque un error se
+  // convertía en cuatro peticiones por pulsación.
+  const [terminoBuscado, setTerminoBuscado] = useState(termino);
+  useEffect(() => {
+    const id = setTimeout(() => setTerminoBuscado(termino), 400);
+    return () => clearTimeout(id);
+  }, [termino]);
   const busqueda = trpc.operations360.buscar.useQuery(
-    { termino },
-    { enabled: termino.length >= 3, staleTime: 15_000 }
+    { termino: terminoBuscado },
+    { enabled: terminoBuscado.length >= 3, staleTime: 15_000, retry: false }
   );
 
   useEffect(() => {
@@ -1461,14 +1469,20 @@ export default function Calendario360() {
                 </h3>
                 <Button size="sm" variant="ghost" onClick={() => setSearch("")}>Limpiar</Button>
               </div>
-              {busqueda.isFetching && <p className="text-sm text-muted-foreground">Buscando…</p>}
+              {(busqueda.isFetching || termino !== terminoBuscado) && <p className="text-sm text-muted-foreground">Buscando…</p>}
               {!busqueda.isFetching && busqueda.data?.aproximada && (
                 <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   No hay ninguna reserva escrita exactamente así. Estos son los nombres
                   <strong> parecidos</strong> a “{termino}”.
                 </p>
               )}
-              {!busqueda.isFetching && busqueda.data?.total === 0 && (
+              {!busqueda.isFetching && busqueda.data?.sinPermisos && (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Tu cuenta no tiene permiso para ver información de clientes, así que
+                  la búsqueda no puede revisar las reservas. Pídeselo a un administrador.
+                </p>
+              )}
+              {!busqueda.isFetching && !busqueda.data?.sinPermisos && busqueda.data?.total === 0 && (
                 <p className="text-sm text-muted-foreground">
                   Sin resultados para “{termino}”. Prueba con el correo, que es lo que menos se escribe mal.
                 </p>

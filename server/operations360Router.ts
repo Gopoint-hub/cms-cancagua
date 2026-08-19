@@ -849,6 +849,14 @@ export const operations360Router = router({
   buscar: protectedProcedure
     .input(z.object({ termino: z.string().trim().min(2).max(120) }))
     .query(async ({ ctx, input }) => {
+      // Recepción entra al calendario con solo tener un módulo, pero el buscador
+      // necesita permiso sobre clientes. Antes esto era un 403 por pulsación y
+      // la tarjeta de resultados quedaba vacía sin decir por qué.
+      if (!clientServices(ctx.user).length) {
+        // El tipo explícito importa: sin él este brazo devuelve never[] y el
+        // .map() del cliente deja de compilar contra la unión de los dos returns.
+        return { total: 0, aproximada: false, resultados: [] as ClientEvent[], sinPermisos: true };
+      }
       const eventos = await loadClientEvents(ctx.user);
       const termino = normalizarBusqueda(input.termino);
       const soloDigitos = input.termino.replace(/\D/g, "");
@@ -888,6 +896,7 @@ export const operations360Router = router({
         aproximada,
         // Tope para no devolver media base si alguien busca "a".
         resultados: encontrados.slice(0, 50),
+        sinPermisos: false,
       };
     }),
 
