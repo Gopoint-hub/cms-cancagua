@@ -165,13 +165,19 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, CmsPermissionKey[]> = {
     "module.biopools",
     "biopools.manage_agenda",
     "biopools.manage_blocks",
+    "biopools.view_clients",
     "module.sauna",
     "sauna.manage_agenda",
     "sauna.manage_blocks",
+    "sauna.view_clients",
     "module.massages",
     "massages.manage_agenda",
     "massages.assign_therapists",
     "massages.manage_payments",
+    // Recepción atiende al cliente que llega preguntando por su reserva y no
+    // sabe la fecha: sin esto el buscador del Calendario 360 no puede leer nada
+    // y la pantalla queda inservible justo para quien la necesita.
+    "massages.view_clients",
   ],
   [MASSAGE_THERAPIST_ROLE]: ["module.massages"],
 };
