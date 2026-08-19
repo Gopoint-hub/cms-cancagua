@@ -75,6 +75,15 @@ export async function ensureMassageDiscountSchema() {
     }
   }
 
+  // Va DESPUÉS del bloque de arriba, que crea la columna angosta en bases nuevas.
+  // El libro de ventas copia el discount_type del cupón tal cual: si el cupón es
+  // 'nth_free' y aquí solo caben 'fixed' y 'percentage', MySQL responde
+  // ER_WARN_DATA_TRUNCATED (1265) y, como el backfill corre en el arranque, el
+  // servicio queda sin poder levantar.
+  await db.execute(sql.raw(
+    "ALTER TABLE `massage_sales` MODIFY COLUMN `discount_type` enum('fixed','percentage','nth_free') NULL"
+  ));
+
   await db.execute(sql.raw(`
     UPDATE \`massage_bookings\`
     SET \`original_amount\` = \`amount_paid\`

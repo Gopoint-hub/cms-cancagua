@@ -1946,7 +1946,7 @@ export const massageSales = mysqlTable("massage_sales", {
   discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).default("0").notNull(),
   discountCodeId: int("discount_code_id"),
   discountCode: varchar("discount_code", { length: 50 }),
-  discountType: mysqlEnum("discount_type", ["fixed", "percentage"]),
+  discountType: mysqlEnum("discount_type", ["fixed", "percentage", "nth_free"]),
   discountValue: int("discount_value"),
   paymentMethod: mysqlEnum("payment_method", [
     "getnet",
