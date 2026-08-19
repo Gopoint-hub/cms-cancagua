@@ -1212,6 +1212,7 @@ export default function BiopiscinasAgenda() {
                       adultQuantity: form.adultQuantity,
                       childQuantity: form.childQuantity,
                       code: manualDiscountCode,
+                      bookingDate: date,
                       })
                     }
                   >

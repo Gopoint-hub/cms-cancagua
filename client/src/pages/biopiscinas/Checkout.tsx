@@ -87,10 +87,13 @@ export default function BiopoolCheckout() {
     onSuccess: result => { setAppliedGiftCard(result); setGiftCardCode(result.code); toast.success(`Gift Card ${result.code} aplicada`); },
     onError: error => { setAppliedGiftCard(null); toast.error(error.message); },
   });
+  // La fecha entra en las dependencias: los códigos con días de vigencia dejan
+  // de ser válidos al cambiar de día, y antes el descuento seguía pintado hasta
+  // que el pago lo rechazaba.
   useEffect(() => {
     setAppliedDiscount(null);
     setAppliedGiftCard(null);
-  }, [service?.id, adults, children]);
+  }, [service?.id, adults, children, date]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (availability.isFetching) return toast.error("Estamos confirmando la disponibilidad del horario elegido");
@@ -149,7 +152,7 @@ export default function BiopoolCheckout() {
               <Label htmlFor="biopool-discount">Aplicar código de descuento</Label>
               <div className="flex gap-2">
                 <Input id="biopool-discount" value={discountCode} onChange={event => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); setAppliedGiftCard(null); }} placeholder="Ingresa tu código" />
-                <Button type="button" variant="outline" disabled={!discountCode.trim() || validateDiscount.isPending} onClick={() => service && validateDiscount.mutate({ serviceId: service.id, adultQuantity: adults, childQuantity: children, code: discountCode })}>
+                <Button type="button" variant="outline" disabled={!discountCode.trim() || validateDiscount.isPending} onClick={() => service && validateDiscount.mutate({ serviceId: service.id, adultQuantity: adults, childQuantity: children, code: discountCode, bookingDate: date })}>
                   {validateDiscount.isPending ? "Validando…" : "Aplicar"}
                 </Button>
               </div>

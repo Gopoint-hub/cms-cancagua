@@ -698,6 +698,7 @@ function BookingEditor({
               serviceId: Number(value.serviceId),
               adultQuantity: value.adults,
               childQuantity: value.children,
+              bookingDate: value.date || undefined,
             });
       const discount = Number(
         result.discountTotal ?? result.discountAmount ?? 0
