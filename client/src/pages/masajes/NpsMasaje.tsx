@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 
+// A quien queda contento se le pide la resena en el momento exacto en que lo
+// dice, y sin salir del navegador donde ya esta. Autorizado por Mario el
+// 18-ago-2026 (msg 1241). El place id es el de la ficha de Cancagua.
+const LINK_RESENA_GOOGLE =
+  "https://search.google.com/local/writereview?placeid=ChIJwUZFARSTF5YRIEwW-QgaTQA";
+const NOTA_MINIMA_PARA_PEDIR_RESENA = 9;
+
 export default function NpsMasaje() {
   const { token = "" } = useParams<{ token: string }>();
   const [score, setScore] = useState<number | null>(null);
@@ -15,8 +22,14 @@ export default function NpsMasaje() {
     { token },
     { retry: false, enabled: Boolean(token) },
   );
+  // Se guarda la nota recien enviada porque la encuesta ya respondida no la
+  // devuelve: sin esto, quien contesta un 10 y recarga no veria el pedido.
+  const [notaEnviada, setNotaEnviada] = useState<number | null>(null);
   const submit = trpc.masajes.public.submitNps.useMutation({
-    onSuccess: () => setSubmitted(true),
+    onSuccess: (_data, variables) => {
+      setNotaEnviada(variables.score);
+      setSubmitted(true);
+    },
   });
 
   const firstName = survey.data?.clientName?.trim().split(/\s+/)[0] || "";
@@ -48,6 +61,19 @@ export default function NpsMasaje() {
                 <p className="mx-auto mt-3 max-w-md text-muted-foreground">
                   Tu respuesta quedó registrada y nos ayudará a seguir mejorando la experiencia Cancagua.
                 </p>
+                {notaEnviada !== null && notaEnviada >= NOTA_MINIMA_PARA_PEDIR_RESENA && (
+                  <div className="mx-auto mt-8 max-w-md rounded-2xl border border-[#ded8cd] bg-[#f6f3ed] p-6">
+                    <p className="text-[#283246]">
+                      ¿Nos ayudarías contando lo mismo en Google? Son 30 segundos y a un
+                      spa chico como el nuestro le sirve muchísimo.
+                    </p>
+                    <Button asChild className="mt-4 bg-[#D3BC8D] text-[#283246] hover:bg-[#c7ad78]">
+                      <a href={LINK_RESENA_GOOGLE} target="_blank" rel="noopener noreferrer">
+                        Dejar mi reseña en Google
+                      </a>
+                    </Button>
+                  </div>
+                )}
               </div>
             ) : (
               <>
