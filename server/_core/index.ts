@@ -151,6 +151,15 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // Sin esto, una excepción dentro de un procedimiento se va en el JSON al
+      // navegador y no deja ni una línea en los logs de Render: la mitad de los
+      // errores de producción eran invisibles desde el dashboard.
+      onError({ error, path, type }) {
+        console.error(
+          `[trpc] ${type} ${path ?? "<sin ruta>"} ${error.code}: ${error.message}`,
+          error.code === "INTERNAL_SERVER_ERROR" ? error.cause : undefined
+        );
+      },
     })
   );
   // development mode uses Vite, production mode uses static files
