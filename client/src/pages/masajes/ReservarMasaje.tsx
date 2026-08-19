@@ -252,7 +252,7 @@ export default function ReservarMasaje() {
     if (initialDiscountCode && (cart.length > 0 || classPlan) && pendingSelections.length === 0 && !appliedDiscount && !validateDiscountMut.isPending) {
       validateDiscountMut.mutate({
         code: initialDiscountCode,
-        items: cart.map(({ techniqueId, duration }) => ({ techniqueId, duration, quantity: 1 })),
+        items: cart.map(({ techniqueId, duration, bookingDate }) => ({ techniqueId, duration, quantity: 1, bookingDate })),
         classPlanId: classPlan?.id,
       });
     }
@@ -261,7 +261,7 @@ export default function ReservarMasaje() {
   const validateDiscount = () => {
     validateDiscountMut.mutate({
       code: discountCode,
-      items: cart.map(({ techniqueId, duration }) => ({ techniqueId, duration, quantity: 1 })),
+      items: cart.map(({ techniqueId, duration, bookingDate }) => ({ techniqueId, duration, quantity: 1, bookingDate })),
       classPlanId: classPlan?.id,
     });
   };

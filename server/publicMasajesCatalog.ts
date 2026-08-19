@@ -105,7 +105,10 @@ router.post("/discount/validate", async (req: Request, res: Response) => {
       const prices = [technique.price50min, technique.price80min, technique.price110min];
       const price = index >= 0 && prices[index] ? Number(prices[index]) : 0;
       if (!price) return res.status(400).json({ error: `Precio no configurado para ${technique.name}.` });
-      for (let count = 0; count < quantity; count += 1) lines.push({ service: "masajes", serviceId: techniqueId, techniqueId, originalAmount: price });
+      // Mismo criterio que el procedimiento tRPC: sin la fecha de la sesión, un
+      // código restringido a ciertos días se aplicaría cualquier día.
+      const bookingDate = typeof raw.bookingDate === "string" ? raw.bookingDate : undefined;
+      for (let count = 0; count < quantity; count += 1) lines.push({ service: "masajes", serviceId: techniqueId, techniqueId, originalAmount: price, bookingDate });
     }
     if (Number.isInteger(classPlanId) && classPlanId > 0) {
       const [plan] = await db.select().from(regularClassPlans)

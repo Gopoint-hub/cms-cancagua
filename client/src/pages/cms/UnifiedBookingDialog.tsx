@@ -690,6 +690,7 @@ function BookingEditor({
                   techniqueId: Number(value.serviceId),
                   duration: value.duration,
                   quantity: 1,
+                  bookingDate: value.date || undefined,
                 },
               ],
             })

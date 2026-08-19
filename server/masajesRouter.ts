@@ -2666,6 +2666,7 @@ const agendaRouter = router({
               serviceId: input.techniqueId,
               techniqueId: input.techniqueId,
               originalAmount: totalAmountClp,
+              bookingDate: input.bookingDate,
             }]);
           } catch (error) {
             throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "El código no es válido" });
@@ -3041,6 +3042,7 @@ const agendaRouter = router({
               serviceId: booking.techniqueId,
               techniqueId: booking.techniqueId,
               originalAmount,
+              bookingDate: serializeDateOnly(booking.bookingDate) ?? undefined,
             }]);
             discountCodeId = discount.discountCodeId;
             discountCode = discount.code;
@@ -3383,6 +3385,9 @@ const agendaRouter = router({
                 serviceId: input.techniqueId,
                 techniqueId: input.techniqueId,
                 originalAmount,
+                // La fecha NUEVA: si mueven la reserva a un día donde el código
+                // no corre, el recálculo tiene que enterarse.
+                bookingDate,
               }]);
               discountAmount = discount.discountTotal;
               discountCodeId = discount.discountCodeId;
@@ -5759,6 +5764,9 @@ const masajesPublicRouter = router({
         techniqueId: z.number().int().positive(),
         duration: z.number().int().positive(),
         quantity: z.number().int().min(1).max(4).default(1),
+        // Fecha de la sesión. Los códigos con días de vigencia se validan
+        // contra este día; sin ella la restricción se saltaba entera.
+        bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/).optional(),
               })
             )
             .max(40),
@@ -5819,6 +5827,7 @@ const masajesPublicRouter = router({
             serviceId: item.techniqueId,
             techniqueId: item.techniqueId,
             originalAmount: price,
+            bookingDate: item.bookingDate,
           });
         }
       }
@@ -6733,6 +6742,7 @@ const masajesPublicRouter = router({
                 serviceId: item.item.techniqueId,
                 techniqueId: item.item.techniqueId,
                 originalAmount: item.price,
+                bookingDate: item.item.bookingDate,
               })),
               ...(classPlan
                 ? [
