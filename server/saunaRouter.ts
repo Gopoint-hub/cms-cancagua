@@ -1680,13 +1680,19 @@ export const saunaRouter = router({
             code: "BAD_REQUEST",
             message: "No se puede usar una gift card y un código de descuento en la misma reserva",
           });
-        let discountOrderFields: {
+        // El `as` del inicializador no es decorativo: TypeScript no rastrea las
+        // asignaciones hechas dentro del callback de la transacción, así que con
+        // un `= null` pelado estrecha la variable a `null` para siempre y todo
+        // acceso posterior falla con "Property 'x' does not exist on type
+        // 'never'". Anotando el inicializador se conserva la unión declarada.
+        type SaunaOrderAmounts = {
           subtotalClp: number;
           discountClp: number;
           discountCodeId: number | null;
           discountCode: string | null;
           totalClp: number;
-        } | null = null;
+        };
+        let discountOrderFields = null as SaunaOrderAmounts | null;
         await db.transaction(async tx => {
           await acquireCapacityLock(tx, input.bookingDate);
           try {

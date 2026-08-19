@@ -10,11 +10,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 
-type ServiceKey = "all" | "massages" | "biopools" | "regular_classes";
+type ServiceKey = "all" | "massages" | "biopools" | "sauna" | "regular_classes";
 const labels: Record<ServiceKey, string> = {
   all: "Todos los servicios",
   massages: "Masajes",
   biopools: "Biopiscinas",
+  // El servidor devuelve "sauna" en clientServices desde que existe el módulo;
+  // sin esta entrada el filtro salía seleccionable pero con la etiqueta vacía,
+  // y los badges de sauna aparecían en blanco.
+  sauna: "Sauna",
   regular_classes: "Clases regulares",
 };
 const clp = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
