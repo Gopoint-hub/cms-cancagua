@@ -423,7 +423,7 @@ export async function recordWellnessCartDiscountUsage(
             descuento += Number(orden.discountClp ?? 0);
             final += Number(orden.totalClp ?? 0);
           }
-        } else {
+        } else if (linea.module === "sauna") {
           const [orden] = await db.select({
             subtotalClp: saunaCheckoutOrders.subtotalClp,
             discountClp: saunaCheckoutOrders.discountClp,
@@ -434,6 +434,30 @@ export async function recordWellnessCartDiscountUsage(
             original += Number(orden.subtotalClp ?? 0);
             descuento += Number(orden.discountClp ?? 0);
             final += Number(orden.totalClp ?? 0);
+          }
+        } else if (linea.module === "massages") {
+          const [reserva] = await db.select({
+            originalAmount: massageBookings.originalAmount,
+            discountAmount: massageBookings.discountAmount,
+            amountPaid: massageBookings.amountPaid,
+          }).from(massageBookings)
+            .where(eq(massageBookings.id, linea.childOrderId)).limit(1);
+          if (reserva) {
+            original += Number(reserva.originalAmount ?? 0);
+            descuento += Number(reserva.discountAmount ?? 0);
+            final += Number(reserva.amountPaid ?? 0);
+          }
+        } else {
+          const [membresia] = await db.select({
+            originalAmountClp: regularClassMemberships.originalAmountClp,
+            discountAmountClp: regularClassMemberships.discountAmountClp,
+            pricePaidClp: regularClassMemberships.pricePaidClp,
+          }).from(regularClassMemberships)
+            .where(eq(regularClassMemberships.id, linea.childOrderId)).limit(1);
+          if (membresia) {
+            original += Number(membresia.originalAmountClp ?? 0);
+            descuento += Number(membresia.discountAmountClp ?? 0);
+            final += Number(membresia.pricePaidClp ?? 0);
           }
         }
       }

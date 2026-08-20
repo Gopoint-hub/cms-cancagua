@@ -15,14 +15,17 @@ export default function ConfirmacionPago() {
   const requestId = getQueryParam("requestId") || getQueryParam("request_id");
   const ref = getQueryParam("ref");
   const giftCardApplied = getQueryParam("gift") === "1";
-  const giftCardAmount = Number(getQueryParam("amount")) || undefined;
+  const discountApplied = getQueryParam("discount") === "1";
+  const amountParam = getQueryParam("amount");
+  const giftCardAmount = amountParam === "" ? undefined : Number(amountParam);
   const giftCardIncludesClasses = getQueryParam("classes") === "1";
+  const completedWithoutGateway = giftCardApplied || discountApplied;
 
-  const [ready, setReady] = useState(giftCardApplied || !!requestId || !!ref);
+  const [ready, setReady] = useState(completedWithoutGateway || !!requestId || !!ref);
   const statusTracked = useRef("");
 
   useEffect(() => {
-    if (giftCardApplied) return;
+    if (completedWithoutGateway) return;
     if (!requestId && !ref) {
       setLocation("/");
     } else if (!requestId && ref) {
@@ -33,7 +36,7 @@ export default function ConfirmacionPago() {
 
   const { data, isLoading, isError } = trpc.masajes.public.checkPaymentStatus.useQuery(
     { requestId: requestId || undefined, ref: ref || undefined },
-    { enabled: !giftCardApplied && ready && (!!requestId || !!ref), retry: 3, retryDelay: 2000 }
+    { enabled: !completedWithoutGateway && ready && (!!requestId || !!ref), retry: 3, retryDelay: 2000 }
   );
 
   useEffect(() => {
@@ -53,7 +56,7 @@ export default function ConfirmacionPago() {
     }
   }, [data, ref, requestId]);
 
-  if (giftCardApplied) return <ApprovedView amount={giftCardAmount} includesClassPlan={giftCardIncludesClasses} />;
+  if (completedWithoutGateway) return <ApprovedView amount={giftCardAmount} includesClassPlan={giftCardIncludesClasses} />;
 
   if (!ready || isLoading) return <LoadingView />;
   if (isError || !data) return <PendingView onRetry={() => window.location.reload()} />;
@@ -82,7 +85,7 @@ function ApprovedView({ amount, includesClassPlan }: { amount?: number; includes
           </svg>
         </div>
         <div>
-          <h1 className="text-2xl font-semibold text-stone-800 mb-2">¡Pago exitoso!</h1>
+          <h1 className="text-2xl font-semibold text-stone-800 mb-2">{amount === 0 ? "¡Reserva confirmada!" : "¡Pago exitoso!"}</h1>
           <p className="text-stone-600">Tu compra fue procesada y tus servicios están confirmados.</p>
           {amount && (
             <p className="text-stone-500 text-sm mt-1">

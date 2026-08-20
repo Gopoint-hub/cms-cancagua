@@ -7,7 +7,7 @@ export async function ensureCashRegisterSchema(): Promise<void> {
   await db.execute(sql.raw(`
     ALTER TABLE massage_bookings
     MODIFY COLUMN manual_payment_method enum(
-      'pending_payment','getnet_link','getnet_pos','bank_transfer','cash','gift_card','transbank'
+      'pending_payment','getnet_link','getnet_pos','bank_transfer','cash','gift_card','transbank','discount_code'
     ) NULL
   `));
   await db.execute(sql.raw(`

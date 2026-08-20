@@ -22,7 +22,6 @@ import {
   saunaServices,
   serviceCartCheckoutItems,
   serviceCartCheckoutOrders,
-  serviceCartNotifications,
 } from "../drizzle/schema";
 import { validateAdultChildQuantities } from "../shared/biopoolsCapacity";
 import { hasSaunaBookingLeadTime, SAUNA_CAPACITY, validateSaunaParty } from "../shared/sauna";
@@ -41,7 +40,6 @@ import {
   availabilityForDay as saunaAvailabilityForDay,
   settings as saunaSettings,
 } from "./saunaRouter";
-import { finalizeApprovedBiopoolOrder, isFullyDiscountedBiopoolOrder } from "./biopoolWebpay";
 import { createTransaction, generateSessionId } from "./webpay";
 import { serviceCartResultUrl } from "./serviceCartCheckout";
 import { customerAcquisitionSchema } from "../shared/customerAcquisition";
@@ -55,6 +53,12 @@ import {
 } from "./masajesRouter";
 import { withMassageResourceLocks } from "./massageResourceLock";
 import { calendarMonthRange } from "./regularClassesPeriod";
+import {
+  createCustomerCheckoutHandoff,
+  customerCheckoutProfileSchema,
+  resolveCustomerCheckoutHandoff,
+} from "./serviceCartHandoff";
+import { finalizeFullyDiscountedServiceCart, isFullyDiscountedServiceCart, type ServiceCartChildOrder } from "./serviceCartCompletion";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
@@ -129,6 +133,21 @@ function permitirConsultaPerfil(ip: string): boolean {
 
 export const serviceCartRouter = router({
   public: router({
+    createCheckoutHandoff: publicProcedure
+      .input(customerCheckoutProfileSchema)
+      .mutation(({ input }) => ({ token: createCustomerCheckoutHandoff(input) })),
+    resolveCheckoutHandoff: publicProcedure
+      .input(z.object({ token: z.string().min(20).max(4096) }))
+      .query(({ input }) => {
+        try {
+          return resolveCustomerCheckoutHandoff(input.token);
+        } catch (error) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error instanceof Error ? error.message : "No pudimos recuperar tus datos",
+          });
+        }
+      }),
     // Previsualización del código: valida y devuelve el desglose SIN cobrar ni
     // tomar cupo, para que el botón "Aplicar código" del carrito pueda decir al
     // instante si el código sirve y sobre qué líneas opera.
@@ -252,7 +271,7 @@ export const serviceCartRouter = router({
         const publicToken = nanoid(48);
         let cartOrderId = 0;
         let totalClp = 0;
-        const childOrders: Array<{ module: "biopools" | "sauna" | "massages" | "regular_classes"; id: number; totalClp: number; fullyDiscounted?: boolean }> = [];
+        const childOrders: ServiceCartChildOrder[] = [];
         const biopoolItem = input.items.find(item => item.module === "biopools");
         const saunaItem = input.items.find(item => item.module === "sauna");
         const massageItems = input.items.filter((item): item is z.infer<typeof massageItemSchema> => item.module === "massages");
@@ -547,24 +566,17 @@ export const serviceCartRouter = router({
                 const child = childOrders.find(item => item.id === line.orderId && item.module === line.module);
                 if (child) {
                   child.totalClp = lineTotal;
-                  if (line.module === "biopools") {
-                    child.fullyDiscounted = isFullyDiscountedBiopoolOrder({
-                      subtotalClp: line.originalAmount,
-                      discountClp: lineDiscount,
-                      totalClp: lineTotal,
-                      discountCodeId: lineDiscount > 0 ? cartDiscount.discountCodeId : null,
-                    });
-                  }
+                  child.fullyDiscounted = line.originalAmount > 0
+                    && lineTotal === 0
+                    && lineDiscount === line.originalAmount
+                    && cartDiscount.discountCodeId > 0;
                 }
                 const preparedItem = prepared.find(item => item.childOrderId === line.orderId && item.module === line.module);
                 if (preparedItem) preparedItem.totalClp = lineTotal;
               }
             }
-            const fullyDiscountedBiopoolOnly = totalClp === 0
-              && childOrders.length === 1
-              && childOrders[0].module === "biopools"
-              && childOrders[0].fullyDiscounted;
-            if (totalClp === 0 && !fullyDiscountedBiopoolOnly) {
+            const fullyDiscountedCart = isFullyDiscountedServiceCart(totalClp, childOrders);
+            if (totalClp === 0 && !fullyDiscountedCart) {
               throw new TRPCError({ code: "BAD_REQUEST", message: "El carrito no tiene un total válido" });
             }
             const [cart] = await tx.insert(serviceCartCheckoutOrders).values({
@@ -590,12 +602,19 @@ export const serviceCartRouter = router({
         }));
 
         if (totalClp === 0) {
-          const discounted = childOrders.find(item => item.module === "biopools" && item.fullyDiscounted);
-          if (!discounted || childOrders.length !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "El carrito no tiene un total válido" });
-          await finalizeApprovedBiopoolOrder(discounted.id, { kind: "discount" }, { consolidatedCart: true });
-          await db.update(serviceCartCheckoutOrders).set({ status: "paid", paidAt: new Date(), completedAt: new Date() }).where(eq(serviceCartCheckoutOrders.id, cartOrderId));
-          await db.insert(serviceCartNotifications).values({ cartOrderId, type: "confirmation", channel: "email", scheduledAt: new Date() }).onDuplicateKeyUpdate({ set: { cartOrderId } });
-          return { paymentRequired: false as const, paymentUrl: null, token: null, orderToken: publicToken, resultUrl: serviceCartResultUrl(publicToken, "pagado") };
+          try {
+            await finalizeFullyDiscountedServiceCart({ cartOrderId, publicToken, childOrders });
+            return { paymentRequired: false as const, paymentUrl: null, token: null, orderToken: publicToken, resultUrl: serviceCartResultUrl(publicToken, "pagado") };
+          } catch (error) {
+            await db.update(serviceCartCheckoutOrders).set({
+              status: "manual_review",
+              webpayStatus: "NOT_REQUIRED",
+              rawResponse: JSON.stringify({ paymentRequired: false, reason: "fully_discounted" }),
+              error: `No se pudieron confirmar todos los servicios cubiertos por el descuento: ${String(error)}`.slice(0, 2000),
+              completedAt: new Date(),
+            }).where(eq(serviceCartCheckoutOrders.id, cartOrderId));
+            return { paymentRequired: false as const, paymentUrl: null, token: null, orderToken: publicToken, resultUrl: serviceCartResultUrl(publicToken, "revision") };
+          }
         }
 
         const buyOrder = generateCartBuyOrder(cartOrderId);

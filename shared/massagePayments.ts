@@ -15,6 +15,7 @@ export type MassagePaymentMethod =
   | ManualMassagePaymentMethod
   | "getnet"
   | "cms_manual"
+  | "discount_code"
   | "skedu_program";
 
 export const MASSAGE_PAYMENT_METHOD_LABELS: Record<MassagePaymentMethod, string> = {
@@ -27,6 +28,7 @@ export const MASSAGE_PAYMENT_METHOD_LABELS: Record<MassagePaymentMethod, string>
   gift_card: "Gift Card",
   transbank: "Transbank",
   cms_manual: "CMS manual (sin especificar)",
+  discount_code: "Código de descuento",
   skedu_program: "Programa Skedu (histórico)",
 };
 

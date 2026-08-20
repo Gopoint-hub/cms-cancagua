@@ -1834,6 +1834,7 @@ export const massageBookings = mysqlTable("massage_bookings", {
     "cash",
     "gift_card",
     "transbank",
+    "discount_code",
   ]),
   bookingSource: mysqlEnum("booking_source", ["web", "cms"]).default("cms").notNull(),
   // Flujo de aprobación para terapeutas freelance
@@ -1994,6 +1995,7 @@ export const massageSales = mysqlTable("massage_sales", {
     "cash",
     "gift_card",
     "transbank",
+    "discount_code",
   ]).notNull(),
   paymentReference: varchar("payment_reference", { length: 100 }),
   status: mysqlEnum("status", ["paid", "refunded"]).default("paid").notNull(),

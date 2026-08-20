@@ -229,6 +229,7 @@ export async function finalizeApprovedSaunaOrder(
   const bookingId = await db.transaction(async tx => {
     const giftCardCode =
       result?.kind === "gift_card" ? String(result.code) : null;
+    const fullyDiscounted = result?.kind === "discount";
     // Todas las operaciones que consumen aforo toman primero este mismo lock.
     // Se mantiene hasta COMMIT/ROLLBACK y evita sobreventas y deadlocks por
     // distinto orden de bloqueo entre el retorno de pago y la agenda.
@@ -274,9 +275,9 @@ export async function finalizeApprovedSaunaOrder(
         status: "confirmed",
         isConfirmed: 1,
         paymentStatus: "paid",
-        paymentMethod: giftCardCode ? "gift_card" : "webpay_plus",
+        paymentMethod: giftCardCode ? "gift_card" : fullyDiscounted ? "discount_code" : "webpay_plus",
         paymentReference:
-          giftCardCode || result.authorizationCode || order.buyOrder,
+          giftCardCode || (fullyDiscounted ? order.discountCode || order.publicToken : result.authorizationCode || order.buyOrder),
         amountClp: order.totalClp,
         amountPaidClp: order.totalClp,
         source: "web",
@@ -284,7 +285,7 @@ export async function finalizeApprovedSaunaOrder(
       })
       .$returningId();
 
-    if (!giftCardCode) {
+    if (!giftCardCode && !fullyDiscounted) {
       await tx.insert(reservationPayments).values({
         module: "sauna",
         reservationId: created.id,
@@ -294,7 +295,7 @@ export async function finalizeApprovedSaunaOrder(
         paidAt: new Date(),
         reference: result.authorizationCode || order.buyOrder,
       });
-    } else {
+    } else if (giftCardCode) {
       const paidAt = new Date();
       const gift = await redeemGiftCardPayment({
         tx,
@@ -328,15 +329,17 @@ export async function finalizeApprovedSaunaOrder(
       .set({
         bookingId: created.id,
         status: "paid",
-        webpayStatus: giftCardCode ? "NOT_REQUIRED" : result.status,
-        responseCode: giftCardCode ? 0 : result.responseCode,
-        authorizationCode: giftCardCode ? null : result.authorizationCode,
-        cardNumber: giftCardCode ? null : result.cardNumber,
-        paymentTypeCode: giftCardCode ? null : result.paymentTypeCode,
-        transactionDate: giftCardCode ? null : result.transactionDate,
+        webpayStatus: giftCardCode || fullyDiscounted ? "NOT_REQUIRED" : result.status,
+        responseCode: giftCardCode || fullyDiscounted ? 0 : result.responseCode,
+        authorizationCode: giftCardCode || fullyDiscounted ? null : result.authorizationCode,
+        cardNumber: giftCardCode || fullyDiscounted ? null : result.cardNumber,
+        paymentTypeCode: giftCardCode || fullyDiscounted ? null : result.paymentTypeCode,
+        transactionDate: giftCardCode || fullyDiscounted ? null : result.transactionDate,
         rawResponse: JSON.stringify(
           giftCardCode
             ? { paymentRequired: false, reason: "gift_card", giftCardCode }
+            : fullyDiscounted
+              ? { paymentRequired: false, reason: "fully_discounted", discountCode: order.discountCode }
             : result
         ),
         paidAt: new Date(),

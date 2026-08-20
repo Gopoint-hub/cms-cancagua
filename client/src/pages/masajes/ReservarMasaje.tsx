@@ -142,8 +142,13 @@ export default function ReservarMasaje() {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("inscripcion")?.trim() ?? "";
   }, []);
+  const customerHandoffToken = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("customer_handoff")?.trim() ?? "";
+  }, []);
   const checkoutId = useMemo(getCheckoutId, []);
   const detailsTracked = useRef(false);
+  const customerHandoffApplied = useRef(false);
   const hasPresetCart = initialSelections.length > 0;
   const firstSelection = initialSelections[0];
   const routeTechniqueId = Number(id ?? firstSelection?.techniqueId);
@@ -184,6 +189,10 @@ export default function ReservarMasaje() {
   const { data: invitation } = trpc.regularClasses.public.invitation.useQuery(
     { token: invitationToken },
     { enabled: /^[a-f0-9]{32}$/i.test(invitationToken), retry: false },
+  );
+  const { data: handedOffCustomer } = trpc.serviceCart.public.resolveCheckoutHandoff.useQuery(
+    { token: customerHandoffToken },
+    { enabled: customerHandoffToken.length >= 20, retry: false },
   );
   const classPlan = regularClassesCatalog?.plans.find((plan) => plan.id === initialClassPlanId);
   const technique = catalog?.find((item) => item.id === techniqueId);
@@ -231,6 +240,25 @@ export default function ReservarMasaje() {
       setPhone((current) => current || parsedPhone.phone);
     }
   }, [invitation]);
+
+  useEffect(() => {
+    if (!handedOffCustomer || customerHandoffApplied.current) return;
+    customerHandoffApplied.current = true;
+    setName((current) => current || handedOffCustomer.clientName);
+    setEmail((current) => current || handedOffCustomer.clientEmail);
+    const parsedPhone = splitInvitationPhone(handedOffCustomer.clientPhone);
+    setCountryCode(parsedPhone.countryCode);
+    setPhone((current) => current || parsedPhone.phone);
+    setAcquisition((current) => current.discoverySource
+      ? current
+      : { ...EMPTY_CUSTOMER_ACQUISITION, ...handedOffCustomer.acquisition });
+
+    // El token es opaco, pero igualmente es de un solo propósito: una vez que
+    // los datos quedaron en memoria lo sacamos de la barra y del historial.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("customer_handoff");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [handedOffCustomer]);
 
   const initPaymentMut = trpc.masajes.public.initCartPayment.useMutation({
     onSuccess: (data) => {
@@ -296,13 +324,23 @@ export default function ReservarMasaje() {
   }, [checkoutId]);
 
   useEffect(() => {
-    if (initialDiscountCode && (cart.length > 0 || classPlan) && pendingSelections.length === 0 && !appliedDiscount && !validateDiscountMut.isPending) {
-      validateDiscountMut.mutate({
+    if (!initialDiscountCode || (cart.length === 0 && !classPlan) || pendingSelections.length > 0 || appliedDiscount || validateDiscountMut.isPending || validateUnifiedDiscountMut.isPending) return;
+    if (externalServices.length > 0) {
+      validateUnifiedDiscountMut.mutate({
         code: initialDiscountCode,
-        items: cart.map(({ techniqueId, duration, bookingDate }) => ({ techniqueId, duration, quantity: 1, bookingDate })),
-        classPlanId: classPlan?.id,
+        items: [
+          ...externalServices.map(item => item.module === "biopools" ? ({ module: "biopools" as const, serviceId: item.serviceId, bookingDate: item.bookingDate, startTime: item.startTime, adultQuantity: item.adultQuantity, childQuantity: item.childQuantity }) : ({ module: "sauna" as const, serviceId: item.serviceId, bookingDate: item.bookingDate, startTime: item.startTime, privateGuestCount: item.privateGuestCount })),
+          ...cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({ module: "massages" as const, techniqueId, duration, bookingDate, startTime, notes })),
+          ...(classPlan ? [{ module: "regular_classes" as const, planId: classPlan.id }] : []),
+        ],
       });
+      return;
     }
+    validateDiscountMut.mutate({
+      code: initialDiscountCode,
+      items: cart.map(({ techniqueId, duration, bookingDate }) => ({ techniqueId, duration, quantity: 1, bookingDate })),
+      classPlanId: classPlan?.id,
+    });
   }, [cart.length, pendingSelections.length, classPlan?.id]);
 
   const validateDiscount = () => {

@@ -7027,6 +7027,57 @@ const masajesPublicRouter = router({
         acquisition: input.acquisition,
       });
 
+      if (total === 0 && discountResult?.discountCodeId) {
+        const discountReference = `discount-${input.checkoutId || bookingIds[0] || membershipId}`;
+        await db.transaction(async tx => {
+          if (bookingIds.length > 0) {
+            await tx.update(massageBookings).set({
+              paymentStatus: "paid",
+              status: "pending",
+              manualPaymentMethod: "discount_code",
+            }).where(inArray(massageBookings.id, bookingIds));
+          }
+          if (membershipId) {
+            await tx.update(regularClassMemberships).set({
+              paymentStatus: "paid",
+              status: "active",
+              paymentMethod: "discount_code",
+              paymentReference: discountReference,
+              paidAt: new Date(),
+            }).where(eq(regularClassMemberships.id, membershipId));
+          }
+        });
+        for (const bookingId of bookingIds) {
+          sendBookingConfirmations(bookingId).catch(error => console.error("[initCartPayment] Reserva con descuento confirmada; falló notificación:", error));
+          syncMassageSale(bookingId).catch(error => console.error("[initCartPayment] Reserva con descuento confirmada; falló venta:", error));
+        }
+        try {
+          await recordMassageDiscountUsage(db, {
+            discountCodeId: discountResult.discountCodeId,
+            requestId: discountReference,
+            email: input.clientEmail,
+            originalAmount: originalTotal,
+            discountAmount: discountResult.discountTotal,
+            finalAmount: 0,
+          });
+        } catch (error) {
+          console.error("[initCartPayment] Reserva con descuento confirmada; falló el registro de uso:", error);
+        }
+        if (input.subscribeNewsletter && input.clientEmail) {
+          try {
+            await db.insert(newsletterSubscribers).values({ email: input.clientEmail, name: input.clientName, source: "masajes_booking", status: "active" });
+          } catch { /* email duplicado */ }
+        }
+        return {
+          processUrl: `/masajes/reserva/confirmacion?discount=1&amount=0&classes=${membershipId ? "1" : "0"}`,
+          bookingIds,
+          membershipId,
+          total: 0,
+          originalTotal,
+          discountTotal: discountResult.discountTotal,
+        };
+      }
+
       if (normalizedGiftCardCode) {
         const reservationId = bookingIds[0] ?? membershipId!;
         const module = bookingIds.length > 0 ? "massages" : "regular_classes";
