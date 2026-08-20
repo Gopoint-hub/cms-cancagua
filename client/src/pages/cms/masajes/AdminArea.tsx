@@ -234,6 +234,9 @@ export default function MasajesAdminArea() {
         "Ingreso bruto": row.grossRevenue,
         "Ingreso neto": row.netRevenue,
         "Medio de pago": getMassagePaymentMethodLabel(row.paymentMethod),
+        "Pasarela de pago": String(row.paymentMethod).startsWith("getnet")
+          ? "Getnet"
+          : row.paymentMethod === "transbank" ? "Transbank" : "Sin pasarela online",
         "Estado pago": row.paymentStatus,
         Comisión: row.commission,
         "Base comisión": row.commissionBasis,

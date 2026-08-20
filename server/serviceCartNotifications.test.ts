@@ -22,4 +22,21 @@ describe("correo consolidado del carrito de servicios", () => {
     expect(email.text).toContain("SAU-001");
     expect(email.text).toContain("BIO-002");
   });
+
+  it("reúne masaje y clases en el mismo correo de una compra Transbank mixta", () => {
+    const email = buildServiceCartConfirmationEmail({
+      clientName: "Camila Pérez",
+      totalClp: 149000,
+      items: [
+        { module: "massages", itemName: "Masaje relajación", bookingDate: "2026-08-25", startTime: "10:00", endTime: "10:50", guests: 1 },
+        { module: "regular_classes", itemName: "Plan Pulso 3", bookingDate: "2026-08-01", startTime: "00:00", endTime: "00:00", guests: 1 },
+        { module: "sauna", itemName: "Sauna Nativo", bookingDate: "2026-08-25", startTime: "12:00", endTime: "13:00", guests: 2 },
+      ],
+    });
+    expect(email.html).toContain("Masaje relajación");
+    expect(email.html).toContain("Plan Pulso 3");
+    expect(email.html).toContain("Sauna Nativo");
+    expect(email.html.match(/Información común para tu visita/g)).toHaveLength(1);
+    expect(email.html.match(/Total pagado/g)).toHaveLength(1);
+  });
 });

@@ -139,7 +139,7 @@ router.post("/", async (req: Request, res: Response) => {
   return res.status(200).json({ ok: true });
 });
 
-export async function sendBookingConfirmations(bookingId: number) {
+export async function sendBookingConfirmations(bookingId: number, options: { consolidatedCart?: boolean } = {}) {
   console.log(`[sendBookingConfirmations] Iniciando para booking ${bookingId}`);
   const db = await getDb();
   if (!db) return;
@@ -223,7 +223,7 @@ export async function sendBookingConfirmations(bookingId: number) {
   };
 
   // ── Emails a cliente y administración (siempre) ─────────────────────────────
-  if (bookingData.clientEmail) {
+  if (bookingData.clientEmail && !options.consolidatedCart) {
     await sendMassageBookingConfirmationEmail({
       to: bookingData.clientEmail,
       clientName: bookingData.clientName,

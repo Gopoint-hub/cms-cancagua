@@ -382,7 +382,7 @@ export function expandSkeduProgramResourceBlocks(
 
 type MassageDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
-async function loadBlockingMassageBookings(
+export async function loadBlockingMassageBookings(
   db: Pick<MassageDb, "select">,
   bookingDate: string,
   options: {

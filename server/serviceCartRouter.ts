@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
@@ -9,6 +9,14 @@ import {
   biopoolServices,
   biopoolTicketTypes,
   massageBookings,
+  massageRooms,
+  massageTechniques,
+  massageTherapistAvailability,
+  massageTherapists,
+  massageTherapistTechniques,
+  regularClassMemberships,
+  regularClassPlans,
+  regularClassStudents,
   saunaBookings,
   saunaCheckoutOrders,
   saunaServices,
@@ -38,6 +46,14 @@ import { createTransaction, generateSessionId } from "./webpay";
 import { serviceCartResultUrl } from "./serviceCartCheckout";
 import { customerAcquisitionSchema } from "../shared/customerAcquisition";
 import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
+import {
+  loadBlockingMassageBookings,
+  selectAutomaticMassageAssignment,
+  validateMassageCartCapacity,
+  validatePublicMassageLeadTime,
+} from "./masajesRouter";
+import { withMassageResourceLocks } from "./massageResourceLock";
+import { calendarMonthRange } from "./regularClassesPeriod";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
@@ -60,6 +76,19 @@ const saunaItemSchema = z.object({
   startTime: timeSchema,
   privateGuestCount: z.number().int().min(1).max(6).optional(),
 });
+const massageItemSchema = z.object({
+  module: z.literal("massages"),
+  techniqueId: z.number().int().positive(),
+  duration: z.number().int().positive(),
+  bookingDate: dateSchema,
+  startTime: timeSchema,
+  notes: z.string().trim().max(1000).optional(),
+});
+const regularClassItemSchema = z.object({
+  module: z.literal("regular_classes"),
+  planId: z.number().int().positive(),
+});
+const unifiedItemSchema = z.discriminatedUnion("module", [biopoolItemSchema, saunaItemSchema, massageItemSchema, regularClassItemSchema]);
 
 function generateCartBuyOrder(orderId: number): string {
   return `CART-${orderId}-${Date.now().toString(36).slice(-6)}`.substring(0, 26);
@@ -105,14 +134,14 @@ export const serviceCartRouter = router({
     validateDiscount: publicProcedure
       .input(z.object({
         code: z.string().trim().min(1).max(50),
-        items: z.array(z.discriminatedUnion("module", [biopoolItemSchema, saunaItemSchema])).min(1).max(2),
+        items: z.array(unifiedItemSchema).min(1).max(44),
       }))
       .mutation(async ({ input }) => {
         const db = await database();
         const lines: Array<{
-          module: "biopools" | "sauna";
+          module: "biopools" | "sauna" | "massages" | "regular_classes";
           itemName: string;
-          service: "biopiscinas" | "sauna";
+          service: "biopiscinas" | "sauna" | "masajes" | "clases";
           serviceId: number;
           originalAmount: number;
           unitAmounts?: number[];
@@ -138,7 +167,7 @@ export const serviceCartRouter = router({
               ],
               bookingDate: item.bookingDate,
             });
-          } else {
+          } else if (item.module === "sauna") {
             const [service] = await db.select().from(saunaServices).where(and(eq(saunaServices.id, item.serviceId), eq(saunaServices.published, 1))).limit(1);
             if (!service) throw new TRPCError({ code: "NOT_FOUND", message: "La opción de Sauna no está disponible" });
             lines.push({
@@ -149,6 +178,17 @@ export const serviceCartRouter = router({
               originalAmount: service.priceClp,
               bookingDate: item.bookingDate,
             });
+          } else if (item.module === "massages") {
+            const [technique] = await db.select().from(massageTechniques).where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1))).limit(1);
+            if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "El masaje ya no está disponible" });
+            const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
+            const price = [technique.price50min, technique.price80min, technique.price110min][durations.indexOf(item.duration)];
+            if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}` });
+            lines.push({ module: "massages", itemName: technique.name, service: "masajes", serviceId: technique.id, originalAmount: Number(price), bookingDate: item.bookingDate });
+          } else {
+            const [plan] = await db.select().from(regularClassPlans).where(and(eq(regularClassPlans.id, item.planId), eq(regularClassPlans.active, 1))).limit(1);
+            if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "El plan de clases ya no está disponible" });
+            lines.push({ module: "regular_classes", itemName: plan.name, service: "clases", serviceId: plan.id, originalAmount: plan.priceClp, bookingDate: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }) });
           }
         }
         try {
@@ -187,16 +227,20 @@ export const serviceCartRouter = router({
         clientEmail: z.string().trim().email(),
         clientPhone: z.string().trim().min(8).max(40),
         acquisition: customerAcquisitionSchema,
-        items: z.array(z.discriminatedUnion("module", [biopoolItemSchema, saunaItemSchema])).min(1).max(2),
+        items: z.array(unifiedItemSchema).min(1).max(44),
         discountCode: z.string().trim().max(50).optional(),
         acceptedTerms: z.literal(true),
         utmSource: z.string().max(100).optional(),
         utmMedium: z.string().max(100).optional(),
         utmCampaign: z.string().max(100).optional(),
       }).superRefine(({ items }, ctx) => {
-        for (const module of ["biopools", "sauna"] as const) {
+        if (!items.some(item => item.module === "biopools" || item.module === "sauna")) {
+          ctx.addIssue({ code: "custom", path: ["items"], message: "Los carritos con sólo Masajes o Clases Regulares se pagan por Getnet" });
+        }
+        for (const module of ["biopools", "sauna", "regular_classes"] as const) {
           if (items.filter(item => item.module === module).length > 1) {
-            ctx.addIssue({ code: "custom", path: ["items"], message: `Sólo puedes agregar una reserva de ${module === "biopools" ? "Biopiscinas" : "Sauna"} por pago` });
+            const label = module === "biopools" ? "Biopiscinas" : module === "sauna" ? "Sauna" : "Clases Regulares";
+            ctx.addIssue({ code: "custom", path: ["items"], message: `Sólo puedes agregar una selección de ${label} por pago` });
           }
         }
       }))
@@ -206,26 +250,30 @@ export const serviceCartRouter = router({
         const publicToken = nanoid(48);
         let cartOrderId = 0;
         let totalClp = 0;
-        const childOrders: Array<{ module: "biopools" | "sauna"; id: number; totalClp: number; fullyDiscounted?: boolean }> = [];
+        const childOrders: Array<{ module: "biopools" | "sauna" | "massages" | "regular_classes"; id: number; totalClp: number; fullyDiscounted?: boolean }> = [];
         const biopoolItem = input.items.find(item => item.module === "biopools");
         const saunaItem = input.items.find(item => item.module === "sauna");
+        const massageItems = input.items.filter((item): item is z.infer<typeof massageItemSchema> => item.module === "massages");
+        const regularClassItem = input.items.find((item): item is z.infer<typeof regularClassItemSchema> => item.module === "regular_classes");
         const biopoolLockName = biopoolItem ? `biopool:shared:${biopoolItem.bookingDate}` : null;
 
-        await db.transaction(async tx => {
+        validatePublicMassageLeadTime(massageItems);
+        validateMassageCartCapacity(massageItems);
+        await withMassageResourceLocks(db, massageItems.map(item => item.bookingDate), async () => db.transaction(async tx => {
           if (saunaItem) await acquireSaunaCapacityLock(tx, saunaItem.bookingDate);
           if (biopoolLockName) await acquireBiopoolCapacityLock(tx, biopoolLockName);
           try {
             const discountLines: Array<{
-              module: "biopools" | "sauna";
+              module: "biopools" | "sauna" | "massages" | "regular_classes";
               orderId: number;
-              service: "biopiscinas" | "sauna";
+              service: "biopiscinas" | "sauna" | "masajes" | "clases";
               serviceId: number;
               originalAmount: number;
               unitAmounts?: number[];
               bookingDate: string;
             }> = [];
             const prepared: Array<{
-              module: "biopools" | "sauna";
+              module: "biopools" | "sauna" | "massages" | "regular_classes";
               childOrderId: number;
               itemName: string;
               bookingDate: string;
@@ -340,6 +388,119 @@ export const serviceCartRouter = router({
               totalClp += saunaItemTotal;
             }
 
+            const massageBookingIds: number[] = [];
+            const blockingByDate = new Map<string, Awaited<ReturnType<typeof loadBlockingMassageBookings>>>();
+            const roomsByDate = new Map<string, Array<{ id: number; capacity: number; allowCoupleBooking: number }>>();
+            for (const item of massageItems) {
+              const [technique] = await tx.select().from(massageTechniques).where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1))).limit(1);
+              if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes ya no está disponible" });
+              const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
+              const price = Number([technique.price50min, technique.price80min, technique.price110min][durations.indexOf(item.duration)] ?? 0);
+              if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}` });
+              const therapists = await tx.select({
+                id: massageTherapists.id,
+                name: massageTherapists.name,
+                type: massageTherapists.type,
+                callPriority: massageTherapists.callPriority,
+                scheduleStart: massageTherapistAvailability.startTime,
+                scheduleEnd: massageTherapistAvailability.endTime,
+              }).from(massageTherapistTechniques)
+                .innerJoin(massageTherapists, eq(massageTherapistTechniques.therapistId, massageTherapists.id))
+                .innerJoin(massageTherapistAvailability, eq(massageTherapistAvailability.therapistId, massageTherapists.id))
+                .where(and(
+                  eq(massageTherapistTechniques.techniqueId, item.techniqueId),
+                  eq(massageTherapists.active, 1),
+                  eq(massageTherapistAvailability.date, item.bookingDate as any),
+                  eq(massageTherapistAvailability.isAvailable, 1),
+                ));
+              let blocking = blockingByDate.get(item.bookingDate);
+              if (!blocking) {
+                blocking = await loadBlockingMassageBookings(tx, item.bookingDate);
+                blockingByDate.set(item.bookingDate, blocking);
+              }
+              let rooms = roomsByDate.get(item.bookingDate);
+              if (!rooms) {
+                rooms = await tx.select({ id: massageRooms.id, capacity: massageRooms.capacity, allowCoupleBooking: massageRooms.allowCoupleBooking }).from(massageRooms).where(eq(massageRooms.active, 1));
+                roomsByDate.set(item.bookingDate, rooms);
+              }
+              const assignment = selectAutomaticMassageAssignment({
+                therapists: therapists.filter(row => row.scheduleStart && row.scheduleEnd) as any,
+                bookings: blocking,
+                rooms,
+                startTime: item.startTime,
+                duration: item.duration,
+                bookingDate: item.bookingDate,
+                groupKey: publicToken,
+              });
+              if (!assignment) throw new TRPCError({ code: "CONFLICT", message: `No quedan terapeuta y sala disponibles para ${technique.name} el ${item.bookingDate} a las ${item.startTime}` });
+              const [created] = await tx.insert(massageBookings).values({
+                techniqueId: item.techniqueId,
+                duration: item.duration,
+                bookingDate: item.bookingDate as any,
+                startTime: item.startTime,
+                endTime: assignment.endTime,
+                clientName: input.clientName,
+                clientPhone: input.clientPhone,
+                clientEmail: input.clientEmail.toLowerCase(),
+                notes: item.notes,
+                therapistId: assignment.therapist.id,
+                roomId: assignment.room.id,
+                paymentStatus: "pending",
+                originalAmount: String(price),
+                discountAmount: "0",
+                amountPaid: String(price),
+                status: "pending",
+                bookingSource: "web",
+              }).$returningId();
+              massageBookingIds.push(created.id);
+              blocking.push({ therapistId: assignment.therapist.id, roomId: assignment.room.id, startTime: item.startTime, endTime: assignment.endTime, groupKey: publicToken });
+              childOrders.push({ module: "massages", id: created.id, totalClp: price });
+              discountLines.push({ module: "massages", orderId: created.id, service: "masajes", serviceId: item.techniqueId, originalAmount: price, bookingDate: item.bookingDate });
+              prepared.push({ module: "massages", childOrderId: created.id, itemName: technique.name, bookingDate: item.bookingDate, startTime: item.startTime, endTime: assignment.endTime, guests: 1, totalClp: price });
+              totalClp += price;
+            }
+            if (massageBookingIds.length > 1) {
+              await tx.update(massageBookings).set({ coupleBookingId: massageBookingIds[0] }).where(inArray(massageBookings.id, massageBookingIds));
+            }
+
+            if (regularClassItem) {
+              const [plan] = await tx.select().from(regularClassPlans).where(and(eq(regularClassPlans.id, regularClassItem.planId), eq(regularClassPlans.active, 1))).limit(1);
+              if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "El plan de clases ya no está disponible" });
+              const email = input.clientEmail.toLowerCase();
+              const phone = input.clientPhone.trim();
+              const nameParts = input.clientName.trim().split(/\s+/);
+              const firstName = nameParts.shift() || input.clientName.trim();
+              const lastName = nameParts.join(" ") || null;
+              const duplicateConditions = [eq(regularClassStudents.email, email), eq(regularClassStudents.phone, phone)];
+              let [student] = await tx.select().from(regularClassStudents).where(or(...duplicateConditions)).limit(1);
+              if (!student) {
+                const [createdStudent] = await tx.insert(regularClassStudents).values({ firstName, lastName, email, phone, status: "prospect", source: "web" }).$returningId();
+                [student] = await tx.select().from(regularClassStudents).where(eq(regularClassStudents.id, createdStudent.id)).limit(1);
+              } else {
+                await tx.update(regularClassStudents).set({ firstName, lastName, email, phone }).where(eq(regularClassStudents.id, student.id));
+              }
+              const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", year: "numeric", month: "2-digit" }).formatToParts(new Date());
+              const period = calendarMonthRange(`${parts.find(part => part.type === "year")?.value}-${parts.find(part => part.type === "month")?.value}`);
+              const [membership] = await tx.insert(regularClassMemberships).values({
+                studentId: student.id,
+                planId: plan.id,
+                periodStart: period.start,
+                periodEnd: period.end,
+                pricePaidClp: plan.priceClp,
+                originalAmountClp: plan.priceClp,
+                discountAmountClp: 0,
+                creditsTotal: plan.creditsPerPeriod,
+                status: "pending_payment",
+                paymentStatus: "pending",
+                paymentMethod: "transbank_web",
+                paymentReference: publicToken,
+              }).$returningId();
+              childOrders.push({ module: "regular_classes", id: membership.id, totalClp: plan.priceClp });
+              discountLines.push({ module: "regular_classes", orderId: membership.id, service: "clases", serviceId: plan.id, originalAmount: plan.priceClp, bookingDate: period.start });
+              prepared.push({ module: "regular_classes", childOrderId: membership.id, itemName: plan.name, bookingDate: period.start, startTime: "00:00", endTime: "00:00", guests: 1, totalClp: plan.priceClp });
+              totalClp += plan.priceClp;
+            }
+
             // UN código por carrito, evaluado contra TODAS las líneas: el
             // descuento se reparte solo entre los servicios a los que aplica y
             // los demás mantienen su precio original.
@@ -363,8 +524,22 @@ export const serviceCartRouter = router({
                 };
                 if (line.module === "biopools") {
                   await tx.update(biopoolCheckoutOrders).set(patch).where(eq(biopoolCheckoutOrders.id, line.orderId));
-                } else {
+                } else if (line.module === "sauna") {
                   await tx.update(saunaCheckoutOrders).set(patch).where(eq(saunaCheckoutOrders.id, line.orderId));
+                } else if (line.module === "massages") {
+                  await tx.update(massageBookings).set({
+                    discountAmount: String(lineDiscount),
+                    discountCodeId: lineDiscount > 0 ? cartDiscount.discountCodeId : null,
+                    discountCode: lineDiscount > 0 ? cartDiscount.code : null,
+                    amountPaid: String(lineTotal),
+                  }).where(eq(massageBookings.id, line.orderId));
+                } else {
+                  await tx.update(regularClassMemberships).set({
+                    discountAmountClp: lineDiscount,
+                    discountCodeId: lineDiscount > 0 ? cartDiscount.discountCodeId : null,
+                    discountCode: lineDiscount > 0 ? cartDiscount.code : null,
+                    pricePaidClp: lineTotal,
+                  }).where(eq(regularClassMemberships.id, line.orderId));
                 }
                 const child = childOrders.find(item => item.id === line.orderId && item.module === line.module);
                 if (child) {
@@ -381,6 +556,13 @@ export const serviceCartRouter = router({
                 const preparedItem = prepared.find(item => item.childOrderId === line.orderId && item.module === line.module);
                 if (preparedItem) preparedItem.totalClp = lineTotal;
               }
+            }
+            const fullyDiscountedBiopoolOnly = totalClp === 0
+              && childOrders.length === 1
+              && childOrders[0].module === "biopools"
+              && childOrders[0].fullyDiscounted;
+            if (totalClp === 0 && !fullyDiscountedBiopoolOnly) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "El carrito no tiene un total válido" });
             }
             const [cart] = await tx.insert(serviceCartCheckoutOrders).values({
               publicToken,
@@ -402,7 +584,7 @@ export const serviceCartRouter = router({
           } finally {
             if (biopoolLockName) await releaseBiopoolCapacityLock(tx, biopoolLockName);
           }
-        });
+        }));
 
         if (totalClp === 0) {
           const discounted = childOrders.find(item => item.module === "biopools" && item.fullyDiscounted);
@@ -422,7 +604,7 @@ export const serviceCartRouter = router({
             await tx.update(serviceCartCheckoutOrders).set({ status: "payment_pending", buyOrder, sessionId, webpayToken: payment.token }).where(eq(serviceCartCheckoutOrders.id, cartOrderId));
             for (const child of childOrders) {
               if (child.module === "biopools") await tx.update(biopoolCheckoutOrders).set({ status: "payment_pending" }).where(eq(biopoolCheckoutOrders.id, child.id));
-              else await tx.update(saunaCheckoutOrders).set({ status: "payment_pending" }).where(eq(saunaCheckoutOrders.id, child.id));
+              else if (child.module === "sauna") await tx.update(saunaCheckoutOrders).set({ status: "payment_pending" }).where(eq(saunaCheckoutOrders.id, child.id));
             }
           });
           return { paymentRequired: true as const, paymentUrl: payment.url, token: payment.token, orderToken: publicToken, resultUrl: null };
@@ -431,7 +613,9 @@ export const serviceCartRouter = router({
             await tx.update(serviceCartCheckoutOrders).set({ status: "failed", error: String(error).slice(0, 2000) }).where(eq(serviceCartCheckoutOrders.id, cartOrderId));
             for (const child of childOrders) {
               if (child.module === "biopools") await tx.update(biopoolCheckoutOrders).set({ status: "failed", error: "No se pudo iniciar el pago del carrito" }).where(eq(biopoolCheckoutOrders.id, child.id));
-              else await tx.update(saunaCheckoutOrders).set({ status: "failed", error: "No se pudo iniciar el pago del carrito" }).where(eq(saunaCheckoutOrders.id, child.id));
+              else if (child.module === "sauna") await tx.update(saunaCheckoutOrders).set({ status: "failed", error: "No se pudo iniciar el pago del carrito" }).where(eq(saunaCheckoutOrders.id, child.id));
+              else if (child.module === "massages") await tx.update(massageBookings).set({ status: "cancelled", cancellationCategory: "system", cancellationReason: "No se pudo iniciar el pago del carrito.", cancelledAt: new Date() }).where(eq(massageBookings.id, child.id));
+              else await tx.update(regularClassMemberships).set({ status: "cancelled" }).where(eq(regularClassMemberships.id, child.id));
             }
           });
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No pudimos iniciar el pago con Webpay" });
@@ -514,9 +698,12 @@ export const serviceCartRouter = router({
           const [booking] = child?.bookingId ? await db.select({ bookingCode: biopoolBookings.bookingCode }).from(biopoolBookings).where(eq(biopoolBookings.id, child.bookingId)).limit(1) : [];
           return { ...item, bookingCode: booking?.bookingCode ?? null };
         }
-        const [child] = await db.select().from(saunaCheckoutOrders).where(eq(saunaCheckoutOrders.id, item.childOrderId)).limit(1);
-        const [booking] = child?.bookingId ? await db.select({ bookingCode: saunaBookings.bookingCode }).from(saunaBookings).where(eq(saunaBookings.id, child.bookingId)).limit(1) : [];
-        return { ...item, bookingCode: booking?.bookingCode ?? null };
+        if (item.module === "sauna") {
+          const [child] = await db.select().from(saunaCheckoutOrders).where(eq(saunaCheckoutOrders.id, item.childOrderId)).limit(1);
+          const [booking] = child?.bookingId ? await db.select({ bookingCode: saunaBookings.bookingCode }).from(saunaBookings).where(eq(saunaBookings.id, child.bookingId)).limit(1) : [];
+          return { ...item, bookingCode: booking?.bookingCode ?? null };
+        }
+        return { ...item, bookingCode: null };
       }));
       return { status: order.status, totalClp: order.totalClp, items: results, clientEmail: order.clientEmail.replace(/^(.{2}).*(@.*)$/, "$1***$2") };
     }),

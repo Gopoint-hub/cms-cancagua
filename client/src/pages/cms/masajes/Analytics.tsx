@@ -84,6 +84,9 @@ export default function MasajesAnalytics() {
         "Monto descontado": Number(sale.discountAmount),
         "Valor realmente pagado": Number(sale.amount),
         "Medio de pago": getMassagePaymentMethodLabel(sale.paymentMethod),
+        "Pasarela de pago": String(sale.paymentMethod).startsWith("getnet")
+          ? "Getnet"
+          : sale.paymentMethod === "transbank" ? "Transbank" : "Sin pasarela online",
         "Referencia": sale.paymentReference ?? "",
         "Estado venta": sale.saleStatus === "refunded"
           ? "Reembolsada"

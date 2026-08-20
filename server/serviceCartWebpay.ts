@@ -2,6 +2,9 @@ import express from "express";
 import { and, eq, inArray, lt } from "drizzle-orm";
 import {
   biopoolCheckoutOrders,
+  massageBookings,
+  regularClassMemberships,
+  reservationPayments,
   saunaCheckoutOrders,
   serviceCartCheckoutItems,
   serviceCartCheckoutOrders,
@@ -12,6 +15,8 @@ import { finalizeApprovedBiopoolOrder } from "./biopoolWebpay";
 import { finalizeApprovedSaunaOrder } from "./saunaWebpay";
 import { serviceCartResultUrl, validateServiceCartPayment } from "./serviceCartCheckout";
 import { commitTransaction, refundTransaction } from "./webpay";
+import { sendBookingConfirmations } from "./getnetWebhook";
+import { syncMassageSale } from "./massageSales";
 
 const router = express.Router();
 
@@ -29,7 +34,9 @@ async function markChildren(orderId: number, status: "aborted" | "rejected" | "e
   const items = await db.select().from(serviceCartCheckoutItems).where(eq(serviceCartCheckoutItems.cartOrderId, orderId));
   for (const item of items) {
     if (item.module === "biopools") await db.update(biopoolCheckoutOrders).set({ status, error }).where(eq(biopoolCheckoutOrders.id, item.childOrderId));
-    else await db.update(saunaCheckoutOrders).set({ status, error }).where(eq(saunaCheckoutOrders.id, item.childOrderId));
+    else if (item.module === "sauna") await db.update(saunaCheckoutOrders).set({ status, error }).where(eq(saunaCheckoutOrders.id, item.childOrderId));
+    else if (item.module === "massages") await db.update(massageBookings).set({ status: "cancelled", cancellationCategory: "system", cancellationReason: error, cancelledAt: new Date() }).where(eq(massageBookings.id, item.childOrderId));
+    else await db.update(regularClassMemberships).set({ status: "cancelled" }).where(eq(regularClassMemberships.id, item.childOrderId));
   }
 }
 
@@ -77,14 +84,35 @@ router.all("/return", async (req, res) => {
       await tx.update(serviceCartCheckoutOrders).set({ expiresAt: finalizeUntil }).where(eq(serviceCartCheckoutOrders.id, order.id));
       for (const item of items) {
         if (item.module === "biopools") await tx.update(biopoolCheckoutOrders).set({ status: "payment_pending", expiresAt: finalizeUntil }).where(eq(biopoolCheckoutOrders.id, item.childOrderId));
-        else await tx.update(saunaCheckoutOrders).set({ status: "payment_pending", expiresAt: finalizeUntil }).where(eq(saunaCheckoutOrders.id, item.childOrderId));
+        else if (item.module === "sauna") await tx.update(saunaCheckoutOrders).set({ status: "payment_pending", expiresAt: finalizeUntil }).where(eq(saunaCheckoutOrders.id, item.childOrderId));
       }
     });
 
     try {
       for (const item of items) {
         if (item.module === "biopools") await finalizeApprovedBiopoolOrder(item.childOrderId, { kind: "webpay", result }, { consolidatedCart: true });
-        else await finalizeApprovedSaunaOrder(item.childOrderId, result, { consolidatedCart: true });
+        else if (item.module === "sauna") await finalizeApprovedSaunaOrder(item.childOrderId, result, { consolidatedCart: true });
+        else if (item.module === "massages") {
+          const [booking] = await db.select({ paymentStatus: massageBookings.paymentStatus, amount: massageBookings.amountPaid }).from(massageBookings).where(eq(massageBookings.id, item.childOrderId)).limit(1);
+          if (!booking) throw new Error(`Reserva de masaje ${item.childOrderId} no encontrada`);
+          if (booking.paymentStatus !== "paid") {
+            await db.transaction(async tx => {
+              await tx.update(massageBookings).set({ paymentStatus: "paid", status: "pending", manualPaymentMethod: "transbank" }).where(eq(massageBookings.id, item.childOrderId));
+              await tx.insert(reservationPayments).values({ module: "massages", reservationId: item.childOrderId, method: "transbank", status: "paid", amountClp: Number(booking.amount ?? item.totalClp), paidAt: new Date(), reference: order.buyOrder });
+            });
+            await sendBookingConfirmations(item.childOrderId, { consolidatedCart: true });
+          }
+          await syncMassageSale(item.childOrderId);
+        } else {
+          const [membership] = await db.select({ paymentStatus: regularClassMemberships.paymentStatus, amount: regularClassMemberships.pricePaidClp }).from(regularClassMemberships).where(eq(regularClassMemberships.id, item.childOrderId)).limit(1);
+          if (!membership) throw new Error(`Plan de clases ${item.childOrderId} no encontrado`);
+          if (membership.paymentStatus !== "paid") {
+            await db.transaction(async tx => {
+              await tx.update(regularClassMemberships).set({ paymentStatus: "paid", status: "active", paymentMethod: "transbank_web", paymentReference: order.buyOrder, paidAt: new Date() }).where(eq(regularClassMemberships.id, item.childOrderId));
+              await tx.insert(reservationPayments).values({ module: "regular_classes", reservationId: item.childOrderId, method: "transbank", status: "paid", amountClp: membership.amount, paidAt: new Date(), reference: order.buyOrder });
+            });
+          }
+        }
       }
       await db.update(serviceCartCheckoutOrders).set({
         status: "paid",
@@ -113,7 +141,9 @@ router.all("/return", async (req, res) => {
     } catch (error) {
       const childStates = await Promise.all(items.map(async item => {
         if (item.module === "biopools") return (await db.select({ status: biopoolCheckoutOrders.status }).from(biopoolCheckoutOrders).where(eq(biopoolCheckoutOrders.id, item.childOrderId)).limit(1))[0]?.status;
-        return (await db.select({ status: saunaCheckoutOrders.status }).from(saunaCheckoutOrders).where(eq(saunaCheckoutOrders.id, item.childOrderId)).limit(1))[0]?.status;
+        if (item.module === "sauna") return (await db.select({ status: saunaCheckoutOrders.status }).from(saunaCheckoutOrders).where(eq(saunaCheckoutOrders.id, item.childOrderId)).limit(1))[0]?.status;
+        if (item.module === "massages") return (await db.select({ status: massageBookings.paymentStatus }).from(massageBookings).where(eq(massageBookings.id, item.childOrderId)).limit(1))[0]?.status;
+        return (await db.select({ status: regularClassMemberships.paymentStatus }).from(regularClassMemberships).where(eq(regularClassMemberships.id, item.childOrderId)).limit(1))[0]?.status;
       }));
       const anyFinalized = childStates.some(status => status === "paid");
       if (!anyFinalized) {

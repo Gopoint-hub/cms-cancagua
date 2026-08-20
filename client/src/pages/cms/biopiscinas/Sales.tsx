@@ -60,6 +60,7 @@ export default function BiopiscinasSales() {
       "Código de descuento": order.discountCode ?? "",
       "Total pagado": order.status === "paid" ? order.totalClp : 0,
       "Medio de pago": "Webpay Plus",
+      "Pasarela de pago": "Transbank",
       "Orden Transbank": order.buyOrder ?? "",
       Autorización: order.authorizationCode ?? "",
       "Últimos 4 tarjeta": order.cardNumber ?? "",

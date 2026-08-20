@@ -635,7 +635,7 @@ export const serviceCartCheckoutOrders = mysqlTable("service_cart_checkout_order
 export const serviceCartCheckoutItems = mysqlTable("service_cart_checkout_items", {
   id: int("id").autoincrement().primaryKey(),
   cartOrderId: int("cart_order_id").notNull(),
-  module: mysqlEnum("module", ["biopools", "sauna"]).notNull(),
+  module: mysqlEnum("module", ["biopools", "sauna", "massages", "regular_classes"]).notNull(),
   childOrderId: int("child_order_id").notNull(),
   itemName: varchar("item_name", { length: 220 }).notNull(),
   bookingDate: date("booking_date", { mode: "string" }).notNull(),

@@ -40,6 +40,22 @@ const getPriceForDuration = (t: any, dur: number): number | null => {
 };
 
 type CartSelection = { techniqueId: number; duration: number; quantity: number };
+type ExternalServiceItem =
+  | { module: "biopools"; serviceId: number; serviceName: string; bookingDate: string; startTime: string; endTime: string; adultQuantity: number; childQuantity: number; totalClp: number }
+  | { module: "sauna"; serviceId: number; serviceName: string; bookingDate: string; startTime: string; endTime: string; privateGuestCount?: number; guests: number; totalClp: number };
+
+const readExternalServices = (): ExternalServiceItem[] => {
+  if (typeof window === "undefined") return [];
+  const raw = new URLSearchParams(window.location.search).get("service_cart");
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is ExternalServiceItem => item?.module === "biopools" || item?.module === "sauna");
+  } catch {
+    return [];
+  }
+};
 
 const readCartSelections = (): CartSelection[] => {
   if (typeof window === "undefined") return [];
@@ -116,6 +132,7 @@ const splitInvitationPhone = (value: string): { countryCode: string; phone: stri
 export default function ReservarMasaje() {
   const { id } = useParams<{ id: string }>();
   const initialSelections = useMemo(readCartSelections, []);
+  const externalServices = useMemo(readExternalServices, []);
   const initialClassPlanId = useMemo(() => {
     if (typeof window === "undefined") return undefined;
     const value = Number(new URLSearchParams(window.location.search).get("plan"));
@@ -136,7 +153,7 @@ export default function ReservarMasaje() {
   const [giftCardCode, setGiftCardCode] = useState("");
   const [appliedGiftCard, setAppliedGiftCard] = useState<{ code: string; mode: "amount" | "service"; balanceAfter: number } | null>(null);
   const [appliedDiscount, setAppliedDiscount] = useState<{
-    code: string; originalTotal: number; discountTotal: number; finalTotal: number;
+    code: string; originalTotal: number; discountTotal: number; finalTotal: number; includesExternal?: boolean;
   } | null>(null);
   const [techniqueId, setTechniqueId] = useState(firstSelection?.techniqueId ?? routeTechniqueId);
 
@@ -231,9 +248,36 @@ export default function ReservarMasaje() {
       toast.error(e.message ?? "Error al iniciar el pago. Intenta de nuevo.");
     },
   });
+  const initUnifiedPaymentMut = trpc.serviceCart.public.startPayment.useMutation({
+    onSuccess: (data) => {
+      pushMassageEvent("payment_redirect", undefined, { checkout_id: checkoutId, payment_type: "Transbank" });
+      if (!data.paymentRequired && data.resultUrl) return window.location.assign(data.resultUrl);
+      if (!data.paymentUrl || !data.token) return toast.error("No pudimos abrir Transbank");
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = data.paymentUrl;
+      const token = document.createElement("input");
+      token.type = "hidden";
+      token.name = "token_ws";
+      token.value = data.token;
+      form.appendChild(token);
+      document.body.appendChild(form);
+      form.submit();
+    },
+    onError: (error) => toast.error(error.message ?? "Error al iniciar el pago. Intenta de nuevo."),
+  });
   const validateDiscountMut = trpc.masajes.public.validateDiscount.useMutation({
     onSuccess: (data) => {
       setAppliedDiscount(data);
+      setAppliedGiftCard(null);
+      setDiscountCode(data.code);
+      toast.success(`Código ${data.code} aplicado`);
+    },
+    onError: (error) => { setAppliedDiscount(null); toast.error(error.message); },
+  });
+  const validateUnifiedDiscountMut = trpc.serviceCart.public.validateDiscount.useMutation({
+    onSuccess: (data) => {
+      setAppliedDiscount({ ...data, includesExternal: true });
       setAppliedGiftCard(null);
       setDiscountCode(data.code);
       toast.success(`Código ${data.code} aplicado`);
@@ -262,13 +306,23 @@ export default function ReservarMasaje() {
   }, [cart.length, pendingSelections.length, classPlan?.id]);
 
   const validateDiscount = () => {
-    validateDiscountMut.mutate({
-      code: discountCode,
-      items: cart.map(({ techniqueId, duration, bookingDate }) => ({ techniqueId, duration, quantity: 1, bookingDate })),
-      classPlanId: classPlan?.id,
-    });
+    if (externalServices.length > 0) {
+      validateUnifiedDiscountMut.mutate({
+        code: discountCode,
+        items: [
+          ...externalServices.map(item => item.module === "biopools" ? ({ module: "biopools" as const, serviceId: item.serviceId, bookingDate: item.bookingDate, startTime: item.startTime, adultQuantity: item.adultQuantity, childQuantity: item.childQuantity }) : ({ module: "sauna" as const, serviceId: item.serviceId, bookingDate: item.bookingDate, startTime: item.startTime, privateGuestCount: item.privateGuestCount })),
+          ...cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({ module: "massages" as const, techniqueId, duration, bookingDate, startTime, notes })),
+          ...(classPlan ? [{ module: "regular_classes" as const, planId: classPlan.id }] : []),
+        ],
+      });
+      return;
+    }
+    validateDiscountMut.mutate({ code: discountCode, items: cart.map(({ techniqueId, duration, bookingDate }) => ({ techniqueId, duration, quantity: 1, bookingDate })), classPlanId: classPlan?.id });
   };
-  const checkoutTotal = appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0);
+  const externalTotal = externalServices.reduce((sum, item) => sum + Number(item.totalClp || 0), 0);
+  const checkoutTotal = appliedDiscount?.includesExternal
+    ? appliedDiscount.finalTotal
+    : (appliedDiscount?.finalTotal ?? cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0)) + externalTotal;
   const giftCardServiceKey = cart.length > 0 && !classPlan ? "massages" as const : cart.length === 0 && classPlan ? "regular_classes" as const : "mixed_program" as const;
   useEffect(() => setAppliedGiftCard(null), [checkoutTotal, giftCardServiceKey]);
   const validateGiftCard = () => validateGiftCardMut.mutate({ code: giftCardCode, serviceKey: giftCardServiceKey, totalClp: checkoutTotal });
@@ -348,20 +402,36 @@ export default function ReservarMasaje() {
       items: cart.map(toAnalyticsItem),
     });
 
-    initPaymentMut.mutate({
-      items: cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({
-        techniqueId, duration, bookingDate, startTime, notes,
-      })),
-      classPlanId: classPlan?.id,
-      clientName: name.trim(),
-      clientPhone: buildInternationalPhone(countryCode, phone),
-      clientEmail: email.trim() || undefined,
-      acquisition: validAcquisition,
-      subscribeNewsletter: subscribeNewsletter || undefined,
-      discountCode: appliedDiscount?.code,
-      giftCardCode: appliedGiftCard?.code,
-      checkoutId: checkoutId || undefined,
-    });
+    if (externalServices.length > 0) {
+      const normalizedPhone = buildInternationalPhone(countryCode, phone);
+      if (!email.trim() || !normalizedPhone) { toast.error("Email y teléfono son obligatorios para completar el pago"); return; }
+      initUnifiedPaymentMut.mutate({
+        clientName: name.trim(),
+        clientPhone: normalizedPhone,
+        clientEmail: email.trim(),
+        acquisition: validAcquisition,
+        acceptedTerms: true,
+        discountCode: appliedDiscount?.code,
+        items: [
+          ...externalServices.map(item => item.module === "biopools" ? ({ module: "biopools" as const, serviceId: item.serviceId, bookingDate: item.bookingDate, startTime: item.startTime, adultQuantity: item.adultQuantity, childQuantity: item.childQuantity }) : ({ module: "sauna" as const, serviceId: item.serviceId, bookingDate: item.bookingDate, startTime: item.startTime, privateGuestCount: item.privateGuestCount })),
+          ...cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({ module: "massages" as const, techniqueId, duration, bookingDate, startTime, notes })),
+          ...(classPlan ? [{ module: "regular_classes" as const, planId: classPlan.id }] : []),
+        ],
+      });
+    } else {
+      initPaymentMut.mutate({
+        items: cart.map(({ techniqueId, duration, bookingDate, startTime, notes }) => ({ techniqueId, duration, bookingDate, startTime, notes })),
+        classPlanId: classPlan?.id,
+        clientName: name.trim(),
+        clientPhone: buildInternationalPhone(countryCode, phone),
+        clientEmail: email.trim() || undefined,
+        acquisition: validAcquisition,
+        subscribeNewsletter: subscribeNewsletter || undefined,
+        discountCode: appliedDiscount?.code,
+        giftCardCode: appliedGiftCard?.code,
+        checkoutId: checkoutId || undefined,
+      });
+    }
   };
 
   const allSelectionsScheduled = !hasPresetCart || pendingSelections.length === 0;
@@ -741,19 +811,20 @@ export default function ReservarMasaje() {
                 <span className="font-medium text-teal-900">{cart.length + (classPlan ? 1 : 0)} producto{cart.length + (classPlan ? 1 : 0) === 1 ? "" : "s"}</span>
               </div>
               {classPlan && <div className="flex justify-between pt-2"><span className="text-teal-700">{classPlan.name}</span><span className="font-medium text-teal-900">${classPlan.priceClp.toLocaleString("es-CL")}</span></div>}
+              {externalServices.map((item, index) => <div key={`${item.module}-${index}`} className="flex justify-between pt-2"><span className="text-teal-700">{item.serviceName}</span><span className="font-medium text-teal-900">${item.totalClp.toLocaleString("es-CL")}</span></div>)}
               {(cart.length > 0 || classPlan) && <div className="pt-2 space-y-2">
                 <Label htmlFor="massage-discount-code" className="text-teal-800">Aplicar código de descuento</Label>
                 <div className="flex gap-2">
                   <Input id="massage-discount-code" value={discountCode} onChange={(event) => { setDiscountCode(event.target.value.toUpperCase()); setAppliedDiscount(null); setAppliedGiftCard(null); }} placeholder="Ingresa tu código" className="bg-white" />
-                  <Button type="button" variant="outline" onClick={validateDiscount} disabled={!discountCode.trim() || validateDiscountMut.isPending}>
-                    {validateDiscountMut.isPending ? "Validando…" : "Aplicar"}
+                  <Button type="button" variant="outline" onClick={validateDiscount} disabled={!discountCode.trim() || validateDiscountMut.isPending || validateUnifiedDiscountMut.isPending}>
+                    {validateDiscountMut.isPending || validateUnifiedDiscountMut.isPending ? "Validando…" : "Aplicar"}
                   </Button>
                 </div>
               </div>}
-              {(cart.length > 0 || classPlan) && <div className="pt-2 space-y-2 border-t border-teal-200"><Label htmlFor="massage-gift-card" className="text-teal-800">Pagar con Gift Card</Label><div className="flex gap-2"><Input id="massage-gift-card" value={giftCardCode} onChange={(event) => { setGiftCardCode(event.target.value.toUpperCase()); setAppliedGiftCard(null); }} placeholder="Código de Gift Card" className="bg-white" /><Button type="button" variant="outline" onClick={validateGiftCard} disabled={!giftCardCode.trim() || checkoutTotal <= 0 || validateGiftCardMut.isPending}>{validateGiftCardMut.isPending ? "Validando…" : "Aplicar"}</Button></div>{appliedGiftCard && <p className="text-xs text-green-700">Gift Card aplicada{appliedGiftCard.mode === "amount" ? ` · saldo restante $${appliedGiftCard.balanceAfter.toLocaleString("es-CL")}` : " · servicio cubierto"}</p>}</div>}
+              {(cart.length > 0 || classPlan) && externalServices.length === 0 && <div className="pt-2 space-y-2 border-t border-teal-200"><Label htmlFor="massage-gift-card" className="text-teal-800">Pagar con Gift Card</Label><div className="flex gap-2"><Input id="massage-gift-card" value={giftCardCode} onChange={(event) => { setGiftCardCode(event.target.value.toUpperCase()); setAppliedGiftCard(null); }} placeholder="Código de Gift Card" className="bg-white" /><Button type="button" variant="outline" onClick={validateGiftCard} disabled={!giftCardCode.trim() || checkoutTotal <= 0 || validateGiftCardMut.isPending}>{validateGiftCardMut.isPending ? "Validando…" : "Aplicar"}</Button></div>{appliedGiftCard && <p className="text-xs text-green-700">Gift Card aplicada{appliedGiftCard.mode === "amount" ? ` · saldo restante $${appliedGiftCard.balanceAfter.toLocaleString("es-CL")}` : " · servicio cubierto"}</p>}</div>}
               <div className="flex justify-between pt-1">
                 <span className="text-teal-700">Subtotal</span>
-                <span className={appliedDiscount ? "line-through text-teal-700" : "font-medium text-teal-900"}>${(cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0)).toLocaleString("es-CL")}</span>
+                <span className={appliedDiscount ? "line-through text-teal-700" : "font-medium text-teal-900"}>${(cart.reduce((sum, item) => sum + item.price, 0) + (classPlan?.priceClp ?? 0) + externalTotal).toLocaleString("es-CL")}</span>
               </div>
               {appliedDiscount && <div className="flex justify-between text-green-700"><span>Descuento {appliedDiscount.code}</span><span>−${appliedDiscount.discountTotal.toLocaleString("es-CL")}</span></div>}
               <div className="flex justify-between border-t border-teal-200 pt-2"><span className="text-teal-700 font-medium">Total</span><span className="font-bold text-teal-900">${checkoutTotal.toLocaleString("es-CL")}</span></div>
@@ -762,9 +833,9 @@ export default function ReservarMasaje() {
             <Button
               className="w-full h-12 text-base rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50"
               onClick={handleSubmit}
-              disabled={initPaymentMut.isPending || !termsAccepted}
+              disabled={initPaymentMut.isPending || initUnifiedPaymentMut.isPending || !termsAccepted}
             >
-              {initPaymentMut.isPending ? "Preparando pago..." : appliedGiftCard ? "Confirmar con Gift Card →" : "Ir a pagar →"}
+              {initPaymentMut.isPending || initUnifiedPaymentMut.isPending ? "Protegiendo tus cupos..." : appliedGiftCard ? "Confirmar con Gift Card →" : `Ir a pagar con ${externalServices.length > 0 ? "Transbank" : "Getnet"} →`}
             </Button>
             {!termsAccepted && (
               <p className="text-xs text-center text-red-500">Debes aceptar los Términos y Condiciones para continuar.</p>

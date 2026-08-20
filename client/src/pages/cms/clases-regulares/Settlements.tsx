@@ -63,6 +63,9 @@ export default function RegularClassesSettlements() {
       Mes: monthLabel(row.month),
       Plan: row.planName,
       Pagado: row.paidClp,
+      "Pasarela de pago": row.paymentMethod === "getnet_web"
+        ? "Getnet"
+        : row.paymentMethod === "transbank_web" ? "Transbank" : "Sin pasarela online",
       "Clases incluidas": row.creditsTotal,
       Asistencias: row.creditsUsed,
       "No utilizadas": row.creditsUnused,
