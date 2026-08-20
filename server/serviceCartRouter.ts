@@ -47,6 +47,7 @@ import { serviceCartResultUrl } from "./serviceCartCheckout";
 import { customerAcquisitionSchema } from "../shared/customerAcquisition";
 import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
 import {
+  isMassageTechniqueAvailableForDate,
   loadBlockingMassageBookings,
   selectAutomaticMassageAssignment,
   validateMassageCartCapacity,
@@ -181,6 +182,7 @@ export const serviceCartRouter = router({
           } else if (item.module === "massages") {
             const [technique] = await db.select().from(massageTechniques).where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1))).limit(1);
             if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "El masaje ya no está disponible" });
+            if (!isMassageTechniqueAvailableForDate(technique, item.bookingDate)) throw new TRPCError({ code: "NOT_FOUND", message: "El masaje no está disponible para el mes seleccionado" });
             const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
             const price = [technique.price50min, technique.price80min, technique.price110min][durations.indexOf(item.duration)];
             if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}` });
@@ -394,6 +396,7 @@ export const serviceCartRouter = router({
             for (const item of massageItems) {
               const [technique] = await tx.select().from(massageTechniques).where(and(eq(massageTechniques.id, item.techniqueId), eq(massageTechniques.active, 1))).limit(1);
               if (!technique) throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes ya no está disponible" });
+              if (!isMassageTechniqueAvailableForDate(technique, item.bookingDate)) throw new TRPCError({ code: "NOT_FOUND", message: "El masaje no está disponible para el mes seleccionado" });
               const durations = (technique.durations ?? "").split(",").map(Number).filter(Boolean).sort((a, b) => a - b);
               const price = Number([technique.price50min, technique.price80min, technique.price110min][durations.indexOf(item.duration)] ?? 0);
               if (!price) throw new TRPCError({ code: "BAD_REQUEST", message: `Precio no configurado para ${technique.name}` });

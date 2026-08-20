@@ -1737,6 +1737,8 @@ export const massageTechniques = mysqlTable("massage_techniques", {
   price50min: decimal("price_50min", { precision: 10, scale: 0 }),
   price80min: decimal("price_80min", { precision: 10, scale: 0 }),
   price110min: decimal("price_110min", { precision: 10, scale: 0 }),
+  monthlyOnly: int("monthly_only").default(0).notNull(),
+  monthlyFeatureMonth: varchar("monthly_feature_month", { length: 7 }),
   active: int("active").default(1).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

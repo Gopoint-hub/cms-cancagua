@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save, Link2, Image as ImageIcon } from "lucide-react";
+import { Plus, Edit, ChevronDown, ChevronRight, Trash2, Save, Link2, Image as ImageIcon, CalendarRange } from "lucide-react";
 
 const DRAFT_KEY = "masajes:draft:tecnica";
 const DURATIONS = [20, 40, 50, 80, 110];
@@ -44,6 +44,18 @@ const normalizeDecimalText = (value: string) => {
   return match?.[0] ?? "";
 };
 
+const chileMonth = () => new Date().toLocaleDateString("en-CA", {
+  timeZone: "America/Santiago",
+  year: "numeric",
+  month: "2-digit",
+});
+
+const monthLabel = (month: string) => new Intl.DateTimeFormat("es-CL", {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+}).format(new Date(`${month}-01T12:00:00Z`));
+
 export default function MasajesTecnicas() {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
@@ -54,6 +66,8 @@ export default function MasajesTecnicas() {
   const [recipeForm, setRecipeForm] = useState<RecipeForm>(emptyRecipe);
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [featuredMonth, setFeaturedMonth] = useState(chileMonth());
+  const [featuredTechniqueId, setFeaturedTechniqueId] = useState("");
 
   const { data: techniques, isLoading } = trpc.masajes.tecnicas.getAll.useQuery();
   const { data: supplies } = trpc.masajes.inventario.getAll.useQuery();
@@ -80,6 +94,13 @@ export default function MasajesTecnicas() {
   });
   const updateMut = trpc.masajes.tecnicas.update.useMutation({
     onSuccess: () => { utils.masajes.tecnicas.getAll.invalidate(); toast.success("Técnica actualizada"); setOpen(false); },
+    onError: e => toast.error(e.message),
+  });
+  const setMonthlyFeatureMut = trpc.masajes.tecnicas.setMonthlyFeature.useMutation({
+    onSuccess: () => {
+      utils.masajes.tecnicas.getAll.invalidate();
+      toast.success("Masaje del mes actualizado");
+    },
     onError: e => toast.error(e.message),
   });
   const uploadImageMut = trpc.masajes.tecnicas.uploadImage.useMutation();
@@ -174,6 +195,19 @@ export default function MasajesTecnicas() {
 
   const selectedSupply = supplies?.find(s => String(s.id) === recipeForm.supplyId);
 
+  useEffect(() => {
+    const configured = techniques?.find(technique => technique.monthlyFeatureMonth === featuredMonth);
+    setFeaturedTechniqueId(configured ? String(configured.id) : "");
+  }, [featuredMonth, techniques]);
+
+  const saveMonthlyFeature = () => {
+    if (!featuredTechniqueId) {
+      toast.error("Selecciona la técnica que será el masaje del mes");
+      return;
+    }
+    setMonthlyFeatureMut.mutate({ techniqueId: Number(featuredTechniqueId), month: featuredMonth });
+  };
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
@@ -184,6 +218,23 @@ export default function MasajesTecnicas() {
           </div>
           <Button className="w-full sm:w-auto" onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Nueva técnica</Button>
         </div>
+
+        <Card className="border-[#BFC2B2] bg-[#F5F6F4]">
+          <CardContent className="p-5">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-2xl">
+                <div className="flex items-center gap-2 text-[#4A4F35]"><CalendarRange className="h-5 w-5" /><h2 className="text-lg font-semibold">Masaje del mes</h2></div>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Selecciona una técnica y el mes en que aparecerá como ficha destacada en la web. Quedará fuera del catálogo regular y se ocultará automáticamente al terminar ese mes.</p>
+                <p className="mt-1 text-xs text-muted-foreground">La fotografía, descripción, duración y valor se editan desde el lápiz de la técnica.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[150px_minmax(220px,1fr)_auto] lg:min-w-[610px]">
+                <div><Label htmlFor="featured-month">Mes</Label><Input id="featured-month" type="month" value={featuredMonth} onChange={event => setFeaturedMonth(event.target.value)} /></div>
+                <div><Label htmlFor="featured-technique">Técnica destacada</Label><select id="featured-technique" value={featuredTechniqueId} onChange={event => setFeaturedTechniqueId(event.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">Seleccionar técnica</option>{techniques?.filter(technique => technique.active === 1).map(technique => <option key={technique.id} value={String(technique.id)}>{technique.name}</option>)}</select></div>
+                <Button onClick={saveMonthlyFeature} disabled={!featuredTechniqueId || setMonthlyFeatureMut.isPending}>{setMonthlyFeatureMut.isPending ? "Guardando…" : "Guardar destacado"}</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {isLoading ? (
           <div className="space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
@@ -208,6 +259,7 @@ export default function MasajesTecnicas() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold">{t.name}</span>
                           {t.active === 0 && <Badge variant="secondary">Inactiva</Badge>}
+                          {t.monthlyOnly === 1 && <Badge className="bg-[#D8DACD] text-[#4A4F35] hover:bg-[#D8DACD]">{t.monthlyFeatureMonth ? `Masaje del mes · ${monthLabel(t.monthlyFeatureMonth)}` : "Sólo mensual · sin mes asignado"}</Badge>}
                           {durs.map(d => (
                             <Badge key={d} variant="outline" className="text-xs">{d} min</Badge>
                           ))}

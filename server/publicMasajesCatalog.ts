@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { asc, eq } from "drizzle-orm";
 import { massageTechniques, regularClassPlans } from "../drizzle/schema";
 import { getDb } from "./db";
-import { serializePublicMassageTechnique } from "./masajesRouter";
+import { chileMonthForDate, isMassageTechniqueAvailableForDate, serializePublicMassageTechnique } from "./masajesRouter";
 import { calculateWellnessCartDiscount, type WellnessDiscountLine } from "./massageDiscounts";
 import { z } from "zod";
 import { saveCheckoutStart, updateCheckoutProgress } from "./massageCheckout";
@@ -73,8 +73,14 @@ router.get("/techniques", async (_req: Request, res: Response) => {
       .orderBy(asc(massageTechniques.name));
 
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    const currentMonth = chileMonthForDate();
+    const featured = techniques.find(technique => technique.monthlyOnly === 1 && technique.monthlyFeatureMonth === currentMonth) ?? null;
     return res.json({
-      techniques: techniques.map(serializePublicMassageTechnique),
+      currentMonth,
+      featuredTechnique: featured ? serializePublicMassageTechnique(featured) : null,
+      techniques: techniques
+        .filter(technique => technique.monthlyOnly !== 1)
+        .map(serializePublicMassageTechnique),
     });
   } catch (error) {
     console.error("[Public Masajes Catalog] Error:", error);
@@ -108,6 +114,9 @@ router.post("/discount/validate", async (req: Request, res: Response) => {
       // Mismo criterio que el procedimiento tRPC: sin la fecha de la sesión, un
       // código restringido a ciertos días se aplicaría cualquier día.
       const bookingDate = typeof raw.bookingDate === "string" ? raw.bookingDate : undefined;
+      if (!isMassageTechniqueAvailableForDate(technique, bookingDate ?? `${chileMonthForDate()}-01`)) {
+        return res.status(400).json({ error: "Este masaje no está disponible para el mes seleccionado." });
+      }
       for (let count = 0; count < quantity; count += 1) lines.push({ service: "masajes", serviceId: techniqueId, techniqueId, originalAmount: price, bookingDate });
     }
     if (Number.isInteger(classPlanId) && classPlanId > 0) {

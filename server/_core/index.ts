@@ -23,6 +23,7 @@ import { ensureMassageNpsSchema } from "../ensureMassageNpsSchema";
 import { ensureMassageBookingSchema } from "../ensureMassageBookingSchema";
 import { ensureMassageMonthlyClosureSchema } from "../ensureMassageMonthlyClosureSchema";
 import { ensureMassageCheckoutSchema } from "../ensureMassageCheckoutSchema";
+import { ensureMassageCatalogSchema } from "../ensureMassageCatalogSchema";
 import { ensureMaintenanceShiftSchema } from "../ensureMaintenanceShiftSchema";
 import { ensureRegularClassesSchema } from "../ensureRegularClassesSchema";
 import { ensureUserPermissionsSchema } from "../ensureUserPermissionsSchema";
@@ -67,6 +68,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   await ensureUserPermissionsSchema();
   await ensureMassageBookingSchema();
+  await ensureMassageCatalogSchema();
   await ensureMassageAssignmentSchema();
   await ensureMassageDiscountSchema();
   await ensureMassageSalesBackfill();

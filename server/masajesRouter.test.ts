@@ -11,6 +11,7 @@ import {
   expandSkeduProgramResourceBlocks,
   isSkeduProgramDurationAllowed,
   isPendingManualMassageAssignment,
+  isMassageTechniqueAvailableForDate,
   listAutomaticMassageSlots,
   massagePriceForDuration,
   MASSAGE_AGENDA_STATUSES,
@@ -345,6 +346,8 @@ describe("serializePublicMassageTechnique", () => {
       price50min: "45000",
       price80min: "81000",
       price110min: null,
+      monthlyOnly: 0,
+      monthlyFeatureMonth: null,
       active: 1,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -356,6 +359,21 @@ describe("serializePublicMassageTechnique", () => {
       { duration: 80, price: 81000 },
     ]);
     expect(technique.bookingUrl).toContain("/reservar/masaje/7");
+  });
+});
+
+describe("masaje del mes", () => {
+  const regular = { active: 1, monthlyOnly: 0, monthlyFeatureMonth: null };
+  const augustFeature = { active: 1, monthlyOnly: 1, monthlyFeatureMonth: "2026-08" };
+
+  it("mantiene las técnicas regulares disponibles en cualquier mes", () => {
+    expect(isMassageTechniqueAvailableForDate(regular, "2026-08-31")).toBe(true);
+    expect(isMassageTechniqueAvailableForDate(regular, "2026-09-01")).toBe(true);
+  });
+
+  it("publica el masaje mensual sólo para reservas de su mes", () => {
+    expect(isMassageTechniqueAvailableForDate(augustFeature, "2026-08-31")).toBe(true);
+    expect(isMassageTechniqueAvailableForDate(augustFeature, "2026-09-01")).toBe(false);
   });
 });
 

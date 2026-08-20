@@ -605,8 +605,30 @@ export const serializePublicMassageTechnique = (
     durations,
     prices,
     bookingUrl: `${ENV.appUrl}/reservar/masaje/${t.id}`,
+    monthlyOnly: t.monthlyOnly === 1,
+    monthlyFeatureMonth: t.monthlyFeatureMonth ?? null,
   };
 };
+
+export function chileMonthForDate(value = new Date()): string {
+  return value.toLocaleDateString("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+  });
+}
+
+export function isMassageTechniqueAvailableForDate(
+  technique: Pick<typeof massageTechniques.$inferSelect, "active" | "monthlyOnly" | "monthlyFeatureMonth">,
+  bookingDate: string,
+): boolean {
+  return technique.active === 1
+    && (technique.monthlyOnly !== 1 || technique.monthlyFeatureMonth === bookingDate.slice(0, 7));
+}
+
+function currentChileDateForCatalog(): string {
+  return `${chileMonthForDate()}-01`;
+}
 
 // ─── TÉCNICAS ────────────────────────────────────────────────
 const tecnicasRouter = router({
@@ -683,6 +705,36 @@ const tecnicasRouter = router({
             price110min !== undefined ? sanitizePrice(price110min) : undefined,
         })
         .where(eq(massageTechniques.id, id));
+      return { success: true };
+    }),
+
+  setMonthlyFeature: protectedProcedure
+    .input(z.object({
+      techniqueId: z.number().int().positive(),
+      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await adminOrEditor(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [technique] = await db.select({ id: massageTechniques.id, active: massageTechniques.active })
+        .from(massageTechniques)
+        .where(eq(massageTechniques.id, input.techniqueId))
+        .limit(1);
+      if (!technique || technique.active !== 1) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "La técnica seleccionada no está activa." });
+      }
+      await db.transaction(async tx => {
+        await tx.update(massageTechniques)
+          .set({ monthlyFeatureMonth: null })
+          .where(and(
+            eq(massageTechniques.monthlyFeatureMonth, input.month),
+            sql`${massageTechniques.id} <> ${input.techniqueId}`,
+          ));
+        await tx.update(massageTechniques)
+          .set({ monthlyOnly: 1, monthlyFeatureMonth: input.month })
+          .where(eq(massageTechniques.id, input.techniqueId));
+      });
       return { success: true };
     }),
 
@@ -5734,7 +5786,9 @@ const masajesPublicRouter = router({
       .from(massageTechniques)
       .where(eq(massageTechniques.active, 1))
       .orderBy(asc(massageTechniques.name));
-    return techniques.map(serializePublicMassageTechnique);
+    return techniques
+      .filter(technique => isMassageTechniqueAvailableForDate(technique, currentChileDateForCatalog()))
+      .map(serializePublicMassageTechnique);
   }),
 
   getTechnique: publicProcedure
@@ -5752,7 +5806,7 @@ const masajesPublicRouter = router({
           )
         )
         .limit(1);
-      return t ?? null;
+      return t && isMassageTechniqueAvailableForDate(t, currentChileDateForCatalog()) ? t : null;
     }),
 
   validateDiscount: publicProcedure
@@ -5803,6 +5857,9 @@ const masajesPublicRouter = router({
             code: "NOT_FOUND",
             message: "Uno de los masajes ya no está disponible.",
           });
+        if (!isMassageTechniqueAvailableForDate(technique, item.bookingDate ?? currentChileDateForCatalog())) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Este masaje sólo está disponible durante su mes destacado." });
+        }
         const durations = (technique.durations ?? "")
           .split(",")
           .map(Number)
@@ -5912,6 +5969,9 @@ const masajesPublicRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
+      const [technique] = await db.select().from(massageTechniques)
+        .where(eq(massageTechniques.id, input.techniqueId)).limit(1);
+      if (!technique || technique.active !== 1) return [];
       const rangeDays = Math.round(
         (Date.parse(`${input.to}T00:00:00Z`) -
           Date.parse(`${input.from}T00:00:00Z`)) /
@@ -6068,6 +6128,7 @@ const masajesPublicRouter = router({
         .filter(
           ([bookingDate, therapists]) =>
             bookingDate >= todayChile &&
+            isMassageTechniqueAvailableForDate(technique, bookingDate) &&
             listAutomaticMassageSlots({
             therapists: Array.from(therapists.values()),
             bookings: bookingsByDate.get(bookingDate) ?? [],
@@ -6092,6 +6153,9 @@ const masajesPublicRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
+      const [technique] = await db.select().from(massageTechniques)
+        .where(eq(massageTechniques.id, input.techniqueId)).limit(1);
+      if (!technique || !isMassageTechniqueAvailableForDate(technique, input.date)) return [];
 
       // Solo terapeutas con disponibilidad explícita para este día.
       let therapists = (await db
@@ -6176,6 +6240,11 @@ const masajesPublicRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { subscribeNewsletter, ...bookingData } = input;
+      const [publicTechnique] = await db.select().from(massageTechniques)
+        .where(eq(massageTechniques.id, input.techniqueId)).limit(1);
+      if (!publicTechnique || !isMassageTechniqueAvailableForDate(publicTechnique, input.bookingDate)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Este masaje no está disponible para el mes seleccionado." });
+      }
 
       // Solo terapeutas con disponibilidad explícita para este día.
       let therapists = (await db
@@ -6338,6 +6407,9 @@ const masajesPublicRouter = router({
           code: "NOT_FOUND",
           message: "Técnica no encontrada",
         });
+      if (!isMassageTechniqueAvailableForDate(technique, input.bookingDate)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Este masaje no está disponible para el mes seleccionado." });
+      }
 
       const durations = (technique.durations ?? "")
         .split(",")
@@ -6619,6 +6691,9 @@ const masajesPublicRouter = router({
             code: "NOT_FOUND",
             message: "Uno de los masajes ya no está disponible.",
           });
+        if (!isMassageTechniqueAvailableForDate(technique, item.bookingDate)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes no está disponible para el mes seleccionado." });
+        }
 
         const durations = (technique.durations ?? "")
           .split(",")
