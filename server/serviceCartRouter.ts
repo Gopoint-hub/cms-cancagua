@@ -14,6 +14,7 @@ import {
   saunaServices,
   serviceCartCheckoutItems,
   serviceCartCheckoutOrders,
+  serviceCartNotifications,
 } from "../drizzle/schema";
 import { validateAdultChildQuantities } from "../shared/biopoolsCapacity";
 import { hasSaunaBookingLeadTime, SAUNA_CAPACITY, validateSaunaParty } from "../shared/sauna";
@@ -35,6 +36,8 @@ import {
 import { finalizeApprovedBiopoolOrder, isFullyDiscountedBiopoolOrder } from "./biopoolWebpay";
 import { createTransaction, generateSessionId } from "./webpay";
 import { serviceCartResultUrl } from "./serviceCartCheckout";
+import { customerAcquisitionSchema } from "../shared/customerAcquisition";
+import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
@@ -183,6 +186,7 @@ export const serviceCartRouter = router({
         clientName: z.string().trim().min(2).max(200),
         clientEmail: z.string().trim().email(),
         clientPhone: z.string().trim().min(8).max(40),
+        acquisition: customerAcquisitionSchema,
         items: z.array(z.discriminatedUnion("module", [biopoolItemSchema, saunaItemSchema])).min(1).max(2),
         discountCode: z.string().trim().max(50).optional(),
         acceptedTerms: z.literal(true),
@@ -389,6 +393,12 @@ export const serviceCartRouter = router({
             }).$returningId();
             cartOrderId = cart.id;
             await tx.insert(serviceCartCheckoutItems).values(prepared.map(item => ({ cartOrderId, ...item })));
+            await saveCustomerPurchaseSurvey(tx, {
+              purchaseType: "service_cart",
+              purchaseId: cartOrderId,
+              clientEmail: input.clientEmail,
+              acquisition: input.acquisition,
+            });
           } finally {
             if (biopoolLockName) await releaseBiopoolCapacityLock(tx, biopoolLockName);
           }
@@ -397,8 +407,9 @@ export const serviceCartRouter = router({
         if (totalClp === 0) {
           const discounted = childOrders.find(item => item.module === "biopools" && item.fullyDiscounted);
           if (!discounted || childOrders.length !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "El carrito no tiene un total válido" });
-          await finalizeApprovedBiopoolOrder(discounted.id, { kind: "discount" });
+          await finalizeApprovedBiopoolOrder(discounted.id, { kind: "discount" }, { consolidatedCart: true });
           await db.update(serviceCartCheckoutOrders).set({ status: "paid", paidAt: new Date(), completedAt: new Date() }).where(eq(serviceCartCheckoutOrders.id, cartOrderId));
+          await db.insert(serviceCartNotifications).values({ cartOrderId, type: "confirmation", channel: "email", scheduledAt: new Date() }).onDuplicateKeyUpdate({ set: { cartOrderId } });
           return { paymentRequired: false as const, paymentUrl: null, token: null, orderToken: publicToken, resultUrl: serviceCartResultUrl(publicToken, "pagado") };
         }
 

@@ -34,6 +34,7 @@ import { ensureGiftCardServiceSchema } from "../ensureGiftCardServiceSchema";
 import { ensureCashRegisterSchema } from "../ensureCashRegisterSchema";
 import { ensureReservationPaymentLinksSchema } from "../ensureReservationPaymentLinksSchema";
 import { ensureServiceCartCheckoutSchema } from "../ensureServiceCartCheckoutSchema";
+import { ensureCustomerExperienceSchema } from "../ensureCustomerExperienceSchema";
 import { ensureMassageSalesBackfill } from "../ensureMassageSalesBackfill";
 import { startTherapistAssignmentExpiryWorker } from "../massageTherapistAssignment";
 import biopoolWebpayReturnRouter, { startBiopoolCheckoutScheduler } from "../biopoolWebpay";
@@ -42,6 +43,7 @@ import { startSaunaSyncScheduler } from "../saunaSync";
 import navegaRelaxWebhook from "../navegaRelaxWebhook";
 import reservationPaymentLinksWebpay from "../reservationPaymentLinksWebpay";
 import serviceCartWebpay, { startServiceCartCheckoutScheduler } from "../serviceCartWebpay";
+import { startServiceCartNotificationScheduler } from "../serviceCartNotifications";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -81,6 +83,7 @@ async function startServer() {
   await ensureCashRegisterSchema();
   await ensureReservationPaymentLinksSchema();
   await ensureServiceCartCheckoutSchema();
+  await ensureCustomerExperienceSchema();
   await ensureMaintenanceShiftSchema();
   startTherapistAssignmentExpiryWorker();
   const app = express();
@@ -194,6 +197,7 @@ startServer()
     startBiopoolCheckoutScheduler();
     startSaunaCheckoutScheduler();
     startServiceCartCheckoutScheduler();
+    startServiceCartNotificationScheduler();
     startSaunaSyncScheduler();
     try {
       const { runInitialMassageTherapistInvitations } = await import("../massageTherapistInvitations");

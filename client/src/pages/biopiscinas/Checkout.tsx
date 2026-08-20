@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { CustomerAcquisitionFields } from "@/components/CustomerAcquisitionFields";
+import { EMPTY_CUSTOMER_ACQUISITION, validateCustomerAcquisitionForm } from "@shared/customerAcquisition";
 
 const clp = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
@@ -34,6 +36,7 @@ export default function BiopoolCheckout() {
     finalTotal: number;
   } | null>(null);
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "+56" });
+  const [acquisition, setAcquisition] = useState({ ...EMPTY_CUSTOMER_ACQUISITION });
   const catalog = trpc.biopools.public.catalog.useQuery();
   const service = catalog.data?.service;
   const totalGuests = adults + children;
@@ -99,12 +102,15 @@ export default function BiopoolCheckout() {
     if (availability.isFetching) return toast.error("Estamos confirmando la disponibilidad del horario elegido");
     if (!service || !startTime) return toast.error("Selecciona una fecha y un horario disponible");
     if (!accepted) return toast.error("Debes aceptar las condiciones del servicio");
+    const validAcquisition = validateCustomerAcquisitionForm(acquisition);
+    if (!validAcquisition) return toast.error("Completa cómo nos encontraste y de dónde vienes");
     const params = new URLSearchParams(window.location.search);
     startPayment.mutate({
       serviceId: service.id,
       clientName: customer.name,
       clientEmail: customer.email,
       clientPhone: customer.phone,
+      acquisition: validAcquisition,
       bookingDate: date,
       startTime,
       adultQuantity: adults,
@@ -143,6 +149,7 @@ export default function BiopoolCheckout() {
           <Card><CardContent className="space-y-4 p-6"><h2 className="text-xl font-semibold">Datos de quien reserva</h2>
             <div><Label htmlFor="name">Nombre completo</Label><Input id="name" required minLength={2} value={customer.name} onChange={event => setCustomer({ ...customer, name: event.target.value })} /></div>
             <div className="grid gap-4 sm:grid-cols-2"><div><Label htmlFor="email">Correo</Label><Input id="email" type="email" required value={customer.email} onChange={event => setCustomer({ ...customer, email: event.target.value })} /></div><div><Label htmlFor="phone">WhatsApp</Label><Input id="phone" type="tel" required minLength={8} value={customer.phone} onChange={event => setCustomer({ ...customer, phone: event.target.value })} /></div></div>
+            <div className="border-t pt-4"><CustomerAcquisitionFields idPrefix="biopool" value={acquisition} onChange={setAcquisition} /></div>
           </CardContent></Card>
         </div>
         <aside><Card className="sticky top-5 overflow-hidden border-0 shadow-xl"><div className="bg-[#314d57] p-6 text-white"><p className="text-xs uppercase tracking-[.25em] text-white/70">Tu reserva</p><h2 className="mt-2 font-serif text-2xl">Biopiscinas</h2></div><CardContent className="space-y-5 p-6">

@@ -39,6 +39,22 @@ describe("Programación de comunicaciones de Biopiscinas", () => {
       "confirmation:whatsapp",
     ]);
   });
+
+  it("omite solo el email inmediato cuando el carrito enviará una confirmación consolidada", () => {
+    const schedule = buildBiopoolNotificationSchedule({
+      bookingId: 44,
+      confirmationAt: new Date("2026-08-13T14:00:00Z"),
+      reminderAt: new Date("2026-08-14T23:00:00Z"),
+      reminderEmailEnabled: 1,
+      reminderWhatsappEnabled: 1,
+      confirmationEmailEnabled: false,
+    });
+    expect(schedule.map((item) => `${item.type}:${item.channel}`)).toEqual([
+      "confirmation:whatsapp",
+      "reminder:email",
+      "reminder:whatsapp",
+    ]);
+  });
 });
 
 describe("Biopiscinas reminder template", () => {

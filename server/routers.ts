@@ -5,6 +5,8 @@ import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "./db";
+import { customerAcquisitionSchema } from "../shared/customerAcquisition";
+import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
 import { generateQuoteNumber, calculateValidUntil } from "./quoteHelpers";
 import { invokeLLM } from "./_core/llm";
 import { isBundledDesignHtml, convertBundledHtmlToEmail } from "./newsletterHtmlProcessor";
@@ -3646,6 +3648,7 @@ Devuelve un JSON con este formato:
         recipientPhone: z.string().optional(),
         senderName: z.string().optional(),
         senderEmail: z.string().email().optional(),
+        acquisition: customerAcquisitionSchema,
         personalMessage: z.string().max(150).optional(),
         deliveryMethod: z.enum(["email", "whatsapp", "download"]).default("email"),
       }))
@@ -3680,6 +3683,15 @@ Devuelve un JSON con este formato:
         if (!giftCard) {
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Error al crear gift card" });
         }
+
+        const surveyDb = await db.getDb();
+        if (!surveyDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Base de datos no disponible" });
+        await saveCustomerPurchaseSurvey(surveyDb, {
+          purchaseType: "gift_card",
+          purchaseId: giftCard.id,
+          clientEmail: input.senderEmail,
+          acquisition: input.acquisition,
+        });
         
         // Generar identificadores para WebPay
         const buyOrder = generateGiftCardBuyOrder(giftCard.id);

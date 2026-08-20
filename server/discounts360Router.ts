@@ -34,6 +34,8 @@ const discountInput = z.object({
   discountValue: z.number().int().positive(),
   startsAt: z.date().nullable().optional(),
   expiresAt: z.date().nullable().optional(),
+  bookingValidFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  bookingValidUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   active: z.number().int().min(0).max(1).default(1),
   scopes: z.array(scopeSchema).min(1, "Selecciona al menos un módulo de servicios."),
 });
@@ -109,6 +111,8 @@ async function listCodes(db: any) {
     discountValue: discountCodes.discountValue,
     startsAt: discountCodes.startsAt,
     expiresAt: discountCodes.expiresAt,
+    bookingValidFrom: discountCodes.bookingValidFrom,
+    bookingValidUntil: discountCodes.bookingValidUntil,
     active: discountCodes.active,
     currentUses: discountCodes.currentUses,
     applicableServices: discountCodes.applicableServices,
@@ -176,6 +180,9 @@ export const discounts360Router = router({
     if (input.startsAt && input.expiresAt && input.startsAt >= input.expiresAt) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha de término debe ser posterior al inicio." });
     }
+    if (input.bookingValidFrom && input.bookingValidUntil && input.bookingValidFrom > input.bookingValidUntil) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha final del servicio debe ser igual o posterior a la inicial." });
+    }
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
     const normalized = input.code.toUpperCase();
@@ -194,6 +201,8 @@ export const discounts360Router = router({
       maxUsesPerUser: 1,
       startsAt: input.startsAt ?? null,
       expiresAt: input.expiresAt ?? null,
+      bookingValidFrom: input.bookingValidFrom ?? null,
+      bookingValidUntil: input.bookingValidUntil ?? null,
       active: input.active,
       createdBy: ctx.user.id,
     }).$returningId();
@@ -208,6 +217,9 @@ export const discounts360Router = router({
       }
       if (input.startsAt && input.expiresAt && input.startsAt >= input.expiresAt) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha de término debe ser posterior al inicio." });
+      }
+      if (input.bookingValidFrom && input.bookingValidUntil && input.bookingValidFrom > input.bookingValidUntil) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "La fecha final del servicio debe ser igual o posterior a la inicial." });
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -233,6 +245,8 @@ export const discounts360Router = router({
           validWeekdays: input.validWeekdays?.length ? input.validWeekdays.slice().sort().join(",") : null,
           startsAt: input.startsAt ?? null,
           expiresAt: input.expiresAt ?? null,
+          bookingValidFrom: input.bookingValidFrom ?? null,
+          bookingValidUntil: input.bookingValidUntil ?? null,
           active: input.active,
         }).where(eq(discountCodes.id, input.id));
         // La tabla antigua queda vacía una vez que el código usa el alcance 360.

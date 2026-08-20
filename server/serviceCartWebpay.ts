@@ -5,6 +5,7 @@ import {
   saunaCheckoutOrders,
   serviceCartCheckoutItems,
   serviceCartCheckoutOrders,
+  serviceCartNotifications,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { finalizeApprovedBiopoolOrder } from "./biopoolWebpay";
@@ -82,8 +83,8 @@ router.all("/return", async (req, res) => {
 
     try {
       for (const item of items) {
-        if (item.module === "biopools") await finalizeApprovedBiopoolOrder(item.childOrderId, { kind: "webpay", result });
-        else await finalizeApprovedSaunaOrder(item.childOrderId, result);
+        if (item.module === "biopools") await finalizeApprovedBiopoolOrder(item.childOrderId, { kind: "webpay", result }, { consolidatedCart: true });
+        else await finalizeApprovedSaunaOrder(item.childOrderId, result, { consolidatedCart: true });
       }
       await db.update(serviceCartCheckoutOrders).set({
         status: "paid",
@@ -98,6 +99,16 @@ router.all("/return", async (req, res) => {
         paidAt: new Date(),
         completedAt: new Date(),
       }).where(eq(serviceCartCheckoutOrders.id, order.id));
+      try {
+        await db.insert(serviceCartNotifications).values({
+          cartOrderId: order.id,
+          type: "confirmation",
+          channel: "email",
+          scheduledAt: new Date(),
+        }).onDuplicateKeyUpdate({ set: { cartOrderId: order.id } });
+      } catch (notificationError) {
+        console.error("[service-cart:webpay] Compra confirmada; no se pudo encolar el correo consolidado", { orderId: order.id, notificationError });
+      }
       return res.redirect(serviceCartResultUrl(order.publicToken, "pagado"));
     } catch (error) {
       const childStates = await Promise.all(items.map(async item => {

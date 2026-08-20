@@ -207,6 +207,27 @@ export async function calculateWellnessCartDiscount(
   // contra el día en que se compra. Comprar el miércoles para el sábado no
   // habilita un código que solo corre de martes a viernes.
   const diasValidos = parseValidWeekdays((discount as any).validWeekdays);
+  const fechaServicioDesde = (discount as any).bookingValidFrom
+    ? String((discount as any).bookingValidFrom).slice(0, 10)
+    : null;
+  const fechaServicioHasta = (discount as any).bookingValidUntil
+    ? String((discount as any).bookingValidUntil).slice(0, 10)
+    : null;
+  const fechaServicioValida = (bookingDate?: string) => {
+    if (!fechaServicioDesde && !fechaServicioHasta) return true;
+    if (!bookingDate) return false;
+    const date = bookingDate.slice(0, 10);
+    return (!fechaServicioDesde || date >= fechaServicioDesde)
+      && (!fechaServicioHasta || date <= fechaServicioHasta);
+  };
+  if ((fechaServicioDesde || fechaServicioHasta) && lines.every(line => !fechaServicioValida(line.bookingDate))) {
+    const range = fechaServicioDesde && fechaServicioHasta
+      ? `entre el ${fechaServicioDesde} y el ${fechaServicioHasta}`
+      : fechaServicioDesde
+        ? `desde el ${fechaServicioDesde}`
+        : `hasta el ${fechaServicioHasta}`;
+    throw new Error(`Este código solo aplica a servicios agendados ${range}.`);
+  }
   if (diasValidos.length > 0) {
     const fechas = lines.map(line => line.bookingDate).filter(Boolean) as string[];
     if (fechas.length > 0) {
@@ -228,6 +249,7 @@ export async function calculateWellnessCartDiscount(
   const allowedIds = new Set<number>(mappings.map((row: any) => row.techniqueId));
   const eligible = lines.map((line) => {
     if (!isWellnessDiscountLineEligible(applicableServices, allowedIds, line)) return false;
+    if (!fechaServicioValida(line.bookingDate)) return false;
     // Una línea cuya visita cae fuera de los días del código no recibe descuento,
     // aunque otra línea del mismo carrito sí lo reciba.
     if (diasValidos.length > 0 && line.bookingDate) {

@@ -7,6 +7,7 @@ import {
   saunaCheckoutOrders,
   saunaNotifications,
   saunaServices,
+  saunaSettings,
   reservationPayments,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -17,7 +18,7 @@ import {
   refundTransaction,
 } from "./webpay";
 import { recordWellnessCartDiscountUsage } from "./massageDiscounts";
-import { buildSaunaNotificationSchedule } from "./saunaNotifications";
+import { buildSaunaNotificationSchedule, sendSaunaStaffConfirmation } from "./saunaNotifications";
 import { redeemGiftCardPayment } from "./reservationPayments";
 import { availableSaunaSeats, saunaIntervalsOverlap } from "../shared/sauna";
 
@@ -220,7 +221,8 @@ async function refundApprovedSaunaPayment(input: {
 
 export async function finalizeApprovedSaunaOrder(
   orderId: number,
-  result: any
+  result: any,
+  options: { consolidatedCart?: boolean } = {}
 ): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
@@ -386,7 +388,17 @@ export async function finalizeApprovedSaunaOrder(
     if (yaEncoladas.length === 0) {
       await db
         .insert(saunaNotifications)
-        .values(buildSaunaNotificationSchedule({ bookingId }));
+        .values(buildSaunaNotificationSchedule({ bookingId, confirmationEmailEnabled: !options.consolidatedCart }));
+      if (options.consolidatedCart) {
+        const [[booking], [config]] = await Promise.all([
+          db.select().from(saunaBookings).where(eq(saunaBookings.id, bookingId)).limit(1),
+          db.select().from(saunaSettings).where(eq(saunaSettings.id, 1)).limit(1),
+        ]);
+        if (booking) {
+          const staff = await sendSaunaStaffConfirmation(booking, config);
+          if (!staff.success) console.error("[sauna:checkout] Falló la copia consolidada a recepción", { bookingId, error: staff.error });
+        }
+      }
     }
   } catch (error) {
     console.error(

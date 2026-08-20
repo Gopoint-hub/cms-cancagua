@@ -33,6 +33,9 @@ type FormState = {
   indefinite: boolean;
   startsAt: string;
   expiresAt: string;
+  serviceDateIndefinite: boolean;
+  bookingValidFrom: string;
+  bookingValidUntil: string;
   active: boolean;
   scopes: ScopeState;
 };
@@ -67,6 +70,9 @@ const emptyForm = (): FormState => ({
   indefinite: true,
   startsAt: "",
   expiresAt: "",
+  serviceDateIndefinite: true,
+  bookingValidFrom: "",
+  bookingValidUntil: "",
   active: true,
   scopes: emptyScopes(),
 });
@@ -199,6 +205,9 @@ export default function DiscountCodes360() {
       indefinite: !item.startsAt && !item.expiresAt,
       startsAt: toLocalInput(item.startsAt),
       expiresAt: toLocalInput(item.expiresAt),
+      serviceDateIndefinite: !item.bookingValidFrom && !item.bookingValidUntil,
+      bookingValidFrom: item.bookingValidFrom ?? "",
+      bookingValidUntil: item.bookingValidUntil ?? "",
       active: item.active === 1,
       scopes,
     });
@@ -223,6 +232,8 @@ export default function DiscountCodes360() {
       discountValue: Number(form.discountValue),
       startsAt: form.indefinite || !form.startsAt ? null : new Date(form.startsAt),
       expiresAt: form.indefinite || !form.expiresAt ? null : new Date(form.expiresAt),
+      bookingValidFrom: form.serviceDateIndefinite || !form.bookingValidFrom ? null : form.bookingValidFrom,
+      bookingValidUntil: form.serviceDateIndefinite || !form.bookingValidUntil ? null : form.bookingValidUntil,
       active: form.active ? 1 : 0,
       scopes,
     };
@@ -240,12 +251,14 @@ export default function DiscountCodes360() {
       "Servicios aplicables": scopeSummary(item),
       Inicio: item.startsAt ? new Date(item.startsAt).toLocaleString("es-CL") : "Indefinido",
       Término: item.expiresAt ? new Date(item.expiresAt).toLocaleString("es-CL") : "Indefinido",
+      "Servicios desde": item.bookingValidFrom || "Sin límite",
+      "Servicios hasta": item.bookingValidUntil || "Sin límite",
       Estado: status(item).label,
       Usos: item.currentUses,
       "Total descontado": Number(item.totalDiscounted),
     }));
     const sheet = XLSX.utils.json_to_sheet(rows);
-    sheet["!cols"] = [18, 28, 14, 12, 55, 22, 22, 14, 10, 20].map((wch) => ({ wch }));
+    sheet["!cols"] = [18, 28, 14, 12, 55, 22, 22, 18, 18, 14, 10, 20].map((wch) => ({ wch }));
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "Códigos 360");
     XLSX.writeFile(book, "codigos-descuento-360.xlsx");
@@ -308,7 +321,10 @@ export default function DiscountCodes360() {
                       <td className="py-3 pr-4"><code className="font-semibold">{item.code}</code><p className="text-muted-foreground">{item.name}</p></td>
                       <td className="pr-4">{item.discountType === "percentage" ? `${item.discountValue}%` : item.discountType === "nth_free" ? `${item.discountValue}x${item.discountValue - 1}` : `$${item.discountValue.toLocaleString("es-CL")}`}{((item as any).validWeekdays ?? []).length > 0 && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{DIAS_SEMANA.filter((d) => ((item as any).validWeekdays ?? []).includes(d.valor)).map((d) => d.corto).join(" ")}</span>}</td>
                       <td className="pr-4 max-w-[320px]">{scopeSummary(item)}</td>
-                      <td className="pr-4 whitespace-nowrap">{item.expiresAt ? `Hasta ${new Date(item.expiresAt).toLocaleDateString("es-CL")}` : "Indefinida"}</td>
+                      <td className="pr-4 whitespace-nowrap">
+                        <p>{item.expiresAt ? `Compra hasta ${new Date(item.expiresAt).toLocaleDateString("es-CL")}` : "Compra sin límite"}</p>
+                        <p className="text-xs text-muted-foreground">{item.bookingValidFrom || item.bookingValidUntil ? `Servicio ${item.bookingValidFrom ? `desde ${item.bookingValidFrom}` : ""}${item.bookingValidFrom && item.bookingValidUntil ? " " : ""}${item.bookingValidUntil ? `hasta ${item.bookingValidUntil}` : ""}` : "Servicio sin rango de fechas"}</p>
+                      </td>
                       <td className="pr-4"><Badge variant={itemStatus.variant}>{itemStatus.label}</Badge></td>
                       <td className="pr-4 text-right">{item.currentUses}</td>
                       <td className="pr-4 text-right">${Number(item.totalDiscounted).toLocaleString("es-CL")}</td>
@@ -395,8 +411,17 @@ export default function DiscountCodes360() {
               <div><Label>{form.discountType === "percentage" ? "Porcentaje" : form.discountType === "nth_free" ? "Cada cuántos, uno gratis" : "Monto CLP"} *</Label><Input required type="number" min={form.discountType === "nth_free" ? 2 : 1} max={form.discountType === "percentage" ? 100 : undefined} value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} />{form.discountType === "nth_free" && <p className="mt-1 text-xs text-muted-foreground">2 = 2x1 (la segunda gratis). El sobrante impar paga completo y se regala siempre la unidad más barata.</p>}</div>
             </div>
             <div><Label>Descripción interna</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={form.indefinite} onChange={(e) => setForm({ ...form, indefinite: e.target.checked })} />Vigencia indefinida</label>
-            {!form.indefinite && <div className="grid sm:grid-cols-2 gap-4"><div><Label>Inicio</Label><Input type="datetime-local" value={form.startsAt} onChange={(e) => setForm({ ...form, startsAt: e.target.value })} /></div><div><Label>Término</Label><Input type="datetime-local" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} /></div></div>}
+            <div className="space-y-3 rounded-lg border p-4">
+              <div><Label>Ventana de compra</Label><p className="text-xs text-muted-foreground">Define cuándo el código está habilitado para ingresarlo y pagar.</p></div>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={form.indefinite} onChange={(e) => setForm({ ...form, indefinite: e.target.checked })} />Sin límite para realizar la compra</label>
+              {!form.indefinite && <div className="grid sm:grid-cols-2 gap-4"><div><Label>Compra desde</Label><Input required type="datetime-local" value={form.startsAt} onChange={(e) => setForm({ ...form, startsAt: e.target.value })} /></div><div><Label>Compra hasta</Label><Input required type="datetime-local" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} /></div></div>}
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-4">
+              <div><Label>Fechas permitidas para usar el servicio</Label><p className="text-xs text-muted-foreground">La compra debe hacerse dentro de la ventana anterior, pero la visita solo puede agendarse en este rango.</p></div>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={form.serviceDateIndefinite} onChange={(e) => setForm({ ...form, serviceDateIndefinite: e.target.checked })} />Sin límite para la fecha de visita</label>
+              {!form.serviceDateIndefinite && <div className="grid sm:grid-cols-2 gap-4"><div><Label>Servicio desde</Label><Input required type="date" value={form.bookingValidFrom} onChange={(e) => setForm({ ...form, bookingValidFrom: e.target.value })} /></div><div><Label>Servicio hasta</Label><Input required type="date" value={form.bookingValidUntil} onChange={(e) => setForm({ ...form, bookingValidUntil: e.target.value })} /></div></div>}
+            </div>
 
             <div className="space-y-3">
               <div><Label>Servicios aplicables *</Label><p className="text-xs text-muted-foreground">Elige uno o más módulos y luego todos sus servicios o sólo algunos.</p></div>

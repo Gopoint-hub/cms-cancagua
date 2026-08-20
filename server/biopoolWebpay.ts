@@ -16,7 +16,7 @@ import { commitTransaction, isTransactionApproved } from "./webpay";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { ENV } from "./_core/env";
 import { recordWellnessCartDiscountUsage } from "./massageDiscounts";
-import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
+import { buildBiopoolNotificationSchedule, sendBiopoolStaffConfirmation } from "./biopoolNotifications";
 import { redeemGiftCardPayment } from "./reservationPayments";
 
 export type BiopoolPaymentOrderCheck = {
@@ -95,6 +95,7 @@ type BiopoolOrderCompletion =
 export async function finalizeApprovedBiopoolOrder(
   orderId: number,
   completion: BiopoolOrderCompletion,
+  options: { consolidatedCart?: boolean } = {},
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Base de datos no disponible");
@@ -257,7 +258,21 @@ export async function finalizeApprovedBiopoolOrder(
       reminderAt,
       reminderEmailEnabled: completed.service.reminderEmailEnabled,
       reminderWhatsappEnabled: completed.service.reminderWhatsappEnabled,
+      confirmationEmailEnabled: !options.consolidatedCart,
     }));
+    if (options.consolidatedCart) {
+      const [booking] = await db.select().from(biopoolBookings).where(eq(biopoolBookings.id, completed.bookingId)).limit(1);
+      if (booking) {
+        const staff = await sendBiopoolStaffConfirmation(booking, completed.service);
+        await db.insert(biopoolBookingActivity).values({
+          bookingId: booking.id,
+          action: `confirmation_staff_email_${staff.success ? "sent" : "failed"}`,
+          detail: staff.success
+            ? JSON.stringify({ staffNotification: true })
+            : JSON.stringify({ error: staff.error }),
+        });
+      }
+    }
   } catch (error) {
     console.error("[biopools:checkout] Reserva confirmada; no se pudieron programar las notificaciones", {
       bookingId: completed.bookingId,

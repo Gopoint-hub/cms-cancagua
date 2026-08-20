@@ -38,6 +38,8 @@ import {
 import { hasCmsPermission, type CmsPermissionKey } from "../shared/permissions";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
+import { customerAcquisitionSchema } from "../shared/customerAcquisition";
+import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
 import { getDb } from "./db";
 import { chileLocalDateTimeToUtc } from "./massageNps";
 import { syncSaunaFromSkedu } from "./saunaSync";
@@ -1617,6 +1619,7 @@ export const saunaRouter = router({
           clientName: z.string().trim().min(2).max(200),
           clientEmail: z.string().trim().email(),
           clientPhone: z.string().trim().min(8).max(40),
+          acquisition: customerAcquisitionSchema,
           bookingDate: dateSchema,
           startTime: timeSchema,
           privateGuestCount: z.number().int().min(1).max(6).optional(),
@@ -1767,6 +1770,12 @@ export const saunaRouter = router({
               })
               .$returningId();
             orderId = created.id;
+            await saveCustomerPurchaseSurvey(tx, {
+              purchaseType: "sauna",
+              purchaseId: orderId,
+              clientEmail: input.clientEmail,
+              acquisition: input.acquisition,
+            });
           } finally {
             await releaseCapacityLock(tx, input.bookingDate);
           }

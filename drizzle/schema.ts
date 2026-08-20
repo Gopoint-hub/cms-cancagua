@@ -646,6 +646,21 @@ export const serviceCartCheckoutItems = mysqlTable("service_cart_checkout_items"
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const serviceCartNotifications = mysqlTable("service_cart_notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  cartOrderId: int("cart_order_id").notNull().unique(),
+  type: mysqlEnum("type", ["confirmation"]).default("confirmation").notNull(),
+  channel: mysqlEnum("channel", ["email"]).default("email").notNull(),
+  status: mysqlEnum("status", ["pending", "sending", "sent", "failed", "skipped"]).default("pending").notNull(),
+  scheduledAt: timestamp("scheduled_at"),
+  sentAt: timestamp("sent_at"),
+  providerId: varchar("provider_id", { length: 180 }),
+  error: text("error"),
+  attemptCount: int("attempt_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
 export type SaunaBooking = typeof saunaBookings.$inferSelect;
 export type SaunaService = typeof saunaServices.$inferSelect;
 export type SaunaCheckoutOrder = typeof saunaCheckoutOrders.$inferSelect;
@@ -1154,6 +1169,9 @@ export const discountCodes = mysqlTable("discount_codes", {
   applicableServices: text("applicable_services"), // JSON: ["biopiscinas", "masajes", "clases", "giftcards"]
   startsAt: timestamp("starts_at"), // Fecha de inicio de validez
   expiresAt: timestamp("expires_at"), // Fecha de expiración
+  // Rango independiente para la fecha en que se realizará el servicio.
+  bookingValidFrom: date("booking_valid_from", { mode: "string" }),
+  bookingValidUntil: date("booking_valid_until", { mode: "string" }),
   active: int("active").default(1).notNull(),
   createdBy: int("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -1162,6 +1180,23 @@ export const discountCodes = mysqlTable("discount_codes", {
 
 export type DiscountCode = typeof discountCodes.$inferSelect;
 export type InsertDiscountCode = typeof discountCodes.$inferInsert;
+
+// Respuestas obligatorias de procedencia capturadas en compras públicas.
+// Se guardan aparte para conservar una fila por compra, incluso cuando el pago
+// agrupa servicios que viven en módulos distintos.
+export const customerPurchaseSurveys = mysqlTable("customer_purchase_surveys", {
+  id: int("id").autoincrement().primaryKey(),
+  purchaseType: varchar("purchase_type", { length: 50 }).notNull(),
+  purchaseId: varchar("purchase_id", { length: 100 }).notNull(),
+  clientEmail: varchar("client_email", { length: 320 }),
+  discoverySource: mysqlEnum("discovery_source", ["advertising", "facebook", "instagram", "google", "friends_family", "other"]).notNull(),
+  discoverySourceOther: varchar("discovery_source_other", { length: 160 }),
+  originType: mysqlEnum("origin_type", ["chile", "foreign"]).notNull(),
+  country: varchar("country", { length: 120 }),
+  region: varchar("region", { length: 160 }),
+  city: varchar("city", { length: 160 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 
 // Uso de códigos de descuento (historial)
 export const discountCodeUsages = mysqlTable("discount_code_usages", {

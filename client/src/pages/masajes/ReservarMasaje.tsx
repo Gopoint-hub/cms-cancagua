@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { CustomerAcquisitionFields } from "@/components/CustomerAcquisitionFields";
+import { EMPTY_CUSTOMER_ACQUISITION, validateCustomerAcquisitionForm } from "@shared/customerAcquisition";
 import { CalendarDays, Clock, User, ShieldAlert, Check, ShoppingCart, Trash2, Plus } from "lucide-react";
 import { addMonths, endOfMonth, format, startOfDay, startOfMonth } from "date-fns";
 import { es } from "date-fns/locale";
@@ -151,6 +153,7 @@ export default function ReservarMasaje() {
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [subscribeNewsletter, setSubscribeNewsletter] = useState(false);
+  const [acquisition, setAcquisition] = useState({ ...EMPTY_CUSTOMER_ACQUISITION });
   const [cart, setCart] = useState<Array<{
     techniqueId: number; techniqueName: string; duration: number; bookingDate: string;
     startTime: string; price: number; notes?: string;
@@ -328,6 +331,8 @@ export default function ReservarMasaje() {
     if (classPlan && !email.trim()) { toast.error("El email es obligatorio para activar tu plan"); return; }
     if (cart.length > 0 && !disclaimerAccepted) { toast.error("Debes aceptar la exención de responsabilidad"); return; }
     if (!termsAccepted) { toast.error("Debes aceptar los Términos y Condiciones"); return; }
+    const validAcquisition = validateCustomerAcquisitionForm(acquisition);
+    if (!validAcquisition) { toast.error("Completa cómo nos encontraste y de dónde vienes"); return; }
 
     const value = checkoutTotal;
     pushMassageEvent("add_payment_info", {
@@ -351,6 +356,7 @@ export default function ReservarMasaje() {
       clientName: name.trim(),
       clientPhone: buildInternationalPhone(countryCode, phone),
       clientEmail: email.trim() || undefined,
+      acquisition: validAcquisition,
       subscribeNewsletter: subscribeNewsletter || undefined,
       discountCode: appliedDiscount?.code,
       giftCardCode: appliedGiftCard?.code,
@@ -672,6 +678,9 @@ export default function ReservarMasaje() {
                 <Label className="text-xs text-muted-foreground">Comentarios (opcional)</Label>
                 <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
                   placeholder="Preferencias, lesiones a considerar..." className="mt-1 rounded-xl resize-none" />
+              </div>
+              <div className="border-t pt-3">
+                <CustomerAcquisitionFields idPrefix="massage" value={acquisition} onChange={setAcquisition} />
               </div>
             </div>
           </div>

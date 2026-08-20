@@ -3,6 +3,8 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { createGetnetSession, getGetnetSessionInfo } from "./getnet";
+import { customerAcquisitionSchema } from "../shared/customerAcquisition";
+import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
 import { sendBookingConfirmations } from "./getnetWebhook";
 import {
   massageTechniques,
@@ -6527,6 +6529,7 @@ const masajesPublicRouter = router({
       clientName: z.string().min(2),
       clientPhone: z.string().optional(),
       clientEmail: z.string().optional(),
+      acquisition: customerAcquisitionSchema,
       subscribeNewsletter: z.boolean().optional(),
       discountCode: z.string().trim().max(50).optional(),
       giftCardCode: z.string().trim().min(1).max(20).optional(),
@@ -6941,6 +6944,13 @@ const masajesPublicRouter = router({
             "No pudimos crear el plan para iniciar el pago. Intenta nuevamente.",
         });
       }
+
+      await saveCustomerPurchaseSurvey(db, {
+        purchaseType: classPlan && prepared.length > 0 ? "classes_massages" : classPlan ? "regular_classes" : "massages",
+        purchaseId: input.checkoutId || bookingIds[0] || membershipId!,
+        clientEmail: input.clientEmail,
+        acquisition: input.acquisition,
+      });
 
       if (normalizedGiftCardCode) {
         const reservationId = bookingIds[0] ?? membershipId!;

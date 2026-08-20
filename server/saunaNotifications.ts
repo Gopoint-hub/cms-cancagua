@@ -22,15 +22,16 @@ type SaunaSettings = typeof saunaSettings.$inferSelect;
 export function buildSaunaNotificationSchedule(input: {
   bookingId: number;
   confirmationAt?: Date;
+  confirmationEmailEnabled?: boolean;
 }): Array<typeof saunaNotifications.$inferInsert> {
   const confirmationAt = input.confirmationAt ?? new Date();
   return [
-    {
+    ...(input.confirmationEmailEnabled === false ? [] : [{
       bookingId: input.bookingId,
-      type: "confirmation",
-      channel: "email",
+      type: "confirmation" as const,
+      channel: "email" as const,
       scheduledAt: confirmationAt,
-    },
+    }]),
     {
       bookingId: input.bookingId,
       type: "confirmation",
@@ -94,7 +95,7 @@ export function saunaStaffRecipient(config: SaunaSettings | undefined): string {
 
 // Copia interna: la confirmación al cliente no le avisa a recepción, así que una
 // reserva de sauna podía entrar sin que nadie en el local se enterara.
-async function sendStaffConfirmation(
+export async function sendSaunaStaffConfirmation(
   booking: SaunaBooking,
   config: SaunaSettings | undefined
 ): Promise<{ success: boolean; error?: string }> {
@@ -241,7 +242,7 @@ export async function processSaunaNotificationQueue(
       // La copia a recepción va pegada al correo de confirmación: si ese no
       // salió, la reserva se sigue reintentando y no corresponde avisar dos veces.
       if (result.success && !isWhatsapp) {
-        const staff = await sendStaffConfirmation(item.booking, config);
+        const staff = await sendSaunaStaffConfirmation(item.booking, config);
         if (!staff.success) {
           console.error(
             "[sauna:notificaciones] Confirmación enviada al cliente; falló la copia a recepción",

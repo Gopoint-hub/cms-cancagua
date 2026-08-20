@@ -53,6 +53,8 @@ import {
   refundTransaction,
 } from "./webpay";
 import { ENV } from "./_core/env";
+import { customerAcquisitionSchema } from "../shared/customerAcquisition";
+import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
 import {
   calculateWellnessCartDiscount,
   recordMassageDiscountUsage,
@@ -1035,6 +1037,7 @@ export const biopoolsRouter = router({
         clientName: z.string().trim().min(2).max(200),
         clientEmail: z.string().trim().email(),
         clientPhone: z.string().trim().min(8).max(40),
+        acquisition: customerAcquisitionSchema,
         bookingDate: dateSchema,
         startTime: timeSchema,
         adultQuantity: z.number().int().min(1).max(40),
@@ -1190,6 +1193,12 @@ export const biopoolsRouter = router({
               })
               .$returningId();
             orderId = created.id;
+            await saveCustomerPurchaseSurvey(tx, {
+              purchaseType: "biopools",
+              purchaseId: orderId,
+              clientEmail: input.clientEmail,
+              acquisition: input.acquisition,
+            });
             await tx
               .insert(biopoolCheckoutItems)
               .values([

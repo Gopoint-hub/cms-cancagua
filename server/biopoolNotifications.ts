@@ -19,16 +19,17 @@ export function buildBiopoolNotificationSchedule(input: {
   reminderEmailEnabled: number;
   reminderWhatsappEnabled: number;
   confirmationAt?: Date;
+  confirmationEmailEnabled?: boolean;
 }): Array<typeof biopoolNotifications.$inferInsert> {
   const confirmationAt = input.confirmationAt ?? new Date();
   const reminderIsFuture = input.reminderAt > confirmationAt;
   return [
-    {
+    ...(input.confirmationEmailEnabled === false ? [] : [{
       bookingId: input.bookingId,
-      type: "confirmation",
-      channel: "email",
+      type: "confirmation" as const,
+      channel: "email" as const,
       scheduledAt: confirmationAt,
-    },
+    }]),
     {
       bookingId: input.bookingId,
       type: "confirmation",
@@ -116,7 +117,7 @@ export function staffRecipient(
 // Copia interna para recepcion: la confirmacion al cliente no les avisa a ellos,
 // asi que una reserva de biopiscinas podia entrar sin que nadie en el local se
 // enterara hasta mirar el panel.
-async function sendStaffConfirmation(
+export async function sendBiopoolStaffConfirmation(
   booking: typeof biopoolBookings.$inferSelect,
   service: typeof biopoolServices.$inferSelect
 ): Promise<{ success: boolean; error?: string }> {
@@ -273,7 +274,7 @@ export async function processBiopoolNotificationQueue(
         !isReminder &&
         item.notification.channel === "email"
       ) {
-        const staff = await sendStaffConfirmation(item.booking, item.service);
+        const staff = await sendBiopoolStaffConfirmation(item.booking, item.service);
         await db.insert(biopoolBookingActivity).values({
           bookingId: item.booking.id,
           action: `confirmation_staff_email_${staff.success ? "sent" : "failed"}`,

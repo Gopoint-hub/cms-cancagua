@@ -16,6 +16,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { CustomerAcquisitionFields } from "@/components/CustomerAcquisitionFields";
+import { EMPTY_CUSTOMER_ACQUISITION, validateCustomerAcquisitionForm } from "@shared/customerAcquisition";
 
 const clp = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -43,6 +45,7 @@ export default function SaunaCheckout() {
     email: "",
     phone: "+56",
   });
+  const [acquisition, setAcquisition] = useState({ ...EMPTY_CUSTOMER_ACQUISITION });
   const services = catalog.data?.services ?? [];
   const policies = catalog.data?.policies;
   const service =
@@ -99,11 +102,15 @@ export default function SaunaCheckout() {
       return toast.error("Selecciona un servicio y horario disponible");
     if (!accepted)
       return toast.error("Debes aceptar las condiciones del servicio");
+    const validAcquisition = validateCustomerAcquisitionForm(acquisition);
+    if (!validAcquisition)
+      return toast.error("Completa cómo nos encontraste y de dónde vienes");
     payment.mutate({
       serviceId: service.id,
       clientName: customer.name,
       clientEmail: customer.email,
       clientPhone: customer.phone,
+      acquisition: validAcquisition,
       bookingDate: date,
       startTime,
       privateGuestCount:
@@ -293,6 +300,9 @@ export default function SaunaCheckout() {
                       }
                     />
                   </div>
+                </div>
+                <div className="border-t pt-4">
+                  <CustomerAcquisitionFields idPrefix="sauna" value={acquisition} onChange={setAcquisition} />
                 </div>
               </CardContent>
             </Card>
