@@ -1,11 +1,39 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 
+export function isDuplicateColumnError(error: unknown): boolean {
+  const visited = new Set<unknown>();
+  let current: unknown = error;
+
+  while (current && !visited.has(current)) {
+    visited.add(current);
+
+    if (typeof current === "object") {
+      const record = current as Record<string, unknown>;
+      if (record.code === "ER_DUP_FIELDNAME" || record.errno === 1060) return true;
+
+      const details = [record.message, record.sqlMessage]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ")
+        .toLowerCase();
+      if (details.includes("duplicate column")) return true;
+
+      current = record.cause;
+      continue;
+    }
+
+    if (String(current).toLowerCase().includes("duplicate column")) return true;
+    break;
+  }
+
+  return false;
+}
+
 async function addColumnIfMissing(db: any, statement: string) {
   try {
     await db.execute(sql.raw(statement));
   } catch (error) {
-    if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    if (!isDuplicateColumnError(error)) throw error;
   }
 }
 
