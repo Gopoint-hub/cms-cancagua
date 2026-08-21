@@ -307,6 +307,14 @@ function PaymentEditor({
       <p className="text-xs text-muted-foreground">
         Podrás generar y enviar el link de pago después de crear la reserva.
       </p>
+      {service === "sauna" &&
+        items.some(item => item.method === "pending_payment") && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            El precio del catálogo quedó pendiente de pago. Puedes continuar
+            así y editar el pago después, o seleccionar ahora el medio real si
+            el cliente ya pagó.
+          </p>
+        )}
       {items.map((item, index) => (
         <div
           key={index}
@@ -529,7 +537,10 @@ function BookingEditor({
     bioServices.data?.filter((item: any) => item.status !== "archived") ?? [];
   const activeSauna =
     saunaServices.data?.filter(
-      (item: any) => item.published && item.kind !== "program"
+      (item: any) =>
+        item.published &&
+        item.kind !== "program" &&
+        Number(item.priceClp) > 0
     ) ?? [];
   const programHasTherapists =
     (programResources.data?.therapists.length ?? 0) >=
@@ -689,11 +700,7 @@ function BookingEditor({
         amountClp: amount,
         discountAmountClp: 0,
         guests: selectedSauna.partySize ?? value.guests,
-        payments: value.payments.map((item, index) =>
-          index === 0 && !item.method
-            ? { ...item, amountClp: String(amount) }
-            : item
-        ),
+        payments: [pendingPayment(amount)],
       });
     }
   }, [value.service, value.serviceId, selectedSauna]);
@@ -799,7 +806,8 @@ function BookingEditor({
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    const saunaAmountClp = Number(item.priceClp ?? 0);
                     onChange({
                       ...value,
                       serviceId: String(item.id),
@@ -807,8 +815,15 @@ function BookingEditor({
                       serviceKind: item.kind ?? "",
                       time: "",
                       discountAmountClp: 0,
-                    })
-                  }
+                      ...(value.service === "sauna"
+                        ? {
+                            amountClp: saunaAmountClp,
+                            guests: Number(item.partySize ?? 1),
+                            payments: [pendingPayment(saunaAmountClp)],
+                          }
+                        : {}),
+                    });
+                  }}
                   className={`flex w-full items-center justify-between gap-3 rounded-2xl border p-4 text-left transition ${selected ? "border-[#9a7655] bg-[#fffaf5] ring-1 ring-[#9a7655]" : "bg-white hover:bg-muted/50"}`}
                 >
                   <div className="min-w-0">
@@ -1236,6 +1251,7 @@ function BookingEditor({
               disabled={
                 value.service === "massages" && !canManageMassagePayments
               }
+              readOnly={value.service === "sauna"}
               value={value.amountClp}
               onChange={event =>
                 onChange({
@@ -1247,8 +1263,7 @@ function BookingEditor({
             />
             {value.service === "sauna" && value.amountClp <= 0 && (
               <p className="mt-1 text-xs font-medium text-amber-700">
-                Sauna necesita un total mayor a $0 para registrar y cobrar la
-                reserva.
+                Selecciona un servicio de Sauna para cargar su precio.
               </p>
             )}
           </div>

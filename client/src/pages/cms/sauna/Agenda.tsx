@@ -110,6 +110,14 @@ function emptyPayment(amountClp = ""): PaymentDraft {
     giftCardCode: "",
   };
 }
+
+function pendingPayment(amountClp: number): PaymentDraft {
+  return {
+    ...emptyPayment(String(Math.max(0, amountClp))),
+    method: "pending_payment",
+    status: "pending",
+  };
+}
 function paymentDateTimeInput(value: unknown) {
   if (!value) return chileDateTimeInput();
   const date = new Date(String(value));
@@ -265,6 +273,7 @@ function PaymentFields({
 }
 
 const initialForm = (date: string) => ({
+  serviceId: "",
   serviceName: "Sauna Nativo",
   kind: "shared" as "shared" | "private" | "staff" | "manual",
   clientName: "",
@@ -335,6 +344,13 @@ export default function SaunaAgenda() {
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
   });
+  const saunaServices = trpc.sauna.services.list.useQuery();
+  const publishedSaunaServices = (saunaServices.data ?? []).filter(
+    service =>
+      service.published &&
+      service.kind !== "program" &&
+      Number(service.priceClp) > 0
+  );
   const utils = trpc.useUtils();
   const create = trpc.sauna.agenda.create.useMutation({
     onSuccess: () => {
@@ -629,21 +645,54 @@ export default function SaunaAgenda() {
               <DialogTitle>Nueva reserva de sauna</DialogTitle>
             </DialogHeader>
       <div className="grid gap-4 py-2 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Field label="Servicio / variante *">
+                  <Select
+                    value={form.serviceId}
+                    onValueChange={serviceId => {
+                      const selected = publishedSaunaServices.find(
+                        service => String(service.id) === serviceId
+                      );
+                      if (!selected) return;
+                      const amountClp = Number(selected.priceClp);
+                      setForm(current => ({
+                        ...current,
+                        serviceId,
+                        serviceName: selected.name,
+                        kind: selected.kind as "shared" | "private" | "staff",
+                        guests: selected.partySize,
+                        amountClp,
+                        paymentStatus: "pending",
+                        paymentMethod: "pending_payment",
+                      }));
+                      setPayments([pendingPayment(amountClp)]);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona una opción publicada" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {publishedSaunaServices.map(service => (
+                        <SelectItem key={service.id} value={String(service.id)}>
+                          {service.name} · {service.partySize} persona
+                          {service.partySize === 1 ? "" : "s"} · ${" "}
+                          {Number(service.priceClp).toLocaleString("es-CL")}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!saunaServices.isLoading &&
+                    !publishedSaunaServices.length && (
+                      <p className="text-xs font-medium text-amber-700">
+                        No hay servicios de Sauna publicados con precio.
+                      </p>
+                    )}
+                </Field>
+              </div>
               <Field label="Tipo">
                 <Select
                   value={form.kind}
-                  onValueChange={(value: any) =>
-                    setForm({
-                      ...form,
-                      kind: value,
-                      serviceName:
-                        value === "private"
-                          ? "Sauna Nativo Privado"
-                          : value === "staff"
-                            ? "Sauna Nativo STAFF"
-                            : "Sauna Nativo",
-                    })
-                  }
+                  disabled
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -660,12 +709,19 @@ export default function SaunaAgenda() {
                 <Input
                   type="number"
                   min={1}
-                  max={form.kind === "private" ? 6 : 5}
+                  max={form.kind === "private" ? 6 : 3}
                   value={form.guests}
+                  readOnly={form.kind !== "private"}
                   onChange={event =>
                     setForm({ ...form, guests: Number(event.target.value) })
                   }
                 />
+                {form.kind === "private" && (
+                  <p className="text-xs text-muted-foreground">
+                    Registra los asistentes reales (1–6); el horario bloqueará
+                    los 6 cupos.
+                  </p>
+                )}
               </Field>
               <Field label="Fecha">
                 <Input
@@ -715,20 +771,19 @@ export default function SaunaAgenda() {
                   type="number"
                   min={1}
                   value={form.amountClp}
-                  onChange={event => {
-                    const amountClp = Number(event.target.value);
-                    setForm({ ...form, amountClp });
-                    if (payments.length === 1 && !payments[0].method)
-                      setPayments([emptyPayment(String(amountClp))]);
-                  }}
+                  readOnly
                 />
                 {form.amountClp <= 0 && (
                   <p className="text-xs font-medium text-amber-700">
-                    Ingresa un total mayor a $0 para habilitar los pagos de la
-                    reserva.
+                    Selecciona un servicio para cargar su precio.
                   </p>
                 )}
               </Field>
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 sm:col-span-2">
+                El precio del catálogo queda como pago pendiente. Puedes crear
+                la reserva así y confirmar o editar el medio de pago cuando el
+                cliente pague.
+              </p>
               <div className="sm:col-span-2 space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>Pagos y abonos</Label>
@@ -799,6 +854,10 @@ export default function SaunaAgenda() {
               </Button>
               <Button
                 onClick={() => {
+                  if (!form.serviceId) {
+                    toast.error("Selecciona un servicio de Sauna publicado");
+                    return;
+                  }
                   if (!Number.isInteger(form.amountClp) || form.amountClp <= 0) {
                     toast.error("Ingresa un valor total mayor a $0");
                     return;
@@ -840,6 +899,7 @@ export default function SaunaAgenda() {
                 }}
                 disabled={
                   create.isPending ||
+                  !form.serviceId ||
                   form.amountClp <= 0 ||
                   (form.amountClp > 0 &&
                     (payments.some(payment => !paymentIsComplete(payment)) ||

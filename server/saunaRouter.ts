@@ -81,6 +81,8 @@ import {
   presentSaunaBookingFinancials,
 } from "./reservationFinancialPrivacy";
 import {
+  prepareSaunaBookingPaymentState,
+  prepareSaunaPaymentUpdate,
   prepareSaunaTotalDefinition,
   saunaBookingTotalSchema,
 } from "./saunaPaymentTotal";
@@ -546,18 +548,12 @@ export const saunaRouter = router({
             code: "FORBIDDEN",
             message: "No tienes permisos para canjear Gift Cards",
           });
-        const plannedClp = payments.reduce(
-          (sum, payment) => sum + payment.amountClp,
-          0
-        );
-        const paidClp = payments
-          .filter(payment => payment.status === "paid")
-          .reduce((sum, payment) => sum + payment.amountClp, 0);
-        if (plannedClp > input.amountClp)
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Los pagos superan el total de la reserva",
-          });
+        const initialPayment = prepareSaunaBookingPaymentState({
+          totalAmountClp: input.amountClp,
+          declaredPaymentStatus: input.paymentStatus,
+          declaredPaymentMethod: input.paymentMethod,
+          payments,
+        });
         const privateBooking =
           input.isPrivate || input.kind === "private" || input.guests >= 4;
         const partyError = validateSaunaParty(input.guests, privateBooking);
@@ -592,19 +588,10 @@ export const saunaRouter = router({
                 isPrivate: privateBooking ? 1 : 0,
                 status: input.isConfirmed ? "confirmed" : "pending",
                 isConfirmed: input.isConfirmed ? 1 : 0,
-                paymentStatus: payments.length
-                  ? calculatedPaymentStatus(paidClp, input.amountClp)
-                  : input.paymentStatus,
-                paymentMethod:
-                  payments.length > 1
-                    ? "mixed"
-                    : payments[0]?.method || input.paymentMethod || null,
+                paymentStatus: initialPayment.paymentStatus,
+                paymentMethod: initialPayment.paymentMethod,
                 amountClp: input.amountClp,
-                amountPaidClp: payments.length
-                  ? paidClp
-                  : input.paymentStatus === "paid"
-                    ? input.amountClp
-                    : 0,
+                amountPaidClp: initialPayment.amountPaidClp,
                 source: "cms",
                 origin: "panel",
                 notes: input.notes || null,
@@ -708,15 +695,29 @@ export const saunaRouter = router({
             status: booking.status,
             currentAmountClp: booking.amountClp,
             amountPaidClp: booking.amountPaidClp,
+            detailedPaymentCount: payments.length,
             nonRefundedPaymentsClp,
             requestedAmountClp: input.amountClp,
           });
 
+          if (next.shouldCreatePendingPayment) {
+            await tx.insert(reservationPayments).values({
+              module: "sauna",
+              reservationId: booking.id,
+              method: "pending_payment",
+              status: "pending",
+              amountClp: input.amountClp,
+              createdByUserId: ctx.user.id,
+            });
+          }
           await tx
             .update(saunaBookings)
             .set({
               amountClp: input.amountClp,
               paymentStatus: next.paymentStatus,
+              ...(next.shouldCreatePendingPayment
+                ? { paymentMethod: "pending_payment" }
+                : {}),
             })
             .where(eq(saunaBookings.id, booking.id));
           return {
@@ -955,24 +956,13 @@ export const saunaRouter = router({
                 eq(reservationPayments.reservationId, booking.id)
               )
             );
-          const legacy = Math.max(
-            0,
-            booking.amountPaidClp -
-              rows
-                .filter(row => row.status === "paid")
-                .reduce((sum, row) => sum + row.amountClp, 0)
-          );
-          const otherPlanned = rows
-            .filter(row => row.id !== payment.id && row.status !== "refunded")
-            .reduce((sum, row) => sum + row.amountClp, 0);
-          if (
-            legacy + otherPlanned + input.payment.amountClp >
-            booking.amountClp
-          )
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "Los pagos superan el total de la reserva",
-            });
+          const next = prepareSaunaPaymentUpdate({
+            totalAmountClp: booking.amountClp,
+            currentAmountPaidClp: booking.amountPaidClp,
+            targetPaymentId: payment.id,
+            rows,
+            replacement: input.payment,
+          });
           await tx
             .update(reservationPayments)
             .set({
@@ -987,12 +977,6 @@ export const saunaRouter = router({
               cardType: input.payment.cardType ?? null,
             })
             .where(eq(reservationPayments.id, payment.id));
-          const newPaid =
-            legacy +
-            rows
-              .filter(row => row.id !== payment.id && row.status === "paid")
-              .reduce((sum, row) => sum + row.amountClp, 0) +
-            (input.payment.status === "paid" ? input.payment.amountClp : 0);
           const remaining = rows.filter(
             row => row.id !== payment.id && row.status !== "refunded"
           );
@@ -1005,17 +989,14 @@ export const saunaRouter = router({
           await tx
             .update(saunaBookings)
             .set({
-              amountPaidClp: newPaid,
-              paymentStatus: calculatedPaymentStatus(
-                newPaid,
-                booking.amountClp
-              ),
+              amountPaidClp: next.newAmountPaidClp,
+              paymentStatus: next.paymentStatus,
               paymentMethod:
-                legacy === 0 && remaining.length === 1
+                next.legacyAmountPaidClp === 0 && remaining.length === 1
                   ? remaining[0].method
                   : "mixed",
               paymentReference:
-                legacy === 0 && remaining.length === 1
+                next.legacyAmountPaidClp === 0 && remaining.length === 1
                   ? (input.payment.reference ?? null)
                   : null,
             })
