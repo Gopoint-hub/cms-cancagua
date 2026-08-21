@@ -152,7 +152,7 @@ function PaymentFields({
 }) {
   return (
     <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
-      <Field label="Medio">
+      <Field label="Medio *">
         <Select
           value={payment.method}
           onValueChange={value =>
@@ -183,7 +183,7 @@ function PaymentFields({
           </SelectContent>
         </Select>
       </Field>
-      <Field label="Monto">
+      <Field label="Monto *">
         <Input
           type="number"
           min={1}
@@ -212,7 +212,7 @@ function PaymentFields({
         </Field>
       )}
       {payment.status === "paid" && (
-        <Field label="Fecha y hora">
+        <Field label="Fecha y hora *">
           <Input
             type="datetime-local"
             value={payment.paidAt}
@@ -232,7 +232,7 @@ function PaymentFields({
           </Field>
         </div>
       ) : payment.status === "paid" && payment.method !== "cash" ? (
-        <Field label="Código o referencia">
+        <Field label="Código o referencia *">
           <Input
             value={payment.reference}
             onChange={event => onChange({ reference: event.target.value })}
@@ -243,7 +243,7 @@ function PaymentFields({
         CARD_PAYMENT_METHODS.includes(
           payment.method as ReservationPaymentMethod
         ) && (
-          <Field label="Tarjeta">
+          <Field label="Tarjeta *">
             <Select
               value={payment.cardType}
               onValueChange={value =>
@@ -710,10 +710,10 @@ export default function SaunaAgenda() {
                   }
                 />
               </Field>
-              <Field label="Valor total">
+              <Field label="Valor total *">
                 <Input
                   type="number"
-                  min={0}
+                  min={1}
                   value={form.amountClp}
                   onChange={event => {
                     const amountClp = Number(event.target.value);
@@ -722,6 +722,12 @@ export default function SaunaAgenda() {
                       setPayments([emptyPayment(String(amountClp))]);
                   }}
                 />
+                {form.amountClp <= 0 && (
+                  <p className="text-xs font-medium text-amber-700">
+                    Ingresa un total mayor a $0 para habilitar los pagos de la
+                    reserva.
+                  </p>
+                )}
               </Field>
               <div className="sm:col-span-2 space-y-3">
                 <div className="flex items-center justify-between">
@@ -793,6 +799,10 @@ export default function SaunaAgenda() {
               </Button>
               <Button
                 onClick={() => {
+                  if (!Number.isInteger(form.amountClp) || form.amountClp <= 0) {
+                    toast.error("Ingresa un valor total mayor a $0");
+                    return;
+                  }
                   if (
                     !canRedeemGiftCards &&
                     payments.some(payment => payment.method === "gift_card")
@@ -830,6 +840,7 @@ export default function SaunaAgenda() {
                 }}
                 disabled={
                   create.isPending ||
+                  form.amountClp <= 0 ||
                   (form.amountClp > 0 &&
                     (payments.some(payment => !paymentIsComplete(payment)) ||
                       payments.reduce(

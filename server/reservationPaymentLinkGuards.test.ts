@@ -163,6 +163,6 @@ describe("vencimiento de links de pago", () => {
       visit(source);
     }
 
-    expect(guardedTransactions).toBe(29);
+    expect(guardedTransactions).toBe(30);
   });
 });

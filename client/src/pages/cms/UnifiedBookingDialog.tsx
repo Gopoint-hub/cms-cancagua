@@ -313,18 +313,13 @@ function PaymentEditor({
           className="grid gap-2 rounded-xl border p-3 sm:grid-cols-2"
         >
           <div>
-            <Label>Medio</Label>
+            <Label>Medio *</Label>
             <Select
               value={item.method}
               onValueChange={method =>
                 update(index, {
                   method,
-                  status:
-                    method === "pending_payment"
-                      ? "pending"
-                      : method === "gift_card"
-                        ? "paid"
-                        : item.status,
+                  status: method === "pending_payment" ? "pending" : "paid",
                   reference: "",
                   cardType: "",
                   giftCardCode: "",
@@ -348,7 +343,7 @@ function PaymentEditor({
             </Select>
           </div>
           <div>
-            <Label>Monto</Label>
+            <Label>Monto *</Label>
             <Input
               type="number"
               min={1}
@@ -380,7 +375,7 @@ function PaymentEditor({
           </div>
           {item.status === "paid" && (
             <div>
-              <Label>Fecha y hora</Label>
+              <Label>Fecha y hora *</Label>
               <Input
                 type="datetime-local"
                 value={item.paidAt}
@@ -404,9 +399,10 @@ function PaymentEditor({
             </div>
           ) : item.status === "paid" && item.method !== "cash" ? (
             <div>
-              <Label>Referencia</Label>
+              <Label>Referencia *</Label>
               <Input
                 value={item.reference}
+                placeholder="Obligatoria para este medio"
                 onChange={event =>
                   update(index, { reference: event.target.value })
                 }
@@ -415,7 +411,7 @@ function PaymentEditor({
           ) : null}
           {cardMethods.has(item.method) && item.status === "paid" && (
             <div>
-              <Label>Tarjeta</Label>
+              <Label>Tarjeta *</Label>
               <Select
                 value={item.cardType}
                 onValueChange={(cardType: "credit" | "debit") =>
@@ -423,7 +419,7 @@ function PaymentEditor({
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecciona" />
+                  <SelectValue placeholder="Selecciona (obligatorio)" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="credit">Crédito</SelectItem>
@@ -1233,10 +1229,10 @@ function BookingEditor({
           ) : null)}
         {(section === "all" || section === "variant") && (
           <div>
-            <Label>Monto</Label>
+            <Label>Monto{value.service === "sauna" ? " *" : ""}</Label>
             <Input
               type="number"
-              min={0}
+              min={value.service === "sauna" ? 1 : 0}
               disabled={
                 value.service === "massages" && !canManageMassagePayments
               }
@@ -1249,6 +1245,12 @@ function BookingEditor({
                 })
               }
             />
+            {value.service === "sauna" && value.amountClp <= 0 && (
+              <p className="mt-1 text-xs font-medium text-amber-700">
+                Sauna necesita un total mayor a $0 para registrar y cobrar la
+                reserva.
+              </p>
+            )}
           </div>
         )}
         {(section === "all" || section === "payment") &&
@@ -1587,7 +1589,7 @@ export function UnifiedBookingDialog({
         item.serviceId &&
         item.date &&
         item.time &&
-        (item.service === "sauna" || item.amountClp > 0) &&
+        item.amountClp > 0 &&
         (program || !item.discountCode.trim() || item.discountAmountClp > 0) &&
         (item.service !== "massages" || item.roomId) &&
         (!program ||
@@ -1611,7 +1613,7 @@ export function UnifiedBookingDialog({
     validClientPhone(client.phone);
   const variantValid =
     Boolean(activeItem?.serviceId) &&
-    (activeItem?.service === "sauna" || activeItem?.amountClp > 0) &&
+    activeItem?.amountClp > 0 &&
     (activeItem?.service !== "biopools" || activeItem.adults >= 1) &&
     (activeItem?.serviceKind !== "massage_program" ||
       activeItem.modality === "simple" ||
@@ -1623,6 +1625,8 @@ export function UnifiedBookingDialog({
   );
   const paymentValid = activeItem
     ? (() => {
+        if (activeItem.service === "sauna" && activeItem.amountClp <= 0)
+          return false;
         if (
           activeItem.service === "massages" &&
           !canManageMassagePayments
@@ -1650,12 +1654,24 @@ export function UnifiedBookingDialog({
   const next = () => {
     if (step === 0 && !activeItem.serviceId)
       return toast.error("Selecciona un servicio");
+    if (
+      step === 1 &&
+      activeItem.service === "sauna" &&
+      activeItem.amountClp <= 0
+    )
+      return toast.error("Ingresa un monto mayor a $0 para Sauna");
     if (step === 1 && !variantValid)
       return toast.error("Completa la variante y cantidad de personas");
     if (step === 2 && !availabilityValid)
       return toast.error("Selecciona un día y horario disponible");
     if (step === 3 && !clientValid)
       return toast.error("Completa los datos del cliente");
+    if (
+      step === 4 &&
+      activeItem.service === "sauna" &&
+      activeItem.amountClp <= 0
+    )
+      return toast.error("Ingresa un monto mayor a $0 para Sauna");
     if (step === 4 && !paymentValid)
       return toast.error("Revisa descuentos, Gift Cards y pagos");
     if (step === 2 && activeIndex > 0) {

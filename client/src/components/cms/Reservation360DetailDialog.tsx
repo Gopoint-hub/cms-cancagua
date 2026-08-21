@@ -229,19 +229,34 @@ function paymentPayload(draft: PaymentDraft) {
   };
 }
 
-function validPayment(draft: PaymentDraft) {
+function paymentValidationMessage(draft: PaymentDraft): string | null {
+  if (!draft.method) return "Selecciona el medio de pago";
   if (
-    !draft.method ||
     !Number.isInteger(Number(draft.amountClp)) ||
     Number(draft.amountClp) <= 0
   )
-    return false;
+    return "Ingresa un monto mayor a $0, sin decimales";
   if (draft.method === "gift_card")
-    return Boolean(draft.giftCardCode.trim()) && draft.status === "paid";
-  if (draft.status === "pending") return true;
-  if (!draft.paidAt || (draft.method !== "cash" && !draft.reference.trim()))
-    return false;
-  return !CARD_METHODS.has(draft.method) || Boolean(draft.cardType);
+    return draft.giftCardCode.trim() && draft.status === "paid"
+      ? null
+      : "Ingresa el código de la Gift Card";
+  if (draft.status === "pending") return null;
+  if (!draft.paidAt) return "Ingresa la fecha y hora del pago";
+  if (draft.method !== "cash" && !draft.reference.trim())
+    return "Ingresa la referencia del pago";
+  if (CARD_METHODS.has(draft.method) && !draft.cardType)
+    return "Selecciona si la tarjeta es de crédito o débito";
+  return null;
+}
+
+function unallocatedPaymentAmountClp(payment: any): number {
+  const totalAmountClp = Number(payment?.totalAmountClp ?? 0);
+  const plannedAmountClp = (payment?.lines ?? [])
+    .filter(
+      (line: any) => line.type === "payment" && line.status !== "refunded"
+    )
+    .reduce((sum: number, line: any) => sum + Number(line.amountClp ?? 0), 0);
+  return Math.max(0, totalAmountClp - plannedAmountClp);
 }
 
 function PaymentManager({
@@ -254,8 +269,26 @@ function PaymentManager({
   onChanged: () => Promise<unknown> | void;
 }) {
   const service = event.service as "massages" | "biopools" | "sauna";
+  const shouldDefineSaunaTotal =
+    service === "sauna" &&
+    detail.payment.totalAmountClp <= 0 &&
+    !["paid", "refunded"].includes(detail.payment.status ?? "");
+  const unallocatedAmountClp = unallocatedPaymentAmountClp(detail.payment);
+  const pendingAllocatedAmountClp = (detail.payment?.lines ?? [])
+    .filter(
+      (line: any) =>
+        line.type === "payment" &&
+        line.status === "pending" &&
+        Number(line.amountClp ?? 0) > 0
+    )
+    .reduce((sum: number, line: any) => sum + Number(line.amountClp ?? 0), 0);
   const [draft, setDraft] = useState<PaymentDraft>(() =>
-    emptyPayment(String(detail.payment?.balanceAmountClp || ""))
+    emptyPayment(String(unallocatedAmountClp || ""))
+  );
+  const [totalAmountDraft, setTotalAmountDraft] = useState(
+    detail.payment?.totalAmountClp > 0
+      ? String(detail.payment.totalAmountClp)
+      : ""
   );
   const [editingId, setEditingId] = useState<number | null>(null);
   const [discountCode, setDiscountCode] = useState(
@@ -286,7 +319,12 @@ function PaymentManager({
     );
 
   useEffect(() => {
-    setDraft(emptyPayment(String(detail.payment?.balanceAmountClp || "")));
+    setDraft(emptyPayment(String(unallocatedAmountClp || "")));
+    setTotalAmountDraft(
+      detail.payment?.totalAmountClp > 0
+        ? String(detail.payment.totalAmountClp)
+        : ""
+    );
     setEditingId(null);
     setDiscountCode(detail.payment?.discountCode ?? "");
     setGiftCardCode("");
@@ -297,7 +335,9 @@ function PaymentManager({
   }, [
     event.id,
     detail.payment?.balanceAmountClp,
+    detail.payment?.totalAmountClp,
     detail.payment?.discountCode,
+    unallocatedAmountClp,
   ]);
 
   const massageAdd = trpc.masajes.agenda.addPayment.useMutation();
@@ -311,6 +351,8 @@ function PaymentManager({
   const saunaAdd = trpc.sauna.agenda.addPayment.useMutation();
   const saunaUpdate = trpc.sauna.agenda.updatePayment.useMutation();
   const saunaRemove = trpc.sauna.agenda.removePayment.useMutation();
+  const saunaDefineTotalAmount =
+    trpc.sauna.agenda.defineTotalAmount.useMutation();
   const materializeLegacy =
     trpc.operations360.materializeLegacyPayment.useMutation();
   const replaceGiftCard =
@@ -376,8 +418,8 @@ function PaymentManager({
         ? biopoolAdd.mutateAsync({ bookingId: event.entityId, payment })
         : saunaAdd.mutateAsync({ bookingId: event.entityId, payment });
   const savePayment = () => {
-    if (!validPayment(draft))
-      return toast.error("Completa los datos obligatorios del pago");
+    const validationMessage = paymentValidationMessage(draft);
+    if (validationMessage) return toast.error(validationMessage);
     if (draft.method === "gift_card" && !canRedeemGiftCards)
       return toast.error("No tienes permisos para gestionar Gift Cards");
     const payment = paymentPayload(draft) as any;
@@ -405,6 +447,19 @@ function PaymentManager({
       );
     }
     return execute(() => addPayment(payment), "Pago agregado");
+  };
+  const defineSaunaTotalAmount = () => {
+    const amountClp = Number(totalAmountDraft);
+    if (!Number.isInteger(amountClp) || amountClp <= 0)
+      return toast.error("Ingresa un total mayor a $0, sin decimales");
+    return execute(
+      () =>
+        saunaDefineTotalAmount.mutateAsync({
+          bookingId: event.entityId,
+          amountClp,
+        }),
+      "Total de la reserva guardado"
+    );
   };
   const paymentIdFor = async (line: any) => {
     const paymentId = Number(String(line.id).replace("payment:", ""));
@@ -554,12 +609,54 @@ function PaymentManager({
   };
 
   const hasOutstandingBalance = detail.payment.balanceAmountClp > 0;
+  const hasUnallocatedBalance =
+    hasOutstandingBalance && unallocatedAmountClp > 0;
+  const outstandingBalanceIsAssigned =
+    hasOutstandingBalance &&
+    !hasUnallocatedBalance &&
+    pendingAllocatedAmountClp > 0;
   const otherPaymentActionsLocked =
     paymentLinkLocked || !activePaymentLink.isFetched;
   const paymentFieldId = `payment-${service}-${event.entityId}`;
 
   return (
     <div className="space-y-4">
+      {shouldDefineSaunaTotal && (
+        <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+          <div>
+            <p className="font-semibold">Falta definir el total de Sauna</p>
+            <p className="mt-1 text-sm">
+              Esta reserva llegó sin valor. Define cuánto se debe cobrar antes
+              de registrar un pago manual.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <div>
+              <Label htmlFor={`${paymentFieldId}-total`}>
+                Total a cobrar *
+              </Label>
+              <Input
+                id={`${paymentFieldId}-total`}
+                type="number"
+                inputMode="numeric"
+                min={1}
+                placeholder="Ej. 30000"
+                value={totalAmountDraft}
+                onChange={event => setTotalAmountDraft(event.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              disabled={busy || saunaDefineTotalAmount.isPending}
+              onClick={defineSaunaTotalAmount}
+            >
+              {saunaDefineTotalAmount.isPending
+                ? "Guardando…"
+                : "Guardar total y habilitar pagos"}
+            </Button>
+          </div>
+        </section>
+      )}
       <div className="overflow-hidden rounded-xl border">
         {detail.payment.lines.map((line: any) => {
           const processorProtected = [
@@ -698,12 +795,14 @@ function PaymentManager({
           <div>
             <p className="font-semibold">
               {hasOutstandingBalance
-                ? `Elige cómo cubrir el saldo · ${money(detail.payment.balanceAmountClp)}`
+                ? outstandingBalanceIsAssigned
+                  ? `Saldo pendiente ya asignado · ${money(detail.payment.balanceAmountClp)}`
+                  : `Elige cómo cubrir el saldo · ${money(detail.payment.balanceAmountClp)}`
                 : editingId
                   ? "Editar pago registrado"
                   : "Cobro electrónico en revisión"}
             </p>
-            {hasOutstandingBalance && (
+            {hasOutstandingBalance && !outstandingBalanceIsAssigned && (
               <p className="mt-1 text-xs text-muted-foreground">
                 Abre una opción para ver su detalle. Las opciones desaparecerán
                 cuando la reserva esté pagada al 100%.
@@ -724,6 +823,14 @@ function PaymentManager({
                 : activePaymentLink.data?.status === "reconciliation_required"
                   ? "El pago electrónico está en revisión. No registres otro cobro hasta conciliarlo."
                   : "Hay un link vigente. Cancélalo antes de elegir otra forma de pago."}
+            </p>
+          )}
+
+          {pendingAllocatedAmountClp > 0 && !editingId && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              {outstandingBalanceIsAssigned
+                ? "El saldo completo ya está asignado a un pago pendiente. Para registrarlo manualmente, usa el lápiz de esa fila y cámbiala a Pagado. Si prefieres cobrar por internet, el link reemplazará ese pendiente."
+                : `${money(pendingAllocatedAmountClp)} ya están asignados a un pago pendiente. Puedes editar esa fila con el lápiz; un pago nuevo sólo puede usar los ${money(unallocatedAmountClp)} restantes.`}
             </p>
           )}
 
@@ -819,7 +926,7 @@ function PaymentManager({
               </AccordionItem>
             )}
 
-            {(hasOutstandingBalance || Boolean(editingId)) && (
+            {(hasUnallocatedBalance || Boolean(editingId)) && (
               <AccordionItem
                 value="manual"
                 disabled={otherPaymentActionsLocked}
@@ -857,9 +964,7 @@ function PaymentManager({
                           onClick={() => {
                             setEditingId(null);
                             setDraft(
-                              emptyPayment(
-                                String(detail.payment.balanceAmountClp || "")
-                              )
+                              emptyPayment(String(unallocatedAmountClp || ""))
                             );
                             setOpenPaymentAction("");
                           }}
@@ -872,7 +977,7 @@ function PaymentManager({
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <Label htmlFor={`${paymentFieldId}-method`}>
-                          Medio de pago
+                          Medio de pago *
                         </Label>
                         <Select
                           value={draft.method}
@@ -889,9 +994,7 @@ function PaymentManager({
                               status:
                                 method === "pending_payment"
                                   ? "pending"
-                                  : method === "gift_card"
-                                    ? "paid"
-                                    : current.status,
+                                  : "paid",
                             }))
                           }
                         >
@@ -941,7 +1044,7 @@ function PaymentManager({
                       </div>
                       <div>
                         <Label htmlFor={`${paymentFieldId}-amount`}>
-                          Monto
+                          Monto *
                         </Label>
                         <Input
                           id={`${paymentFieldId}-amount`}
@@ -959,7 +1062,7 @@ function PaymentManager({
                       {draft.status === "paid" && (
                         <div>
                           <Label htmlFor={`${paymentFieldId}-paid-at`}>
-                            Fecha y hora
+                            Fecha y hora *
                           </Label>
                           <Input
                             id={`${paymentFieldId}-paid-at`}
@@ -993,11 +1096,12 @@ function PaymentManager({
                       ) : draft.method !== "cash" && draft.status === "paid" ? (
                         <div>
                           <Label htmlFor={`${paymentFieldId}-reference`}>
-                            Referencia
+                            Referencia *
                           </Label>
                           <Input
                             id={`${paymentFieldId}-reference`}
                             value={draft.reference}
+                            placeholder="Obligatoria para este medio"
                             onChange={e =>
                               setDraft(current => ({
                                 ...current,
@@ -1011,7 +1115,7 @@ function PaymentManager({
                         draft.status === "paid" && (
                           <div>
                             <Label htmlFor={`${paymentFieldId}-card-type`}>
-                              Tipo de tarjeta
+                              Tipo de tarjeta *
                             </Label>
                             <Select
                               value={draft.cardType}
@@ -1020,7 +1124,7 @@ function PaymentManager({
                               }
                             >
                               <SelectTrigger id={`${paymentFieldId}-card-type`}>
-                                <SelectValue placeholder="Selecciona" />
+                                <SelectValue placeholder="Selecciona (obligatorio)" />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="credit">Crédito</SelectItem>
@@ -1033,9 +1137,7 @@ function PaymentManager({
                     <Button
                       className="w-full sm:w-auto"
                       type="button"
-                      disabled={
-                        busy || paymentLinkLocked || !validPayment(draft)
-                      }
+                      disabled={busy || paymentLinkLocked}
                       onClick={savePayment}
                     >
                       <Plus className="mr-2 h-4 w-4" />
@@ -1884,13 +1986,19 @@ export function Reservation360DetailDialog({
     if (open) setTab("general");
   }, [open, event?.id]);
   const meta = event ? RESERVATION_360_SERVICE_META[event.service] : null;
+  const missingPaymentTotal =
+    event?.service === "sauna" &&
+    detail?.payment?.totalAmountClp <= 0 &&
+    !["paid", "refunded"].includes(detail.payment.status ?? "");
   const paymentTone = !detail?.payment
     ? "border-slate-200 bg-background"
-    : detail.payment.balanceAmountClp <= 0
-      ? "border-emerald-300 bg-emerald-50/80"
-      : detail.payment.amountClp > 0
-        ? "border-amber-300 bg-amber-50/80"
-        : "border-rose-300 bg-rose-50/80";
+    : missingPaymentTotal
+      ? "border-amber-300 bg-amber-50/80"
+      : detail.payment.balanceAmountClp <= 0
+        ? "border-emerald-300 bg-emerald-50/80"
+        : detail.payment.amountClp > 0
+          ? "border-amber-300 bg-amber-50/80"
+          : "border-rose-300 bg-rose-50/80";
   const refreshReservationViews = async () => {
     await Promise.all([
       query.refetch(),
@@ -1941,6 +2049,21 @@ export function Reservation360DetailDialog({
           </p>
         ) : detail ? (
           <>
+            {detail.status !== "cancelled" && missingPaymentTotal && (
+              <div className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold">Total de Sauna sin definir</p>
+                  <p className="text-sm text-amber-800">
+                    Define el valor de la reserva para habilitar sus pagos.
+                  </p>
+                </div>
+                {detail.canManagePayments && (
+                  <Button variant="outline" onClick={() => setTab("payments")}>
+                    Definir total y registrar pago
+                  </Button>
+                )}
+              </div>
+            )}
             {detail.status !== "cancelled" &&
               detail.payment?.balanceAmountClp > 0 && (
                 <div className="flex flex-col gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-red-950 sm:flex-row sm:items-center sm:justify-between">
@@ -2004,20 +2127,24 @@ export function Reservation360DetailDialog({
                   <p className="mt-1 font-semibold">
                     {detail.paymentRestricted
                       ? "Información restringida"
-                      : detail.payment
-                        ? detail.payment.balanceAmountClp <= 0
-                          ? "Pagada"
-                          : detail.payment.amountClp > 0
-                            ? "Abonada"
-                            : "No pagada"
-                        : "No corresponde"}
+                      : missingPaymentTotal
+                        ? "Total sin definir"
+                        : detail.payment
+                          ? detail.payment.balanceAmountClp <= 0
+                            ? "Pagada"
+                            : detail.payment.amountClp > 0
+                              ? "Abonada"
+                              : "No pagada"
+                          : "No corresponde"}
                   </p>
                   <p className="text-sm text-muted-foreground">
                     {detail.paymentRestricted
                       ? "Requiere permiso de pagos o ventas"
-                      : detail.payment
-                        ? money(detail.payment.amountClp)
-                        : "Clase programada"}
+                      : missingPaymentTotal
+                        ? "Abre Pagos para habilitar el cobro"
+                        : detail.payment
+                          ? money(detail.payment.amountClp)
+                          : "Clase programada"}
                   </p>
                 </CardContent>
               </Card>

@@ -9,6 +9,7 @@ import {
 import { addMinutesToTime, inferSaunaBooking } from "../shared/sauna";
 import { getDb } from "./db";
 import { chileLocalDateTimeToUtc } from "./massageNps";
+import { resolveSyncedSaunaTotalClp } from "./saunaPaymentTotal";
 import {
   getAllSkeduAppointments,
   getSkeduBusinessUser,
@@ -226,6 +227,12 @@ async function syncSaunaFromSkeduUnlocked(rangeFrom: string, rangeTo: string) {
         appointment.DeletedAt || appointment.RealDeletedAt
       );
       const user = users.get(appointment.UserUUID);
+      const externalAmountClp = resolveSyncedSaunaTotalClp(
+        Number(
+          appointment.SessionPriceWithDiscount ?? appointment.SessionPrice ?? 0
+        ),
+        0
+      );
       const values = {
         skeduGroupUuid: appointment.GroupUUID ?? null,
         skeduUserUuid: appointment.UserUUID ?? null,
@@ -250,9 +257,7 @@ async function syncSaunaFromSkeduUnlocked(rangeFrom: string, rangeTo: string) {
             ? ("confirmed" as const)
             : ("pending" as const),
         isConfirmed: appointment.IsConfirmed ? 1 : 0,
-        amountClp: Number(
-          appointment.SessionPriceWithDiscount ?? appointment.SessionPrice ?? 0
-        ),
+        amountClp: externalAmountClp,
         source: "skedu" as const,
         origin: appointment.Origin ?? null,
         rescheduleCount: Number(appointment.RescheduleCount ?? 0),
@@ -272,7 +277,12 @@ async function syncSaunaFromSkeduUnlocked(rangeFrom: string, rangeTo: string) {
           skeduAppointmentUuid: appointment.UUID,
           ...values,
         })
-        .onDuplicateKeyUpdate({ set: values });
+        .onDuplicateKeyUpdate({
+          set: {
+            ...values,
+            amountClp: sql`CASE WHEN ${externalAmountClp} > 0 THEN ${externalAmountClp} ELSE ${saunaBookings.amountClp} END`,
+          },
+        });
       bookingsUpserted += 1;
     }
 

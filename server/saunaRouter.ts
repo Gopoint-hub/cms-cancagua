@@ -80,6 +80,10 @@ import {
   canReadReservationFinancials,
   presentSaunaBookingFinancials,
 } from "./reservationFinancialPrivacy";
+import {
+  prepareSaunaTotalDefinition,
+  saunaBookingTotalSchema,
+} from "./saunaPaymentTotal";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -524,7 +528,7 @@ export const saunaRouter = router({
             .enum(["unknown", "pending", "paid"])
             .default("unknown"),
           paymentMethod: z.string().max(60).optional(),
-          amountClp: z.number().int().min(0).default(0),
+          amountClp: saunaBookingTotalSchema,
           payments: z.array(saunaPaymentSchema).min(1).max(10).optional(),
           notes: z.string().max(4000).optional(),
           isConfirmed: z.boolean().default(true),
@@ -663,6 +667,64 @@ export const saunaRouter = router({
             )
           )
           .orderBy(desc(reservationPayments.createdAt));
+      }),
+    defineTotalAmount: protectedProcedure
+      .input(
+        z.object({
+          bookingId: z.number().int().positive(),
+          amountClp: saunaBookingTotalSchema,
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "sauna.manage_agenda");
+        const db = await database();
+        return db.transaction(async tx => {
+          await assertNoLiveReservationPaymentAttempt(
+            tx,
+            "sauna",
+            input.bookingId
+          );
+          const [booking] = await tx
+            .select()
+            .from(saunaBookings)
+            .where(eq(saunaBookings.id, input.bookingId))
+            .limit(1);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+
+          const payments = await tx
+            .select()
+            .from(reservationPayments)
+            .where(
+              and(
+                eq(reservationPayments.module, "sauna"),
+                eq(reservationPayments.reservationId, booking.id)
+              )
+            );
+          const nonRefundedPaymentsClp = payments
+            .filter(payment => payment.status !== "refunded")
+            .reduce((sum, payment) => sum + payment.amountClp, 0);
+          const next = prepareSaunaTotalDefinition({
+            source: booking.source,
+            status: booking.status,
+            currentAmountClp: booking.amountClp,
+            amountPaidClp: booking.amountPaidClp,
+            nonRefundedPaymentsClp,
+            requestedAmountClp: input.amountClp,
+          });
+
+          await tx
+            .update(saunaBookings)
+            .set({
+              amountClp: input.amountClp,
+              paymentStatus: next.paymentStatus,
+            })
+            .where(eq(saunaBookings.id, booking.id));
+          return {
+            success: true,
+            amountClp: input.amountClp,
+            paymentStatus: next.paymentStatus,
+          };
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     addPayment: protectedProcedure
       .input(z.object({ bookingId: z.number(), payment: saunaPaymentSchema }))
