@@ -84,6 +84,7 @@ import {
   presentBiopoolActivityFinancials,
   presentBiopoolBookingFinancials,
 } from "./reservationFinancialPrivacy";
+import { buildBiopoolDiscountLine } from "./biopoolDiscountLine";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -1025,20 +1026,14 @@ export const biopoolsRouter = router({
           });
         try {
           return await calculateWellnessCartDiscount(db, input.code, [
-            {
-            service: "biopiscinas",
-            serviceId: input.serviceId,
-              originalAmount:
-                adult.priceClp * input.adultQuantity +
-                (child?.priceClp ?? 0) * input.childQuantity,
-              // Precio de cada ticket: las promos tipo 2x1 necesitan contar
-              // unidades, no solo el monto total.
-              unitAmounts: [
-                ...Array.from({ length: input.adultQuantity }, () => adult.priceClp),
-                ...Array.from({ length: input.childQuantity }, () => child?.priceClp ?? 0),
-              ],
+            buildBiopoolDiscountLine({
+              serviceId: input.serviceId,
+              adultQuantity: input.adultQuantity,
+              childQuantity: input.childQuantity,
+              adultPriceClp: adult.priceClp,
+              childPriceClp: child?.priceClp,
               bookingDate: input.bookingDate,
-            },
+            }),
           ]);
         } catch (error) {
           throw new TRPCError({
@@ -1139,9 +1134,15 @@ export const biopoolsRouter = router({
                 code: "PRECONDITION_FAILED",
                 message: "La venta de tickets no está configurada",
               });
-            const subtotalClp =
-              adult.priceClp * input.adultQuantity +
-              (child?.priceClp ?? 0) * input.childQuantity;
+            const discountLine = buildBiopoolDiscountLine({
+              serviceId: input.serviceId,
+              adultQuantity: input.adultQuantity,
+              childQuantity: input.childQuantity,
+              adultPriceClp: adult.priceClp,
+              childPriceClp: child?.priceClp,
+              bookingDate: input.bookingDate,
+            });
+            const subtotalClp = discountLine.originalAmount;
             let discount: Awaited<
               ReturnType<typeof calculateWellnessCartDiscount>
             > | null = null;
@@ -1150,18 +1151,7 @@ export const biopoolsRouter = router({
                 discount = await calculateWellnessCartDiscount(
                   tx,
                   input.discountCode,
-                  [
-                    {
-                      service: "biopiscinas",
-                      serviceId: input.serviceId,
-                      originalAmount: subtotalClp,
-                      unitAmounts: [
-                        ...Array.from({ length: input.adultQuantity }, () => adult.priceClp),
-                        ...Array.from({ length: input.childQuantity }, () => child?.priceClp ?? 0),
-                      ],
-                      bookingDate: input.bookingDate,
-                    },
-                  ]
+                  [discountLine]
                 );
               } catch (error) {
                 throw new TRPCError({
@@ -1648,9 +1638,15 @@ export const biopoolsRouter = router({
                 code: "PRECONDITION_FAILED",
                 message: "Faltan los tickets requeridos para esta reserva",
               });
-            const originalAmountClp =
-              adult.priceClp * input.adultQuantity +
-              (child?.priceClp ?? 0) * input.childQuantity;
+            const discountLine = buildBiopoolDiscountLine({
+              serviceId: input.serviceId,
+              adultQuantity: input.adultQuantity,
+              childQuantity: input.childQuantity,
+              adultPriceClp: adult.priceClp,
+              childPriceClp: child?.priceClp,
+              bookingDate: input.bookingDate,
+            });
+            const originalAmountClp = discountLine.originalAmount;
             let appliedDiscount: Awaited<
               ReturnType<typeof calculateWellnessCartDiscount>
             > | null = null;
@@ -1659,13 +1655,7 @@ export const biopoolsRouter = router({
                 appliedDiscount = await calculateWellnessCartDiscount(
                   tx,
                   input.discountCode,
-                  [
-                    {
-                  service: "biopiscinas",
-                  serviceId: input.serviceId,
-                  originalAmount: originalAmountClp,
-                    },
-                  ]
+                  [discountLine]
                 );
               } catch (error) {
                 throw new TRPCError({
@@ -2537,12 +2527,34 @@ export const biopoolsRouter = router({
           if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
           let result: Awaited<ReturnType<typeof calculateWellnessCartDiscount>> | null = null;
           if (input.code) {
+            const tickets = await tx
+              .select()
+              .from(biopoolTicketTypes)
+              .where(
+                and(
+                  eq(biopoolTicketTypes.serviceId, booking.serviceId),
+                  eq(biopoolTicketTypes.active, 1)
+                )
+              );
+            const adult = tickets.find(ticket => ticket.code === "adult");
+            const child = tickets.find(ticket => ticket.code === "child");
+            if (!adult || (booking.childQuantity > 0 && !child))
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: "Faltan los tickets requeridos para recalcular el descuento",
+              });
             try {
-              result = await calculateWellnessCartDiscount(tx, input.code, [{
-                service: "biopiscinas",
-                serviceId: booking.serviceId,
-                originalAmount: booking.originalAmountClp,
-              }]);
+              result = await calculateWellnessCartDiscount(tx, input.code, [
+                buildBiopoolDiscountLine({
+                  serviceId: booking.serviceId,
+                  adultQuantity: booking.adultQuantity,
+                  childQuantity: booking.childQuantity,
+                  adultPriceClp: adult.priceClp,
+                  childPriceClp: child?.priceClp,
+                  bookingDate: serializeDate(booking.bookingDate),
+                  originalAmountClp: booking.originalAmountClp,
+                }),
+              ]);
             } catch (error) {
               throw new TRPCError({
                 code: "BAD_REQUEST",
@@ -2764,9 +2776,15 @@ export const biopoolsRouter = router({
                 code: "PRECONDITION_FAILED",
                 message: "Faltan los tickets requeridos para recalcular la reserva",
               });
-            const originalAmountClp =
-              adult.priceClp * input.adultQuantity +
-              (child?.priceClp ?? 0) * input.childQuantity;
+            const discountLine = buildBiopoolDiscountLine({
+              serviceId: booking.serviceId,
+              adultQuantity: input.adultQuantity,
+              childQuantity: input.childQuantity,
+              adultPriceClp: adult.priceClp,
+              childPriceClp: child?.priceClp,
+              bookingDate: serializeDate(booking.bookingDate),
+            });
+            const originalAmountClp = discountLine.originalAmount;
             let discountAmountClp = 0;
             let discountCodeId: number | null = null;
             let discountCode: string | null = null;
@@ -2775,7 +2793,7 @@ export const biopoolsRouter = router({
                 const discount = await calculateWellnessCartDiscount(
                   tx,
                   booking.discountCode,
-                  [{ service: "biopiscinas", serviceId: booking.serviceId, originalAmount: originalAmountClp }]
+                  [discountLine]
                 );
                 discountAmountClp = discount.discountTotal;
                 discountCodeId = discount.discountCodeId;

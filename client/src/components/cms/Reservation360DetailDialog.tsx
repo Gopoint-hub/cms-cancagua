@@ -137,6 +137,35 @@ function money(value?: number | null) {
   }).format(value ?? 0);
 }
 
+export function reservationPaymentCardState(payment: {
+  amountClp?: unknown;
+  balanceAmountClp?: unknown;
+  discountAmountClp?: unknown;
+  discountCode?: string | null;
+}) {
+  const paidAmountClp = Math.max(0, Number(payment.amountClp) || 0);
+  const balanceAmountClp = Math.max(0, Number(payment.balanceAmountClp) || 0);
+  const discountAmountClp = Math.max(0, Number(payment.discountAmountClp) || 0);
+  const hasDiscount = discountAmountClp > 0;
+  const discountOnlySettled =
+    balanceAmountClp === 0 && paidAmountClp === 0 && hasDiscount;
+
+  return {
+    paidAmountClp,
+    discountAmountClp,
+    discountCode: payment.discountCode?.trim() || null,
+    hasDiscount,
+    discountOnlySettled,
+    title: discountOnlySettled
+      ? "Cubierta con descuento"
+      : balanceAmountClp === 0
+        ? "Pagada"
+        : paidAmountClp > 0
+          ? "Abonada"
+          : "No pagada",
+  };
+}
+
 type PaymentDraft = {
   method: string;
   status: "pending" | "paid";
@@ -1982,6 +2011,9 @@ export function Reservation360DetailDialog({
     }
   );
   const detail: any = query.data;
+  const paymentCard = detail?.payment
+    ? reservationPaymentCardState(detail.payment)
+    : null;
   useEffect(() => {
     if (open) setTab("general");
   }, [open, event?.id]);
@@ -2129,12 +2161,8 @@ export function Reservation360DetailDialog({
                       ? "Información restringida"
                       : missingPaymentTotal
                         ? "Total sin definir"
-                        : detail.payment
-                          ? detail.payment.balanceAmountClp <= 0
-                            ? "Pagada"
-                            : detail.payment.amountClp > 0
-                              ? "Abonada"
-                              : "No pagada"
+                        : paymentCard
+                          ? paymentCard.title
                           : "No corresponde"}
                   </p>
                   <p className="text-sm text-muted-foreground">
@@ -2142,9 +2170,13 @@ export function Reservation360DetailDialog({
                       ? "Requiere permiso de pagos o ventas"
                       : missingPaymentTotal
                         ? "Abre Pagos para habilitar el cobro"
-                        : detail.payment
-                          ? money(detail.payment.amountClp)
-                          : "Clase programada"}
+                        : paymentCard?.discountOnlySettled
+                          ? `${paymentCard.discountCode ? `${paymentCard.discountCode} · ` : ""}${money(paymentCard.discountAmountClp)}`
+                          : paymentCard?.hasDiscount
+                            ? `Pago ${money(paymentCard.paidAmountClp)} · descuento ${money(paymentCard.discountAmountClp)}`
+                            : paymentCard
+                              ? money(paymentCard.paidAmountClp)
+                              : "Clase programada"}
                   </p>
                 </CardContent>
               </Card>
@@ -2224,9 +2256,7 @@ export function Reservation360DetailDialog({
                         </p>
                         {detail.payment.discountCode && (
                           <p className="mt-1 break-all font-mono text-[11px] font-semibold text-violet-700">
-                            {detail.payment.discountAmountClp > 0
-                              ? detail.payment.discountCode
-                              : `Retirado: ${detail.payment.discountCode}`}
+                            {detail.payment.discountCode}
                           </p>
                         )}
                       </div>
