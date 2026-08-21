@@ -45,12 +45,20 @@ import {
 import { es } from "date-fns/locale";
 import SkeduProgramBookingDialog from "./SkeduProgramBookingDialog";
 import SkeduTherapistAssignmentDialog from "./SkeduTherapistAssignmentDialog";
+import {
+  Reservation360DetailDialog,
+  type Reservation360Event,
+} from "@/components/cms/Reservation360DetailDialog";
 import MassageCancellationDialog, {
   getMassageCancellationLabel,
   type MassageCancellationCategory,
 } from "./MassageCancellationDialog";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { hasCmsPermission, hasMassagePaymentAccess } from "@shared/permissions";
+import {
+  hasCmsPermission,
+  hasGiftCardAccess,
+  hasMassagePaymentAccess,
+} from "@shared/permissions";
 import {
   MANUAL_MASSAGE_PAYMENT_METHODS,
   MASSAGE_PAYMENT_METHOD_LABELS,
@@ -176,9 +184,11 @@ function paymentIsComplete(payment: PaymentDraft) {
 function PaymentFields({
   payment,
   onChange,
+  canRedeemGiftCards,
 }: {
   payment: PaymentDraft;
   onChange: (changes: Partial<PaymentDraft>) => void;
+  canRedeemGiftCards: boolean;
 }) {
   return (
     <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
@@ -204,7 +214,9 @@ function PaymentFields({
             <SelectValue placeholder="Selecciona" />
           </SelectTrigger>
           <SelectContent>
-            {MANUAL_MASSAGE_PAYMENT_METHODS.map(method => (
+            {MANUAL_MASSAGE_PAYMENT_METHODS.filter(
+              method => canRedeemGiftCards || method !== "gift_card"
+            ).map(method => (
               <SelectItem key={method} value={method}>
                 {MASSAGE_PAYMENT_METHOD_LABELS[method]}
               </SelectItem>
@@ -322,9 +334,30 @@ function calcEndTime(start: string, duration: number): string {
   return `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`;
 }
 
+function toReservation360Event(booking: any): Reservation360Event {
+  const isSkeduProgram = booking.bookingKind === "skedu_program";
+  return {
+    id: `${isSkeduProgram ? "massage-program" : "massage"}:${booking.id}`,
+    entityId: booking.id,
+    kind: isSkeduProgram ? "massage_program" : "massage",
+    service: "massages",
+    date: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    title:
+      booking.techniqueName ?? (isSkeduProgram ? "Programa Skedu" : "Masaje"),
+    clientName: booking.clientName,
+    status: booking.status,
+    paymentStatus: booking.paymentStatus ?? null,
+    people: isSkeduProgram && booking.modality === "double" ? 2 : 1,
+    href: `/cms/masajes/agenda?date=${encodeURIComponent(booking.bookingDate)}`,
+  };
+}
+
 // ─── Tarjeta individual de reserva ────────────────────────────────────────────
 function BookingCard({
   b,
+  onManage,
   onEdit,
   onStatus,
   onCancel,
@@ -333,6 +366,7 @@ function BookingCard({
   canViewSales,
 }: {
   b: any;
+  onManage: (b: any) => void;
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
@@ -402,37 +436,39 @@ function BookingCard({
               </div>
             )}
           </div>
-          {(canManageAgenda || canAssignTherapists) && (
-            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:shrink-0">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:shrink-0">
+            <Button size="sm" onClick={() => onManage(b)}>
+              Gestionar reserva
+            </Button>
             {canManageAgenda && b.status === "pending" && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onStatus(b.id, "confirmed", b.bookingKind)}
-                >
-                  Confirmar
-                </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onStatus(b.id, "confirmed", b.bookingKind)}
+              >
+                Confirmar
+              </Button>
             )}
             {b.bookingKind === "skedu_program" ? (
               <>
                 {canAssignTherapists && b.status !== "cancelled" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onEdit(b)}
-                      title="Editar terapeutas asignados"
-                    >
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onEdit(b)}
+                    title="Editar terapeutas asignados"
+                  >
                     <Edit className="mr-1.5 h-4 w-4" />
                     Terapeutas
                   </Button>
                 )}
                 {canManageAgenda && b.status === "confirmed" && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-red-600"
-                      onClick={() => onCancel(b)}
-                    >
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-600"
+                    onClick={() => onCancel(b)}
+                  >
                     Cancelar
                   </Button>
                 )}
@@ -445,21 +481,20 @@ function BookingCard({
                     Editar
                   </Button>
                 )}
-                  {canManageAgenda &&
-                    (b.status === "pending" || b.status === "confirmed") && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-600"
-                        onClick={() => onCancel(b)}
-                      >
-                    Cancelar
-                  </Button>
-                )}
+                {canManageAgenda &&
+                  (b.status === "pending" || b.status === "confirmed") && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-600"
+                      onClick={() => onCancel(b)}
+                    >
+                      Cancelar
+                    </Button>
+                  )}
               </>
             )}
-            </div>
-          )}
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -470,6 +505,7 @@ function BookingCard({
 function DayView({
   bookings,
   isLoading,
+  onManage,
   onEdit,
   onStatus,
   onCancel,
@@ -479,6 +515,7 @@ function DayView({
 }: {
   bookings: any[] | undefined;
   isLoading: boolean;
+  onManage: (b: any) => void;
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
@@ -509,6 +546,7 @@ function DayView({
         <BookingCard
           key={`${b.bookingKind}-${b.id}`}
           b={b}
+          onManage={onManage}
           onEdit={onEdit}
           onStatus={onStatus}
           onCancel={onCancel}
@@ -527,6 +565,7 @@ function WeekView({
   isLoading,
   weekStart,
   onDayClick,
+  onManage,
   onEdit,
   onStatus,
   onCancel,
@@ -538,6 +577,7 @@ function WeekView({
   isLoading: boolean;
   weekStart: Date;
   onDayClick: (date: string) => void;
+  onManage: (b: any) => void;
   onEdit: (b: any) => void;
   onStatus: (id: number, status: string, bookingKind: string) => void;
   onCancel: (b: any) => void;
@@ -595,6 +635,7 @@ function WeekView({
                   <BookingCard
                     key={`${b.bookingKind}-${b.id}`}
                     b={b}
+                    onManage={onManage}
                     onEdit={onEdit}
                     onStatus={onStatus}
                     onCancel={onCancel}
@@ -727,6 +768,7 @@ export default function MasajesAgenda() {
   );
   const canViewSales = hasCmsPermission(user ?? {}, "massages.view_sales");
   const canManagePayments = hasMassagePaymentAccess(user ?? {});
+  const canRedeemGiftCards = hasGiftCardAccess(user ?? {});
   const search = useSearch();
   const initialDate = (() => {
     const p = new URLSearchParams(search);
@@ -738,6 +780,8 @@ export default function MasajesAgenda() {
 
   const [view, setView] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState(initialDate);
+  const [selectedReservation, setSelectedReservation] =
+    useState<Reservation360Event | null>(null);
   const [open, setOpen] = useState(false);
   const [skeduOpen, setSkeduOpen] = useState(false);
   const [editingSkeduBooking, setEditingSkeduBooking] = useState<any | null>(
@@ -983,6 +1027,14 @@ export default function MasajesAgenda() {
   };
 
   const handleSave = () => {
+    if (
+      !editingId &&
+      !canRedeemGiftCards &&
+      payments.some(payment => payment.method === "gift_card")
+    ) {
+      toast.error("No tienes permiso para canjear Gift Cards");
+      return;
+    }
     const totalAmountClp = Number(form.amountPaid || 0);
     const data = {
       clientName: form.clientName,
@@ -1181,6 +1233,10 @@ export default function MasajesAgenda() {
     setView("day");
   };
 
+  const openReservationDetail = (booking: any) => {
+    setSelectedReservation(toReservation360Event(booking));
+  };
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
@@ -1274,6 +1330,7 @@ export default function MasajesAgenda() {
           <DayView
             bookings={bookings}
             isLoading={isLoading}
+            onManage={openReservationDetail}
             onEdit={openEdit}
             onStatus={handleStatus}
             onCancel={setCancellationTarget}
@@ -1288,6 +1345,7 @@ export default function MasajesAgenda() {
             isLoading={isLoading}
             weekStart={weekStart}
             onDayClick={handleDayClick}
+            onManage={openReservationDetail}
             onEdit={openEdit}
             onStatus={handleStatus}
             onCancel={setCancellationTarget}
@@ -1481,7 +1539,7 @@ export default function MasajesAgenda() {
                   />
               )}
             </div>
-              {canManagePayments && (
+              {canManagePayments && !editingId && (
                 <div>
                   <Label>Valor total del masaje</Label>
                   <Input
@@ -1515,6 +1573,7 @@ export default function MasajesAgenda() {
                     <div key={index}>
                       <PaymentFields
                         payment={payment}
+                        canRedeemGiftCards={canRedeemGiftCards}
                         onChange={changes => updatePayment(index, changes)}
                       />
                       {payments.length > 1 && (
@@ -1558,209 +1617,37 @@ export default function MasajesAgenda() {
                 </div>
               )}
               {canManagePayments && editingId && (
-                <div className="space-y-3 sm:col-span-2">
-              <Label>Pagos registrados</Label>
-                  {(paymentQuery.data ?? []).map(payment =>
-                    editingPaymentId === payment.id ? (
-                      <div
-                        key={payment.id}
-                        className="space-y-2 rounded-xl border border-teal-300 bg-teal-50/30 p-3"
-                      >
-                        <div className="flex items-center justify-between">
-                          <strong className="text-sm">Editar pago</strong>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => setEditingPaymentId(null)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <PaymentFields
-                          payment={editingPayment}
-                          onChange={changes =>
-                            setEditingPayment(current => ({
-                              ...current,
-                              ...changes,
-                            }))
-                          }
-                        />
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={saveEditedPayment}
-                          disabled={
-                            !paymentIsComplete(editingPayment) ||
-                            updatePaymentMut.isPending
-                          }
-                        >
-                          Guardar pago
-                        </Button>
-                      </div>
-                    ) : (
-                      <div
-                        key={payment.id}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"
-                      >
-                        <div>
-                          <strong>
-                            {MASSAGE_PAYMENT_METHOD_LABELS[
-                              payment.method as keyof typeof MASSAGE_PAYMENT_METHOD_LABELS
-                            ] ?? payment.method}{" "}
-                            · $ {payment.amountClp.toLocaleString("es-CL")}
-                          </strong>
-                          <p className="text-xs text-muted-foreground">
-                            {payment.status === "paid" ? "Pagado" : "Pendiente"}
-                            {payment.reference ? ` · ${payment.reference}` : ""}
-                            {payment.cardType
-                              ? ` · ${payment.cardType === "credit" ? "Crédito" : "Débito"}`
-                              : ""}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {payment.status === "pending" && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => confirmPendingPayment(payment)}
-                            >
-                              Marcar pagado
-                            </Button>
-                          )}
-                          {!payment.giftCardId && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => startEditingPayment(payment)}
-                            >
-                              <Edit className="mr-1 h-3.5 w-3.5" />
-                              Editar
-                            </Button>
-                          )}
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="text-red-600"
-                            onClick={() => removeRegisteredPayment(payment.id)}
-                            disabled={removePaymentMut.isPending}
-                          >
-                            <Trash2 className="mr-1 h-3.5 w-3.5" />
-                            Eliminar
-                          </Button>
-                        </div>
-                      </div>
-                    )
-                  )}
-                  {!paymentQuery.data?.length && (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-                      {editingBooking?.getnetRequestId ? (
-                        <>
-                          <strong>Pago confirmado por Getnet.</strong> Este
-                          cobro está protegido y no se puede editar ni eliminar.
-                        </>
-                      ) : (
-                        <>
-                          Sin desglose histórico. El monto abonado anterior se
-                          conserva.
-                        </>
-                      )}
-                    </div>
-                  )}
-                  <Label>Agregar pago o abono</Label>
-                  <PaymentFields
-                    payment={newPayment}
-                    onChange={changes =>
-                      setNewPayment(current => ({ ...current, ...changes }))
-                    }
-                  />
+                <div className="space-y-2 rounded-xl border bg-muted/30 p-3 sm:col-span-2">
+                  <p className="text-sm text-muted-foreground">
+                    Los pagos, descuentos, Gift Cards y links se administran
+                    desde el detalle centralizado de la reserva.
+                  </p>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={submitNewPayment}
-                    disabled={
-                      !paymentIsComplete(newPayment) || addPaymentMut.isPending
-                    }
+                    disabled={!editingBooking}
+                    onClick={() => {
+                      if (!editingBooking) return;
+                      setSelectedReservation(
+                        toReservation360Event(editingBooking)
+                      );
+                      setOpen(false);
+                    }}
                   >
-                    Agregar pago
+                    Gestionar pagos y descuentos
                   </Button>
                 </div>
               )}
-              {canManagePayments && editingId ? (
-                <div className="space-y-2 rounded-xl border p-3 sm:col-span-2">
-                  <Label>Código de descuento</Label>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <Input
-                      value={form.discountCode}
-                      onChange={e =>
-                        setForm(f => ({
-                          ...f,
-                          discountCode: e.target.value.toUpperCase(),
-                        }))
-                      }
-                      placeholder="Ingresa otro código"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        setDiscountMut.mutate({
-                          bookingId: editingId,
-                          code: form.discountCode || undefined,
-                        })
-                      }
-                      disabled={
-                        !form.discountCode.trim() || setDiscountMut.isPending
-                      }
-                    >
-                      Aplicar código
-                    </Button>
-                    {editingBooking?.discountCode && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="text-red-600"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              "¿Quitar el código de descuento de esta reserva?"
-                            )
-                          )
-                            setDiscountMut.mutate({ bookingId: editingId });
-                        }}
-                        disabled={setDiscountMut.isPending}
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        Quitar código
-                      </Button>
-                    )}
-                  </div>
-                  {editingBooking?.discountCode && (
-                    <p className="text-xs text-emerald-700">
-                      Aplicado actualmente:{" "}
-                      <strong>
-                        {editingBooking?.discountCode}
-                      </strong>{" "}
-                      · −${" "}
-                      {Number(
-                        editingBooking?.discountAmount ?? 0
-                      ).toLocaleString("es-CL")}
-                    </p>
-                  )}
-                </div>
-              ) : (
-            <div>
-              <Label>Código descuento</Label>
+              {canManagePayments && !editingId && (
+                <div>
+                  <Label>Código descuento</Label>
                   <Input
                     value={form.discountCode}
                     onChange={e =>
                       setForm(f => ({ ...f, discountCode: e.target.value }))
                     }
                   />
-            </div>
+                </div>
               )}
             <div className="sm:col-span-2">
               <Label>Notas</Label>
@@ -1842,6 +1729,14 @@ export default function MasajesAgenda() {
           onConfirm={handleCancellation}
         />
       )}
+      <Reservation360DetailDialog
+        event={selectedReservation}
+        open={Boolean(selectedReservation)}
+        onOpenChange={next => {
+          if (!next) setSelectedReservation(null);
+        }}
+        onChanged={() => utils.masajes.agenda.getByDateRange.invalidate()}
+      />
     </DashboardLayout>
   );
 }

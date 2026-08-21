@@ -240,8 +240,13 @@ export function hasGiftCardAccess(user: PermissionUser): boolean {
   return hasAnyCmsPermission(user, ["module.gift_cards", "module.sales"]);
 }
 
-/** Permite operar pagos en agenda sin abrir Ventas ni Analítica de Masajes. */
+/** Permite registrar o modificar pagos desde la agenda de Masajes. */
 export function hasMassagePaymentAccess(user: PermissionUser): boolean {
+  return hasCmsPermission(user, "massages.manage_payments");
+}
+
+/** Permite leer datos financieros sin conceder capacidad de cobro. */
+export function hasMassagePaymentReadAccess(user: PermissionUser): boolean {
   return hasAnyCmsPermission(user, ["massages.manage_payments", "massages.view_sales"]);
 }
 

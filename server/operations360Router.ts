@@ -39,44 +39,69 @@ import {
   hasCmsPermission,
   hasMassagePaymentAccess,
   isAdminRole,
+  type CmsPermissionKey,
   type PermissionUser,
 } from "../shared/permissions";
+import {
+  RESERVATION_360_CLIENT_EVENT_KINDS,
+  RESERVATION_360_EVENT_KINDS,
+  RESERVATION_360_SERVICE_KEYS,
+  type Reservation360ServiceKey,
+} from "../shared/reservation360";
+import { isPendingMassagePaymentMethod } from "../shared/massagePayments";
+import { calculatedPaymentStatus } from "../shared/reservationPayments";
 import { protectedProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { canRedeemGiftCard } from "./giftCardRedemption";
 import { redeemGiftCardPayment } from "./reservationPayments";
-import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
+import {
+  assertNoLiveReservationPaymentAttempt,
+  RESERVATION_PAYMENT_TRANSACTION,
+} from "./reservationPaymentLinkGuards";
+import {
+  canReadClientGiftCards,
+  canReadReservationFinancials,
+  presentClientAuditActivity,
+  presentReservationFinancials,
+  redactFinancialReservationNotes,
+} from "./reservationFinancialPrivacy";
 import { parseRescheduleAuditLines } from "./rescheduleAudit";
 import { syncMassageSale } from "./massageSales";
+import {
+  assertRegularClassOperationsResourceAccess,
+  getActiveRegularClassTeacherForUser,
+} from "./regularClassesOperationsAccess";
 import { getAllSkeduAppointments, getAllSkeduBusinessUsers } from "./skedu";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const serviceSchema = z.enum(["massages", "biopools", "sauna", "regular_classes"]);
-const calendarServiceSchema = z.enum([
-  "massages",
-  "biopools",
-  "sauna",
-  "regular_classes",
-]);
+const serviceSchema = z.enum(RESERVATION_360_SERVICE_KEYS);
 
-type ServiceKey = z.infer<typeof serviceSchema>;
-type CalendarServiceKey = z.infer<typeof calendarServiceSchema>;
-const eventKindSchema = z.enum([
-  "massage",
-  "massage_program",
-  "biopool",
-  "sauna",
-  "regular_class",
-  "regular_class_schedule",
-  "regular_class_membership",
-]);
-const clientReservationKindSchema = z.enum([
-  "massage",
-  "massage_program",
-  "biopool",
-  "sauna",
-  "regular_class",
-  "regular_class_membership",
-]);
+type ServiceKey = Reservation360ServiceKey;
+type CalendarServiceKey = Reservation360ServiceKey;
+const eventKindSchema = z.enum(RESERVATION_360_EVENT_KINDS);
+
+const CALENDAR_SERVICE_PERMISSIONS = {
+  massages: "module.massages",
+  biopools: "module.biopools",
+  sauna: "module.sauna",
+  regular_classes: "module.regular_classes",
+} as const satisfies Record<CalendarServiceKey, CmsPermissionKey>;
+
+const CLIENT_SERVICE_PERMISSIONS = {
+  massages: "massages.view_clients",
+  biopools: "biopools.view_clients",
+  sauna: "sauna.view_clients",
+  regular_classes: "regular_classes.students",
+} as const satisfies Record<ServiceKey, CmsPermissionKey>;
+
+function assertUnreachableReservation360Kind(kind: never): never {
+  throw new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: `El tipo de reserva 360 no tiene adaptador: ${String(kind)}`,
+  });
+}
+
+const clientReservationKindSchema = z.enum(RESERVATION_360_CLIENT_EVENT_KINDS);
 type ClientReservationKind = z.infer<typeof clientReservationKindSchema>;
 const clientReservationReferenceSchema = z.union([
   z.object({
@@ -124,8 +149,16 @@ type ClientEventActivityEntry = {
   detail?: string | null;
   at?: Date | string | null;
 };
-type ClientEventResponse = ClientEvent & {
-  paidAmountClp: number;
+type ClientEventResponse = Omit<
+  ClientEvent,
+  "paymentStatus" | "amountClp" | "totalAmountClp" | "balanceAmountClp"
+> & {
+  paymentStatus: string | null;
+  amountClp: number | null;
+  totalAmountClp: number | null;
+  balanceAmountClp: number | null;
+  paidAmountClp: number | null;
+  financialRestricted: boolean;
   activityBucket: "upcoming" | "past" | "cancelled";
   activity: ClientEventActivityEntry[];
   hasPaymentRecord: boolean;
@@ -140,8 +173,9 @@ type ClientSummary = {
   services: ServiceKey[];
   reservations: number;
   upcomingReservations: number;
-  totalSpentClp: number;
-  pendingBalanceClp: number;
+  totalSpentClp: number | null;
+  pendingBalanceClp: number | null;
+  financialRestricted: boolean;
   lastActivity: string;
   nextReservation: string | null;
   nextReservationEvent: ClientEventResponse | null;
@@ -168,8 +202,9 @@ type ClientProfileResponse = {
   summary: Partial<ClientSummary> & {
     reservations: number;
     upcomingReservations: number;
-    totalSpentClp: number;
-    pendingBalanceClp: number;
+    totalSpentClp: number | null;
+    pendingBalanceClp: number | null;
+    financialRestricted: boolean;
     nextReservation: string | null;
     services: ServiceKey[];
     lastActivity: string;
@@ -188,6 +223,7 @@ type ClientProfileResponse = {
   activity: Array<typeof client360Audit.$inferSelect>;
   canManageProfile: boolean;
   canMergeProfiles: boolean;
+  giftCardsRestricted: boolean;
 };
 
 function serializeDate(value: unknown): string {
@@ -226,7 +262,7 @@ function massageProgramTotalClp(input: {
   return unitPrice * (input.modality === "double" ? 2 : 1);
 }
 
-function massageProgramPaymentState(
+export function massageProgramPaymentState(
   booking: typeof massageProgramBookings.$inferSelect,
   rows: Array<typeof reservationPayments.$inferSelect>
 ) {
@@ -234,16 +270,16 @@ function massageProgramPaymentState(
   const paidClp = rows
     .filter(row => row.status === "paid")
     .reduce((sum, row) => sum + row.amountClp, 0);
-  const legacyPaid = !rows.length && booking.paymentMethod !== "pending_payment";
+  const legacyPaid =
+    !rows.length && !isPendingMassagePaymentMethod(booking.paymentMethod);
+  const effectivePaidClp = legacyPaid ? totalClp : paidClp;
   return {
     totalClp,
-    paidClp: legacyPaid ? totalClp : paidClp,
+    paidClp: effectivePaidClp,
     status:
       booking.status === "cancelled"
         ? null
-        : legacyPaid || paidClp >= totalClp
-          ? "paid"
-          : "pending",
+        : calculatedPaymentStatus(effectivePaidClp, totalClp),
   };
 }
 
@@ -334,9 +370,29 @@ function noteRescheduleActivities(notes: string | null | undefined, prefix: stri
   }));
 }
 
-function biopoolActivityPresentation(action: string, detail: string | null) {
+export function visibleReservationNotes(
+  notes: string | null | undefined,
+  canViewPayments: boolean
+): string | null {
+  return redactFinancialReservationNotes(notes, canViewPayments);
+}
+
+export function biopoolActivityPresentation(
+  action: string,
+  detail: string | null,
+  canViewPayments = true
+) {
+  if (!canViewPayments && /^(?:payment_|discount_|refund_)/.test(action)) {
+    return null;
+  }
   if (action !== "booking_rescheduled" || !detail) {
-    return { label: action, detail };
+    return {
+      label:
+        !canViewPayments && action.startsWith("booking_created")
+          ? "booking_created"
+          : action,
+      detail: canViewPayments ? detail : null,
+    };
   }
   try {
     const parsed = JSON.parse(detail);
@@ -354,7 +410,10 @@ function biopoolActivityPresentation(action: string, detail: string | null) {
         .join(" · "),
     };
   } catch {
-    return { label: "Reserva reagendada", detail };
+    return {
+      label: "Reserva reagendada",
+      detail: canViewPayments ? detail : null,
+    };
   }
 }
 
@@ -488,22 +547,42 @@ async function database() {
   return db;
 }
 
+export function canReadRegularClassesCalendar(user: PermissionUser): boolean {
+  return (
+    hasCmsPermission(user, "module.regular_classes") &&
+    (isAdminRole(user.role) ||
+      hasCmsPermission(user, "regular_classes.attendance"))
+  );
+}
+
 function calendarServices(user: PermissionUser): CalendarServiceKey[] {
-  return [
-    ...(hasCmsPermission(user, "module.massages") ? ["massages" as const] : []),
-    ...(hasCmsPermission(user, "module.biopools") ? ["biopools" as const] : []),
-    ...(hasCmsPermission(user, "module.sauna") ? ["sauna" as const] : []),
-    ...(hasCmsPermission(user, "module.regular_classes") ? ["regular_classes" as const] : []),
-  ];
+  return RESERVATION_360_SERVICE_KEYS.filter(service => {
+    if (!hasCmsPermission(user, CALENDAR_SERVICE_PERMISSIONS[service])) {
+      return false;
+    }
+    return (
+      service !== "regular_classes" ||
+      canReadRegularClassesCalendar(user)
+    );
+  });
+}
+
+export function canReplaceReservation360GiftCard(
+  user: PermissionUser,
+  service: "massages" | "biopools" | "sauna"
+): boolean {
+  if (!calendarServices(user).includes(service) || !canRedeemGiftCard(user)) {
+    return false;
+  }
+  return service === "massages"
+    ? hasMassagePaymentAccess(user)
+    : hasCmsPermission(user, `${service}.manage_agenda` as any);
 }
 
 function clientServices(user: PermissionUser): ServiceKey[] {
-  return [
-    ...(hasCmsPermission(user, "massages.view_clients") ? ["massages" as const] : []),
-    ...(hasCmsPermission(user, "biopools.view_clients") ? ["biopools" as const] : []),
-    ...(hasCmsPermission(user, "sauna.view_clients") ? ["sauna" as const] : []),
-    ...(hasCmsPermission(user, "regular_classes.students") ? ["regular_classes" as const] : []),
-  ];
+  return RESERVATION_360_SERVICE_KEYS.filter(service =>
+    hasCmsPermission(user, CLIENT_SERVICE_PERMISSIONS[service])
+  );
 }
 
 function canManageClientProfiles(user: PermissionUser): boolean {
@@ -569,7 +648,7 @@ async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]>
   }
 
   const events: ClientEvent[] = [];
-  if (allowed.includes("massages")) {
+  async function loadMassageClientEvents() {
     const [standard, programs, npsResponses, programPaymentRows] = await Promise.all([
       db
         .select({
@@ -668,7 +747,7 @@ async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]>
     }
   }
 
-  if (allowed.includes("biopools")) {
+  async function loadBiopoolClientEvents() {
     const rows = await db
       .select({ booking: biopoolBookings, serviceName: biopoolServices.name })
       .from(biopoolBookings)
@@ -712,7 +791,7 @@ async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]>
 
   // El sauna no estaba en esta función, así que sus reservas no aparecían ni en
   // la ficha del cliente ni en las búsquedas.
-  if (allowed.includes("sauna")) {
+  async function loadSaunaClientEvents() {
     const rows = await db.select().from(saunaBookings);
     for (const booking of rows) {
       const sourceKey = `sauna:${booking.id}`;
@@ -756,7 +835,7 @@ async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]>
     }
   }
 
-  if (allowed.includes("regular_classes")) {
+  async function loadRegularClassClientEvents() {
     const [membershipRows, attendanceRows] = await Promise.all([
       db
         .select({
@@ -838,6 +917,17 @@ async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]>
         detail: row.attendance.notes,
       });
     }
+  }
+
+  const clientEventLoaders = {
+    massages: loadMassageClientEvents,
+    biopools: loadBiopoolClientEvents,
+    sauna: loadSaunaClientEvents,
+    regular_classes: loadRegularClassClientEvents,
+  } satisfies Record<ServiceKey, () => Promise<void>>;
+
+  for (const service of RESERVATION_360_SERVICE_KEYS) {
+    if (allowed.includes(service)) await clientEventLoaders[service]();
   }
   return events;
 }
@@ -1093,21 +1183,41 @@ function clientEventActivity(
   return `${event.date} ${event.startTime ?? "00:00"}` >= nowKey ? "upcoming" : "past";
 }
 
-function clientEventResponse(event: ClientEvent, user: PermissionUser) {
+export function canOpenClientReservation360Detail(
+  event: Pick<ClientEvent, "sourceKey" | "kind" | "service">,
+  user: PermissionUser
+): boolean {
+  if (
+    event.sourceKey.startsWith("regular_class_attendance:") ||
+    event.kind === "external"
+  ) {
+    return false;
+  }
+  if (event.kind === "regular_class_membership") {
+    return hasCmsPermission(user, "regular_classes.students");
+  }
+  return calendarServices(user).includes(event.service);
+}
+
+export function clientEventResponse(
+  event: ClientEvent,
+  user: PermissionUser
+): ClientEventResponse {
   const classAttendance = event.sourceKey.startsWith("regular_class_attendance:");
-  const classMembership = event.kind === "regular_class_membership";
   const external = event.kind === "external";
+  const presented = presentReservationFinancials(event, user);
   return {
-    ...event,
-    paidAmountClp: event.amountClp,
+    ...presented,
+    detail: redactFinancialReservationNotes(
+      event.detail,
+      !presented.financialRestricted
+    ),
+    paidAmountClp: presented.amountClp,
     activityBucket: clientEventActivity(event),
     activity: [],
-    hasPaymentRecord: !classAttendance && !external,
-    canOpenDetail:
-      !classAttendance &&
-      !classMembership &&
-      !external &&
-      calendarServices(user).includes(event.service),
+    hasPaymentRecord:
+      !presented.financialRestricted && !classAttendance && !external,
+    canOpenDetail: canOpenClientReservation360Detail(event, user),
   };
 }
 
@@ -1207,6 +1317,10 @@ async function clientListData(user: PermissionUser, input: ClientListFilters) {
         ...legacy.flatMap(row => inferLegacyServices(row.serviciosUsados)),
         ...(profile.originKey?.startsWith("regular_class_student:") ? ["regular_classes" as const] : []),
       ]));
+      const financialRestricted =
+        services.some(service => !canReadReservationFinancials(user, service)) ||
+        (legacy.length > 0 &&
+          allowed.some(service => !canReadReservationFinancials(user, service)));
       const upcoming = history
         .filter(item => clientEventActivity(item, nowKey) === "upcoming")
         .sort((a, b) => `${a.date} ${a.startTime ?? ""}`.localeCompare(`${b.date} ${b.startTime ?? ""}`));
@@ -1238,8 +1352,14 @@ async function clientListData(user: PermissionUser, input: ClientListFilters) {
         services,
         reservations,
         upcomingReservations: upcoming.length,
-        totalSpentClp,
-        pendingBalanceClp: history.reduce((sum, item) => sum + item.balanceAmountClp, 0),
+        totalSpentClp: financialRestricted ? null : totalSpentClp,
+        pendingBalanceClp: financialRestricted
+          ? null
+          : history.reduce(
+              (sum, item) => sum + item.balanceAmountClp,
+              0
+            ),
+        financialRestricted,
         lastActivity: [latestEventDate, legacyActivity, serializeDate(profile.updatedAt)]
           .filter(Boolean)
           .sort()
@@ -1330,16 +1450,28 @@ function normalizeReservationReference(
   };
 }
 
+export function canLinkClientReservation360(
+  user: PermissionUser,
+  kind: ClientReservationKind
+): boolean {
+  switch (kind) {
+    case "massage":
+    case "massage_program":
+      return hasCmsPermission(user, "massages.manage_agenda");
+    case "biopool":
+      return hasCmsPermission(user, "biopools.manage_agenda");
+    case "sauna":
+      return hasCmsPermission(user, "sauna.manage_agenda");
+    case "regular_class":
+    case "regular_class_membership":
+      return hasCmsPermission(user, "regular_classes.students");
+    default:
+      return assertUnreachableReservation360Kind(kind);
+  }
+}
+
 function assertCanLinkReservation(user: PermissionUser, kind: ClientReservationKind) {
-  const permitted =
-    (kind === "massage" || kind === "massage_program")
-      ? hasCmsPermission(user, "massages.manage_agenda")
-      : kind === "biopool"
-        ? hasCmsPermission(user, "biopools.manage_agenda")
-        : kind === "sauna"
-          ? hasCmsPermission(user, "sauna.manage_agenda")
-          : hasCmsPermission(user, "regular_classes.students");
-  if (!permitted) {
+  if (!canLinkClientReservation360(user, kind)) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "No tienes permisos para vincular una reserva de este servicio",
@@ -1351,28 +1483,70 @@ async function reservationReferenceExists(
   db: Awaited<ReturnType<typeof database>>,
   reference: { kind: ClientReservationKind; entityId: number }
 ): Promise<boolean> {
-  if (reference.kind === "massage") {
-    return Boolean((await db.select({ id: massageBookings.id }).from(massageBookings)
-      .where(eq(massageBookings.id, reference.entityId)).limit(1))[0]);
+  switch (reference.kind) {
+    case "massage":
+      return Boolean(
+        (
+          await db
+            .select({ id: massageBookings.id })
+            .from(massageBookings)
+            .where(eq(massageBookings.id, reference.entityId))
+            .limit(1)
+        )[0]
+      );
+    case "massage_program":
+      return Boolean(
+        (
+          await db
+            .select({ id: massageProgramBookings.id })
+            .from(massageProgramBookings)
+            .where(eq(massageProgramBookings.id, reference.entityId))
+            .limit(1)
+        )[0]
+      );
+    case "biopool":
+      return Boolean(
+        (
+          await db
+            .select({ id: biopoolBookings.id })
+            .from(biopoolBookings)
+            .where(eq(biopoolBookings.id, reference.entityId))
+            .limit(1)
+        )[0]
+      );
+    case "sauna":
+      return Boolean(
+        (
+          await db
+            .select({ id: saunaBookings.id })
+            .from(saunaBookings)
+            .where(eq(saunaBookings.id, reference.entityId))
+            .limit(1)
+        )[0]
+      );
+    case "regular_class":
+      return Boolean(
+        (
+          await db
+            .select({ id: regularClassSessions.id })
+            .from(regularClassSessions)
+            .where(eq(regularClassSessions.id, reference.entityId))
+            .limit(1)
+        )[0]
+      );
+    case "regular_class_membership":
+      return Boolean(
+        (
+          await db
+            .select({ id: regularClassMemberships.id })
+            .from(regularClassMemberships)
+            .where(eq(regularClassMemberships.id, reference.entityId))
+            .limit(1)
+        )[0]
+      );
+    default:
+      return assertUnreachableReservation360Kind(reference.kind);
   }
-  if (reference.kind === "massage_program") {
-    return Boolean((await db.select({ id: massageProgramBookings.id }).from(massageProgramBookings)
-      .where(eq(massageProgramBookings.id, reference.entityId)).limit(1))[0]);
-  }
-  if (reference.kind === "biopool") {
-    return Boolean((await db.select({ id: biopoolBookings.id }).from(biopoolBookings)
-      .where(eq(biopoolBookings.id, reference.entityId)).limit(1))[0]);
-  }
-  if (reference.kind === "sauna") {
-    return Boolean((await db.select({ id: saunaBookings.id }).from(saunaBookings)
-      .where(eq(saunaBookings.id, reference.entityId)).limit(1))[0]);
-  }
-  if (reference.kind === "regular_class_membership") {
-    return Boolean((await db.select({ id: regularClassMemberships.id }).from(regularClassMemberships)
-      .where(eq(regularClassMemberships.id, reference.entityId)).limit(1))[0]);
-  }
-  return Boolean((await db.select({ id: regularClassSessions.id }).from(regularClassSessions)
-    .where(eq(regularClassSessions.id, reference.entityId)).limit(1))[0]);
 }
 
 export function inferSkeduClientService(serviceName: unknown): ServiceKey | "other" {
@@ -1467,10 +1641,41 @@ function nullableDate(value: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+export function regularClassCalendarTeacherScopeId(
+  role: string | null | undefined,
+  linkedTeacherId: number | null
+): number | null {
+  if (isAdminRole(role)) return null;
+  // Los ids son positivos: -1 representa un scope vacío para una cuenta sin
+  // profesor activo y evita que la ausencia de filtro exponga clases ajenas.
+  return linkedTeacherId ?? -1;
+}
+
+export async function guardLegacyPaymentMaterialization(input: {
+  assertNoLiveAttempt: () => Promise<void>;
+  loadExistingPayments: () => Promise<unknown[]>;
+}): Promise<void> {
+  // El lock/guard del link debe tomarse antes de inspeccionar o crear el pago:
+  // así un checkout que parte en paralelo no puede quedar acreditado dos veces.
+  await input.assertNoLiveAttempt();
+  const existing = await input.loadExistingPayments();
+  if (existing.length) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message:
+        "El pago ya fue convertido a detalle. Actualiza la reserva.",
+    });
+  }
+}
+
 export const operations360Router = router({
   access: protectedProcedure.query(({ ctx }) => ({
     calendarServices: calendarServices(ctx.user),
     clientServices: clientServices(ctx.user),
+    clientFinancialServices: clientServices(ctx.user).filter(service =>
+      canReadReservationFinancials(ctx.user, service)
+    ),
+    canViewGiftCards: canReadClientGiftCards(ctx.user),
     canSyncClientHistory: isAdminRole(ctx.user.role),
     manualBookingServices: ([
       hasCmsPermission(ctx.user, "massages.manage_agenda") ? "massages" : null,
@@ -1484,7 +1689,7 @@ export const operations360Router = router({
       z.object({
         from: dateSchema,
         to: dateSchema,
-        services: z.array(calendarServiceSchema).optional(),
+        services: z.array(serviceSchema).optional(),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -1492,12 +1697,16 @@ export const operations360Router = router({
       const db = await database();
       const allowed = calendarServices(ctx.user);
       if (!allowed.length) throw new TRPCError({ code: "FORBIDDEN" });
-      const selected = (input.services?.length ? input.services : allowed).filter(service =>
-        allowed.includes(service)
-      );
+      const selected = (
+        input.services?.length ? input.services : allowed
+      ).filter(service => allowed.includes(service));
       const events: Array<Record<string, unknown>> = [];
 
-      if (selected.includes("massages")) {
+      async function loadMassageCalendarEvents() {
+        const canViewMassagePayments = canReadReservationFinancials(
+          ctx.user,
+          "massages"
+        );
         const [standard, programs, programPaymentRows] = await Promise.all([
           db
             .select({
@@ -1511,7 +1720,10 @@ export const operations360Router = router({
               techniqueName: massageTechniques.name,
             })
             .from(massageBookings)
-            .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
+            .leftJoin(
+              massageTechniques,
+              eq(massageBookings.techniqueId, massageTechniques.id)
+            )
             .where(
               and(
                 gte(massageBookings.bookingDate, input.from as any),
@@ -1527,10 +1739,12 @@ export const operations360Router = router({
                 lte(massageProgramBookings.bookingDate, input.to as any)
               )
             ),
-          db
-            .select()
-            .from(reservationPayments)
-            .where(eq(reservationPayments.module, "massage_programs")),
+          canViewMassagePayments
+            ? db
+                .select()
+                .from(reservationPayments)
+                .where(eq(reservationPayments.module, "massage_programs"))
+            : Promise.resolve([]),
         ]);
         events.push(
           ...standard.map(row => ({
@@ -1544,7 +1758,7 @@ export const operations360Router = router({
             title: row.techniqueName ?? "Masaje",
             clientName: row.clientName,
             status: row.status,
-            paymentStatus: row.paymentStatus,
+            paymentStatus: canViewMassagePayments ? row.paymentStatus : null,
             people: 1,
             href: `/cms/masajes/agenda?date=${serializeDate(row.date)}`,
           })),
@@ -1561,21 +1775,35 @@ export const operations360Router = router({
               ? `${row.clientName} / ${row.secondClientName}`
               : row.clientName,
             status: row.status,
-            paymentStatus: massageProgramPaymentState(
-              row,
-              programPaymentRows.filter(item => item.reservationId === row.id)
-            ).status,
+            paymentStatus: canViewMassagePayments
+              ? massageProgramPaymentState(
+                  row,
+                  programPaymentRows.filter(
+                    item => item.reservationId === row.id
+                  )
+                ).status
+              : null,
             people: row.modality === "double" ? 2 : 1,
             href: `/cms/masajes/agenda?date=${serializeDate(row.bookingDate)}`,
           }))
         );
       }
 
-      if (selected.includes("biopools")) {
+      async function loadBiopoolCalendarEvents() {
+        const canViewBiopoolPayments = canReadReservationFinancials(
+          ctx.user,
+          "biopools"
+        );
         const rows = await db
-          .select({ booking: biopoolBookings, serviceName: biopoolServices.name })
+          .select({
+            booking: biopoolBookings,
+            serviceName: biopoolServices.name,
+          })
           .from(biopoolBookings)
-          .innerJoin(biopoolServices, eq(biopoolBookings.serviceId, biopoolServices.id))
+          .innerJoin(
+            biopoolServices,
+            eq(biopoolBookings.serviceId, biopoolServices.id)
+          )
           .where(
             and(
               gte(biopoolBookings.bookingDate, input.from),
@@ -1594,14 +1822,20 @@ export const operations360Router = router({
             title: serviceName,
             clientName: booking.clientName,
             status: booking.status,
-            paymentStatus: booking.paymentStatus,
+            paymentStatus: canViewBiopoolPayments
+              ? booking.paymentStatus
+              : null,
             people: booking.totalGuests,
             href: `/cms/biopiscinas/agenda?date=${serializeDate(booking.bookingDate)}`,
           }))
         );
       }
 
-      if (selected.includes("sauna")) {
+      async function loadSaunaCalendarEvents() {
+        const canViewSaunaPayments = canReadReservationFinancials(
+          ctx.user,
+          "sauna"
+        );
         const rows = await db
           .select()
           .from(saunaBookings)
@@ -1623,14 +1857,34 @@ export const operations360Router = router({
             title: booking.serviceName,
             clientName: booking.clientName ?? "Sin cliente registrado",
             status: booking.status,
-            paymentStatus: booking.paymentStatus,
+            paymentStatus: canViewSaunaPayments ? booking.paymentStatus : null,
             people: booking.guests,
             href: `/cms/sauna/agenda?date=${serializeDate(booking.bookingDate)}`,
           }))
         );
       }
 
-      if (selected.includes("regular_classes")) {
+      async function loadRegularClassCalendarEvents() {
+        const linkedTeacher = !isAdminRole(ctx.user.role)
+          ? await getActiveRegularClassTeacherForUser(ctx.user.id, db)
+          : null;
+        const teacherScopeId = regularClassCalendarTeacherScopeId(
+          ctx.user.role,
+          linkedTeacher?.id ?? null
+        );
+        const scheduleConditions = [eq(regularClassSchedules.active, 1)];
+        const sessionConditions = [
+          gte(regularClassSessions.sessionDate, input.from),
+          lte(regularClassSessions.sessionDate, input.to),
+        ];
+        if (teacherScopeId !== null) {
+          scheduleConditions.push(
+            eq(regularClassSchedules.teacherId, teacherScopeId)
+          );
+          sessionConditions.push(
+            eq(regularClassSessions.teacherId, teacherScopeId)
+          );
+        }
         const [schedules, sessionRows] = await Promise.all([
           db
             .select({
@@ -1652,7 +1906,7 @@ export const operations360Router = router({
               regularClassTeachers,
               eq(regularClassSchedules.teacherId, regularClassTeachers.id)
             )
-            .where(eq(regularClassSchedules.active, 1)),
+            .where(and(...scheduleConditions)),
           db
             .select({
               id: regularClassSessions.id,
@@ -1661,12 +1915,7 @@ export const operations360Router = router({
               status: regularClassSessions.status,
             })
             .from(regularClassSessions)
-            .where(
-              and(
-                gte(regularClassSessions.sessionDate, input.from),
-                lte(regularClassSessions.sessionDate, input.to)
-              )
-            ),
+            .where(and(...sessionConditions)),
         ]);
         const sessionIds = sessionRows.map(row => row.id);
         const attendanceRows = sessionIds.length
@@ -1687,12 +1936,17 @@ export const operations360Router = router({
               schedule.dayOfWeek !== weekday ||
               serializeDate(schedule.validFrom) > date ||
               (schedule.validTo && serializeDate(schedule.validTo) < date)
-            ) continue;
-            const session = sessionRows.find(row =>
-              row.scheduleId === schedule.id && serializeDate(row.date) === date
+            )
+              continue;
+            const session = sessionRows.find(
+              row =>
+                row.scheduleId === schedule.id &&
+                serializeDate(row.date) === date
             );
             events.push({
-              id: session ? `regular-class:${session.id}` : `regular-class-schedule:${schedule.id}:${date}`,
+              id: session
+                ? `regular-class:${session.id}`
+                : `regular-class-schedule:${schedule.id}:${date}`,
               entityId: session?.id ?? schedule.id,
               kind: session ? "regular_class" : "regular_class_schedule",
               service: "regular_classes",
@@ -1704,7 +1958,8 @@ export const operations360Router = router({
               status: session?.status ?? "scheduled",
               paymentStatus: null,
               people: session
-                ? attendanceRows.filter(item => item.sessionId === session.id).length
+                ? attendanceRows.filter(item => item.sessionId === session.id)
+                    .length
                 : 0,
               href: `/cms/clases-regulares/asistencia?date=${date}`,
             });
@@ -1712,10 +1967,25 @@ export const operations360Router = router({
         }
       }
 
+      const calendarLoaders = {
+        massages: loadMassageCalendarEvents,
+        biopools: loadBiopoolCalendarEvents,
+        sauna: loadSaunaCalendarEvents,
+        regular_classes: loadRegularClassCalendarEvents,
+      } satisfies Record<CalendarServiceKey, () => Promise<void>>;
+
+      for (const service of RESERVATION_360_SERVICE_KEYS) {
+        if (selected.includes(service)) await calendarLoaders[service]();
+      }
+
       return events
-        .filter(event => isVisibleCalendarReservation(String(event.status ?? "")))
+        .filter(event =>
+          isVisibleCalendarReservation(String(event.status ?? ""))
+        )
         .sort((left: any, right: any) =>
-          `${left.date} ${left.startTime}`.localeCompare(`${right.date} ${right.startTime}`)
+          `${left.date} ${left.startTime}`.localeCompare(
+            `${right.date} ${right.startTime}`
+          )
         );
     }),
 
@@ -1731,7 +2001,12 @@ export const operations360Router = router({
       if (!clientServices(ctx.user).length) {
         // El tipo explícito importa: sin él este brazo devuelve never[] y el
         // .map() del cliente deja de compilar contra la unión de los dos returns.
-        return { total: 0, aproximada: false, resultados: [] as ClientEvent[], sinPermisos: true };
+        return {
+          total: 0,
+          aproximada: false,
+          resultados: [] as ClientEventResponse[],
+          sinPermisos: true,
+        };
       }
       const eventos = await loadClientEvents(ctx.user);
       const termino = normalizarBusqueda(input.termino);
@@ -1774,93 +2049,162 @@ export const operations360Router = router({
         total: encontrados.length,
         aproximada,
         // Tope para no devolver media base si alguien busca "a".
-        resultados: encontrados.slice(0, 50),
+        resultados: encontrados
+          .slice(0, 50)
+          .map(event => clientEventResponse(event, ctx.user)),
         sinPermisos: false,
       };
     }),
 
   detail: protectedProcedure
-    .input(z.object({ kind: eventKindSchema, entityId: z.number().int().positive(), date: dateSchema }))
+    .input(
+      z.object({
+        kind: eventKindSchema,
+        entityId: z.number().int().positive(),
+        date: dateSchema,
+      })
+    )
     .query(async ({ ctx, input }) => {
       const db = await database();
       const allowed = calendarServices(ctx.user);
 
       if (input.kind === "biopool") {
-        if (!allowed.includes("biopools")) throw new TRPCError({ code: "FORBIDDEN" });
+        if (!allowed.includes("biopools"))
+          throw new TRPCError({ code: "FORBIDDEN" });
+        const canManageReservation = hasCmsPermission(
+          ctx.user,
+          "biopools.manage_agenda"
+        );
+        const canViewPayments = canReadReservationFinancials(
+          ctx.user,
+          "biopools"
+        );
         const [row] = await db
-          .select({ booking: biopoolBookings, serviceName: biopoolServices.name })
+          .select({
+            booking: biopoolBookings,
+            serviceName: biopoolServices.name,
+          })
           .from(biopoolBookings)
-          .innerJoin(biopoolServices, eq(biopoolBookings.serviceId, biopoolServices.id))
+          .innerJoin(
+            biopoolServices,
+            eq(biopoolBookings.serviceId, biopoolServices.id)
+          )
           .where(eq(biopoolBookings.id, input.entityId))
           .limit(1);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-        const [activity, notifications, paymentRows, tickets, [checkout]] = await Promise.all([
-          db.select().from(biopoolBookingActivity)
-            .where(eq(biopoolBookingActivity.bookingId, input.entityId)),
-          db.select().from(biopoolNotifications)
-            .where(eq(biopoolNotifications.bookingId, input.entityId)),
-          db.select().from(reservationPayments)
-            .where(and(
-              eq(reservationPayments.module, "biopools"),
-              eq(reservationPayments.reservationId, input.entityId),
-            )),
-          db.select().from(biopoolTicketTypes)
-            .where(and(
-              eq(biopoolTicketTypes.serviceId, row.booking.serviceId),
-              eq(biopoolTicketTypes.active, 1),
-            )),
-          db.select().from(biopoolCheckoutOrders)
-            .where(eq(biopoolCheckoutOrders.bookingId, input.entityId))
-            .limit(1),
-        ]);
+        const [activity, notifications, paymentRows, tickets, [checkout]] =
+          await Promise.all([
+            db
+              .select()
+              .from(biopoolBookingActivity)
+              .where(eq(biopoolBookingActivity.bookingId, input.entityId)),
+            db
+              .select()
+              .from(biopoolNotifications)
+              .where(eq(biopoolNotifications.bookingId, input.entityId)),
+            canViewPayments
+              ? db
+                  .select()
+                  .from(reservationPayments)
+                  .where(
+                    and(
+                      eq(reservationPayments.module, "biopools"),
+                      eq(reservationPayments.reservationId, input.entityId)
+                    )
+                  )
+              : Promise.resolve([]),
+            db
+              .select()
+              .from(biopoolTicketTypes)
+              .where(
+                and(
+                  eq(biopoolTicketTypes.serviceId, row.booking.serviceId),
+                  eq(biopoolTicketTypes.active, 1)
+                )
+              ),
+            canViewPayments
+              ? db
+                  .select()
+                  .from(biopoolCheckoutOrders)
+                  .where(eq(biopoolCheckoutOrders.bookingId, input.entityId))
+                  .limit(1)
+              : Promise.resolve([]),
+          ]);
         const booking = row.booking;
         return {
           service: "biopools" as const,
-          canManagePayments: hasCmsPermission(ctx.user, "biopools.manage_agenda"),
-          canManageReservation: hasCmsPermission(ctx.user, "biopools.manage_agenda"),
+          canManagePayments: canManageReservation,
+          canManageReservation,
+          canRedeemGiftCards: canReplaceReservation360GiftCard(
+            ctx.user,
+            "biopools"
+          ),
+          paymentRestricted: !canViewPayments,
           title: row.serviceName,
-          editable: {
-            serviceId: booking.serviceId,
-            adultQuantity: booking.adultQuantity,
-            childQuantity: booking.childQuantity,
-            adultPriceClp: tickets.find(ticket => ticket.code === "adult")?.priceClp ?? 0,
-            childPriceClp: tickets.find(ticket => ticket.code === "child")?.priceClp ?? 0,
+          editable: canManageReservation
+            ? {
+                serviceId: booking.serviceId,
+                adultQuantity: booking.adultQuantity,
+                childQuantity: booking.childQuantity,
+                adultPriceClp:
+                  tickets.find(ticket => ticket.code === "adult")?.priceClp ??
+                  0,
+                childPriceClp:
+                  tickets.find(ticket => ticket.code === "child")?.priceClp ??
+                  0,
+              }
+            : undefined,
+          client: {
+            name: booking.clientName,
+            email: booking.clientEmail,
+            phone: booking.clientPhone,
           },
-          client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
-          schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
+          schedule: {
+            date: serializeDate(booking.bookingDate),
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+          },
           status: booking.status,
-          payment: buildPaymentDetail({
-            status: booking.paymentStatus,
-            method: booking.paymentMethod,
-            reference: booking.paymentReference,
-            originalAmountClp: booking.originalAmountClp,
-            discountAmountClp: booking.discountAmountClp,
-            discountCode: booking.discountCode,
-            amountPaidClp: booking.amountPaidClp,
-            refundAmountClp: booking.refundAmountClp,
-            createdAt: booking.createdAt,
-            rows: paymentRows,
-            legacyMethod: checkout?.authorizationCode ? "webpay_plus" : booking.paymentMethod,
-            legacyReference: checkout?.authorizationCode ?? checkout?.buyOrder ?? booking.paymentReference,
-            legacyPaidAt: checkout?.paidAt ?? booking.createdAt,
-            historicalDiscountCode: checkout?.discountCode,
-            historicalDiscountAmountClp: checkout?.discountClp,
-          }),
-          notes: booking.notes,
+          payment: canViewPayments
+            ? buildPaymentDetail({
+                status: booking.paymentStatus,
+                method: booking.paymentMethod,
+                reference: booking.paymentReference,
+                originalAmountClp: booking.originalAmountClp,
+                discountAmountClp: booking.discountAmountClp,
+                discountCode: booking.discountCode,
+                amountPaidClp: booking.amountPaidClp,
+                refundAmountClp: booking.refundAmountClp,
+                createdAt: booking.createdAt,
+                rows: paymentRows,
+                legacyMethod: checkout?.authorizationCode
+                  ? "webpay_plus"
+                  : booking.paymentMethod,
+                legacyReference:
+                  checkout?.authorizationCode ??
+                  checkout?.buyOrder ??
+                  booking.paymentReference,
+                legacyPaidAt: checkout?.paidAt ?? booking.createdAt,
+                historicalDiscountCode: checkout?.discountCode,
+                historicalDiscountAmountClp: checkout?.discountClp,
+              })
+            : null,
+          notes: visibleReservationNotes(booking.notes, canViewPayments),
           detail: `${booking.adultQuantity} adulto(s) · ${booking.childQuantity} niño(s) · ${booking.totalGuests} personas`,
           activity: [
-            ...activity.map(item => {
+            ...activity.flatMap(item => {
               const presentation = biopoolActivityPresentation(
                 item.action,
-                item.detail
+                item.detail,
+                canViewPayments
               );
-              return {
+              return presentation ? [{
                 id: `activity:${item.id}`,
                 type: "activity",
                 label: presentation.label,
                 detail: presentation.detail,
                 at: item.createdAt,
-              };
+              }] : [];
             }),
             ...notifications.map(item => ({
               id: `notification:${item.id}`,
@@ -1869,13 +2213,22 @@ export const operations360Router = router({
               detail: item.status,
               at: item.sentAt ?? item.scheduledAt ?? item.createdAt,
             })),
-          ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()),
+          ].sort(
+            (a, b) =>
+              new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()
+          ),
           href: `/cms/biopiscinas/agenda?date=${serializeDate(booking.bookingDate)}`,
         };
       }
 
       if (input.kind === "massage" || input.kind === "massage_program") {
-        if (!allowed.includes("massages")) throw new TRPCError({ code: "FORBIDDEN" });
+        if (!allowed.includes("massages"))
+          throw new TRPCError({ code: "FORBIDDEN" });
+        const canManagePayments = hasMassagePaymentAccess(ctx.user);
+        const canViewPayments = canReadReservationFinancials(
+          ctx.user,
+          "massages"
+        );
         if (input.kind === "massage") {
           const [row] = await db
             .select({
@@ -1885,129 +2238,286 @@ export const operations360Router = router({
               roomName: massageRooms.name,
             })
             .from(massageBookings)
-            .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-            .leftJoin(massageTherapists, eq(massageBookings.therapistId, massageTherapists.id))
+            .leftJoin(
+              massageTechniques,
+              eq(massageBookings.techniqueId, massageTechniques.id)
+            )
+            .leftJoin(
+              massageTherapists,
+              eq(massageBookings.therapistId, massageTherapists.id)
+            )
             .leftJoin(massageRooms, eq(massageBookings.roomId, massageRooms.id))
             .where(eq(massageBookings.id, input.entityId))
             .limit(1);
           if (!row) throw new TRPCError({ code: "NOT_FOUND" });
           const [[nps], paymentRows] = await Promise.all([
-            db.select().from(massageNpsResponses)
-              .where(and(
-                eq(massageNpsResponses.bookingType, "massage"),
-                eq(massageNpsResponses.bookingId, input.entityId),
-              )).limit(1),
-            db.select().from(reservationPayments)
-              .where(and(
-                eq(reservationPayments.module, "massages"),
-                eq(reservationPayments.reservationId, input.entityId),
-              )),
+            db
+              .select()
+              .from(massageNpsResponses)
+              .where(
+                and(
+                  eq(massageNpsResponses.bookingType, "massage"),
+                  eq(massageNpsResponses.bookingId, input.entityId)
+                )
+              )
+              .limit(1),
+            canViewPayments
+              ? db
+                  .select()
+                  .from(reservationPayments)
+                  .where(
+                    and(
+                      eq(reservationPayments.module, "massages"),
+                      eq(reservationPayments.reservationId, input.entityId)
+                    )
+                  )
+              : Promise.resolve([]),
           ]);
           const booking = row.booking;
+          const canManageReservation = hasCmsPermission(
+            ctx.user,
+            "massages.manage_agenda"
+          );
           return {
             service: "massages" as const,
-            canManagePayments: hasMassagePaymentAccess(ctx.user),
-            canManageReservation: hasCmsPermission(ctx.user, "massages.manage_agenda"),
+            canManagePayments,
+            canManageReservation,
+            canRedeemGiftCards: canReplaceReservation360GiftCard(
+              ctx.user,
+              "massages"
+            ),
+            paymentRestricted: !canViewPayments,
             title: row.techniqueName ?? "Masaje",
-            editable: {
-              techniqueId: booking.techniqueId,
-              duration: booking.duration,
+            editable: canManageReservation
+              ? {
+                  techniqueId: booking.techniqueId,
+                  duration: booking.duration,
+                }
+              : undefined,
+            client: {
+              name: booking.clientName,
+              email: booking.clientEmail,
+              phone: booking.clientPhone,
             },
-            client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
-            schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
+            schedule: {
+              date: serializeDate(booking.bookingDate),
+              startTime: booking.startTime,
+              endTime: booking.endTime,
+            },
             status: booking.status,
-            payment: buildPaymentDetail({
-              status: booking.paymentStatus,
-              method: booking.manualPaymentMethod ?? (booking.getnetRequestId ? "getnet" : null),
-              reference: booking.getnetRequestId,
-              originalAmountClp: booking.originalAmount,
-              discountAmountClp: booking.discountAmount,
-              discountCode: booking.discountCode,
-              amountPaidClp: booking.amountPaid,
-              refundAmountClp: booking.paymentStatus === "refunded" ? money(booking.amountPaid) : 0,
-              createdAt: booking.createdAt,
-              rows: paymentRows,
-            }),
-            notes: booking.notes,
-            detail: [row.therapistName, row.roomName, `${booking.duration} min`].filter(Boolean).join(" · "),
+            payment: canViewPayments
+              ? buildPaymentDetail({
+                  status: booking.paymentStatus,
+                  method:
+                    booking.manualPaymentMethod ??
+                    (booking.getnetRequestId ? "getnet" : null),
+                  reference: booking.getnetRequestId,
+                  originalAmountClp: booking.originalAmount,
+                  discountAmountClp: booking.discountAmount,
+                  discountCode: booking.discountCode,
+                  amountPaidClp: booking.amountPaid,
+                  refundAmountClp:
+                    booking.paymentStatus === "refunded"
+                      ? money(booking.amountPaid)
+                      : 0,
+                  createdAt: booking.createdAt,
+                  rows: paymentRows,
+                })
+              : null,
+            notes: visibleReservationNotes(booking.notes, canViewPayments),
+            detail: [row.therapistName, row.roomName, `${booking.duration} min`]
+              .filter(Boolean)
+              .join(" · "),
             activity: [
-              { id: `created:${booking.id}`, type: "activity", label: "Reserva creada", detail: booking.bookingSource, at: booking.createdAt },
-              ...noteRescheduleActivities(booking.notes, `massage:${booking.id}`),
-              ...(booking.cancelledAt ? [{ id: `cancelled:${booking.id}`, type: "activity", label: "Reserva cancelada", detail: booking.cancellationReason, at: booking.cancelledAt }] : []),
-              ...(nps?.respondedAt ? [{ id: `nps:${nps.id}`, type: "nps", label: `NPS ${nps.score}/10`, detail: nps.comment, at: nps.respondedAt }] : []),
-            ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()),
+              {
+                id: `created:${booking.id}`,
+                type: "activity",
+                label: "Reserva creada",
+                detail: booking.bookingSource,
+                at: booking.createdAt,
+              },
+              ...noteRescheduleActivities(
+                booking.notes,
+                `massage:${booking.id}`
+              ),
+              ...(booking.cancelledAt
+                ? [
+                    {
+                      id: `cancelled:${booking.id}`,
+                      type: "activity",
+                      label: "Reserva cancelada",
+                      detail: booking.cancellationReason,
+                      at: booking.cancelledAt,
+                    },
+                  ]
+                : []),
+              ...(nps?.respondedAt
+                ? [
+                    {
+                      id: `nps:${nps.id}`,
+                      type: "nps",
+                      label: `NPS ${nps.score}/10`,
+                      detail: nps.comment,
+                      at: nps.respondedAt,
+                    },
+                  ]
+                : []),
+            ].sort(
+              (a, b) =>
+                new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()
+            ),
             href: `/cms/masajes/agenda?date=${serializeDate(booking.bookingDate)}`,
           };
         }
 
-        const [booking] = await db.select().from(massageProgramBookings)
-          .where(eq(massageProgramBookings.id, input.entityId)).limit(1);
+        const [booking] = await db
+          .select()
+          .from(massageProgramBookings)
+          .where(eq(massageProgramBookings.id, input.entityId))
+          .limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
         const [[nps], paymentRows] = await Promise.all([
-          db.select().from(massageNpsResponses)
-            .where(and(
-              eq(massageNpsResponses.bookingType, "skedu_program"),
-              eq(massageNpsResponses.bookingId, input.entityId),
-            )).limit(1),
-          db.select().from(reservationPayments)
-            .where(and(
-              eq(reservationPayments.module, "massage_programs"),
-              eq(reservationPayments.reservationId, input.entityId),
-            )),
+          db
+            .select()
+            .from(massageNpsResponses)
+            .where(
+              and(
+                eq(massageNpsResponses.bookingType, "skedu_program"),
+                eq(massageNpsResponses.bookingId, input.entityId)
+              )
+            )
+            .limit(1),
+          canViewPayments
+            ? db
+                .select()
+                .from(reservationPayments)
+                .where(
+                  and(
+                    eq(reservationPayments.module, "massage_programs"),
+                    eq(reservationPayments.reservationId, input.entityId)
+                  )
+                )
+            : Promise.resolve([]),
         ]);
-        const programPayment = massageProgramPaymentState(booking, paymentRows);
+        const programPayment = canViewPayments
+          ? massageProgramPaymentState(booking, paymentRows)
+          : null;
         return {
           service: "massages" as const,
-          canManagePayments: hasMassagePaymentAccess(ctx.user),
+          canManagePayments,
           canManageReservation: false,
+          canRedeemGiftCards: false,
+          paymentRestricted: !canViewPayments,
           title: `Programa ${booking.program.replaceAll("_", " ")}`,
-          client: { name: booking.clientName, email: booking.clientEmail, phone: booking.clientPhone },
-          schedule: { date: serializeDate(booking.bookingDate), startTime: booking.startTime, endTime: booking.endTime },
+          client: {
+            name: booking.clientName,
+            email: booking.clientEmail,
+            phone: booking.clientPhone,
+          },
+          schedule: {
+            date: serializeDate(booking.bookingDate),
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+          },
           status: booking.status,
-          payment: buildPaymentDetail({
-            status: programPayment.status,
-            method: booking.paymentMethod,
-            reference: booking.paymentReference,
-            originalAmountClp: programPayment.totalClp,
-            amountPaidClp: programPayment.paidClp,
-            refundAmountClp: 0,
-            createdAt: booking.createdAt,
-            rows: paymentRows,
-          }),
-          notes: booking.notes,
+          payment: programPayment
+            ? buildPaymentDetail({
+                status: programPayment.status,
+                method: booking.paymentMethod,
+                reference: booking.paymentReference,
+                originalAmountClp: programPayment.totalClp,
+                amountPaidClp: programPayment.paidClp,
+                refundAmountClp: 0,
+                createdAt: booking.createdAt,
+                rows: paymentRows,
+              })
+            : null,
+          notes: visibleReservationNotes(booking.notes, canViewPayments),
           detail: `${booking.modality === "double" ? "Doble" : "Simple"} · ${booking.duration} min`,
           activity: [
-            { id: `created:${booking.id}`, type: "activity", label: "Programa ingresado", detail: booking.externalReference, at: booking.createdAt },
-            ...(booking.cancelledAt ? [{ id: `cancelled:${booking.id}`, type: "activity", label: "Reserva cancelada", detail: booking.cancellationReason, at: booking.cancelledAt }] : []),
-            ...(nps?.respondedAt ? [{ id: `nps:${nps.id}`, type: "nps", label: `NPS ${nps.score}/10`, detail: nps.comment, at: nps.respondedAt }] : []),
-          ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()),
+            {
+              id: `created:${booking.id}`,
+              type: "activity",
+              label: "Programa ingresado",
+              detail: booking.externalReference,
+              at: booking.createdAt,
+            },
+            ...(booking.cancelledAt
+              ? [
+                  {
+                    id: `cancelled:${booking.id}`,
+                    type: "activity",
+                    label: "Reserva cancelada",
+                    detail: booking.cancellationReason,
+                    at: booking.cancelledAt,
+                  },
+                ]
+              : []),
+            ...(nps?.respondedAt
+              ? [
+                  {
+                    id: `nps:${nps.id}`,
+                    type: "nps",
+                    label: `NPS ${nps.score}/10`,
+                    detail: nps.comment,
+                    at: nps.respondedAt,
+                  },
+                ]
+              : []),
+          ].sort(
+            (a, b) =>
+              new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()
+          ),
           href: `/cms/masajes/agenda?date=${serializeDate(booking.bookingDate)}`,
         };
       }
 
       if (input.kind === "sauna") {
-        if (!allowed.includes("sauna")) throw new TRPCError({ code: "FORBIDDEN" });
+        if (!allowed.includes("sauna"))
+          throw new TRPCError({ code: "FORBIDDEN" });
+        const canManagePayments = hasCmsPermission(
+          ctx.user,
+          "sauna.manage_agenda"
+        );
+        const canViewPayments = canReadReservationFinancials(
+          ctx.user,
+          "sauna"
+        );
         const [[booking], paymentRows, [checkout]] = await Promise.all([
-          db.select()
+          db
+            .select()
             .from(saunaBookings)
             .where(eq(saunaBookings.id, input.entityId))
             .limit(1),
-          db.select().from(reservationPayments)
-            .where(and(
-              eq(reservationPayments.module, "sauna"),
-              eq(reservationPayments.reservationId, input.entityId),
-            )),
-          db.select().from(saunaCheckoutOrders)
-            .where(eq(saunaCheckoutOrders.bookingId, input.entityId))
-            .limit(1),
+          canViewPayments
+            ? db
+                .select()
+                .from(reservationPayments)
+                .where(
+                  and(
+                    eq(reservationPayments.module, "sauna"),
+                    eq(reservationPayments.reservationId, input.entityId)
+                  )
+                )
+            : Promise.resolve([]),
+          canViewPayments
+            ? db
+                .select()
+                .from(saunaCheckoutOrders)
+                .where(eq(saunaCheckoutOrders.bookingId, input.entityId))
+                .limit(1)
+            : Promise.resolve([]),
         ]);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
         return {
           service: "sauna" as const,
-          canManagePayments: hasCmsPermission(ctx.user, "sauna.manage_agenda"),
-          canManageReservation:
-            booking.source !== "skedu" &&
-            hasCmsPermission(ctx.user, "sauna.manage_agenda"),
+          canManagePayments,
+          canManageReservation: booking.source !== "skedu" && canManagePayments,
+          canRedeemGiftCards: canReplaceReservation360GiftCard(
+            ctx.user,
+            "sauna"
+          ),
+          paymentRestricted: !canViewPayments,
           title: booking.serviceName,
           client: {
             name: booking.clientName ?? "Sin cliente registrado",
@@ -2020,20 +2530,30 @@ export const operations360Router = router({
             endTime: booking.endTime,
           },
           status: booking.status,
-          payment: buildPaymentDetail({
-            status: booking.paymentStatus,
-            method: booking.paymentMethod,
-            reference: booking.paymentReference,
-            originalAmountClp: booking.amountClp,
-            amountPaidClp: booking.amountPaidClp,
-            refundAmountClp: booking.paymentStatus === "refunded" ? booking.amountPaidClp : 0,
-            createdAt: booking.createdAt,
-            rows: paymentRows,
-            legacyMethod: checkout?.authorizationCode ? "webpay_plus" : booking.paymentMethod,
-            legacyReference: checkout?.authorizationCode ?? checkout?.buyOrder ?? booking.paymentReference,
-            legacyPaidAt: checkout?.paidAt ?? booking.createdAt,
-          }),
-          notes: booking.notes,
+          payment: canViewPayments
+            ? buildPaymentDetail({
+                status: booking.paymentStatus,
+                method: booking.paymentMethod,
+                reference: booking.paymentReference,
+                originalAmountClp: booking.amountClp,
+                amountPaidClp: booking.amountPaidClp,
+                refundAmountClp:
+                  booking.paymentStatus === "refunded"
+                    ? booking.amountPaidClp
+                    : 0,
+                createdAt: booking.createdAt,
+                rows: paymentRows,
+                legacyMethod: checkout?.authorizationCode
+                  ? "webpay_plus"
+                  : booking.paymentMethod,
+                legacyReference:
+                  checkout?.authorizationCode ??
+                  checkout?.buyOrder ??
+                  booking.paymentReference,
+                legacyPaidAt: checkout?.paidAt ?? booking.createdAt,
+              })
+            : null,
+          notes: visibleReservationNotes(booking.notes, canViewPayments),
           detail: `${booking.guests} persona(s) · ${booking.source === "skedu" ? "Skedu" : "CMS"}`,
           activity: [
             {
@@ -2045,39 +2565,55 @@ export const operations360Router = router({
             },
             ...noteRescheduleActivities(booking.notes, `sauna:${booking.id}`),
             ...(booking.cancelledAt
-              ? [{
-                  id: `cancelled:${booking.id}`,
-                  type: "activity",
-                  label: "Reserva cancelada",
-                  detail: null,
-                  at: booking.cancelledAt,
-                }]
+              ? [
+                  {
+                    id: `cancelled:${booking.id}`,
+                    type: "activity",
+                    label: "Reserva cancelada",
+                    detail: null,
+                    at: booking.cancelledAt,
+                  },
+                ]
               : []),
-          ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()),
+          ].sort(
+            (a, b) =>
+              new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()
+          ),
           href: `/cms/sauna/agenda?date=${serializeDate(booking.bookingDate)}`,
         };
       }
 
-      if (!allowed.includes("regular_classes")) throw new TRPCError({ code: "FORBIDDEN" });
       if (input.kind === "regular_class_membership") {
-        const [row] = await db.select({
-          membership: regularClassMemberships,
-          student: regularClassStudents,
-          planName: regularClassPlans.name,
-        }).from(regularClassMemberships)
-          .innerJoin(regularClassStudents, eq(regularClassMemberships.studentId, regularClassStudents.id))
-          .innerJoin(regularClassPlans, eq(regularClassMemberships.planId, regularClassPlans.id))
-          .where(eq(regularClassMemberships.id, input.entityId)).limit(1);
+        assertRegularClassOperationsResourceAccess(ctx.user, {
+          kind: "regular_class_membership",
+        });
+        const [row] = await db
+          .select({
+            membership: regularClassMemberships,
+            student: regularClassStudents,
+            planName: regularClassPlans.name,
+          })
+          .from(regularClassMemberships)
+          .innerJoin(
+            regularClassStudents,
+            eq(regularClassMemberships.studentId, regularClassStudents.id)
+          )
+          .innerJoin(
+            regularClassPlans,
+            eq(regularClassMemberships.planId, regularClassPlans.id)
+          )
+          .where(eq(regularClassMemberships.id, input.entityId))
+          .limit(1);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-        const name = [row.student.firstName, row.student.lastName].filter(Boolean).join(" ");
-        const totalAmountClp = Math.max(
-          0,
-          row.membership.originalAmountClp - row.membership.discountAmountClp
-        );
+        const name = [row.student.firstName, row.student.lastName]
+          .filter(Boolean)
+          .join(" ");
         return {
           service: "regular_classes" as const,
           canManagePayments: false,
           canManageReservation: false,
+          canRedeemGiftCards: false,
+          paymentRestricted: false,
           title: row.planName,
           client: { name, email: row.student.email, phone: row.student.phone },
           schedule: {
@@ -2093,72 +2629,140 @@ export const operations360Router = router({
             originalAmountClp: row.membership.originalAmountClp,
             discountAmountClp: row.membership.discountAmountClp,
             discountCode: row.membership.discountCode,
-            amountPaidClp: row.membership.paymentStatus === "paid"
-              ? row.membership.pricePaidClp
-              : 0,
+            amountPaidClp:
+              row.membership.paymentStatus === "paid"
+                ? row.membership.pricePaidClp
+                : 0,
             createdAt: row.membership.createdAt,
           }),
           notes: row.membership.notes,
           detail: `Vigencia ${serializeDate(row.membership.periodStart)}–${serializeDate(row.membership.periodEnd)}`,
-          activity: [{
-            id: `created:${row.membership.id}`,
-            type: "activity" as const,
-            label: "Plan registrado",
-            detail: row.planName,
-            at: row.membership.createdAt,
-          }],
+          activity: [
+            {
+              id: `created:${row.membership.id}`,
+              type: "activity" as const,
+              label: "Plan registrado",
+              detail: row.planName,
+              at: row.membership.createdAt,
+            },
+          ],
           href: "/cms/clases-regulares/alumnos",
         };
       }
       if (input.kind === "regular_class") {
-        const [row] = await db.select({
-          session: regularClassSessions,
-          disciplineName: regularClassDisciplines.name,
-          teacherName: regularClassTeachers.name,
-        }).from(regularClassSessions)
-          .innerJoin(regularClassDisciplines, eq(regularClassSessions.disciplineId, regularClassDisciplines.id))
-          .innerJoin(regularClassTeachers, eq(regularClassSessions.teacherId, regularClassTeachers.id))
-          .where(eq(regularClassSessions.id, input.entityId)).limit(1);
+        const [row] = await db
+          .select({
+            session: regularClassSessions,
+            disciplineName: regularClassDisciplines.name,
+            teacherName: regularClassTeachers.name,
+          })
+          .from(regularClassSessions)
+          .innerJoin(
+            regularClassDisciplines,
+            eq(regularClassSessions.disciplineId, regularClassDisciplines.id)
+          )
+          .innerJoin(
+            regularClassTeachers,
+            eq(regularClassSessions.teacherId, regularClassTeachers.id)
+          )
+          .where(eq(regularClassSessions.id, input.entityId))
+          .limit(1);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-        const attendances = await db.select().from(regularClassAttendances)
+        const viewerTeacher = isAdminRole(ctx.user.role)
+          ? null
+          : await getActiveRegularClassTeacherForUser(ctx.user.id, db);
+        assertRegularClassOperationsResourceAccess(
+          ctx.user,
+          { kind: "regular_class", teacherId: row.session.teacherId },
+          viewerTeacher?.id ?? null
+        );
+        const attendances = await db
+          .select()
+          .from(regularClassAttendances)
           .where(eq(regularClassAttendances.sessionId, input.entityId));
         return {
           service: "regular_classes" as const,
           canManagePayments: false,
+          canManageReservation: false,
+          canRedeemGiftCards: false,
+          paymentRestricted: false,
           title: row.disciplineName,
           client: { name: row.teacherName, email: null, phone: null },
-          schedule: { date: serializeDate(row.session.sessionDate), startTime: row.session.startTime, endTime: row.session.endTime },
+          schedule: {
+            date: serializeDate(row.session.sessionDate),
+            startTime: row.session.startTime,
+            endTime: row.session.endTime,
+          },
           status: row.session.status,
           payment: null,
           notes: row.session.notes,
           detail: `${attendances.filter(item => item.status === "present").length} asistente(s)`,
-          activity: [{ id: `created:${row.session.id}`, type: "activity", label: "Clase programada", detail: row.teacherName, at: row.session.createdAt }],
+          activity: [
+            {
+              id: `created:${row.session.id}`,
+              type: "activity",
+              label: "Clase programada",
+              detail: row.teacherName,
+              at: row.session.createdAt,
+            },
+          ],
           href: `/cms/clases-regulares/asistencia?date=${serializeDate(row.session.sessionDate)}`,
         };
       }
 
-      const [row] = await db.select({
-        schedule: regularClassSchedules,
-        disciplineName: regularClassDisciplines.name,
-        teacherName: regularClassTeachers.name,
-      }).from(regularClassSchedules)
-        .innerJoin(regularClassDisciplines, eq(regularClassSchedules.disciplineId, regularClassDisciplines.id))
-        .innerJoin(regularClassTeachers, eq(regularClassSchedules.teacherId, regularClassTeachers.id))
-        .where(eq(regularClassSchedules.id, input.entityId)).limit(1);
-      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-      return {
-        service: "regular_classes" as const,
-        canManagePayments: false,
-        title: row.disciplineName,
-        client: { name: row.teacherName, email: null, phone: null },
-        schedule: { date: input.date, startTime: row.schedule.startTime, endTime: row.schedule.endTime },
-        status: "scheduled",
-        payment: null,
-        notes: null,
-        detail: "Clase recurrente",
-        activity: [],
-        href: `/cms/clases-regulares/asistencia?date=${input.date}`,
-      };
+      if (input.kind === "regular_class_schedule") {
+        const [row] = await db
+          .select({
+            schedule: regularClassSchedules,
+            disciplineName: regularClassDisciplines.name,
+            teacherName: regularClassTeachers.name,
+          })
+          .from(regularClassSchedules)
+          .innerJoin(
+            regularClassDisciplines,
+            eq(regularClassSchedules.disciplineId, regularClassDisciplines.id)
+          )
+          .innerJoin(
+            regularClassTeachers,
+            eq(regularClassSchedules.teacherId, regularClassTeachers.id)
+          )
+          .where(eq(regularClassSchedules.id, input.entityId))
+          .limit(1);
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        const viewerTeacher = isAdminRole(ctx.user.role)
+          ? null
+          : await getActiveRegularClassTeacherForUser(ctx.user.id, db);
+        assertRegularClassOperationsResourceAccess(
+          ctx.user,
+          {
+            kind: "regular_class_schedule",
+            teacherId: row.schedule.teacherId,
+          },
+          viewerTeacher?.id ?? null
+        );
+        return {
+          service: "regular_classes" as const,
+          canManagePayments: false,
+          canManageReservation: false,
+          canRedeemGiftCards: false,
+          paymentRestricted: false,
+          title: row.disciplineName,
+          client: { name: row.teacherName, email: null, phone: null },
+          schedule: {
+            date: input.date,
+            startTime: row.schedule.startTime,
+            endTime: row.schedule.endTime,
+          },
+          status: "scheduled",
+          payment: null,
+          notes: null,
+          detail: "Clase recurrente",
+          activity: [],
+          href: `/cms/clases-regulares/asistencia?date=${input.date}`,
+        };
+      }
+
+      return assertUnreachableReservation360Kind(input.kind);
     }),
 
   materializeLegacyPayment: protectedProcedure
@@ -2176,12 +2780,24 @@ export const operations360Router = router({
       if (!canManage) throw new TRPCError({ code: "FORBIDDEN" });
 
       return db.transaction(async tx => {
-        const existing = await tx.select().from(reservationPayments).where(and(
-          eq(reservationPayments.module, input.service),
-          eq(reservationPayments.reservationId, input.entityId),
-        ));
-        if (existing.length)
-          throw new TRPCError({ code: "CONFLICT", message: "El pago ya fue convertido a detalle. Actualiza la reserva." });
+        await guardLegacyPaymentMaterialization({
+          assertNoLiveAttempt: () =>
+            assertNoLiveReservationPaymentAttempt(
+              tx,
+              input.service,
+              input.entityId
+            ),
+          loadExistingPayments: () =>
+            tx
+              .select()
+              .from(reservationPayments)
+              .where(
+                and(
+                  eq(reservationPayments.module, input.service),
+                  eq(reservationPayments.reservationId, input.entityId)
+                )
+              ),
+        });
 
         let method: string | null = null;
         let reference: string | null = null;
@@ -2233,67 +2849,114 @@ export const operations360Router = router({
           createdByUserId: ctx.user.id,
         }).$returningId();
         return { paymentId: created.id };
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
     }),
 
   replaceGiftCardPayment: protectedProcedure
-    .input(z.object({
-      service: z.enum(["massages", "biopools", "sauna"]),
-      paymentId: z.number().int().positive(),
-      code: z.string().trim().min(1).max(20),
-      amountClp: z.number().int().positive(),
-    }))
+    .input(
+      z.object({
+        service: z.enum(["massages", "biopools", "sauna"]),
+        paymentId: z.number().int().positive(),
+        code: z.string().trim().min(1).max(20),
+        amountClp: z.number().int().positive(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       const db = await database();
-      const canManage = input.service === "massages"
-        ? hasMassagePaymentAccess(ctx.user)
-        : hasCmsPermission(ctx.user, `${input.service}.manage_agenda` as any);
-      if (!canManage) throw new TRPCError({ code: "FORBIDDEN" });
+      if (!canReplaceReservation360GiftCard(ctx.user, input.service)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permisos para canjear Gift Cards",
+        });
+      }
       const result = await db.transaction(async tx => {
-        const [payment] = await tx.select().from(reservationPayments).where(and(
-          eq(reservationPayments.id, input.paymentId),
-          eq(reservationPayments.module, input.service),
-        )).limit(1);
+        const [payment] = await tx
+          .select()
+          .from(reservationPayments)
+          .where(
+            and(
+              eq(reservationPayments.id, input.paymentId),
+              eq(reservationPayments.module, input.service)
+            )
+          )
+          .limit(1);
         if (!payment?.giftCardId || payment.method !== "gift_card")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "El pago no corresponde a una Gift Card editable" });
-        await assertNoLiveReservationPaymentAttempt(tx, input.service, payment.reservationId);
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "El pago no corresponde a una Gift Card editable",
+          });
+        await assertNoLiveReservationPaymentAttempt(
+          tx,
+          input.service,
+          payment.reservationId
+        );
 
         let totalClp = 0;
         let currentPaidClp = 0;
         if (input.service === "massages") {
-          const [booking] = await tx.select().from(massageBookings)
-            .where(eq(massageBookings.id, payment.reservationId)).limit(1);
+          const [booking] = await tx
+            .select()
+            .from(massageBookings)
+            .where(eq(massageBookings.id, payment.reservationId))
+            .limit(1);
           if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-          totalClp = Math.max(0, money(booking.originalAmount) - money(booking.discountAmount));
+          totalClp = Math.max(
+            0,
+            money(booking.originalAmount) - money(booking.discountAmount)
+          );
           currentPaidClp = money(booking.amountPaid);
         } else if (input.service === "biopools") {
-          const [booking] = await tx.select().from(biopoolBookings)
-            .where(eq(biopoolBookings.id, payment.reservationId)).limit(1);
+          const [booking] = await tx
+            .select()
+            .from(biopoolBookings)
+            .where(eq(biopoolBookings.id, payment.reservationId))
+            .limit(1);
           if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-          totalClp = Math.max(0, booking.originalAmountClp - booking.discountAmountClp);
+          totalClp = Math.max(
+            0,
+            booking.originalAmountClp - booking.discountAmountClp
+          );
           currentPaidClp = booking.amountPaidClp;
         } else {
-          const [booking] = await tx.select().from(saunaBookings)
-            .where(eq(saunaBookings.id, payment.reservationId)).limit(1);
+          const [booking] = await tx
+            .select()
+            .from(saunaBookings)
+            .where(eq(saunaBookings.id, payment.reservationId))
+            .limit(1);
           if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
           totalClp = booking.amountClp;
           currentPaidClp = booking.amountPaidClp;
         }
-        const newPaidClp = Math.max(0, currentPaidClp - payment.amountClp) + input.amountClp;
+        const newPaidClp =
+          Math.max(0, currentPaidClp - payment.amountClp) + input.amountClp;
         if (newPaidClp > totalClp)
-          throw new TRPCError({ code: "BAD_REQUEST", message: "El canje supera el saldo pendiente de la reserva" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "El canje supera el saldo pendiente de la reserva",
+          });
 
-        const [oldCard] = await tx.select().from(giftCards)
-          .where(eq(giftCards.id, payment.giftCardId)).limit(1);
-        if (!oldCard) throw new TRPCError({ code: "NOT_FOUND", message: "Gift Card anterior no encontrada" });
-        const restoredBalance = oldCard.amount === 0
-          ? 0
-          : Math.min(oldCard.amount, oldCard.balance + payment.amountClp);
-        await tx.update(giftCards).set({
-          balance: restoredBalance,
-          status: "active",
-          redeemedAt: null,
-        }).where(eq(giftCards.id, oldCard.id));
+        const [oldCard] = await tx
+          .select()
+          .from(giftCards)
+          .where(eq(giftCards.id, payment.giftCardId))
+          .limit(1);
+        if (!oldCard)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Gift Card anterior no encontrada",
+          });
+        const restoredBalance =
+          oldCard.amount === 0
+            ? 0
+            : Math.min(oldCard.amount, oldCard.balance + payment.amountClp);
+        await tx
+          .update(giftCards)
+          .set({
+            balance: restoredBalance,
+            status: "active",
+            redeemedAt: null,
+          })
+          .where(eq(giftCards.id, oldCard.id));
         await tx.insert(giftCardTransactions).values({
           giftCardId: oldCard.id,
           transactionType: "refund",
@@ -2319,26 +2982,41 @@ export const operations360Router = router({
           note: `Gift Card editada desde Calendario 360`,
           serviceKey: input.service,
         });
-        await tx.update(reservationPayments).set({
-          amountClp: input.amountClp,
-          reference: redeemed.code,
-          giftCardId: redeemed.id,
-          paidAt: new Date(),
-        }).where(eq(reservationPayments.id, payment.id));
-        const status = newPaidClp <= 0 ? "pending" : newPaidClp < totalClp ? "partially_paid" : "paid";
+        await tx
+          .update(reservationPayments)
+          .set({
+            amountClp: input.amountClp,
+            reference: redeemed.code,
+            giftCardId: redeemed.id,
+            paidAt: new Date(),
+          })
+          .where(eq(reservationPayments.id, payment.id));
+        const status =
+          newPaidClp <= 0
+            ? "pending"
+            : newPaidClp < totalClp
+              ? "partially_paid"
+              : "paid";
         if (input.service === "massages") {
-          await tx.update(massageBookings).set({ amountPaid: String(newPaidClp), paymentStatus: status })
+          await tx
+            .update(massageBookings)
+            .set({ amountPaid: String(newPaidClp), paymentStatus: status })
             .where(eq(massageBookings.id, payment.reservationId));
         } else if (input.service === "biopools") {
-          await tx.update(biopoolBookings).set({ amountPaidClp: newPaidClp, paymentStatus: status })
+          await tx
+            .update(biopoolBookings)
+            .set({ amountPaidClp: newPaidClp, paymentStatus: status })
             .where(eq(biopoolBookings.id, payment.reservationId));
         } else {
-          await tx.update(saunaBookings).set({ amountPaidClp: newPaidClp, paymentStatus: status })
+          await tx
+            .update(saunaBookings)
+            .set({ amountPaidClp: newPaidClp, paymentStatus: status })
             .where(eq(saunaBookings.id, payment.reservationId));
         }
         return { success: true, reservationId: payment.reservationId };
-      });
-      if (input.service === "massages") await syncMassageSale(result.reservationId);
+      }, RESERVATION_PAYMENT_TRANSACTION);
+      if (input.service === "massages")
+        await syncMassageSale(result.reservationId);
       return { success: true };
     }),
 
@@ -2367,6 +3045,9 @@ export const operations360Router = router({
         const nextCursor = input.cursor + items.length < clients.length
           ? input.cursor + items.length
           : null;
+        const financialRestricted = clients.some(
+          client => client.financialRestricted
+        );
         return {
           items,
           total: clients.length,
@@ -2374,7 +3055,13 @@ export const operations360Router = router({
           summary: {
             clients: clients.length,
             upcomingReservations: clients.reduce((sum, client) => sum + client.upcomingReservations, 0),
-            pendingBalanceClp: clients.reduce((sum, client) => sum + client.pendingBalanceClp, 0),
+            pendingBalanceClp: financialRestricted
+              ? null
+              : clients.reduce(
+                  (sum, client) => sum + (client.pendingBalanceClp ?? 0),
+                  0
+                ),
+            financialRestricted,
           },
         };
       }),
@@ -2429,12 +3116,15 @@ export const operations360Router = router({
       .query(async ({ ctx, input }) => {
         const profile = await assertClientProfileVisible(ctx.user, input.profileId);
         const db = await database();
+        const canViewGiftCards = canReadClientGiftCards(ctx.user);
         const [identities, auditRows, allGiftCards, summaries, events] = await Promise.all([
           db.select().from(client360Identities)
             .where(eq(client360Identities.profileId, input.profileId)),
           db.select().from(client360Audit)
             .where(eq(client360Audit.profileId, input.profileId)),
-          db.select().from(giftCards),
+          canViewGiftCards
+            ? db.select().from(giftCards)
+            : Promise.resolve([]),
           clientListData(ctx.user, {}),
           loadClientEvents(ctx.user),
         ]);
@@ -2458,8 +3148,16 @@ export const operations360Router = router({
             serviceKey: card.serviceKey,
             serviceName: card.serviceName,
             expiresAt: card.expiresAt,
-          }));
+        }));
         const profileEvents = events.filter(event => event.profileId === input.profileId);
+        const profileSummary = summaries.find(
+          item => item.profileId === input.profileId
+        );
+        const financialRestricted =
+          profileSummary?.financialRestricted ??
+          profileEvents.some(
+            event => !canReadReservationFinancials(ctx.user, event.service)
+          );
         return {
           profile: {
             id: profile.id,
@@ -2467,7 +3165,10 @@ export const operations360Router = router({
             name: profile.displayName,
             email: profile.primaryEmail,
             phone: profile.primaryPhone,
-            notes: profile.notes,
+            notes: redactFinancialReservationNotes(
+              profile.notes,
+              !financialRestricted
+            ),
             status: profile.status,
             createdAt: profile.createdAt,
             updatedAt: profile.updatedAt,
@@ -2481,19 +3182,34 @@ export const operations360Router = router({
               normalizedValue: identity.normalizedValue,
               source: identity.source,
             })),
-          summary: summaries.find(item => item.profileId === input.profileId) ?? {
+          summary: profileSummary ?? {
             reservations: profileEvents.length,
             upcomingReservations: profileEvents.filter(event => clientEventActivity(event) === "upcoming").length,
-            totalSpentClp: profileEvents.reduce((sum, event) => sum + event.amountClp, 0),
-            pendingBalanceClp: profileEvents.reduce((sum, event) => sum + event.balanceAmountClp, 0),
+            totalSpentClp: financialRestricted
+              ? null
+              : profileEvents.reduce(
+                  (sum, event) => sum + event.amountClp,
+                  0
+                ),
+            pendingBalanceClp: financialRestricted
+              ? null
+              : profileEvents.reduce(
+                  (sum, event) => sum + event.balanceAmountClp,
+                  0
+                ),
+            financialRestricted,
             nextReservation: null,
             services: Array.from(new Set(profileEvents.map(event => event.service))),
             lastActivity: serializeDate(profile.updatedAt),
           },
           giftCards: clientGiftCards,
-          activity: auditRows
-            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-            .slice(0, 100),
+          giftCardsRestricted: !canViewGiftCards,
+          activity: presentClientAuditActivity(
+            auditRows
+              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+              .slice(0, 100),
+            financialRestricted
+          ),
           canManageProfile: canManageClientProfiles(ctx.user),
           canMergeProfiles: isAdminRole(ctx.user.role),
         };

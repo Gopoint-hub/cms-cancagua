@@ -1,5 +1,9 @@
 import { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
+import {
+  Reservation360DetailDialog,
+  type Reservation360Event,
+} from "@/components/cms/Reservation360DetailDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -52,6 +56,8 @@ export default function RegularClassesStudents() {
   const [carryStudent, setCarryStudent] = useState<any | null>(null);
   const [paymentStudent, setPaymentStudent] = useState<any | null>(null);
   const [deleteStudent, setDeleteStudent] = useState<any | null>(null);
+  const [selectedReservation, setSelectedReservation] =
+    useState<Reservation360Event | null>(null);
   const [studentForm, setStudentForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   const [enrollForm, setEnrollForm] = useState({
     planId: "", month: currentMonthString(),
@@ -193,6 +199,33 @@ export default function RegularClassesStudents() {
                         <Button size="sm" onClick={() => setEnrollStudent(student)}>
                           Inscribir
                         </Button>
+                        {student.membership && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              const membership = student.membership;
+                              if (!membership) return;
+                              setSelectedReservation({
+                                id: `regular-class-membership:${membership.id}`,
+                                entityId: membership.id,
+                                kind: "regular_class_membership",
+                                service: "regular_classes",
+                                date: String(membership.periodStart).slice(0, 10),
+                                startTime: "00:00",
+                                endTime: "00:00",
+                                title: membership.planName,
+                                clientName: `${student.firstName} ${student.lastName ?? ""}`.trim(),
+                                status: membership.status,
+                                paymentStatus: membership.paymentStatus,
+                                people: 1,
+                                href: "/cms/clases-regulares/alumnos",
+                              });
+                            }}
+                          >
+                            Gestionar plan
+                          </Button>
+                        )}
                         {student.membership?.paymentStatus === "pending" && (
                           <Button size="sm" variant="destructive" onClick={() => setPaymentStudent(student)}>
                             Registrar pago
@@ -378,6 +411,19 @@ export default function RegularClassesStudents() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Reservation360DetailDialog
+        event={selectedReservation}
+        open={Boolean(selectedReservation)}
+        onOpenChange={next => !next && setSelectedReservation(null)}
+        onChanged={() =>
+          Promise.all([
+            utils.regularClasses.students.list.invalidate(),
+            utils.regularClasses.dashboard.invalidate(),
+            utils.cashRegister.summary.invalidate(),
+          ])
+        }
+      />
     </DashboardLayout>
   );
 }

@@ -8,11 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { AlertTriangle, CalendarPlus } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/_core/hooks/useAuth";
 import {
+  isPendingMassagePaymentMethod,
   MANUAL_MASSAGE_PAYMENT_METHODS,
   MASSAGE_PAYMENT_METHOD_LABELS,
   type ManualMassagePaymentMethod,
 } from "@shared/massagePayments";
+import { hasMassagePaymentAccess } from "@shared/permissions";
 
 type Props = {
   open: boolean;
@@ -21,9 +24,16 @@ type Props = {
   onCreated?: () => void;
 };
 
+type SkeduProgramPaymentMethod = Exclude<
+  ManualMassagePaymentMethod,
+  "gift_card" | "getnet_link"
+>;
+
 const todayChile = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 
 export default function SkeduProgramBookingDialog({ open, onOpenChange, initialDate, onCreated }: Props) {
+  const { user } = useAuth();
+  const canManagePayments = hasMassagePaymentAccess(user ?? {});
   const [program, setProgram] = useState("reconecta");
   const [duration, setDuration] = useState<30 | 50>(30);
   const [modality, setModality] = useState<"simple" | "double">("simple");
@@ -35,7 +45,8 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
   const [startTime, setStartTime] = useState("10:00");
   const [roomId, setRoomId] = useState("");
   const [externalReference, setExternalReference] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<ManualMassagePaymentMethod>("getnet_link");
+  const [paymentMethod, setPaymentMethod] =
+    useState<SkeduProgramPaymentMethod>("pending_payment");
   const [paymentReference, setPaymentReference] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -49,6 +60,12 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
   useEffect(() => {
     if (open && initialDate) setBookingDate(initialDate);
   }, [open, initialDate]);
+
+  useEffect(() => {
+    if (!open || canManagePayments) return;
+    setPaymentMethod("pending_payment");
+    setPaymentReference("");
+  }, [open, canManagePayments]);
 
   useEffect(() => {
     if (!open || !resources) return;
@@ -74,7 +91,7 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
     setStartTime("10:00");
     setRoomId("");
     setExternalReference("");
-    setPaymentMethod("getnet_link");
+    setPaymentMethod("pending_payment");
     setPaymentReference("");
     setNotes("");
   };
@@ -89,7 +106,9 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
     onError: (error) => toast.error(error.message),
   });
 
-  const paymentComplete = ["pending_payment", "cash"].includes(paymentMethod)
+  const paymentComplete = !canManagePayments
+    || isPendingMassagePaymentMethod(paymentMethod)
+    || paymentMethod === "cash"
     || Boolean(paymentReference.trim());
   const canSubmit = !!clientName.trim() && !!bookingDate && !!startTime && !!roomId &&
     (modality === "simple" || !!secondClientName.trim()) && paymentComplete;
@@ -108,8 +127,10 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
       startTime,
       roomId: Number(roomId),
       externalReference: externalReference.trim() || undefined,
-      paymentMethod,
-      paymentReference: paymentReference.trim() || undefined,
+      paymentMethod: canManagePayments ? paymentMethod : "pending_payment",
+      paymentReference: canManagePayments
+        ? paymentReference.trim() || undefined
+        : undefined,
       notes: notes.trim() || undefined,
     });
   };
@@ -212,30 +233,45 @@ export default function SkeduProgramBookingDialog({ open, onOpenChange, initialD
             <Label>Referencia Skedu</Label>
             <Input value={externalReference} onChange={(event) => setExternalReference(event.target.value)} placeholder="ID o código de la reserva" />
           </div>
-          <div>
-            <Label>Medio de pago *</Label>
-            <Select value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as ManualMassagePaymentMethod)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {MANUAL_MASSAGE_PAYMENT_METHODS.map((method) => (
-                  <SelectItem key={method} value={method}>
-                    {MASSAGE_PAYMENT_METHOD_LABELS[method]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {!["pending_payment", "cash"].includes(paymentMethod) && (
-            <div className="sm:col-span-2">
-              <Label>Referencia de pago *</Label>
-              <Input
-                value={paymentReference}
-                onChange={(event) => setPaymentReference(event.target.value)}
-                placeholder="Código Getnet, Gift Card o comprobante"
-              />
-            </div>
+          {canManagePayments ? (
+            <>
+              <div>
+                <Label>Medio de pago *</Label>
+                <Select value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as SkeduProgramPaymentMethod)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {MANUAL_MASSAGE_PAYMENT_METHODS
+                      .filter(
+                        method =>
+                          method !== "gift_card" && method !== "getnet_link"
+                      )
+                      .map((method) => (
+                      <SelectItem key={method} value={method}>
+                        {MASSAGE_PAYMENT_METHOD_LABELS[method]}
+                      </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {!isPendingMassagePaymentMethod(paymentMethod) &&
+                paymentMethod !== "cash" && (
+                <div className="sm:col-span-2">
+                  <Label>Referencia de pago *</Label>
+                  <Input
+                    value={paymentReference}
+                    onChange={(event) => setPaymentReference(event.target.value)}
+                    placeholder="Código Getnet, Gift Card o comprobante"
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              La reserva se creará pendiente de pago.
+            </p>
           )}
-          {paymentMethod === "pending_payment" && (
+          {(!canManagePayments ||
+            isPendingMassagePaymentMethod(paymentMethod)) && (
             <div className="sm:col-span-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
               La reserva quedará en rojo hasta registrar el medio real durante el check-in.
             </div>

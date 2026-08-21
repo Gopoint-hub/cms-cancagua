@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { isPendingMassagePaymentMethod } from "../shared/massagePayments";
 import {
   buildInhouseMonthRotation,
   buildRecurringMassageAvailability,
   buildPublicMassageBookingNotifications,
+  allocateSkeduProgramPaidAmount,
+  calculateSkeduProgramSettlement,
   getChileDateString,
   getChileTimeString,
   getSkeduMassageQuantity,
@@ -17,7 +20,9 @@ import {
   MASSAGE_AGENDA_STATUSES,
   MANUAL_ASSIGNMENT_REJECTION_STATUSES,
   SKEDU_AGENDA_STATUSES,
+  SKEDU_PROGRAM_PAYMENT_METHODS,
   normalizeDecimalInput,
+  resolveSkeduProgramCreditedPayments,
   selectAutomaticMassageAssignment,
   serializePublicMassageTechnique,
   serializeDateOnly,
@@ -163,6 +168,24 @@ describe("recurring therapist availability", () => {
 });
 
 describe("Skedu massage programs", () => {
+  it("only accepts payment methods that represent an actual program payment", () => {
+    expect(SKEDU_PROGRAM_PAYMENT_METHODS).not.toContain("gift_card");
+    expect(SKEDU_PROGRAM_PAYMENT_METHODS).not.toContain("getnet_link");
+  });
+
+  it("never counts an unconfirmed Getnet link as paid", () => {
+    expect(isPendingMassagePaymentMethod("pending_payment")).toBe(true);
+    expect(isPendingMassagePaymentMethod("getnet_link")).toBe(true);
+    expect(isPendingMassagePaymentMethod("getnet")).toBe(false);
+    expect(
+      calculateSkeduProgramSettlement({
+        totalClp: 45_000,
+        payments: [],
+        legacyPaymentMethod: "getnet_link",
+      })
+    ).toEqual({ paidAmountClp: 0, balanceAmountClp: 45_000 });
+  });
+
   it("uses the configured fixed price for each individual massage", () => {
     expect(getSkeduMassageUnitPrice(30)).toBe(35_000);
     expect(getSkeduMassageUnitPrice(50)).toBe(45_000);
@@ -200,6 +223,143 @@ describe("Skedu massage programs", () => {
     expect(() => validateSkeduTherapistSelection("double", 1, 2)).not.toThrow();
     expect(() => validateSkeduTherapistSelection("double", 1)).toThrow("requiere dos terapeutas");
     expect(() => validateSkeduTherapistSelection("double", 1, 1)).toThrow("dos terapeutas distintos");
+  });
+
+  it("settles only the outstanding balance while preserving prior instalments", () => {
+    expect(calculateSkeduProgramSettlement({
+      totalClp: 90_000,
+      payments: [
+        { status: "paid", amountClp: 20_000 },
+        { status: "paid", amountClp: 15_000 },
+        { status: "pending", amountClp: 55_000 },
+        { status: "refunded", amountClp: 5_000 },
+      ],
+      legacyPaymentMethod: "cash",
+    })).toEqual({
+      paidAmountClp: 35_000,
+      balanceAmountClp: 55_000,
+    });
+  });
+
+  it("recognizes legacy paid programs without detailed payment rows", () => {
+    expect(calculateSkeduProgramSettlement({
+      totalClp: 45_000,
+      payments: [],
+      legacyPaymentMethod: "skedu_program",
+    })).toEqual({
+      paidAmountClp: 45_000,
+      balanceAmountClp: 0,
+    });
+    expect(calculateSkeduProgramSettlement({
+      totalClp: 45_000,
+      payments: [],
+      legacyPaymentMethod: "pending_payment",
+    }).balanceAmountClp).toBe(45_000);
+  });
+
+  it("uses only accredited program payments and keeps their real payment date", () => {
+    const paidAt = new Date("2026-08-20T18:45:00.000Z");
+    const result = resolveSkeduProgramCreditedPayments({
+      totalClp: 90_000,
+      legacyPaymentMethod: "cash",
+      legacyPaidAt: new Date("2026-08-01T13:00:00.000Z"),
+      payments: [
+        {
+          status: "pending",
+          amountClp: 70_000,
+          method: "getnet_link",
+          paidAt: null,
+          createdAt: new Date("2026-08-20T18:00:00.000Z"),
+        },
+        {
+          status: "paid",
+          amountClp: 20_000,
+          method: "bank_transfer",
+          paidAt,
+          createdAt: new Date("2026-08-20T18:30:00.000Z"),
+          reference: "TRX-20",
+        },
+        {
+          status: "refunded",
+          amountClp: 15_000,
+          method: "cash",
+          paidAt: new Date("2026-08-19T15:00:00.000Z"),
+          createdAt: new Date("2026-08-19T15:00:00.000Z"),
+        },
+      ],
+    });
+
+    expect(result.paidAmountClp).toBe(20_000);
+    expect(result.isFullyPaid).toBe(false);
+    expect(result.latestPaidAt).toEqual(paidAt);
+    expect(result.credits).toEqual([
+      {
+        amountClp: 20_000,
+        method: "bank_transfer",
+        paidAt,
+        reference: "TRX-20",
+        legacy: false,
+      },
+    ]);
+  });
+
+  it("preserves confirmed legacy payments but not pending legacy methods", () => {
+    const legacyPaidAt = new Date("2026-07-10T14:00:00.000Z");
+    const legacyPaid = resolveSkeduProgramCreditedPayments({
+      totalClp: 45_000,
+      payments: [],
+      legacyPaymentMethod: "skedu_program",
+      legacyPaidAt,
+    });
+    expect(legacyPaid).toEqual({
+      credits: [
+        {
+          amountClp: 45_000,
+          method: "skedu_program",
+          paidAt: legacyPaidAt,
+          reference: null,
+          legacy: true,
+        },
+      ],
+      paidAmountClp: 45_000,
+      isFullyPaid: true,
+      latestPaidAt: legacyPaidAt,
+    });
+
+    for (const legacyPaymentMethod of ["pending_payment", "getnet_link"]) {
+      expect(
+        resolveSkeduProgramCreditedPayments({
+          totalClp: 45_000,
+          payments: [],
+          legacyPaymentMethod,
+          legacyPaidAt,
+        }).paidAmountClp
+      ).toBe(0);
+    }
+  });
+
+  it("counts an explicitly accredited Getnet row and allocates its exact CLP total", () => {
+    const paidAt = new Date("2026-08-20T19:00:00.000Z");
+    const result = resolveSkeduProgramCreditedPayments({
+      totalClp: 70_000,
+      payments: [
+        {
+          status: "paid",
+          amountClp: 35_001,
+          method: "getnet_link",
+          paidAt,
+          createdAt: paidAt,
+        },
+      ],
+      legacyPaymentMethod: "getnet_link",
+      legacyPaidAt: paidAt,
+    });
+
+    expect(result.paidAmountClp).toBe(35_001);
+    expect(allocateSkeduProgramPaidAmount(result.paidAmountClp, 2)).toEqual([
+      17_501,
+      17_500,
+    ]);
   });
 });
 

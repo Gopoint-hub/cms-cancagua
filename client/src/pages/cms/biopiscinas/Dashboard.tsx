@@ -49,16 +49,21 @@ export default function BiopiscinasDashboard() {
     },
     {
       label: "Ventas pagadas",
-      value: clp.format(data?.revenueClp ?? 0),
+      value: data?.paymentRestricted
+        ? "Restringido"
+        : clp.format(data?.revenueClp ?? 0),
       icon: CircleDollarSign,
       tone: "text-emerald-700",
     },
     {
       label: "Pagos pendientes",
-      value: data?.pendingPayment ?? 0,
+      value: data?.paymentRestricted
+        ? "Restringido"
+        : (data?.pendingPayment ?? 0),
       icon: AlertTriangle,
       tone: "text-red-700",
-      warning: Boolean(data?.pendingPayment),
+      warning:
+        !data?.paymentRestricted && Boolean(data?.pendingPayment),
     },
   ];
 

@@ -33,6 +33,12 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { isPendingMassagePaymentMethod } from "@shared/massagePayments";
+import {
+  hasGiftCardAccess,
+  hasMassagePaymentAccess,
+} from "@shared/permissions";
 import {
   ReservationPaymentLinks,
   type ReservationPaymentLink,
@@ -214,9 +220,9 @@ function paymentComplete(item: PaymentDraft) {
 function programPaymentComplete(item: BookingDraft) {
   if (!item.programPaymentMethod) return false;
   return (
-    ["pending_payment", "cash", "skedu_program"].includes(
-      item.programPaymentMethod
-    ) || Boolean(item.programPaymentReference.trim())
+    isPendingMassagePaymentMethod(item.programPaymentMethod) ||
+    ["cash", "skedu_program"].includes(item.programPaymentMethod) ||
+    Boolean(item.programPaymentReference.trim())
   );
 }
 function paymentInput(item: PaymentDraft) {
@@ -243,11 +249,13 @@ function PaymentEditor({
   service,
   items,
   balanceClp,
+  canRedeemGiftCards,
   onChange,
 }: {
   service: DirectService;
   items: PaymentDraft[];
   balanceClp: number;
+  canRedeemGiftCards: boolean;
   onChange: (items: PaymentDraft[]) => void;
 }) {
   const update = (index: number, changes: Partial<PaymentDraft>) =>
@@ -327,11 +335,15 @@ function PaymentEditor({
                 <SelectValue placeholder="Selecciona" />
               </SelectTrigger>
               <SelectContent>
-                {paymentMethods[service].map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
+                {paymentMethods[service]
+                  .filter(
+                    ([value]) => value !== "gift_card" || canRedeemGiftCards
+                  )
+                  .map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
@@ -444,6 +456,8 @@ function BookingEditor({
   onRemove,
   canRemove,
   allowedServices,
+  canManageMassagePayments,
+  canRedeemGiftCards,
   section = "all",
 }: {
   value: BookingDraft;
@@ -451,6 +465,8 @@ function BookingEditor({
   onRemove: () => void;
   canRemove: boolean;
   allowedServices: DirectService[];
+  canManageMassagePayments: boolean;
+  canRedeemGiftCards: boolean;
   section?: "all" | "catalog" | "variant" | "availability" | "payment";
 }) {
   const techniques = trpc.masajes.tecnicas.getAll.useQuery(undefined, {
@@ -1221,6 +1237,9 @@ function BookingEditor({
             <Input
               type="number"
               min={0}
+              disabled={
+                value.service === "massages" && !canManageMassagePayments
+              }
               value={value.amountClp}
               onChange={event =>
                 onChange({
@@ -1234,6 +1253,7 @@ function BookingEditor({
         )}
         {(section === "all" || section === "payment") &&
           value.service !== "sauna" &&
+          (value.service !== "massages" || canManageMassagePayments) &&
           !isProgram && (
             <div className="lg:col-span-2">
               <Label>Código de descuento</Label>
@@ -1289,6 +1309,7 @@ function BookingEditor({
               type="button"
               size="sm"
               variant="outline"
+              disabled={!canManageMassagePayments}
               className="border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
               onClick={() =>
                 onChange({
@@ -1309,7 +1330,12 @@ function BookingEditor({
           <div>
             <Label>Medio de pago</Label>
             <Select
-              value={value.programPaymentMethod}
+              value={
+                canManageMassagePayments
+                  ? value.programPaymentMethod
+                  : "pending_payment"
+              }
+              disabled={!canManageMassagePayments}
               onValueChange={programPaymentMethod =>
                 onChange({ ...value, programPaymentMethod })
               }
@@ -1322,7 +1348,10 @@ function BookingEditor({
                   Incluido en programa Skedu
                 </SelectItem>
                 {paymentMethods.massages
-                  .filter(([method]) => method !== "gift_card")
+                  .filter(
+                    ([method]) =>
+                      method !== "gift_card" && method !== "getnet_link"
+                  )
                   .map(([method, label]) => (
                     <SelectItem key={method} value={method}>
                       {label}
@@ -1331,9 +1360,11 @@ function BookingEditor({
               </SelectContent>
             </Select>
           </div>
-          {!["pending_payment", "cash", "skedu_program"].includes(
-            value.programPaymentMethod
-          ) && (
+          {canManageMassagePayments &&
+            !isPendingMassagePaymentMethod(value.programPaymentMethod) &&
+            !["cash", "skedu_program"].includes(
+              value.programPaymentMethod
+            ) && (
             <div>
               <Label>Referencia de pago</Label>
               <Input
@@ -1347,7 +1378,8 @@ function BookingEditor({
               />
             </div>
           )}
-          {value.programPaymentMethod === "pending_payment" && (
+          {(!canManageMassagePayments ||
+            isPendingMassagePaymentMethod(value.programPaymentMethod)) && (
             <p className="self-end rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
               Quedará en rojo hasta registrar el pago real durante el check-in.
             </p>
@@ -1366,13 +1398,23 @@ function BookingEditor({
       )}
       {(section === "all" || section === "payment") &&
         !isProgram &&
-        finalAmount > 0 && (
+        finalAmount > 0 &&
+        (value.service !== "massages" || canManageMassagePayments) && (
           <PaymentEditor
             service={value.service}
             items={value.payments}
             balanceClp={finalAmount}
+            canRedeemGiftCards={canRedeemGiftCards}
             onChange={payments => onChange({ ...value, payments })}
           />
+        )}
+      {(section === "all" || section === "payment") &&
+        value.service === "massages" &&
+        !isProgram &&
+        !canManageMassagePayments && (
+          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
+            La reserva se creará pendiente de pago.
+          </p>
         )}
       {(section === "all" || section === "payment") && (
         <div>
@@ -1417,6 +1459,9 @@ export function UnifiedBookingDialog({
     client: BookingClientDraft;
   }) => Promise<unknown> | void;
 }) {
+  const { user } = useAuth();
+  const canManageMassagePayments = hasMassagePaymentAccess(user ?? {});
+  const canRedeemGiftCards = hasGiftCardAccess(user ?? {});
   const available = (
     ["massages", "biopools", "sauna"] as DirectService[]
   ).filter(service => allowedServices.includes(service));
@@ -1511,8 +1556,10 @@ export function UnifiedBookingDialog({
   const paidTotal = items.reduce(
     (sum, item) =>
       sum +
-      (item.serviceKind === "massage_program"
-        ? item.programPaymentMethod === "pending_payment"
+      (item.service === "massages" && !canManageMassagePayments
+        ? 0
+        : item.serviceKind === "massage_program"
+        ? isPendingMassagePaymentMethod(item.programPaymentMethod)
           ? 0
           : Math.max(0, item.amountClp - item.discountAmountClp)
         : item.payments
@@ -1544,12 +1591,13 @@ export function UnifiedBookingDialog({
         (program || !item.discountCode.trim() || item.discountAmountClp > 0) &&
         (item.service !== "massages" || item.roomId) &&
         (!program ||
-          (programPaymentComplete(item) &&
+          ((!canManageMassagePayments || programPaymentComplete(item)) &&
             (item.modality === "simple" ||
               item.secondClientName.trim().length >= 2))) &&
         (item.service !== "biopools" ||
           (item.adults >= 1 && item.adults + item.children > 0)) &&
         (program ||
+          (item.service === "massages" && !canManageMassagePayments) ||
           due === 0 ||
           (item.payments.length > 0 &&
             item.payments.every(paymentComplete) &&
@@ -1575,6 +1623,11 @@ export function UnifiedBookingDialog({
   );
   const paymentValid = activeItem
     ? (() => {
+        if (
+          activeItem.service === "massages" &&
+          !canManageMassagePayments
+        )
+          return true;
         if (activeItem.serviceKind === "massage_program")
           return programPaymentComplete(activeItem);
         const due = Math.max(
@@ -1645,15 +1698,22 @@ export function UnifiedBookingDialog({
     try {
       for (const item of items) {
         const due = Math.max(0, item.amountClp - item.discountAmountClp);
+        const canManageItemPayments =
+          item.service !== "massages" || canManageMassagePayments;
         const paid =
-          item.serviceKind === "massage_program"
-            ? item.programPaymentMethod === "pending_payment"
+          !canManageItemPayments
+            ? 0
+            : item.serviceKind === "massage_program"
+            ? isPendingMassagePaymentMethod(item.programPaymentMethod)
               ? 0
               : due
             : item.payments
                 .filter(row => row.status === "paid")
                 .reduce((sum, row) => sum + Number(row.amountClp || 0), 0);
-        const payments = due > 0 ? item.payments.map(paymentInput) : [];
+        const payments =
+          canManageItemPayments && due > 0
+            ? item.payments.map(paymentInput)
+            : [];
         if (
           item.service === "massages" &&
           item.serviceKind === "massage_program"
@@ -1673,15 +1733,19 @@ export function UnifiedBookingDialog({
             startTime: item.time,
             roomId: Number(item.roomId),
             externalReference: item.externalReference.trim() || undefined,
-            paymentMethod: item.programPaymentMethod as any,
-            paymentReference: item.programPaymentReference.trim() || undefined,
+            paymentMethod: canManageMassagePayments
+              ? (item.programPaymentMethod as any)
+              : "pending_payment",
+            paymentReference: canManageMassagePayments
+              ? item.programPaymentReference.trim() || undefined
+              : undefined,
             notes: item.notes.trim() || undefined,
           });
           allCreated.push({
             service: "massage_programs",
             reservationId: result.id,
           });
-          if (due > paid)
+          if (canManageMassagePayments && due > paid)
             created.push({
               service: "massage_programs",
               reservationId: result.id,
@@ -1697,14 +1761,19 @@ export function UnifiedBookingDialog({
             bookingDate: item.date,
             startTime: item.time,
             endTime: endTime(item.time, item.duration),
-            paymentStatus: due === 0 ? "paid" : "pending",
-            totalAmountClp: item.amountClp,
-            payments: payments.length ? (payments as any) : undefined,
-            discountCode: item.discountCode.trim() || undefined,
+            paymentStatus:
+              canManageMassagePayments && due === 0 ? "paid" : "pending",
+            ...(canManageMassagePayments
+              ? {
+                  totalAmountClp: item.amountClp,
+                  payments: payments.length ? (payments as any) : undefined,
+                  discountCode: item.discountCode.trim() || undefined,
+                }
+              : {}),
             notes: item.notes.trim() || undefined,
           });
           allCreated.push({ service: "massages", reservationId: result.id });
-          if (due > paid)
+          if (canManageMassagePayments && due > paid)
             created.push({ service: "massages", reservationId: result.id });
         } else if (item.service === "biopools") {
           const result = await bioCreate.mutateAsync({
@@ -1975,6 +2044,8 @@ export function UnifiedBookingDialog({
               onRemove={() => {}}
               canRemove={false}
               allowedServices={available}
+              canManageMassagePayments={canManageMassagePayments}
+              canRedeemGiftCards={canRedeemGiftCards}
               section={
                 step === 0
                   ? "catalog"
@@ -2132,16 +2203,26 @@ export function UnifiedBookingDialog({
                       <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                         {item.serviceKind === "massage_program" && (
                           <p>
-                            {item.programPaymentMethod.replaceAll("_", " ")}
-                            {item.programPaymentMethod === "pending_payment"
-                              ? " · Pendiente de pago"
-                              : " · Pagado"}
-                            {item.programPaymentReference
-                              ? ` · ${item.programPaymentReference}`
-                              : ""}
+                            {!canManageMassagePayments ? (
+                              "Pendiente de pago"
+                            ) : (
+                              <>
+                                {item.programPaymentMethod.replaceAll("_", " ")}
+                                {isPendingMassagePaymentMethod(
+                                  item.programPaymentMethod
+                                )
+                                  ? " · Pendiente de pago"
+                                  : " · Pagado"}
+                                {item.programPaymentReference
+                                  ? ` · ${item.programPaymentReference}`
+                                  : ""}
+                              </>
+                            )}
                           </p>
                         )}
-                        {item.payments
+                        {(item.service !== "massages" ||
+                          canManageMassagePayments) &&
+                          item.payments
                           .filter(payment => payment.method)
                           .map((payment, paymentIndex) => (
                             <p key={paymentIndex}>

@@ -50,7 +50,10 @@ import {
 } from "./webpay";
 import { calculatedPaymentStatus } from "../shared/reservationPayments";
 import { calculateWellnessCartDiscount } from "./massageDiscounts";
-import { canRedeemGiftCard } from "./giftCardRedemption";
+import {
+  assertGiftCardPaymentRemovalAccess,
+  canRedeemGiftCard,
+} from "./giftCardRedemption";
 import { validatePublicGiftCard } from "./publicGiftCards";
 import { finalizeApprovedSaunaOrder, saunaResultUrl } from "./saunaWebpay";
 import {
@@ -69,7 +72,14 @@ import {
   buildRescheduleAuditLine,
   type ReschedulePolicyViolation,
 } from "./rescheduleAudit";
-import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
+import {
+  assertNoLiveReservationPaymentAttempt,
+  RESERVATION_PAYMENT_TRANSACTION,
+} from "./reservationPaymentLinkGuards";
+import {
+  canReadReservationFinancials,
+  presentSaunaBookingFinancials,
+} from "./reservationFinancialPrivacy";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -331,6 +341,7 @@ export async function releaseCapacityLock(
 export const saunaRouter = router({
   dashboard: protectedProcedure.query(async ({ ctx }) => {
     requirePermission(ctx.user, "module.sauna");
+    const canViewPayments = canReadReservationFinancials(ctx.user, "sauna");
     const db = await database();
     const today = chileToday();
     const [
@@ -361,10 +372,12 @@ export const saunaRouter = router({
         .from(saunaSyncRuns)
         .orderBy(desc(saunaSyncRuns.startedAt))
         .limit(1),
-      db
-        .select({ id: saunaCheckoutOrders.id })
-        .from(saunaCheckoutOrders)
-        .where(eq(saunaCheckoutOrders.status, "manual_review")),
+      canViewPayments
+        ? db
+            .select({ id: saunaCheckoutOrders.id })
+            .from(saunaCheckoutOrders)
+            .where(eq(saunaCheckoutOrders.status, "manual_review"))
+        : Promise.resolve([]),
     ]);
     const alerts: Array<{ type: string; message: string; bookingId?: number }> =
       [];
@@ -398,7 +411,7 @@ export const saunaRouter = router({
           message: `${booking.startTime}: reserva sin confirmar`,
           bookingId: booking.id,
         });
-      if (booking.paymentStatus !== "paid")
+      if (canViewPayments && booking.paymentStatus !== "paid")
         alerts.push({
           type: "payment_pending",
           message: `${booking.startTime}: ${booking.clientName || "reserva"} pendiente de pago`,
@@ -410,7 +423,7 @@ export const saunaRouter = router({
         type: "detox",
         message: `${pendingPrograms.length} pase(s) Detox aún no tienen horario de sauna`,
       });
-    if (manualReviewOrders.length)
+    if (canViewPayments && manualReviewOrders.length)
       alerts.push({
         type: "payment_manual_review",
         message: `${manualReviewOrders.length} pago(s) Webpay requieren conciliación manual`,
@@ -418,13 +431,18 @@ export const saunaRouter = router({
     return {
       today,
       capacity: SAUNA_CAPACITY,
-      bookings,
+      bookings: bookings.map(booking =>
+        presentSaunaBookingFinancials(booking, canViewPayments)
+      ),
       slots: dayAvailability.slots,
       guests: bookings.reduce((sum, item) => sum + item.guests, 0),
       privateBookings: bookings.filter(item => Boolean(item.isPrivate)).length,
       unconfirmed: bookings.filter(item => !item.isConfirmed).length,
       pendingPrograms: pendingPrograms.length,
-      manualReviewPayments: manualReviewOrders.length,
+      manualReviewPayments: canViewPayments
+        ? manualReviewOrders.length
+        : null,
+      paymentRestricted: !canViewPayments,
       alerts,
       lastSync: lastSync[0] ?? null,
     };
@@ -463,7 +481,7 @@ export const saunaRouter = router({
       .input(z.object({ from: dateSchema, to: dateSchema }))
       .query(async ({ ctx, input }) => {
         requirePermission(ctx.user, "module.sauna");
-        return (await database())
+        const rows = await (await database())
           .select()
           .from(saunaBookings)
           .where(
@@ -476,6 +494,13 @@ export const saunaRouter = router({
             asc(saunaBookings.bookingDate),
             asc(saunaBookings.startTime)
           );
+        const canViewPayments = canReadReservationFinancials(
+          ctx.user,
+          "sauna"
+        );
+        return rows.map(booking =>
+          presentSaunaBookingFinancials(booking, canViewPayments)
+        );
       }),
     availability: protectedProcedure
       .input(z.object({ date: dateSchema }))
@@ -621,6 +646,12 @@ export const saunaRouter = router({
       .input(z.object({ bookingId: z.number() }))
       .query(async ({ ctx, input }) => {
         requirePermission(ctx.user, "module.sauna");
+        if (!canReadReservationFinancials(ctx.user, "sauna")) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "No tienes permisos para ver pagos de Sauna",
+          });
+        }
         const db = await database();
         return db
           .select()
@@ -731,7 +762,7 @@ export const saunaRouter = router({
             })
             .where(eq(saunaBookings.id, booking.id));
           return created;
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     completePayment: protectedProcedure
       .input(
@@ -799,7 +830,7 @@ export const saunaRouter = router({
             })
             .where(eq(saunaBookings.id, booking.id));
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     updatePayment: protectedProcedure
       .input(z.object({ paymentId: z.number(), payment: saunaPaymentSchema }))
@@ -928,7 +959,7 @@ export const saunaRouter = router({
             })
             .where(eq(saunaBookings.id, booking.id));
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     removePayment: protectedProcedure
       .input(z.object({ paymentId: z.number() }))
@@ -963,6 +994,7 @@ export const saunaRouter = router({
               message: "Pago no encontrado",
             });
           assertReservationPaymentEditable(payment);
+          assertGiftCardPaymentRemovalAccess(ctx.user, payment);
           const [booking] = await tx
             .select()
             .from(saunaBookings)
@@ -1051,7 +1083,7 @@ export const saunaRouter = router({
             })
             .where(eq(saunaBookings.id, booking.id));
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     setStatus: protectedProcedure
       .input(
@@ -1132,7 +1164,7 @@ export const saunaRouter = router({
             })
             .where(eq(saunaBookings.id, input.id));
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     reschedule: protectedProcedure
       .input(
@@ -1263,7 +1295,7 @@ export const saunaRouter = router({
           } finally {
             await releaseCapacityLock(tx, input.bookingDate);
           }
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
   }),
 

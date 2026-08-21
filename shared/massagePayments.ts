@@ -18,7 +18,18 @@ export type MassagePaymentMethod =
   | "discount_code"
   | "skedu_program";
 
-export const MASSAGE_PAYMENT_METHOD_LABELS: Record<MassagePaymentMethod, string> = {
+/**
+ * `getnet_link` representa un cobro todavía no acreditado. El proveedor lo
+ * reemplaza por `getnet` recién cuando confirma el pago.
+ */
+export function isPendingMassagePaymentMethod(value?: string | null): boolean {
+  return value === "pending_payment" || value === "getnet_link";
+}
+
+export const MASSAGE_PAYMENT_METHOD_LABELS: Record<
+  MassagePaymentMethod,
+  string
+> = {
   pending_payment: "Pendiente de pago",
   getnet: "Link de pago Getnet",
   getnet_link: "Link de pago Getnet",

@@ -3,6 +3,10 @@ import { useSearch } from "wouter";
 import { addDays, format, parseISO, subDays } from "date-fns";
 import { es } from "date-fns/locale";
 import DashboardLayout from "@/components/DashboardLayout";
+import {
+  Reservation360DetailDialog,
+  type Reservation360Event,
+} from "@/components/cms/Reservation360DetailDialog";
 import { ReschedulePolicyOverride } from "@/components/cms/ReschedulePolicyOverride";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { hasCmsPermission } from "@shared/permissions";
+import { hasCmsPermission, hasGiftCardAccess } from "@shared/permissions";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
   ChevronLeft,
@@ -154,6 +158,7 @@ export default function BiopiscinasAgenda() {
   const search = useSearch();
   const { user } = useAuth();
   const canManage = hasCmsPermission(user ?? {}, "biopools.manage_agenda");
+  const canRedeemGiftCards = hasGiftCardAccess(user ?? {});
   const initialDate = new URLSearchParams(search).get("date") ?? localDate();
   const [date, setDate] = useState(initialDate);
   const [selectedServiceId, setSelectedServiceId] = useState<number | "all">(
@@ -182,6 +187,8 @@ export default function BiopiscinasAgenda() {
     totalClp: number;
     amountPaidClp: number;
   } | null>(null);
+  const [selectedReservation, setSelectedReservation] =
+    useState<Reservation360Event | null>(null);
   const [additionalPayment, setAdditionalPayment] =
     useState<PaymentDraft>(emptyPayment());
   const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
@@ -275,7 +282,7 @@ export default function BiopiscinasAgenda() {
     }> = [];
     if (
       paymentDetail.booking.discountCode &&
-      paymentDetail.booking.discountAmountClp > 0
+      Number(paymentDetail.booking.discountAmountClp ?? 0) > 0
     ) {
       rows.push({
         id: "discount",
@@ -284,7 +291,7 @@ export default function BiopiscinasAgenda() {
           paymentDetail.checkoutOrder?.createdAt ??
           paymentDetail.booking.createdAt,
         detail: paymentDetail.booking.discountCode,
-        amountClp: paymentDetail.booking.discountAmountClp,
+        amountClp: Number(paymentDetail.booking.discountAmountClp ?? 0),
         status: "discount",
       });
     }
@@ -690,6 +697,13 @@ export default function BiopiscinasAgenda() {
   }, [rescheduleAvailability, rescheduleBooking, rescheduleTime]);
   const save = () => {
     if (!manualService) return;
+    if (
+      !canRedeemGiftCards &&
+      payments.some(payment => payment.method === "gift_card")
+    ) {
+      toast.error("No tienes permiso para canjear Gift Cards");
+      return;
+    }
     create.mutate({
       ...form,
       serviceId: manualService.id,
@@ -732,6 +746,23 @@ export default function BiopiscinasAgenda() {
   );
   const serviceName = (serviceId: number) =>
     activeServices.find(item => item.id === serviceId)?.name ?? "Biopiscinas";
+  const toReservation360Event = (
+    booking: NonNullable<typeof bookings>[number]
+  ): Reservation360Event => ({
+    id: `biopool:${booking.id}`,
+    entityId: booking.id,
+    kind: "biopool",
+    service: "biopools",
+    date: bookingDate(booking.bookingDate),
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    title: serviceName(booking.serviceId),
+    clientName: booking.clientName,
+    status: booking.status,
+    paymentStatus: booking.paymentStatus,
+    people: booking.totalGuests,
+    href: `/cms/biopiscinas/agenda?date=${bookingDate(booking.bookingDate)}`,
+  });
 
   return (
     <DashboardLayout>
@@ -849,27 +880,31 @@ export default function BiopiscinasAgenda() {
                         >
                           {statusLabel[booking.status]}
                         </Badge>
-                        <Badge
-                          variant={
-                            booking.paymentStatus === "paid"
-                              ? "secondary"
-                              : "outline"
-                          }
-                          className="text-[11px] sm:text-xs"
-                        >
-                          {booking.paymentStatus === "paid"
-                            ? "Pagada"
-                            : booking.paymentStatus === "partially_paid"
-                              ? "Pago parcial"
-                              : booking.paymentStatus === "refunded"
-                                ? "Reembolsada"
-                                : "Pago pendiente"}
-                        </Badge>
-                        {booking.refundStatus === "pending" && (
-                          <Badge variant="destructive">
-                            Reembolso pendiente ·{" "}
-                            {clp.format(booking.refundAmountClp)}
-                          </Badge>
+                        {!booking.paymentRestricted && (
+                          <>
+                            <Badge
+                              variant={
+                                booking.paymentStatus === "paid"
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              className="text-[11px] sm:text-xs"
+                            >
+                              {booking.paymentStatus === "paid"
+                                ? "Pagada"
+                                : booking.paymentStatus === "partially_paid"
+                                  ? "Pago parcial"
+                                  : booking.paymentStatus === "refunded"
+                                    ? "Reembolsada"
+                                    : "Pago pendiente"}
+                            </Badge>
+                            {booking.refundStatus === "pending" && (
+                              <Badge variant="destructive">
+                                Reembolso pendiente ·{" "}
+                                {clp.format(booking.refundAmountClp ?? 0)}
+                              </Badge>
+                            )}
+                          </>
                         )}
                       </div>
                       <p className="mt-1 truncate font-medium">
@@ -877,103 +912,95 @@ export default function BiopiscinasAgenda() {
                       </p>
                       <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1 sm:text-sm">
                         {booking.adultQuantity} adulto(s) ·{" "}
-                        {booking.childQuantity} niño(s) ·{" "}
-                        {clp.format(
-                          booking.originalAmountClp - booking.discountAmountClp
+                        {booking.childQuantity} niño(s)
+                        {!booking.paymentRestricted && (
+                          <>
+                            {" "}·{" "}
+                            {clp.format(
+                              Number(booking.originalAmountClp ?? 0) -
+                                Number(booking.discountAmountClp ?? 0)
+                            )}
+                          </>
                         )}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Abonado: {clp.format(booking.amountPaidClp)} · Saldo:{" "}
-                        {clp.format(
-                          Math.max(
-                            0,
-                            booking.originalAmountClp -
-                              booking.discountAmountClp -
-                              booking.amountPaidClp
-                          )
-                        )}
-                      </p>
-                      {booking.refundStatus === "pending" && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Descuento transacción:{" "}
-                          {clp.format(booking.refundFeeAmountClp)}
-                        </p>
+                      {!booking.paymentRestricted && (
+                        <>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Abonado: {clp.format(booking.amountPaidClp ?? 0)} ·
+                            Saldo:{" "}
+                            {clp.format(
+                              Math.max(
+                                0,
+                                Number(booking.originalAmountClp ?? 0) -
+                                  Number(booking.discountAmountClp ?? 0) -
+                                  Number(booking.amountPaidClp ?? 0)
+                              )
+                            )}
+                          </p>
+                          {booking.refundStatus === "pending" && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Descuento transacción:{" "}
+                              {clp.format(booking.refundFeeAmountClp ?? 0)}
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                     <div className="grid w-full grid-cols-3 items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
-                            {canManage && booking.status !== "cancelled" && (
+                      <Button
+                        className="col-span-3 w-full whitespace-nowrap sm:w-auto"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          setSelectedReservation(toReservation360Event(booking))
+                        }
+                      >
+                        Gestionar reserva
+                      </Button>
+                      {canManage && booking.refundStatus === "pending" && (
+                        <Button
+                          className="col-span-3 w-full sm:w-auto"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => processRefund(booking.id)}
+                          disabled={markRefund.isPending}
+                        >
+                          Marcar reembolso procesado
+                        </Button>
+                      )}
+                      {canManage && booking.status !== "cancelled" && (
                         <Button
                           className="w-full gap-1 whitespace-nowrap px-2"
                           size="sm"
                           variant="outline"
-                          onClick={() => {
-                            const totalClp =
-                              booking.originalAmountClp -
-                              booking.discountAmountClp;
-                            setPaymentBooking({
-                              id: booking.id,
-                              clientName: booking.clientName,
-                              totalClp,
-                              amountPaidClp: booking.amountPaidClp,
-                            });
-                            setBookingDiscountCode(booking.discountCode ?? "");
-                            setEditingPaymentId(null);
-                            setAdditionalPayment(
-                              emptyPayment(
-                                String(
-                                  Math.max(0, totalClp - booking.amountPaidClp)
-                                )
-                              )
-                            );
-                          }}
+                          onClick={() => openReschedule(booking)}
                         >
-                                <Plus className="h-4 w-4" /> Pagos
-                              </Button>
-                            )}
-                      {canManage && booking.refundStatus === "pending" && (
-                                <Button
-                                  className="col-span-3 w-full sm:w-auto"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => processRefund(booking.id)}
-                                  disabled={markRefund.isPending}
-                                >
-                                  Marcar reembolso procesado
-                                </Button>
-                              )}
-                            {canManage && booking.status !== "cancelled" && (
-                              <Button
-                                className="w-full gap-1 whitespace-nowrap px-2"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openReschedule(booking)}
-                              >
-                                <RotateCw className="h-4 w-4" />
-                                Reagendar
-                              </Button>
-                            )}
-                            {canManage && booking.status !== "cancelled" && (
-                              <Select
-                                value={booking.status}
-                                onValueChange={status =>
-                                  changeStatus(booking.id, status)
-                                }
-                              >
-                                <SelectTrigger className="w-full sm:w-36">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="confirmed">
-                                    Confirmada
-                                  </SelectItem>
-                                  <SelectItem value="completed">
-                                    Completada
-                                  </SelectItem>
+                          <RotateCw className="h-4 w-4" />
+                          Reagendar
+                        </Button>
+                      )}
+                      {canManage && booking.status !== "cancelled" && (
+                        <Select
+                          value={booking.status}
+                          onValueChange={status =>
+                            changeStatus(booking.id, status)
+                          }
+                        >
+                          <SelectTrigger className="w-full sm:w-36">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="confirmed">
+                              Confirmada
+                            </SelectItem>
+                            <SelectItem value="completed">
+                              Completada
+                            </SelectItem>
                             <SelectItem value="no_show">No asistió</SelectItem>
                             <SelectItem value="cancelled">Cancelada</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -1013,36 +1040,48 @@ export default function BiopiscinasAgenda() {
                       </p>
                     )}
                   </div>
-                  {canManage && (
-                    <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
-                      <Button
-                        className="w-full"
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          reactivateBooking(booking.id, booking.clientName)
-                        }
-                        disabled={reactivate.isPending}
-                      >
-                        <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
-                      </Button>
-                      <Button
-                        className="w-full"
-                        size="sm"
-                        variant="destructive"
-                        onClick={() =>
-                          removeCancelledFromAgenda(
-                            booking.id,
-                            booking.clientName
-                          )
-                        }
-                        disabled={hideCancelled.isPending}
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" /> Eliminar de la
-                        agenda
-                      </Button>
-                    </div>
-                  )}
+                  <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+                    <Button
+                      className="col-span-2 w-full sm:w-auto"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        setSelectedReservation(toReservation360Event(booking))
+                      }
+                    >
+                      Gestionar reserva
+                    </Button>
+                    {canManage && (
+                      <>
+                        <Button
+                          className="w-full"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            reactivateBooking(booking.id, booking.clientName)
+                          }
+                          disabled={reactivate.isPending}
+                        >
+                          <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
+                        </Button>
+                        <Button
+                          className="w-full"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() =>
+                            removeCancelledFromAgenda(
+                              booking.id,
+                              booking.clientName
+                            )
+                          }
+                          disabled={hideCancelled.isPending}
+                        >
+                          <Trash2 className="mr-1 h-4 w-4" /> Eliminar de la
+                          agenda
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
               ))}
             </CardContent>
@@ -1070,19 +1109,31 @@ export default function BiopiscinasAgenda() {
                       {serviceName(booking.serviceId)}
                     </span>
                   </div>
-                  {canManage && (
+                  <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                     <Button
-                      className="w-full sm:w-auto"
+                      className="flex-1 sm:flex-none"
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       onClick={() =>
-                        reactivateBooking(booking.id, booking.clientName)
+                        setSelectedReservation(toReservation360Event(booking))
                       }
-                      disabled={reactivate.isPending}
                     >
-                      <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
+                      Gestionar reserva
                     </Button>
-                  )}
+                    {canManage && (
+                      <Button
+                        className="flex-1 sm:flex-none"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          reactivateBooking(booking.id, booking.clientName)
+                        }
+                        disabled={reactivate.isPending}
+                      >
+                        <RotateCcw className="mr-1 h-4 w-4" /> Reactivar
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </CardContent>
@@ -1288,9 +1339,11 @@ export default function BiopiscinasAgenda() {
                             <SelectItem value="transbank_machine">
                               Máquina Transbank
                             </SelectItem>
-                            <SelectItem value="gift_card">
-                              Canjear Gift Card
-                            </SelectItem>
+                            {canRedeemGiftCards && (
+                              <SelectItem value="gift_card">
+                                Canjear Gift Card
+                              </SelectItem>
+                            )}
                         </SelectContent>
                       </Select>
                     </div>
@@ -2148,6 +2201,13 @@ export default function BiopiscinasAgenda() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Reservation360DetailDialog
+          event={selectedReservation}
+          open={Boolean(selectedReservation)}
+          onOpenChange={next => !next && setSelectedReservation(null)}
+          onChanged={() => utils.biopools.invalidate()}
+        />
       </div>
     </DashboardLayout>
   );

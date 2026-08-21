@@ -1,8 +1,32 @@
+import { TRPCError } from "@trpc/server";
 import { hasGiftCardAccess, type PermissionUser } from "@shared/permissions";
-import { giftCardServiceMatches, type GiftCardServiceKey } from "@shared/giftCardServices";
+import {
+  giftCardServiceMatches,
+  type GiftCardServiceKey,
+} from "@shared/giftCardServices";
 
 export function canRedeemGiftCard(user: PermissionUser): boolean {
   return hasGiftCardAccess(user);
+}
+
+export function assertGiftCardPaymentRemovalAccess(
+  user: PermissionUser,
+  payment?:
+    | { method?: string | null; giftCardId?: number | null }
+    | number
+    | null
+): void {
+  const isGiftCardPayment =
+    typeof payment === "number" ||
+    (typeof payment === "object" &&
+      payment !== null &&
+      (payment.giftCardId != null || payment.method === "gift_card"));
+  if (isGiftCardPayment && !canRedeemGiftCard(user)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permisos para modificar Gift Cards",
+    });
+  }
 }
 
 export function validateServiceGiftCardRedemption(input: {
@@ -25,8 +49,14 @@ export function validateServiceGiftCardRedemption(input: {
   if (input.expiresAt && input.expiresAt < new Date()) {
     throw new Error("La Gift Card está vencida");
   }
-  if (input.requestedServiceKey && !giftCardServiceMatches(input.serviceKey, input.requestedServiceKey)) {
-    if (input.serviceKey === "mixed_program") throw new Error("Esta Gift Card corresponde a un programa que todavía no está habilitado en el CMS");
+  if (
+    input.requestedServiceKey &&
+    !giftCardServiceMatches(input.serviceKey, input.requestedServiceKey)
+  ) {
+    if (input.serviceKey === "mixed_program")
+      throw new Error(
+        "Esta Gift Card corresponde a un programa que todavía no está habilitado en el CMS"
+      );
     throw new Error("Esta Gift Card no corresponde al servicio seleccionado");
   }
 }

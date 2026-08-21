@@ -67,6 +67,7 @@ import {
 } from "./biopoolWebpay";
 import { buildBiopoolNotificationSchedule } from "./biopoolNotifications";
 import {
+  assertGiftCardPaymentRemovalAccess,
   canRedeemGiftCard,
   validateGiftCardRedemption,
   validateServiceGiftCardRedemption,
@@ -74,7 +75,15 @@ import {
 import { inferGiftCardServiceKey } from "@shared/giftCardServices";
 import { validatePublicGiftCard } from "./publicGiftCards";
 import { assertReservationPaymentEditable } from "./reservationPayments";
-import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
+import {
+  assertNoLiveReservationPaymentAttempt,
+  RESERVATION_PAYMENT_TRANSACTION,
+} from "./reservationPaymentLinkGuards";
+import {
+  canReadReservationFinancials,
+  presentBiopoolActivityFinancials,
+  presentBiopoolBookingFinancials,
+} from "./reservationFinancialPrivacy";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -401,6 +410,10 @@ const serviceUpdateSchema = z.object({
 export const biopoolsRouter = router({
   dashboard: protectedProcedure.query(async ({ ctx }) => {
     requirePermission(ctx.user, "module.biopools");
+    const canViewPayments = canReadReservationFinancials(
+      ctx.user,
+      "biopools"
+    );
     const db = await database();
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Santiago",
@@ -417,8 +430,9 @@ export const biopoolsRouter = router({
         today,
         bookings: 0,
         guests: 0,
-        revenueClp: 0,
-        pendingPayment: 0,
+        revenueClp: canViewPayments ? 0 : null,
+        pendingPayment: canViewPayments ? 0 : null,
+        paymentRestricted: !canViewPayments,
         confirmed: 0,
         capacity: 0,
         slots: [],
@@ -450,11 +464,15 @@ export const biopoolsRouter = router({
       today,
       bookings: bookings.length,
       guests: bookings.reduce((sum, item) => sum + item.totalGuests, 0),
-      revenueClp: bookings
-        .filter(item => item.paymentStatus === "paid")
-        .reduce((sum, item) => sum + item.amountPaidClp, 0),
-      pendingPayment: bookings.filter(item => item.paymentStatus !== "paid")
-        .length,
+      revenueClp: canViewPayments
+        ? bookings
+            .filter(item => item.paymentStatus === "paid")
+            .reduce((sum, item) => sum + item.amountPaidClp, 0)
+        : null,
+      pendingPayment: canViewPayments
+        ? bookings.filter(item => item.paymentStatus !== "paid").length
+        : null,
+      paymentRestricted: !canViewPayments,
       confirmed: bookings.filter(item => item.status === "confirmed").length,
       capacity: Math.max(...services.map(service => service.capacity)),
       slots,
@@ -1353,6 +1371,12 @@ export const biopoolsRouter = router({
       )
       .query(async ({ ctx, input }) => {
         requirePermission(ctx.user, "module.biopools");
+        if (!canReadReservationFinancials(ctx.user, "biopools")) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "No tienes permisos para ver ventas de Biopiscinas",
+          });
+        }
         const db = await database();
         return db
           .select({
@@ -1461,7 +1485,7 @@ export const biopoolsRouter = router({
       .query(async ({ ctx, input }) => {
         requirePermission(ctx.user, "module.biopools");
         const db = await database();
-        return db
+        const rows = await db
           .select()
           .from(biopoolBookings)
           .where(
@@ -1477,6 +1501,13 @@ export const biopoolsRouter = router({
             asc(biopoolBookings.bookingDate),
             asc(biopoolBookings.startTime)
           );
+        const canViewPayments = canReadReservationFinancials(
+          ctx.user,
+          "biopools"
+        );
+        return rows.map(booking =>
+          presentBiopoolBookingFinancials(booking, canViewPayments)
+        );
       }),
     get: protectedProcedure
       .input(z.object({ id: z.number() }))
@@ -1489,6 +1520,10 @@ export const biopoolsRouter = router({
           .where(eq(biopoolBookings.id, input.id))
           .limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        const canViewPayments = canReadReservationFinancials(
+          ctx.user,
+          "biopools"
+        );
         const [activity, notifications, payments, checkoutOrders] =
           await Promise.all([
           db
@@ -1501,26 +1536,36 @@ export const biopoolsRouter = router({
             .from(biopoolNotifications)
             .where(eq(biopoolNotifications.bookingId, input.id))
             .orderBy(desc(biopoolNotifications.createdAt)),
-          db
-            .select()
-            .from(reservationPayments)
+          canViewPayments
+            ? db
+                .select()
+                .from(reservationPayments)
               .where(
                 and(
                   eq(reservationPayments.module, "biopools"),
                   eq(reservationPayments.reservationId, input.id)
                 )
               )
-            .orderBy(desc(reservationPayments.createdAt)),
-          db
-            .select()
-            .from(biopoolCheckoutOrders)
-            .where(eq(biopoolCheckoutOrders.bookingId, input.id))
-            .orderBy(desc(biopoolCheckoutOrders.createdAt))
-            .limit(1),
+                .orderBy(desc(reservationPayments.createdAt))
+            : Promise.resolve([]),
+          canViewPayments
+            ? db
+                .select()
+                .from(biopoolCheckoutOrders)
+                .where(eq(biopoolCheckoutOrders.bookingId, input.id))
+                .orderBy(desc(biopoolCheckoutOrders.createdAt))
+                .limit(1)
+            : Promise.resolve([]),
         ]);
         return {
-          booking,
-          activity,
+          booking: presentBiopoolBookingFinancials(
+            booking,
+            canViewPayments
+          ),
+          activity: presentBiopoolActivityFinancials(
+            activity,
+            canViewPayments
+          ),
           notifications,
           payments,
           checkoutOrder: checkoutOrders[0] ?? null,
@@ -2151,7 +2196,7 @@ export const biopoolsRouter = router({
           } finally {
             await releaseCapacityLock(tx, lockName);
           }
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     completePayment: protectedProcedure
       .input(
@@ -2231,7 +2276,7 @@ export const biopoolsRouter = router({
             ctx.user.id
           );
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     updatePayment: protectedProcedure
       .input(z.object({ paymentId: z.number(), payment: manualPaymentSchema }))
@@ -2350,7 +2395,7 @@ export const biopoolsRouter = router({
             ctx.user.id
           );
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     removePayment: protectedProcedure
       .input(z.object({ paymentId: z.number() }))
@@ -2377,6 +2422,7 @@ export const biopoolsRouter = router({
               message: "Pago no encontrado",
             });
           assertReservationPaymentEditable(payment);
+          assertGiftCardPaymentRemovalAccess(ctx.user, payment);
           const [booking] = await tx
             .select()
             .from(biopoolBookings)
@@ -2469,7 +2515,7 @@ export const biopoolsRouter = router({
             ctx.user.id
           );
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     setDiscount: protectedProcedure
       .input(
@@ -2520,7 +2566,7 @@ export const biopoolsRouter = router({
             ctx.user.id,
           );
           return { success: true, discountCode: result?.code ?? null, discountAmount: discount };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     hideCancelledFromAgenda: protectedProcedure
       .input(z.object({ id: z.number() }))
@@ -2557,7 +2603,7 @@ export const biopoolsRouter = router({
             ctx.user.id
           );
           return { success: true };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     reactivate: protectedProcedure
       .input(z.object({ id: z.number() }))
@@ -2653,7 +2699,7 @@ export const biopoolsRouter = router({
           } finally {
             await releaseCapacityLock(tx, lockName);
           }
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     updateGuests: protectedProcedure
       .input(
@@ -2777,7 +2823,7 @@ export const biopoolsRouter = router({
           } finally {
             await releaseCapacityLock(tx, lockName);
           }
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     updateStatus: protectedProcedure
       .input(
@@ -2856,7 +2902,7 @@ export const biopoolsRouter = router({
             refund,
             paymentMethod: booking.paymentMethod,
           };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
         if (
           input.status === "cancelled" &&
           result.refund?.eligible &&
@@ -3103,7 +3149,7 @@ export const biopoolsRouter = router({
           } finally {
             await releaseCapacityLock(tx, lockName);
           }
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
   }),
 

@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
+import { useSearch } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
+import {
+  Reservation360DetailDialog,
+  type Reservation360Event,
+} from "@/components/cms/Reservation360DetailDialog";
 import { ReschedulePolicyOverride } from "@/components/cms/ReschedulePolicyOverride";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +28,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { hasCmsPermission } from "@shared/permissions";
+import { hasCmsPermission, hasGiftCardAccess } from "@shared/permissions";
 import {
   addDays,
   addMonths,
@@ -139,9 +144,11 @@ function paymentIsComplete(payment: PaymentDraft) {
 function PaymentFields({
   payment,
   onChange,
+  canRedeemGiftCards = true,
 }: {
   payment: PaymentDraft;
   onChange: (changes: Partial<PaymentDraft>) => void;
+  canRedeemGiftCards?: boolean;
 }) {
   return (
     <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
@@ -166,7 +173,9 @@ function PaymentFields({
             <SelectValue placeholder="Selecciona" />
           </SelectTrigger>
           <SelectContent>
-            {SAUNA_PAYMENT_METHODS.map(method => (
+            {SAUNA_PAYMENT_METHODS.filter(
+              method => canRedeemGiftCards || method !== "gift_card"
+            ).map(method => (
               <SelectItem key={method} value={method}>
                 {RESERVATION_PAYMENT_LABELS[method]}
               </SelectItem>
@@ -271,12 +280,26 @@ const initialForm = (date: string) => ({
   isConfirmed: true,
 });
 
+function validAgendaDate(value: string | null, fallback: string) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return fallback;
+  const parsed = parseISO(value);
+  return !Number.isNaN(parsed.getTime()) &&
+    format(parsed, "yyyy-MM-dd") === value
+    ? value
+    : fallback;
+}
+
 export default function SaunaAgenda() {
+  const search = useSearch();
   const today = format(new Date(), "yyyy-MM-dd");
-  const [anchor, setAnchor] = useState(today);
+  const initialDate = validAgendaDate(
+    new URLSearchParams(search).get("date"),
+    today
+  );
+  const [anchor, setAnchor] = useState(initialDate);
   const [view, setView] = useState<ViewMode>("day");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState(initialForm(today));
+  const [form, setForm] = useState(initialForm(initialDate));
   const [rescheduleBooking, setRescheduleBooking] = useState<any>(null);
   const [rescheduleDate, setRescheduleDate] = useState(today);
   const [rescheduleTime, setRescheduleTime] = useState("10:00");
@@ -284,12 +307,15 @@ export default function SaunaAgenda() {
   const [rescheduleOverride, setRescheduleOverride] = useState(false);
   const [payments, setPayments] = useState<PaymentDraft[]>([emptyPayment()]);
   const [paymentBooking, setPaymentBooking] = useState<any>(null);
+  const [selectedReservation, setSelectedReservation] =
+    useState<Reservation360Event | null>(null);
   const [newPayment, setNewPayment] = useState<PaymentDraft>(emptyPayment());
   const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
   const [editingPayment, setEditingPayment] =
     useState<PaymentDraft>(emptyPayment());
   const { user } = useAuth();
   const canManage = hasCmsPermission(user ?? {}, "sauna.manage_agenda");
+  const canRedeemGiftCards = hasGiftCardAccess(user ?? {});
   const range = useMemo(() => {
     const date = parseISO(anchor);
     if (view === "week")
@@ -553,22 +579,27 @@ export default function SaunaAgenda() {
                         key={booking.id}
                         booking={booking}
                         canManage={canManage}
+                        onManage={() =>
+                          setSelectedReservation({
+                            id: `sauna:${booking.id}`,
+                            entityId: booking.id,
+                            kind: "sauna",
+                            service: "sauna",
+                            date: String(booking.bookingDate).slice(0, 10),
+                            startTime: booking.startTime,
+                            endTime: booking.endTime,
+                            title: booking.serviceName,
+                            clientName:
+                              booking.clientName ?? "Sin cliente registrado",
+                            status: booking.status,
+                            paymentStatus: booking.paymentStatus,
+                            people: booking.guests,
+                            href: `/cms/sauna/agenda?date=${String(booking.bookingDate).slice(0, 10)}`,
+                          })
+                        }
                         onStatus={status =>
                           setStatus.mutate({ id: booking.id, status })
                         }
-                        onPayments={() => {
-                          setPaymentBooking(booking);
-                          setNewPayment(
-                            emptyPayment(
-                              String(
-                                Math.max(
-                                  0,
-                                  booking.amountClp - booking.amountPaidClp
-                                )
-                              )
-                            )
-                          );
-                        }}
                         onReschedule={() => {
                           setRescheduleBooking(booking);
                           setRescheduleDate(
@@ -711,6 +742,7 @@ export default function SaunaAgenda() {
                   <div key={index}>
                     <PaymentFields
                       payment={payment}
+                      canRedeemGiftCards={canRedeemGiftCards}
                       onChange={changes =>
                         setPayments(current =>
                           current.map((item, paymentIndex) =>
@@ -760,7 +792,14 @@ export default function SaunaAgenda() {
                 Cancelar
               </Button>
               <Button
-                onClick={() =>
+                onClick={() => {
+                  if (
+                    !canRedeemGiftCards &&
+                    payments.some(payment => payment.method === "gift_card")
+                  ) {
+                    toast.error("No tienes permiso para canjear Gift Cards");
+                    return;
+                  }
                   create.mutate({
                     ...form,
                     isPrivate: form.kind === "private" || form.guests >= 4,
@@ -787,8 +826,8 @@ export default function SaunaAgenda() {
                           }))
                         : undefined,
                     notes: form.notes || undefined,
-                  })
-                }
+                  });
+                }}
                 disabled={
                   create.isPending ||
                   (form.amountClp > 0 &&
@@ -1058,6 +1097,13 @@ export default function SaunaAgenda() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Reservation360DetailDialog
+          event={selectedReservation}
+          open={Boolean(selectedReservation)}
+          onOpenChange={next => !next && setSelectedReservation(null)}
+          onChanged={() => utils.sauna.invalidate()}
+        />
       </div>
     </DashboardLayout>
   );
@@ -1081,17 +1127,17 @@ function Field({
 function BookingCard({
   booking,
   canManage,
+  onManage,
   onStatus,
   onReschedule,
-  onPayments,
 }: {
   booking: any;
   canManage: boolean;
+  onManage: () => void;
   onStatus: (
     status: "pending" | "confirmed" | "completed" | "cancelled" | "no_show"
   ) => void;
   onReschedule: () => void;
-  onPayments: () => void;
 }) {
   return (
     <div
@@ -1131,10 +1177,15 @@ function BookingCard({
       <p className="text-sm text-muted-foreground">{booking.serviceName}</p>
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
         <Badge variant="outline">{booking.origin || booking.source}</Badge>
-        <Badge variant="outline">Pago: {booking.paymentStatus}</Badge>
-        <Badge variant="outline">
-          Abonado $ {Number(booking.amountPaidClp ?? 0).toLocaleString("es-CL")}
-        </Badge>
+        {!booking.paymentRestricted && (
+          <>
+            <Badge variant="outline">Pago: {booking.paymentStatus}</Badge>
+            <Badge variant="outline">
+              Abonado ${" "}
+              {Number(booking.amountPaidClp ?? 0).toLocaleString("es-CL")}
+            </Badge>
+          </>
+        )}
         <Badge variant="outline">
           Reagendamientos: {booking.rescheduleCount}
         </Badge>
@@ -1142,6 +1193,9 @@ function BookingCard({
           <Badge variant="secondary">Sin confirmar</Badge>
         )}
       </div>
+      <Button className="mt-3" size="sm" variant="secondary" onClick={onManage}>
+        Gestionar reserva
+      </Button>
       {booking.source === "skedu" ? (
         <p className="mt-3 text-xs text-muted-foreground">
           Cambios operacionales: gestionar en Skedu; el CMS los reflejará
@@ -1151,9 +1205,6 @@ function BookingCard({
         canManage &&
         booking.status !== "cancelled" && (
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={onPayments}>
-              Pagos
-            </Button>
             <Button
               size="sm"
               variant="outline"

@@ -45,14 +45,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import {
-  Calendar360ReservationDetail,
-  type Calendar360EventKind,
-  type Calendar360ReservationEvent,
-  type Calendar360ServiceKey,
-} from "./Calendario360";
+  Reservation360DetailDialog,
+  type Reservation360Event,
+  type Reservation360EventKind,
+  type Reservation360ServiceKey,
+} from "@/components/cms/Reservation360DetailDialog";
+import { createReservation360Event } from "@shared/reservation360";
 import { UnifiedBookingDialog } from "./UnifiedBookingDialog";
 
-type ServiceKey = "all" | Calendar360ServiceKey;
+type ServiceKey = "all" | Reservation360ServiceKey;
 type ClientTab = "upcoming" | "history" | "payments" | "activity";
 type HistoryFilter = "all" | "completed" | "cancelled";
 
@@ -62,11 +63,12 @@ type ClientSummary = {
   name: string;
   email: string | null;
   phone: string | null;
-  services: Calendar360ServiceKey[];
+  services: Reservation360ServiceKey[];
   reservations: number;
   upcomingReservations?: number;
-  pendingBalanceClp?: number;
-  totalSpentClp: number;
+  pendingBalanceClp?: number | null;
+  totalSpentClp: number | null;
+  financialRestricted?: boolean;
   lastActivity: string;
   nextReservation?: string | null;
   notes?: string | null;
@@ -75,18 +77,19 @@ type ClientSummary = {
 type ClientHistoryItem = {
   id: string;
   entityId?: number;
-  kind?: Calendar360EventKind | "external" | "regular_class_membership";
-  service: Calendar360ServiceKey;
+  kind?: Reservation360EventKind | "external";
+  service: Reservation360ServiceKey;
   date: string;
   startTime: string | null;
   endTime?: string | null;
   title: string;
   status: string;
   paymentStatus: string | null;
-  amountClp: number;
-  totalAmountClp?: number;
-  paidAmountClp?: number;
-  balanceAmountClp?: number;
+  amountClp: number | null;
+  totalAmountClp?: number | null;
+  paidAmountClp?: number | null;
+  balanceAmountClp?: number | null;
+  financialRestricted?: boolean;
   clientName: string;
   clientEmail: string | null;
   clientPhone: string | null;
@@ -145,6 +148,7 @@ type ClientProfileData = {
   }>;
   canManageProfile: boolean;
   canMergeProfiles: boolean;
+  giftCardsRestricted: boolean;
 };
 
 const CLIENT_PAGE_SIZE = 30;
@@ -159,7 +163,7 @@ const serviceLabels: Record<ServiceKey, string> = {
   regular_classes: "Clases regulares",
 };
 
-const serviceTone: Record<Calendar360ServiceKey, string> = {
+const serviceTone: Record<Reservation360ServiceKey, string> = {
   massages: "border-rose-200 bg-rose-50 text-rose-800",
   biopools: "border-cyan-200 bg-cyan-50 text-cyan-800",
   sauna: "border-amber-200 bg-amber-50 text-amber-900",
@@ -171,13 +175,14 @@ const clp = new Intl.NumberFormat("es-CL", {
   currency: "CLP",
   maximumFractionDigits: 0,
 });
-const calendarDetailKinds = new Set<Calendar360EventKind>([
+const calendarDetailKinds = new Set<Reservation360EventKind>([
   "massage",
   "massage_program",
   "biopool",
   "sauna",
   "regular_class",
   "regular_class_schedule",
+  "regular_class_membership",
 ]);
 const GOOGLE_REVIEW_URL = "https://maps.app.goo.gl/mhKem25vtagvCiSm8";
 const TRIPADVISOR_REVIEW_URL =
@@ -313,18 +318,17 @@ function auditDetail(value: string | null) {
 
 function reservationEvent(
   item: ClientHistoryItem
-): Calendar360ReservationEvent | null {
+): Reservation360Event | null {
   if (
     !item.kind ||
     !item.entityId ||
-    !calendarDetailKinds.has(item.kind as Calendar360EventKind)
+    !calendarDetailKinds.has(item.kind as Reservation360EventKind)
   )
     return null;
-  return {
+  return createReservation360Event({
     id: item.id,
     entityId: item.entityId,
-    kind: item.kind as Calendar360EventKind,
-    service: item.service,
+    kind: item.kind as Reservation360EventKind,
     date: item.date,
     startTime: item.startTime ?? "00:00",
     endTime: item.endTime ?? item.startTime ?? "00:00",
@@ -334,7 +338,7 @@ function reservationEvent(
     paymentStatus: item.paymentStatus,
     people: Math.max(1, Number(item.people ?? 1)),
     href: item.href ?? "#",
-  };
+  });
 }
 
 function ReservationCard({
@@ -380,14 +384,16 @@ function ReservationCard({
           )}
         </div>
         <div className="flex shrink-0 items-center justify-between gap-4 sm:block sm:text-right">
-          <div>
-            <p className="font-semibold">{clp.format(total)}</p>
-            {balance > 0 && (
-              <p className="text-xs font-medium text-rose-700">
-                Saldo {clp.format(balance)}
-              </p>
-            )}
-          </div>
+          {!item.financialRestricted && (
+            <div>
+              <p className="font-semibold">{clp.format(total)}</p>
+              {balance > 0 && (
+                <p className="text-xs font-medium text-rose-700">
+                  Saldo {clp.format(balance)}
+                </p>
+              )}
+            </div>
+          )}
           {canOpen && (
             <ChevronRight className="h-5 w-5 text-muted-foreground sm:ml-auto sm:mt-3" />
           )}
@@ -447,7 +453,7 @@ function ClientWorkspace({
   const [tab, setTab] = useState<ClientTab>("upcoming");
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [selectedReservation, setSelectedReservation] =
-    useState<Calendar360ReservationEvent | null>(null);
+    useState<Reservation360Event | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -498,7 +504,13 @@ function ClientWorkspace({
         ? item.status === "cancelled"
         : item.status !== "cancelled")
   );
-  const paymentRows = filteredRows.filter(
+  const financialRestricted =
+    client.financialRestricted === true ||
+    filteredRows.some(item => item.financialRestricted === true);
+  const financialRows = filteredRows.filter(
+    item => item.financialRestricted !== true
+  );
+  const paymentRows = financialRows.filter(
     item =>
       item.hasPaymentRecord ??
       (item.kind !== "regular_class" &&
@@ -514,7 +526,7 @@ function ClientWorkspace({
         : Number(item.paidAmountClp ?? item.amountClp ?? 0)),
     0
   );
-  const pendingTotal = filteredRows.reduce((sum, item) => {
+  const pendingTotal = financialRows.reduce((sum, item) => {
     if (item.status === "cancelled") return sum;
     const paid = Number(item.paidAmountClp ?? item.amountClp ?? 0);
     const total = Number(item.totalAmountClp ?? paid);
@@ -785,35 +797,50 @@ function ClientWorkspace({
                 {filteredRows.length}
               </p>
             </div>
-            <div className="rounded-xl bg-emerald-50 p-3">
-              <p className="text-xs text-emerald-800">Total pagado</p>
-              <p className="mt-1 break-words text-xl font-semibold text-emerald-900">
-                {clp.format(paidTotal)}
-              </p>
-            </div>
-            <div
-              className={cn(
-                "rounded-xl p-3",
-                pendingTotal > 0 ? "bg-rose-50" : "bg-slate-50"
-              )}
-            >
-              <p
-                className={cn(
-                  "text-xs",
-                  pendingTotal > 0 ? "text-rose-800" : "text-muted-foreground"
-                )}
-              >
-                Saldo pendiente
-              </p>
-              <p
-                className={cn(
-                  "mt-1 break-words text-xl font-semibold",
-                  pendingTotal > 0 && "text-rose-900"
-                )}
-              >
-                {clp.format(pendingTotal)}
-              </p>
-            </div>
+            {financialRestricted ? (
+              <div className="col-span-2 rounded-xl bg-slate-50 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Información financiera
+                </p>
+                <p className="mt-1 text-sm font-medium">
+                  Restringida para uno o más servicios
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-xl bg-emerald-50 p-3">
+                  <p className="text-xs text-emerald-800">Total pagado</p>
+                  <p className="mt-1 break-words text-xl font-semibold text-emerald-900">
+                    {clp.format(paidTotal)}
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    "rounded-xl p-3",
+                    pendingTotal > 0 ? "bg-rose-50" : "bg-slate-50"
+                  )}
+                >
+                  <p
+                    className={cn(
+                      "text-xs",
+                      pendingTotal > 0
+                        ? "text-rose-800"
+                        : "text-muted-foreground"
+                    )}
+                  >
+                    Saldo pendiente
+                  </p>
+                  <p
+                    className={cn(
+                      "mt-1 break-words text-xl font-semibold",
+                      pendingTotal > 0 && "text-rose-900"
+                    )}
+                  >
+                    {clp.format(pendingTotal)}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -907,8 +934,14 @@ function ClientWorkspace({
             </EmptySection>
           ) : (
             <>
-              <Card>
-                <CardContent className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3">
+              {financialRestricted ? (
+                <div className="rounded-2xl border border-dashed bg-slate-50 px-4 py-5 text-sm text-muted-foreground">
+                  La información financiera está restringida para uno o más
+                  servicios de esta ficha.
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3">
                   <div>
                     <p className="text-xs text-muted-foreground">
                       Pagado registrado
@@ -933,8 +966,9 @@ function ClientWorkspace({
                       {paymentRows.length}
                     </p>
                   </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
               {(profileData?.giftCards.length ?? 0) > 0 && (
                 <Card>
                   <CardContent className="p-4">
@@ -979,10 +1013,17 @@ function ClientWorkspace({
                   </CardContent>
                 </Card>
               )}
-              <p className="px-1 text-xs text-muted-foreground">
-                Abre una reserva para ver el desglose, editar pagos manuales,
-                usar Gift Cards o generar links de pago.
-              </p>
+              {profileData?.giftCardsRestricted && (
+                <p className="px-1 text-xs text-muted-foreground">
+                  Las Gift Cards asociadas requieren permiso de Gift Cards.
+                </p>
+              )}
+              {!financialRestricted && (
+                <p className="px-1 text-xs text-muted-foreground">
+                  Abre una reserva para ver el desglose, editar pagos manuales,
+                  usar Gift Cards o generar links de pago.
+                </p>
+              )}
               {paymentRows.length ? (
                 paymentRows.map(item => (
                   <ReservationCard
@@ -1107,7 +1148,7 @@ function ClientWorkspace({
         </TabsContent>
       </Tabs>
 
-      <Calendar360ReservationDetail
+      <Reservation360DetailDialog
         event={selectedReservation}
         open={Boolean(selectedReservation)}
         onOpenChange={open => !open && setSelectedReservation(null)}
@@ -1368,7 +1409,7 @@ export default function Clientes360() {
   });
   const data = (listQuery.data?.items ?? []) as ClientSummary[];
   const manualBookingServices = (access?.manualBookingServices ??
-    []) as Calendar360ServiceKey[];
+    []) as Reservation360ServiceKey[];
 
   useEffect(() => {
     const timeout = window.setTimeout(
@@ -1398,6 +1439,8 @@ export default function Clientes360() {
     clients: Number(listQuery.data?.summary.clients ?? 0),
     upcoming: Number(listQuery.data?.summary.upcomingReservations ?? 0),
     pending: Number(listQuery.data?.summary.pendingBalanceClp ?? 0),
+    financialRestricted:
+      listQuery.data?.summary.financialRestricted === true,
   };
 
   const refreshClientData = async () => {
@@ -1468,7 +1511,9 @@ export default function Clientes360() {
                   Por cobrar
                 </p>
                 <p className="break-words text-sm font-semibold sm:text-xl">
-                  {clp.format(totals.pending)}
+                  {totals.financialRestricted
+                    ? "Restringido"
+                    : clp.format(totals.pending)}
                 </p>
               </div>
             </CardContent>
@@ -1500,7 +1545,7 @@ export default function Clientes360() {
               <SelectContent>
                 <SelectItem value="all">Todos los servicios</SelectItem>
                 {(
-                  (access?.clientServices ?? []) as Calendar360ServiceKey[]
+                  (access?.clientServices ?? []) as Reservation360ServiceKey[]
                 ).map(item => (
                   <SelectItem key={item} value={item}>
                     {serviceLabels[item]}

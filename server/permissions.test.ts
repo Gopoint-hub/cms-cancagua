@@ -12,6 +12,7 @@ import {
   hasMassageAdminAccess,
   hasMassageOperationsAccess,
   hasMassagePaymentAccess,
+  hasMassagePaymentReadAccess,
   hasMassageReadAccess,
 } from "../shared/permissions";
 
@@ -61,6 +62,7 @@ describe("Usuario Personal Cancagua permissions", () => {
     expect(hasMaintenanceAccess(CANCAGUA_STAFF_ROLE)).toBe(true);
     expect(hasMassageOperationsAccess(CANCAGUA_STAFF_ROLE)).toBe(true);
     expect(hasMassagePaymentAccess({ role: CANCAGUA_STAFF_ROLE })).toBe(true);
+    expect(hasMassagePaymentReadAccess({ role: CANCAGUA_STAFF_ROLE })).toBe(true);
   });
 
   it("denies massage administration", () => {
@@ -154,6 +156,8 @@ describe("Terapeuta de Masajes permissions", () => {
     await expect(caller.masajes.agenda.getSkeduPrograms())
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(caller.masajes.agenda.updateStatus({ id: 1, status: "completed" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.masajes.agenda.getPayments({ bookingId: 1 }))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(caller.giftCardsAdmin.getAll())
       .rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -291,6 +295,49 @@ describe("Terapeuta de Masajes permissions", () => {
         "massages.manage_agenda",
       ]),
     })).toBe(false);
+  });
+
+  it("keeps sales visibility read-only for massage payments", async () => {
+    const permissions = JSON.stringify([
+      "module.massages",
+      "massages.manage_agenda",
+      "massages.view_sales",
+    ]);
+    const context = createMassageTherapistContext(permissions);
+    const user = context.user!;
+    const caller = appRouter.createCaller(context);
+
+    expect(hasMassagePaymentReadAccess(user)).toBe(true);
+    expect(hasMassagePaymentAccess(user)).toBe(false);
+    await expect(caller.masajes.agenda.settleSkeduProgramPayment({
+      id: 1,
+      method: "cash",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.masajes.agenda.createSkeduProgramBooking({
+      program: "reconecta",
+      duration: 30,
+      modality: "simple",
+      clientName: "Cliente prueba",
+      bookingDate: "2026-08-20",
+      startTime: "10:00",
+      roomId: 1,
+      paymentMethod: "cash",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires the massage module together with payment management", async () => {
+    const permissions = JSON.stringify(["massages.manage_payments"]);
+    const context = createMassageTherapistContext(permissions);
+    const caller = appRouter.createCaller(context);
+
+    expect(hasMassagePaymentAccess(context.user!)).toBe(true);
+    await expect(caller.masajes.agenda.settleSkeduProgramPayment({
+      id: 1,
+      method: "cash",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.reservationPaymentLinks.create({
+      reservations: [{ service: "massage_programs", reservationId: 1 }],
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("keeps Gift Cards available to existing users of the Sales module", () => {

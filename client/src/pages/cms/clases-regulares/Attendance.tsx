@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearch } from "wouter";
 import {
   addDays,
   addMonths,
@@ -14,6 +15,10 @@ import {
 } from "date-fns";
 import { es } from "date-fns/locale";
 import DashboardLayout from "@/components/DashboardLayout";
+import {
+  Reservation360DetailDialog,
+  type Reservation360Event,
+} from "@/components/cms/Reservation360DetailDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -63,6 +68,13 @@ type AttendanceSession = {
 
 const parseDate = (value: string) => new Date(`${value}T12:00:00`);
 const dateKey = (value: Date) => format(value, "yyyy-MM-dd");
+const validDateKey = (value: string | null) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = parseDate(value);
+  return !Number.isNaN(parsed.getTime()) && dateKey(parsed) === value
+    ? value
+    : null;
+};
 const capitalize = (value: string) =>
   value.charAt(0).toUpperCase() + value.slice(1);
 
@@ -97,9 +109,11 @@ function periodTitle(view: ViewMode, anchor: Date) {
 
 function SessionAttendanceCard({
   session,
+  onManage,
   onNewStudent,
 }: {
   session: AttendanceSession;
+  onManage: () => void;
   onNewStudent: (sessionId: number) => void;
 }) {
   const utils = trpc.useUtils();
@@ -303,6 +317,9 @@ function SessionAttendanceCard({
         )}
 
         <div className="space-y-3 border-t bg-stone-50/70 p-4 sm:p-5">
+          <Button variant="secondary" className="w-full" onClick={onManage}>
+            Gestionar sesión
+          </Button>
           <Button
             variant="outline"
             className="w-full justify-start border-stone-200 bg-white text-stone-600"
@@ -508,13 +525,19 @@ function MonthView({
 
 export default function RegularClassesAttendance() {
   const utils = trpc.useUtils();
+  const search = useSearch();
   const today = parseDate(todayString());
+  const initialDate = validDateKey(new URLSearchParams(search).get("date"));
   const [view, setView] = useState<ViewMode>("day");
-  const [anchor, setAnchor] = useState(today);
+  const [anchor, setAnchor] = useState(() =>
+    initialDate ? parseDate(initialDate) : today
+  );
   const [teacherFilter, setTeacherFilter] = useState<number | null>(null);
   const [newStudentSessionId, setNewStudentSessionId] = useState<number | null>(
     null
   );
+  const [selectedReservation, setSelectedReservation] =
+    useState<Reservation360Event | null>(null);
   const [newStudent, setNewStudent] = useState({
     firstName: "",
     lastName: "",
@@ -731,6 +754,23 @@ export default function RegularClassesAttendance() {
                   <SessionAttendanceCard
                     key={session.id}
                     session={session}
+                    onManage={() =>
+                      setSelectedReservation({
+                        id: `regular-class:${session.id}`,
+                        entityId: session.id,
+                        kind: "regular_class",
+                        service: "regular_classes",
+                        date: session.sessionDate,
+                        startTime: session.startTime,
+                        endTime: session.endTime,
+                        title: session.disciplineName,
+                        clientName: session.teacherName,
+                        status: session.status,
+                        paymentStatus: null,
+                        people: session.attendanceCount,
+                        href: `/cms/clases-regulares/asistencia?date=${session.sessionDate}`,
+                      })
+                    }
                     onNewStudent={setNewStudentSessionId}
                   />
                 ))}
@@ -899,6 +939,18 @@ export default function RegularClassesAttendance() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Reservation360DetailDialog
+        event={selectedReservation}
+        open={Boolean(selectedReservation)}
+        onOpenChange={next => !next && setSelectedReservation(null)}
+        onChanged={() =>
+          Promise.all([
+            utils.regularClasses.attendance.sessions.invalidate(),
+            utils.regularClasses.attendance.roster.invalidate(),
+          ])
+        }
+      />
     </DashboardLayout>
   );
 }

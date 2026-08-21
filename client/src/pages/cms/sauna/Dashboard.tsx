@@ -150,7 +150,15 @@ export default function SaunaDashboard() {
             </CardHeader>
             <CardContent className="space-y-3">
               {(data?.bookings ?? []).map(booking => (
-                <div key={booking.id} className={booking.paymentStatus === "paid" ? "rounded-xl border p-3" : "rounded-xl border border-red-300 bg-red-50 p-3"}>
+                <div
+                  key={booking.id}
+                  className={
+                    booking.paymentRestricted ||
+                    booking.paymentStatus === "paid"
+                      ? "rounded-xl border p-3"
+                      : "rounded-xl border border-red-300 bg-red-50 p-3"
+                  }
+                >
                   <div className="flex items-center justify-between gap-2">
                     <strong>{booking.startTime}</strong>
                     <Badge variant={booking.isPrivate ? "default" : "outline"}>
@@ -165,14 +173,26 @@ export default function SaunaDashboard() {
                   <p className="text-xs text-muted-foreground">
                     {booking.serviceName} · {booking.origin || booking.source}
                   </p>
-                  {booking.amountClp > 0 && (
+                  {!booking.paymentRestricted &&
+                    Number(booking.amountClp ?? 0) > 0 && (
                     <p className="mt-1 text-xs text-emerald-700">
-                      {clp.format(booking.amountClp)}
+                      {clp.format(Number(booking.amountClp))}
                     </p>
                   )}
-                  <Badge variant={booking.paymentStatus === "paid" ? "secondary" : "destructive"} className="mt-2">
-                    {booking.paymentStatus === "paid" ? "Pagado" : "Pendiente de pago"}
-                  </Badge>
+                  {!booking.paymentRestricted && (
+                    <Badge
+                      variant={
+                        booking.paymentStatus === "paid"
+                          ? "secondary"
+                          : "destructive"
+                      }
+                      className="mt-2"
+                    >
+                      {booking.paymentStatus === "paid"
+                        ? "Pagado"
+                        : "Pendiente de pago"}
+                    </Badge>
+                  )}
                 </div>
               ))}
               {!data?.bookings.length && (

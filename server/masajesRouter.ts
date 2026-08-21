@@ -71,6 +71,7 @@ import {
   hasMassageAdminAccess,
   hasMassageOperationsAccess,
   hasMassagePaymentAccess,
+  hasMassagePaymentReadAccess,
   hasMassageReadAccess,
 } from "@shared/permissions";
 import { chileLocalDateTimeToUtc } from "./massageNps";
@@ -86,7 +87,10 @@ import {
   startTherapistAssignmentForBooking,
   stopTherapistAssignmentForBooking,
 } from "./massageTherapistAssignment";
-import { MANUAL_MASSAGE_PAYMENT_METHODS } from "@shared/massagePayments";
+import {
+  isPendingMassagePaymentMethod,
+  MANUAL_MASSAGE_PAYMENT_METHODS,
+} from "@shared/massagePayments";
 import {
   buildMassageClientDirectory,
   type MassageClientBookingRecord,
@@ -105,7 +109,10 @@ import {
   reservationPaymentInputSchema,
   validateReservationPayment,
 } from "./reservationPayments";
-import { canRedeemGiftCard } from "./giftCardRedemption";
+import {
+  assertGiftCardPaymentRemovalAccess,
+  canRedeemGiftCard,
+} from "./giftCardRedemption";
 import { validatePublicGiftCard } from "./publicGiftCards";
 import {
   withMassageResourceLock,
@@ -115,13 +122,21 @@ import {
   appendRescheduleAuditLine,
   buildRescheduleAuditLine,
 } from "./rescheduleAudit";
-import { assertNoLiveReservationPaymentAttempt } from "./reservationPaymentLinkGuards";
+import {
+  assertNoLiveReservationPaymentAttempt,
+  RESERVATION_PAYMENT_TRANSACTION,
+} from "./reservationPaymentLinkGuards";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
-const skeduProgramPaymentMethodSchema = z.enum([
-  ...MANUAL_MASSAGE_PAYMENT_METHODS,
+export const SKEDU_PROGRAM_PAYMENT_METHODS = [
+  "pending_payment",
+  "getnet_pos",
+  "bank_transfer",
+  "cash",
+  "transbank",
   "skedu_program",
-]);
+] as const;
+const skeduProgramPaymentMethodSchema = z.enum(SKEDU_PROGRAM_PAYMENT_METHODS);
 const skeduProgramSettlementMethodSchema = z.enum([
   "cash",
   "bank_transfer",
@@ -198,6 +213,20 @@ const massageAgenda = async (
     !hasCmsPermission(user, "massages.manage_agenda")
   ) {
     throw new TRPCError({ code: "FORBIDDEN" });
+  }
+};
+
+const massagePayments = async (
+  user: Pick<User, "role" | "permissions" | "regularClassesTeacher">
+) => {
+  if (
+    !hasCmsPermission(user, "module.massages") ||
+    !hasMassagePaymentAccess(user)
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permiso para actualizar pagos de masajes",
+    });
   }
 };
 
@@ -311,6 +340,111 @@ export function getSkeduMassageUnitPrice(duration: number): number {
 
 export function getSkeduMassageQuantity(modality: "simple" | "double"): number {
   return modality === "double" ? 2 : 1;
+}
+
+type SkeduProgramSettlementPayment = {
+  status: "pending" | "paid" | "refunded";
+  amountClp: number;
+};
+
+type SkeduProgramAnalyticsPayment = SkeduProgramSettlementPayment & {
+  method: string;
+  paidAt: Date | null;
+  createdAt: Date;
+  reference?: string | null;
+};
+
+export type SkeduProgramCreditedPayment = {
+  amountClp: number;
+  method: string;
+  paidAt: Date;
+  reference: string | null;
+  legacy: boolean;
+};
+
+export function calculateSkeduProgramSettlement(input: {
+  totalClp: number;
+  payments: readonly SkeduProgramSettlementPayment[];
+  legacyPaymentMethod?: string | null;
+}) {
+  const legacyPaidAmountClp =
+    input.payments.length === 0 &&
+    input.legacyPaymentMethod != null &&
+    !isPendingMassagePaymentMethod(input.legacyPaymentMethod)
+      ? input.totalClp
+      : 0;
+  const paidAmountClp =
+    legacyPaidAmountClp +
+    input.payments
+      .filter(payment => payment.status === "paid")
+      .reduce((sum, payment) => sum + payment.amountClp, 0);
+
+  return {
+    paidAmountClp,
+    balanceAmountClp: Math.max(0, input.totalClp - paidAmountClp),
+  };
+}
+
+/**
+ * Traduce la evidencia financiera de un programa Skedu a abonos de analítica.
+ * Las filas detalladas mandan siempre. Solo los registros históricos que no
+ * tienen ninguna fila conservan la inferencia de pago por su medio legado.
+ */
+export function resolveSkeduProgramCreditedPayments(input: {
+  totalClp: number;
+  payments: readonly SkeduProgramAnalyticsPayment[];
+  legacyPaymentMethod?: string | null;
+  legacyPaidAt: Date;
+}) {
+  const credits: SkeduProgramCreditedPayment[] = input.payments
+    .filter(payment => payment.status === "paid" && payment.amountClp > 0)
+    .map(payment => ({
+      amountClp: payment.amountClp,
+      method: payment.method,
+      paidAt: payment.paidAt ?? payment.createdAt,
+      reference: payment.reference ?? null,
+      legacy: false,
+    }));
+
+  if (
+    input.payments.length === 0 &&
+    input.totalClp > 0 &&
+    input.legacyPaymentMethod != null &&
+    !isPendingMassagePaymentMethod(input.legacyPaymentMethod)
+  ) {
+    credits.push({
+      amountClp: input.totalClp,
+      method: input.legacyPaymentMethod,
+      paidAt: input.legacyPaidAt,
+      reference: null,
+      legacy: true,
+    });
+  }
+
+  credits.sort((left, right) => left.paidAt.getTime() - right.paidAt.getTime());
+  const paidAmountClp = credits.reduce(
+    (sum, payment) => sum + payment.amountClp,
+    0
+  );
+  return {
+    credits,
+    paidAmountClp,
+    isFullyPaid: input.totalClp > 0 && paidAmountClp >= input.totalClp,
+    latestPaidAt: credits.at(-1)?.paidAt ?? null,
+  };
+}
+
+export function allocateSkeduProgramPaidAmount(
+  paidAmountClp: number,
+  quantity: number
+): number[] {
+  if (quantity <= 0 || paidAmountClp <= 0) return [];
+  const baseAmount = Math.floor(paidAmountClp / quantity);
+  const remainder = paidAmountClp - baseAmount * quantity;
+  return Array.from(
+    { length: quantity },
+    (_, index) => baseAmount + (index < remainder ? 1 : 0)
+  );
 }
 
 function getSkeduProgramLabel(programValue: string): string {
@@ -1716,6 +1850,16 @@ const agendaRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
+      if (
+        (input.paymentMethod !== "pending_payment" ||
+          Boolean(input.paymentReference?.trim())) &&
+        !hasMassagePaymentAccess(ctx.user)
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para registrar pagos de masajes",
+        });
+      }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -1741,8 +1885,9 @@ const agendaRouter = router({
       const programTotalClp =
         getSkeduMassageUnitPrice(input.duration) *
         getSkeduMassageQuantity(input.modality);
-      const paymentStatus =
-        input.paymentMethod === "pending_payment" ? "pending" : "paid";
+      const paymentStatus = isPendingMassagePaymentMethod(input.paymentMethod)
+        ? "pending"
+        : "paid";
       if (
         paymentStatus === "paid" &&
         !["cash", "skedu_program"].includes(input.paymentMethod) &&
@@ -1869,12 +2014,7 @@ const agendaRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (!hasMassagePaymentAccess(ctx.user)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes permiso para registrar pagos de masajes",
-        });
-      }
+      await massagePayments(ctx.user);
       if (input.method !== "cash" && !input.reference?.trim()) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1897,7 +2037,7 @@ const agendaRouter = router({
             message: "No puedes cobrar una reserva cancelada",
           });
         }
-        const [existing] = await tx
+        const payments = await tx
           .select()
           .from(reservationPayments)
           .where(
@@ -1905,41 +2045,33 @@ const agendaRouter = router({
               eq(reservationPayments.module, "massage_programs"),
               eq(reservationPayments.reservationId, input.id)
             )
-          )
-          .limit(1);
-        if (existing?.status === "paid") {
+          );
+        const totalClp =
+          getSkeduMassageUnitPrice(booking.duration) *
+          getSkeduMassageQuantity(booking.modality);
+        const settlement = calculateSkeduProgramSettlement({
+          totalClp,
+          payments,
+          legacyPaymentMethod: booking.paymentMethod,
+        });
+        if (settlement.balanceAmountClp <= 0) {
           throw new TRPCError({
             code: "CONFLICT",
             message: "Este programa ya figura pagado",
           });
         }
-        const totalClp =
-          getSkeduMassageUnitPrice(booking.duration) *
-          getSkeduMassageQuantity(booking.modality);
-        if (existing) {
-          await tx
-            .update(reservationPayments)
-            .set({
-              method: input.method,
-              status: "paid",
-              amountClp: totalClp,
-              paidAt: new Date(),
-              reference: input.reference?.trim() || null,
-              createdByUserId: ctx.user.id,
-            })
-            .where(eq(reservationPayments.id, existing.id));
-        } else {
-          await tx.insert(reservationPayments).values({
-            module: "massage_programs",
-            reservationId: input.id,
-            method: input.method,
-            status: "paid",
-            amountClp: totalClp,
-            paidAt: new Date(),
-            reference: input.reference?.trim() || null,
-            createdByUserId: ctx.user.id,
-          });
-        }
+        // Los intentos y placeholders pendientes se conservan para mantener su
+        // trazabilidad. La nueva fila registra exclusivamente el saldo cobrado.
+        await tx.insert(reservationPayments).values({
+          module: "massage_programs",
+          reservationId: input.id,
+          method: input.method,
+          status: "paid",
+          amountClp: settlement.balanceAmountClp,
+          paidAt: new Date(),
+          reference: input.reference?.trim() || null,
+          createdByUserId: ctx.user.id,
+        });
         await tx
           .update(massageProgramBookings)
           .set({
@@ -1947,7 +2079,7 @@ const agendaRouter = router({
             paymentReference: input.reference?.trim() || null,
           })
           .where(eq(massageProgramBookings.id, input.id));
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       return { success: true };
     }),
 
@@ -2075,7 +2207,7 @@ const agendaRouter = router({
               }
             : {}),
         }).where(eq(massageProgramBookings.id, input.id));
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       await stopTherapistAssignmentForBooking("skedu_program", input.id);
       return { success: true };
     }),
@@ -2246,7 +2378,7 @@ const agendaRouter = router({
           ? payments
               .filter(payment => payment.status === "paid")
               .reduce((sum, payment) => sum + payment.amountClp, 0)
-          : row.paymentMethod !== "pending_payment" && row.paymentMethod !== "getnet_link"
+          : !isPendingMassagePaymentMethod(row.paymentMethod)
             ? totalClp
             : 0;
         const paymentStatus = calculatedPaymentStatus(paidAmountClp, totalClp);
@@ -2297,7 +2429,7 @@ const agendaRouter = router({
           String(a.bookingDate).localeCompare(String(b.bookingDate)) ||
           a.startTime.localeCompare(b.startTime)
       );
-      if (hasMassagePaymentAccess(ctx.user)) return bookings;
+      if (hasMassagePaymentReadAccess(ctx.user)) return bookings;
       return bookings.map(booking => ({
         ...booking,
         paymentStatus: null,
@@ -2660,12 +2792,15 @@ const agendaRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await massageAgenda(ctx.user);
+      const canManagePayments = hasMassagePaymentAccess(ctx.user);
       if (
         (input.paymentStatus === "paid" ||
-          input.amountPaid ||
-          input.manualPaymentMethod ||
-          input.payments) &&
-        !hasMassagePaymentAccess(ctx.user)
+          input.amountPaid !== undefined ||
+          input.manualPaymentMethod !== undefined ||
+          input.totalAmountClp !== undefined ||
+          input.payments !== undefined ||
+          Boolean(input.discountCode?.trim())) &&
+        !canManagePayments
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -2685,8 +2820,29 @@ const agendaRouter = router({
           message: "No tienes permisos para canjear Gift Cards",
         });
       }
-      const totalAmountClp =
+      let totalAmountClp =
         input.totalAmountClp ?? Number(input.amountPaid || 0);
+      if (!canManagePayments) {
+        const [technique] = await db
+          .select({
+            price50min: massageTechniques.price50min,
+            price80min: massageTechniques.price80min,
+            price110min: massageTechniques.price110min,
+          })
+          .from(massageTechniques)
+          .where(eq(massageTechniques.id, input.techniqueId))
+          .limit(1);
+        const configuredPrice = technique
+          ? massagePriceForDuration(technique, input.duration)
+          : null;
+        if (!configuredPrice) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "El masaje no tiene un valor configurado para esa duración",
+          });
+        }
+        totalAmountClp = configuredPrice;
+      }
       const paidAmountClp = payments
         .filter(payment => payment.status === "paid")
         .reduce((sum, payment) => sum + payment.amountClp, 0);
@@ -2809,6 +2965,12 @@ const agendaRouter = router({
     .input(z.object({ bookingId: z.number() }))
     .query(async ({ ctx, input }) => {
       await massageRead(ctx.user);
+      if (!hasMassagePaymentReadAccess(ctx.user)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes permiso para ver pagos de masajes",
+        });
+      }
       const db = await getDb();
       if (!db) return [];
       return db
@@ -2828,12 +2990,7 @@ const agendaRouter = router({
       z.object({ paymentId: z.number(), payment: massagePaymentInputSchema })
     )
     .mutation(async ({ ctx, input }) => {
-      await massageAgenda(ctx.user);
-      if (!hasMassagePaymentAccess(ctx.user))
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes permiso para actualizar pagos",
-        });
+      await massagePayments(ctx.user);
       validateReservationPayment(input.payment);
       if (input.payment.method === "gift_card")
         throw new TRPCError({
@@ -2939,7 +3096,7 @@ const agendaRouter = router({
           })
           .where(eq(massageBookings.id, booking.id));
         return booking.id;
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       await syncMassageSale(bookingId);
       return { success: true };
     }),
@@ -2947,12 +3104,7 @@ const agendaRouter = router({
   removePayment: protectedProcedure
     .input(z.object({ paymentId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await massageAgenda(ctx.user);
-      if (!hasMassagePaymentAccess(ctx.user))
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes permiso para actualizar pagos",
-        });
+      await massagePayments(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const bookingId = await db.transaction(async tx => {
@@ -2975,6 +3127,7 @@ const agendaRouter = router({
             message: "Pago no encontrado",
           });
         assertReservationPaymentEditable(payment);
+        assertGiftCardPaymentRemovalAccess(ctx.user, payment);
         const [booking] = await tx
           .select()
           .from(massageBookings)
@@ -3055,7 +3208,7 @@ const agendaRouter = router({
           })
           .where(eq(massageBookings.id, booking.id));
         return booking.id;
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       await syncMassageSale(bookingId);
       return { success: true };
     }),
@@ -3068,12 +3221,7 @@ const agendaRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await massageAgenda(ctx.user);
-      if (!hasMassagePaymentAccess(ctx.user))
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes permiso para actualizar pagos",
-        });
+      await massagePayments(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const result = await db.transaction(async tx => {
@@ -3116,7 +3264,7 @@ const agendaRouter = router({
           paymentStatus: calculatedPaymentStatus(Number(booking.amountPaid ?? 0), finalTotal),
         }).where(eq(massageBookings.id, booking.id));
         return { bookingId: booking.id, discountCode, discountAmount };
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       await syncMassageSale(result.bookingId);
       return { success: true, discountCode: result.discountCode, discountAmount: result.discountAmount };
     }),
@@ -3130,12 +3278,7 @@ const agendaRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await massageAgenda(ctx.user);
-      if (!hasMassagePaymentAccess(ctx.user))
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes permiso para actualizar pagos",
-        });
+      await massagePayments(ctx.user);
       validateReservationPayment(input.payment);
       if (input.payment.method === "gift_card" && !canRedeemGiftCard(ctx.user))
         throw new TRPCError({
@@ -3224,7 +3367,7 @@ const agendaRouter = router({
           })
           .where(eq(massageBookings.id, booking.id));
         return { id: created.id, fullyPaid: status === "paid" };
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       if (result.fullyPaid) {
         await syncMassageSale(input.bookingId);
         await startTherapistAssignmentForBooking("massage", input.bookingId);
@@ -3242,12 +3385,7 @@ const agendaRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await massageAgenda(ctx.user);
-      if (!hasMassagePaymentAccess(ctx.user))
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes permiso para actualizar pagos",
-        });
+      await massagePayments(ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const result = await db.transaction(async tx => {
@@ -3297,7 +3435,7 @@ const agendaRouter = router({
           .set({ amountPaid: String(newPaid), paymentStatus: status })
           .where(eq(massageBookings.id, booking.id));
         return { bookingId: booking.id, fullyPaid: status === "paid" };
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       if (result.fullyPaid) {
         await syncMassageSale(result.bookingId);
         await startTherapistAssignmentForBooking("massage", result.bookingId);
@@ -3346,7 +3484,7 @@ const agendaRouter = router({
               }
             : {}),
         }).where(eq(massageBookings.id, input.id));
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       if (input.status !== "pending") {
         await stopTherapistAssignmentForBooking("massage", input.id);
       }
@@ -3476,7 +3614,7 @@ const agendaRouter = router({
             finalAmountClp: finalAmount,
             overpaymentAmountClp: Math.max(0, Number(booking.amountPaid ?? 0) - finalAmount),
           };
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
         await syncMassageSale(input.id);
         return result;
       });
@@ -3548,7 +3686,7 @@ const agendaRouter = router({
             rescheduleCount: current.rescheduleCount + 1,
             notes: appendRescheduleAuditLine(current.notes, auditLine),
           }).where(eq(massageBookings.id, current.id));
-        });
+        }, RESERVATION_PAYMENT_TRANSACTION);
         await syncMassageSale(booking.id);
         return { success: true };
       });
@@ -3655,7 +3793,7 @@ const agendaRouter = router({
               : {}),
           })
           .where(eq(massageBookings.id, id));
-      });
+      }, RESERVATION_PAYMENT_TRANSACTION);
       if (input.status && input.status !== "pending") {
         await stopTherapistAssignmentForBooking("massage", id);
       }
@@ -4317,9 +4455,37 @@ async function getCombinedMassageSalesRows(
   const therapistNames = new Map(
     therapistRows.map(therapist => [therapist.id, therapist.name])
   );
+  const programIds = programRows.map(booking => booking.id);
+  const programPaymentRows = programIds.length
+    ? await db
+        .select()
+        .from(reservationPayments)
+        .where(
+          and(
+            eq(reservationPayments.module, "massage_programs"),
+            inArray(reservationPayments.reservationId, programIds)
+          )
+        )
+    : [];
+  const programPayments = new Map<number, typeof programPaymentRows>();
+  for (const payment of programPaymentRows) {
+    programPayments.set(payment.reservationId, [
+      ...(programPayments.get(payment.reservationId) ?? []),
+      payment,
+    ]);
+  }
   const programSales = programRows.flatMap(booking => {
     const serviceDate = serializeDateOnly(booking.bookingDate);
     const unitPrice = getSkeduMassageUnitPrice(booking.duration);
+    const quantity = getSkeduMassageQuantity(booking.modality);
+    const credited = resolveSkeduProgramCreditedPayments({
+      totalClp: unitPrice * quantity,
+      payments: programPayments.get(booking.id) ?? [],
+      legacyPaymentMethod: booking.paymentMethod,
+      legacyPaidAt: booking.createdAt,
+    });
+    const soldAt = credited.latestPaidAt;
+    if (!credited.paidAmountClp || !soldAt) return [];
     const programLabel = getSkeduProgramLabel(booking.program);
     const clients = [
       {
@@ -4335,24 +4501,32 @@ async function getCombinedMassageSalesRows(
           ]
         : []),
     ];
+    const amounts = allocateSkeduProgramPaidAmount(
+      credited.paidAmountClp,
+      clients.length
+    );
+    const latestCredit = credited.credits[credited.credits.length - 1]!;
     return clients.map((client, unitIndex) => ({
       id: `SKEDU-${booking.id}-${unitIndex + 1}`,
       bookingId: booking.id,
-      soldAt: booking.createdAt,
+      soldAt,
       serviceDate,
       startTime: booking.startTime,
       clientName: client.name,
       clientEmail: booking.clientEmail,
       techniqueName: `Programa ${programLabel}`,
       duration: booking.duration,
-      amount: unitPrice,
+      amount: amounts[unitIndex] ?? 0,
       originalAmount: unitPrice,
       discountAmount: 0,
       discountCode: null,
       discountType: null,
       discountValue: null,
-      paymentMethod: booking.paymentMethod,
-      paymentReference: booking.paymentReference ?? booking.externalReference,
+      paymentMethod: latestCredit.method,
+      paymentReference:
+        latestCredit.reference ??
+        booking.paymentReference ??
+        booking.externalReference,
       saleStatus:
         booking.status === "cancelled"
           ? ("cancelled" as const)
@@ -4494,6 +4668,7 @@ const analyticsRouter = router({
         previousSalesRows,
         previousProgramPeriod,
         todayPaymentsRows,
+        programPaymentsReceivedToday,
         standardPeriod,
         programPeriod,
         standardToday,
@@ -4531,9 +4706,12 @@ const analyticsRouter = router({
           ),
         db
           .select({
+          id: massageProgramBookings.id,
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           status: massageProgramBookings.status,
+          paymentMethod: massageProgramBookings.paymentMethod,
+          createdAt: massageProgramBookings.createdAt,
           })
           .from(massageProgramBookings)
           .where(
@@ -4554,6 +4732,36 @@ const analyticsRouter = router({
           ),
         db
           .select({
+            amountClp: reservationPayments.amountClp,
+            bookingStatus: massageProgramBookings.status,
+          })
+          .from(reservationPayments)
+          .innerJoin(
+            massageProgramBookings,
+            eq(
+              reservationPayments.reservationId,
+              massageProgramBookings.id
+            )
+          )
+          .where(
+            and(
+              eq(reservationPayments.module, "massage_programs"),
+              eq(reservationPayments.status, "paid"),
+              or(
+                and(
+                  gte(reservationPayments.paidAt, todayStart),
+                  lt(reservationPayments.paidAt, tomorrowStart)
+                ),
+                and(
+                  isNull(reservationPayments.paidAt),
+                  gte(reservationPayments.createdAt, todayStart),
+                  lt(reservationPayments.createdAt, tomorrowStart)
+                )
+              )
+            )
+          ),
+        db
+          .select({
           status: massageBookings.status,
           startTime: massageBookings.startTime,
           bookingSource: massageBookings.bookingSource,
@@ -4567,12 +4775,14 @@ const analyticsRouter = router({
           ),
         db
           .select({
+          id: massageProgramBookings.id,
           status: massageProgramBookings.status,
           startTime: massageProgramBookings.startTime,
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           program: massageProgramBookings.program,
           paymentMethod: massageProgramBookings.paymentMethod,
+          createdAt: massageProgramBookings.createdAt,
           therapistId: massageProgramBookings.therapistId,
           secondTherapistId: massageProgramBookings.secondTherapistId,
           })
@@ -4609,6 +4819,8 @@ const analyticsRouter = router({
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           status: massageProgramBookings.status,
+          paymentMethod: massageProgramBookings.paymentMethod,
+          createdAt: massageProgramBookings.createdAt,
           })
           .from(massageProgramBookings)
           .where(
@@ -4659,25 +4871,64 @@ const analyticsRouter = router({
           .from(massageTherapists),
       ]);
 
+      const relevantProgramIds = Array.from(
+        new Set(
+          [
+            ...programPeriod,
+            ...previousProgramPeriod,
+            ...programCreatedToday,
+          ].map(booking => booking.id)
+        )
+      );
+      const programPaymentRows = relevantProgramIds.length
+        ? await db
+            .select()
+            .from(reservationPayments)
+            .where(
+              and(
+                eq(reservationPayments.module, "massage_programs"),
+                inArray(reservationPayments.reservationId, relevantProgramIds)
+              )
+            )
+        : [];
+      const programPayments = new Map<number, typeof programPaymentRows>();
+      for (const payment of programPaymentRows) {
+        programPayments.set(payment.reservationId, [
+          ...(programPayments.get(payment.reservationId) ?? []),
+          payment,
+        ]);
+      }
+      const programAnalyticsFor = (booking: {
+        id: number;
+        duration: number;
+        modality: "simple" | "double";
+        paymentMethod: string;
+        createdAt: Date;
+      }) =>
+        resolveSkeduProgramCreditedPayments({
+          totalClp:
+            getSkeduMassageUnitPrice(booking.duration) *
+            getSkeduMassageQuantity(booking.modality),
+          payments: programPayments.get(booking.id) ?? [],
+          legacyPaymentMethod: booking.paymentMethod,
+          legacyPaidAt: booking.createdAt,
+        });
+      const currentProgramAnalytics = programPeriod
+        .filter(booking => booking.status !== "cancelled")
+        .map(booking => ({ booking, payment: programAnalyticsFor(booking) }));
+      const previousProgramAnalytics = previousProgramPeriod
+        .filter(booking => booking.status !== "cancelled")
+        .map(booking => ({ booking, payment: programAnalyticsFor(booking) }));
+
       const paidSales = salesTotalsRows.filter(sale => sale.status === "paid");
-      const programRevenue = programPeriod
-        .filter(booking => booking.status !== "cancelled")
-        .reduce(
-          (sum, booking) =>
-            sum +
-            getSkeduMassageUnitPrice(booking.duration) *
-              getSkeduMassageQuantity(booking.modality),
-          0
-        );
-      const previousProgramRevenue = previousProgramPeriod
-        .filter(booking => booking.status !== "cancelled")
-        .reduce(
-          (sum, booking) =>
-            sum +
-            getSkeduMassageUnitPrice(booking.duration) *
-              getSkeduMassageQuantity(booking.modality),
-          0
-        );
+      const programRevenue = currentProgramAnalytics.reduce(
+        (sum, row) => sum + row.payment.paidAmountClp,
+        0
+      );
+      const previousProgramRevenue = previousProgramAnalytics.reduce(
+        (sum, row) => sum + row.payment.paidAmountClp,
+        0
+      );
       const revenue =
         paidSales.reduce((sum, sale) => sum + Number(sale.amount), 0) +
         programRevenue;
@@ -4692,19 +4943,18 @@ const analyticsRouter = router({
           : revenue > 0
             ? 100
             : 0;
-      const programOnlineRevenue = programPeriod
-        .filter(
-          booking =>
-            booking.status !== "cancelled" &&
-            booking.paymentMethod === "getnet_link"
-        )
-        .reduce(
-          (sum, booking) =>
-            sum +
-            getSkeduMassageUnitPrice(booking.duration) *
-              getSkeduMassageQuantity(booking.modality),
-          0
-        );
+      const isOnlinePaymentMethod = (method: string) =>
+        method === "getnet" ||
+        method === "getnet_link" ||
+        method === "webpay";
+      const programOnlineRevenue = currentProgramAnalytics.reduce(
+        (sum, row) =>
+          sum +
+          row.payment.credits
+            .filter(payment => isOnlinePaymentMethod(payment.method))
+            .reduce((subtotal, payment) => subtotal + payment.amountClp, 0),
+        0
+      );
       const onlineRevenue =
         paidSales
           .filter(
@@ -4724,10 +4974,11 @@ const analyticsRouter = router({
           .reduce((sum, sale) => sum + Number(sale.amount), 0) +
         programRevenue -
         programOnlineRevenue;
-      const paidProgramMassages = programPeriod
-        .filter(booking => booking.status !== "cancelled")
+      const paidProgramMassages = currentProgramAnalytics
+        .filter(row => row.payment.isFullyPaid)
         .reduce(
-          (sum, booking) => sum + getSkeduMassageQuantity(booking.modality),
+          (sum, row) =>
+            sum + getSkeduMassageQuantity(row.booking.modality),
           0
         );
       const allPeriodBookings = [...standardPeriod, ...programPeriod];
@@ -4799,6 +5050,21 @@ const analyticsRouter = router({
       const sentNps = npsRows.filter(
         response => response.deliveryStatus === "sent"
       ).length;
+      const creditedProgramPaymentsReceivedToday =
+        programPaymentsReceivedToday
+          .filter(payment => payment.bookingStatus !== "cancelled")
+          .reduce((sum, payment) => sum + payment.amountClp, 0);
+      const legacyProgramPaymentsReceivedToday = programCreatedToday
+        .filter(
+          booking =>
+            booking.status !== "cancelled" &&
+            !programPayments.has(booking.id)
+        )
+        .reduce(
+          (sum, booking) =>
+            sum + programAnalyticsFor(booking).paidAmountClp,
+          0
+        );
 
       const totals = {
         totalBookings: allPeriodBookings.length,
@@ -4834,15 +5100,8 @@ const analyticsRouter = router({
             (sum, sale) => sum + Number(sale.amount),
             0
           ) +
-          programCreatedToday
-            .filter(booking => booking.status !== "cancelled")
-            .reduce(
-              (sum, booking) =>
-                sum +
-                getSkeduMassageUnitPrice(booking.duration) *
-                  getSkeduMassageQuantity(booking.modality),
-              0
-            ),
+          creditedProgramPaymentsReceivedToday +
+          legacyProgramPaymentsReceivedToday,
         massageServicesToday: standardToday.filter(
           booking => booking.status !== "cancelled"
         ).length,
@@ -4958,9 +5217,8 @@ const analyticsRouter = router({
           revenue: Number(row.revenue),
         });
       }
-      for (const booking of programPeriod.filter(
-        row => row.status !== "cancelled"
-      )) {
+      for (const { booking, payment } of currentProgramAnalytics) {
+        if (payment.paidAmountClp <= 0) continue;
         const techniqueName = `Programa ${getSkeduProgramLabel(booking.program)}`;
         const current = techniqueMap.get(techniqueName) ?? {
           techniqueName,
@@ -4968,9 +5226,8 @@ const analyticsRouter = router({
           revenue: 0,
         };
         const quantity = getSkeduMassageQuantity(booking.modality);
-        current.count += quantity;
-        current.revenue +=
-          getSkeduMassageUnitPrice(booking.duration) * quantity;
+        if (payment.isFullyPaid) current.count += quantity;
+        current.revenue += payment.paidAmountClp;
         techniqueMap.set(techniqueName, current);
       }
       const byTechnique = Array.from(techniqueMap.values()).sort(
@@ -4988,18 +5245,16 @@ const analyticsRouter = router({
           revenue: Number(row.revenue),
         });
       }
-      for (const booking of programPeriod.filter(
-        row => row.status !== "cancelled"
-      )) {
+      for (const { booking, payment } of currentProgramAnalytics) {
+        if (payment.paidAmountClp <= 0) continue;
         const current = durationMap.get(booking.duration) ?? {
           duration: booking.duration,
           count: 0,
           revenue: 0,
         };
         const quantity = getSkeduMassageQuantity(booking.modality);
-        current.count += quantity;
-        current.revenue +=
-          getSkeduMassageUnitPrice(booking.duration) * quantity;
+        if (payment.isFullyPaid) current.count += quantity;
+        current.revenue += payment.paidAmountClp;
         durationMap.set(booking.duration, current);
       }
       const byDuration = Array.from(durationMap.values()).sort(
@@ -5024,16 +5279,19 @@ const analyticsRouter = router({
           revenue: Number(row.revenue),
         });
       }
-      for (const booking of programPeriod.filter(
-        row => row.status !== "cancelled"
-      )) {
+      for (const { booking, payment } of currentProgramAnalytics) {
+        if (payment.paidAmountClp <= 0) continue;
         const therapistIds = [
           booking.therapistId,
           ...(booking.modality === "double" && booking.secondTherapistId
             ? [booking.secondTherapistId]
             : []),
         ];
-        for (const therapistId of therapistIds) {
+        const therapistRevenue = allocateSkeduProgramPaidAmount(
+          payment.paidAmountClp,
+          therapistIds.length
+        );
+        for (const [index, therapistId] of therapistIds.entries()) {
           const therapistName = therapistId
             ? (therapistNameById.get(therapistId) ?? "Sin asignar")
             : "Sin asignar";
@@ -5042,8 +5300,8 @@ const analyticsRouter = router({
             count: 0,
             revenue: 0,
           };
-          current.count += 1;
-          current.revenue += getSkeduMassageUnitPrice(booking.duration);
+          if (payment.isFullyPaid) current.count += 1;
+          current.revenue += therapistRevenue[index] ?? 0;
           therapistMap.set(therapistName, current);
         }
       }
