@@ -163,6 +163,33 @@ describe("vencimiento de links de pago", () => {
       visit(source);
     }
 
-    expect(guardedTransactions).toBe(30);
+    expect(guardedTransactions).toBe(31);
+  });
+
+  it("mantiene un orden único de locks al editar y reagendar Sauna", () => {
+    const sourceText = readFileSync(
+      new URL("./saunaRouter.ts", import.meta.url),
+      "utf8"
+    );
+    const updateBooking = sourceText.slice(
+      sourceText.indexOf("    updateBooking:"),
+      sourceText.indexOf("    getPayments:")
+    );
+    const reschedule = sourceText.slice(
+      sourceText.indexOf("    reschedule:"),
+      sourceText.indexOf("  blocks: router({")
+    );
+
+    for (const procedure of [updateBooking, reschedule]) {
+      expect(procedure.indexOf("acquireSaunaSyncMutationLock")).toBeGreaterThan(
+        -1
+      );
+      expect(procedure.indexOf("acquireCapacityLock")).toBeGreaterThan(
+        procedure.indexOf("acquireSaunaSyncMutationLock")
+      );
+      expect(
+        procedure.indexOf("assertNoLiveReservationPaymentAttempt")
+      ).toBeGreaterThan(procedure.indexOf("acquireCapacityLock"));
+    }
   });
 });

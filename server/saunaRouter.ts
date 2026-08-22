@@ -18,6 +18,7 @@ import {
   saunaBlocks,
   saunaBookings,
   saunaCheckoutOrders,
+  saunaNotifications,
   saunaProgramQueue,
   saunaServices,
   saunaSettings,
@@ -42,7 +43,14 @@ import { customerAcquisitionSchema } from "../shared/customerAcquisition";
 import { saveCustomerPurchaseSurvey } from "./customerPurchaseSurvey";
 import { getDb } from "./db";
 import { chileLocalDateTimeToUtc } from "./massageNps";
-import { syncSaunaFromSkedu } from "./saunaSync";
+import { SAUNA_SKEDU_RESOURCE_UUID, syncSaunaFromSkedu } from "./saunaSync";
+import {
+  cancelSkeduAppointment,
+  getSkeduAppointmentPayments,
+  hasConfirmedSkeduWebpayPayment,
+  rescheduleSkeduAppointment,
+  SkeduAppointmentOperationError,
+} from "./skedu";
 import {
   createTransaction,
   generateSaunaBuyOrder,
@@ -72,6 +80,10 @@ import {
   buildRescheduleAuditLine,
   type ReschedulePolicyViolation,
 } from "./rescheduleAudit";
+import {
+  appendSaunaAuditLine,
+  buildSaunaCancellationAuditLine,
+} from "./saunaCancellationAudit";
 import {
   assertNoLiveReservationPaymentAttempt,
   RESERVATION_PAYMENT_TRANSACTION,
@@ -342,6 +354,37 @@ export async function releaseCapacityLock(
   _date: string
 ): Promise<void> {
   // El bloqueo de fila se libera automáticamente después de COMMIT o ROLLBACK.
+}
+
+const SAUNA_SYNC_LOCK_NAME = "sauna:sync:global";
+
+async function acquireSaunaSyncMutationLock(executor: any): Promise<void> {
+  const lock: any = await executor.execute(
+    sql`SELECT GET_LOCK(${SAUNA_SYNC_LOCK_NAME}, 15) AS acquired`
+  );
+  if (Number(lock?.[0]?.[0]?.acquired ?? 0) !== 1) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message:
+        "Sauna se está sincronizando con Skedu. Intenta nuevamente en unos segundos",
+    });
+  }
+}
+
+async function releaseSaunaSyncMutationLock(executor: any): Promise<void> {
+  try {
+    await executor.execute(sql`SELECT RELEASE_LOCK(${SAUNA_SYNC_LOCK_NAME})`);
+  } catch (error) {
+    console.error("[sauna] No se pudo liberar el lock de sincronización", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function validExternalDate(value: unknown): Date | null {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export const saunaRouter = router({
@@ -632,6 +675,302 @@ export const saunaRouter = router({
             await releaseCapacityLock(tx, input.bookingDate);
           }
         });
+      }),
+    updateBooking: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          serviceId: z.number().int().positive().optional(),
+          guests: z.number().int().min(1).max(SAUNA_CAPACITY),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        requirePermission(ctx.user, "sauna.manage_agenda");
+        const db = await database();
+        return db.transaction(async tx => {
+          try {
+            await acquireSaunaSyncMutationLock(tx);
+            await acquireCapacityLock(tx, "booking-update");
+            await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
+            const [booking] = await tx
+              .select()
+              .from(saunaBookings)
+              .where(eq(saunaBookings.id, input.id))
+              .limit(1);
+            if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+            if (!["pending", "confirmed"].includes(booking.status)) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message:
+                  "Solo se pueden editar reservas pendientes o confirmadas",
+              });
+            }
+            if (booking.source === "skedu") {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message:
+                  "Esta reserva se edita en su ficha original de Skedu para mantener ambas agendas sincronizadas",
+              });
+            }
+
+            if (booking.source === "detox") {
+              await assertCapacity(
+                tx,
+                {
+                  date: serializeDate(booking.bookingDate),
+                  startTime: booking.startTime,
+                  endTime: booking.endTime,
+                  capacityUsed: input.guests,
+                },
+                booking.id
+              );
+              await tx
+                .update(saunaBookings)
+                .set({ guests: input.guests, capacityUsed: input.guests })
+                .where(eq(saunaBookings.id, booking.id));
+              return {
+                success: true,
+                amountClp: booking.amountClp,
+                paymentStatus: booking.paymentStatus,
+                overpaymentAmountClp: Math.max(
+                  0,
+                  booking.amountPaidClp - booking.amountClp
+                ),
+              };
+            }
+
+            if (!input.serviceId) {
+              const isPrivate =
+                booking.kind === "private" ||
+                Boolean(booking.isPrivate) ||
+                input.guests >= 4;
+              const partyError = validateSaunaParty(input.guests, isPrivate);
+              if (partyError) {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: partyError,
+                });
+              }
+              const capacityUsed = isPrivate ? SAUNA_CAPACITY : input.guests;
+              await assertCapacity(
+                tx,
+                {
+                  date: serializeDate(booking.bookingDate),
+                  startTime: booking.startTime,
+                  endTime: booking.endTime,
+                  capacityUsed,
+                },
+                booking.id
+              );
+              await tx
+                .update(saunaBookings)
+                .set({
+                  guests: input.guests,
+                  capacityUsed,
+                  isPrivate: isPrivate ? 1 : 0,
+                  kind:
+                    booking.kind === "manual"
+                      ? "manual"
+                      : isPrivate
+                        ? "private"
+                        : booking.kind,
+                })
+                .where(eq(saunaBookings.id, booking.id));
+              return {
+                success: true,
+                amountClp: booking.amountClp,
+                paymentStatus: booking.paymentStatus,
+                overpaymentAmountClp: Math.max(
+                  0,
+                  booking.amountPaidClp - booking.amountClp
+                ),
+              };
+            }
+            const [service] = await tx
+              .select()
+              .from(saunaServices)
+              .where(eq(saunaServices.id, input.serviceId))
+              .limit(1);
+            if (
+              !service ||
+              !service.published ||
+              service.kind === "program" ||
+              service.priceClp <= 0
+            ) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: "La variante de Sauna no está disponible",
+              });
+            }
+
+            const guests =
+              service.kind === "private" ? input.guests : service.partySize;
+            const serviceKind = service.kind as "shared" | "private" | "staff";
+            const isPrivate = service.kind === "private" || guests >= 4;
+            const partyError = validateSaunaParty(guests, isPrivate);
+            if (partyError) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: partyError });
+            }
+            const capacityUsed = isPrivate ? SAUNA_CAPACITY : guests;
+            await assertCapacity(
+              tx,
+              {
+                date: serializeDate(booking.bookingDate),
+                startTime: booking.startTime,
+                endTime: booking.endTime,
+                capacityUsed,
+              },
+              booking.id
+            );
+
+            const [checkout] = await tx
+              .select()
+              .from(saunaCheckoutOrders)
+              .where(eq(saunaCheckoutOrders.bookingId, booking.id))
+              .limit(1);
+            let discountAmountClp = 0;
+            if (checkout?.discountCode && checkout.discountClp > 0) {
+              try {
+                const discount = await calculateWellnessCartDiscount(
+                  tx,
+                  checkout.discountCode,
+                  [
+                    {
+                      service: "sauna",
+                      serviceId: service.id,
+                      originalAmount: service.priceClp,
+                      bookingDate: serializeDate(booking.bookingDate),
+                    },
+                  ]
+                );
+                discountAmountClp = discount.discountTotal;
+              } catch (error) {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message:
+                    error instanceof Error
+                      ? `No se pudo mantener el descuento: ${error.message}`
+                      : "No se pudo mantener el descuento aplicado",
+                });
+              }
+            }
+            const finalAmountClp = Math.max(
+              0,
+              service.priceClp - discountAmountClp
+            );
+
+            const payments = await tx
+              .select()
+              .from(reservationPayments)
+              .where(
+                and(
+                  eq(reservationPayments.module, "sauna"),
+                  eq(reservationPayments.reservationId, booking.id)
+                )
+              );
+            const activePayments = payments.filter(
+              payment => payment.status !== "refunded"
+            );
+            const genericPlaceholders = activePayments.filter(
+              payment =>
+                payment.status === "pending" &&
+                payment.method === "pending_payment"
+            );
+            if (genericPlaceholders.length > 1) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message:
+                  "La reserva tiene más de un pago pendiente genérico. Regulariza los pagos antes de cambiar la variante",
+              });
+            }
+            const placeholder = genericPlaceholders[0] ?? null;
+            const fixedPendingAmountClp = activePayments
+              .filter(
+                payment =>
+                  payment.status === "pending" && payment.id !== placeholder?.id
+              )
+              .reduce((sum, payment) => sum + payment.amountClp, 0);
+            const availableForPending = Math.max(
+              0,
+              finalAmountClp - booking.amountPaidClp
+            );
+            if (fixedPendingAmountClp > availableForPending) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message:
+                  "Los pagos pendientes registrados superan el nuevo saldo. Regularízalos antes de cambiar la variante",
+              });
+            }
+            const placeholderAmountClp = Math.max(
+              0,
+              availableForPending - fixedPendingAmountClp
+            );
+            const shouldCreatePendingPayment =
+              activePayments.length === 0 &&
+              booking.amountPaidClp === 0 &&
+              booking.amountClp === 0 &&
+              finalAmountClp > 0;
+            if (placeholder) {
+              if (placeholderAmountClp > 0) {
+                await tx
+                  .update(reservationPayments)
+                  .set({ amountClp: placeholderAmountClp })
+                  .where(eq(reservationPayments.id, placeholder.id));
+              } else {
+                await tx
+                  .delete(reservationPayments)
+                  .where(eq(reservationPayments.id, placeholder.id));
+              }
+            } else if (shouldCreatePendingPayment) {
+              await tx.insert(reservationPayments).values({
+                module: "sauna",
+                reservationId: booking.id,
+                method: "pending_payment",
+                status: "pending",
+                amountClp: finalAmountClp,
+                createdByUserId: ctx.user.id,
+              });
+            }
+
+            const paymentStatus =
+              finalAmountClp === 0 && discountAmountClp > 0
+                ? ("paid" as const)
+                : calculatedPaymentStatus(
+                    booking.amountPaidClp,
+                    finalAmountClp
+                  );
+            await tx
+              .update(saunaBookings)
+              .set({
+                skeduServiceUuid: service.skeduServiceUuid,
+                serviceName: service.name,
+                kind: isPrivate ? "private" : serviceKind,
+                guests,
+                capacityUsed,
+                isPrivate: isPrivate ? 1 : 0,
+                amountClp: finalAmountClp,
+                paymentStatus,
+                ...(shouldCreatePendingPayment
+                  ? { paymentMethod: "pending_payment" }
+                  : {}),
+              })
+              .where(eq(saunaBookings.id, booking.id));
+            return {
+              success: true,
+              originalAmountClp: service.priceClp,
+              discountAmountClp,
+              amountClp: finalAmountClp,
+              paymentStatus,
+              overpaymentAmountClp: Math.max(
+                0,
+                booking.amountPaidClp - finalAmountClp
+              ),
+            };
+          } finally {
+            await releaseCapacityLock(tx, "booking-update");
+            await releaseSaunaSyncMutationLock(tx);
+          }
+        }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     getPayments: protectedProcedure
       .input(z.object({ bookingId: z.number() }))
@@ -1130,89 +1469,273 @@ export const saunaRouter = router({
       }),
     setStatus: protectedProcedure
       .input(
-        z.object({
-          id: z.number(),
-          status: statusSchema,
-          overridePolicy: z.boolean().default(false),
-        })
+        z
+          .object({
+            id: z.number().int().positive(),
+            status: statusSchema,
+            overridePolicy: z.boolean().default(false),
+            reason: z.string().trim().max(1000).optional(),
+          })
+          .superRefine((value, ctx) => {
+            if (
+              value.status === "cancelled" &&
+              (value.reason?.trim().length ?? 0) < 3
+            ) {
+              ctx.addIssue({
+                code: "custom",
+                path: ["reason"],
+                message: "Indica el motivo de la cancelación",
+              });
+            }
+          })
       )
       .mutation(async ({ ctx, input }) => {
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
-          if (input.status !== "cancelled")
-            await acquireCapacityLock(tx, "status-change");
-          if (input.status === "cancelled")
-            await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
-          const [booking] = await tx
-            .select()
-            .from(saunaBookings)
-            .where(eq(saunaBookings.id, input.id))
-            .limit(1);
-          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-          if (booking.source === "skedu")
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message:
-                "Las reservas originadas en Skedu deben modificarse en Skedu para evitar que la sincronización revierta el cambio",
-            });
-          if (
-            input.status === "cancelled" &&
-            booking.paymentStatus === "paid" &&
-            booking.paymentMethod === "webpay_plus"
-          ) {
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message:
-                "Esta reserva fue pagada por Webpay. Procesa primero el reembolso en Transbank antes de liberarla en el CMS",
-            });
-          }
-          if (input.status === "cancelled" && !input.overridePolicy) {
-            const config = await settings(tx);
-            const startsAt = chileLocalDateTimeToUtc(
-              serializeDate(booking.bookingDate),
-              booking.startTime
-            );
+          await acquireSaunaSyncMutationLock(tx);
+          try {
+            if (input.status !== "cancelled")
+              await acquireCapacityLock(tx, "status-change");
+            if (input.status === "cancelled")
+              await assertNoLiveReservationPaymentAttempt(
+                tx,
+                "sauna",
+                input.id
+              );
+            const [booking] = await tx
+              .select()
+              .from(saunaBookings)
+              .where(eq(saunaBookings.id, input.id))
+              .limit(1);
+            if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
             if (
-              startsAt.getTime() - Date.now() <
-              config.cancellationNoticeHours * 60 * 60_000
+              input.status === "cancelled" &&
+              !["pending", "confirmed"].includes(booking.status)
             ) {
               throw new TRPCError({
                 code: "BAD_REQUEST",
-                message: `La política exige cancelar con al menos ${config.cancellationNoticeHours} horas de anticipación`,
+                message: "Esta reserva ya no admite cancelación",
               });
             }
-          }
-          if (input.status !== "cancelled") {
-            await assertCapacity(
-              tx,
-              {
-                date: serializeDate(booking.bookingDate),
-                startTime: booking.startTime,
-                endTime: booking.endTime,
-                capacityUsed: booking.capacityUsed,
-              },
-              booking.id
+            if (booking.source === "skedu" && input.status !== "cancelled")
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message:
+                  "Los demás cambios de estado de esta reserva se administran en Skedu",
+              });
+            if (
+              booking.source === "skedu" &&
+              input.status === "cancelled" &&
+              !booking.skeduAppointmentUuid
+            ) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message:
+                  "La reserva no tiene un identificador de Skedu válido para cancelarla",
+              });
+            }
+            if (input.status === "cancelled" && !input.overridePolicy) {
+              const config = await settings(tx);
+              const startsAt = chileLocalDateTimeToUtc(
+                serializeDate(booking.bookingDate),
+                booking.startTime
+              );
+              if (
+                startsAt.getTime() - Date.now() <
+                config.cancellationNoticeHours * 60 * 60_000
+              ) {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: `La política exige cancelar con al menos ${config.cancellationNoticeHours} horas de anticipación`,
+                });
+              }
+            }
+            if (
+              input.status === "cancelled" &&
+              input.overridePolicy &&
+              !validOverrideReason(input.reason ?? "")
+            ) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message:
+                  "La excepción requiere un motivo de al menos 10 caracteres",
+              });
+            }
+            if (input.status === "cancelled") {
+              const [payments, [checkout]] = await Promise.all([
+                tx
+                  .select()
+                  .from(reservationPayments)
+                  .where(
+                    and(
+                      eq(reservationPayments.module, "sauna"),
+                      eq(reservationPayments.reservationId, booking.id)
+                    )
+                  ),
+                tx
+                  .select()
+                  .from(saunaCheckoutOrders)
+                  .where(eq(saunaCheckoutOrders.bookingId, booking.id))
+                  .limit(1),
+              ]);
+              const hasConfirmedWebpay =
+                (booking.amountPaidClp > 0 &&
+                  booking.paymentStatus !== "refunded" &&
+                  ["webpay", "webpay_plus", "transbank"].includes(
+                    booking.paymentMethod ?? ""
+                  )) ||
+                payments.some(
+                  payment =>
+                    payment.status === "paid" &&
+                    ["webpay", "webpay_plus", "transbank"].includes(
+                      payment.method
+                    )
+                ) ||
+                (checkout?.status === "paid" &&
+                  Boolean(checkout.authorizationCode));
+              if (hasConfirmedWebpay) {
+                throw new TRPCError({
+                  code: "PRECONDITION_FAILED",
+                  message:
+                    "Esta reserva tiene un pago Webpay confirmado. Procesa primero el reembolso en Transbank antes de liberarla en el CMS",
+                });
+              }
+              if (booking.source === "skedu") {
+                if (!booking.skeduGroupUuid) {
+                  throw new TRPCError({
+                    code: "PRECONDITION_FAILED",
+                    message:
+                      "La reserva no tiene un grupo de Skedu válido para verificar sus pagos",
+                  });
+                }
+                try {
+                  const skeduPayments = await getSkeduAppointmentPayments(
+                    booking.skeduGroupUuid
+                  );
+                  if (hasConfirmedSkeduWebpayPayment(skeduPayments)) {
+                    throw new TRPCError({
+                      code: "PRECONDITION_FAILED",
+                      message:
+                        "Esta reserva tiene un pago Webpay confirmado en Skedu. Procesa primero el reembolso antes de cancelarla",
+                    });
+                  }
+                } catch (error) {
+                  if (
+                    error instanceof TRPCError ||
+                    !(error instanceof SkeduAppointmentOperationError)
+                  ) {
+                    throw error;
+                  }
+                  throw new TRPCError({
+                    code: "PRECONDITION_FAILED",
+                    message: `${error.message}. La reserva no se canceló`,
+                  });
+                }
+              }
+            }
+            if (input.status !== "cancelled") {
+              await assertCapacity(
+                tx,
+                {
+                  date: serializeDate(booking.bookingDate),
+                  startTime: booking.startTime,
+                  endTime: booking.endTime,
+                  capacityUsed: booking.capacityUsed,
+                },
+                booking.id
+              );
+            }
+            const cancellationAudit =
+              input.status === "cancelled"
+                ? buildSaunaCancellationAuditLine({
+                    reason: input.reason!,
+                    actor: ctx.user,
+                    policyOverride: input.overridePolicy,
+                    source: booking.source === "skedu" ? "Skedu" : "CMS",
+                  })
+                : null;
+            let externalCancellation: Awaited<
+              ReturnType<typeof cancelSkeduAppointment>
+            > | null = null;
+            if (
+              input.status === "cancelled" &&
+              booking.source === "skedu" &&
+              booking.skeduAppointmentUuid
+            ) {
+              try {
+                externalCancellation = await cancelSkeduAppointment(
+                  booking.skeduAppointmentUuid
+                );
+              } catch (error) {
+                if (error instanceof SkeduAppointmentOperationError) {
+                  throw new TRPCError({
+                    code: "PRECONDITION_FAILED",
+                    message: `${error.message}. La reserva no se marcó como cancelada en el CMS`,
+                  });
+                }
+                throw error;
+              }
+            }
+            const externalCancellationAt = validExternalDate(
+              externalCancellation?.appointment?.RealDeletedAt ??
+                externalCancellation?.appointment?.DeletedAt
             );
+            const externalUpdatedAt = validExternalDate(
+              externalCancellation?.appointment?.UpdatedAt
+            );
+            await tx
+              .update(saunaBookings)
+              .set({
+                status: input.status,
+                isConfirmed:
+                  input.status === "confirmed" || input.status === "completed"
+                    ? 1
+                    : 0,
+                cancelledAt:
+                  input.status === "cancelled"
+                    ? (externalCancellationAt ?? new Date())
+                    : null,
+                ...(externalUpdatedAt ? { externalUpdatedAt } : {}),
+                ...(externalCancellation ? { lastSyncedAt: new Date() } : {}),
+                ...(cancellationAudit
+                  ? {
+                      notes: appendSaunaAuditLine(
+                        booking.notes,
+                        cancellationAudit
+                      ),
+                    }
+                  : {}),
+              })
+              .where(eq(saunaBookings.id, input.id));
+            if (input.status === "cancelled") {
+              if (booking.source === "detox") {
+                await tx
+                  .update(saunaProgramQueue)
+                  .set({ status: "pending", saunaBookingId: null })
+                  .where(eq(saunaProgramQueue.saunaBookingId, booking.id));
+              }
+              await tx
+                .update(saunaNotifications)
+                .set({ status: "skipped", error: "Reserva cancelada" })
+                .where(
+                  and(
+                    eq(saunaNotifications.bookingId, booking.id),
+                    inArray(saunaNotifications.status, ["pending", "failed"])
+                  )
+                );
+            }
+            return { success: true };
+          } finally {
+            await releaseCapacityLock(tx, "status-change");
+            await releaseSaunaSyncMutationLock(tx);
           }
-          await tx
-            .update(saunaBookings)
-            .set({
-              status: input.status,
-              isConfirmed:
-                input.status === "confirmed" || input.status === "completed"
-                  ? 1
-                  : 0,
-              cancelledAt: input.status === "cancelled" ? new Date() : null,
-            })
-            .where(eq(saunaBookings.id, input.id));
-          return { success: true };
         }, RESERVATION_PAYMENT_TRANSACTION);
       }),
     reschedule: protectedProcedure
       .input(
         z.object({
-          id: z.number(),
+          id: z.number().int().positive(),
           bookingDate: dateSchema,
           startTime: timeSchema,
           overridePolicy: z.boolean().default(false),
@@ -1223,120 +1746,181 @@ export const saunaRouter = router({
         requirePermission(ctx.user, "sauna.manage_agenda");
         const db = await database();
         return db.transaction(async tx => {
-          await acquireCapacityLock(tx, input.bookingDate);
-          await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
-          const [booking] = await tx
-            .select()
-            .from(saunaBookings)
-            .where(eq(saunaBookings.id, input.id))
-            .limit(1);
-          if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-          if (booking.source === "skedu")
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message:
-                "Las reservas de Skedu deben reagendarse en Skedu; el CMS reflejará el cambio en la próxima sincronización",
-            });
-          const config = await settings(tx);
-          const { exceedsMaximum, violatesNotice, canOverride } =
-            evaluateReschedulePolicy({
-              rescheduleCount: booking.rescheduleCount,
-              maxReschedules: config.maxReschedules,
-              hoursUntilStart:
-                (chileLocalDateTimeToUtc(
-                  serializeDate(booking.bookingDate),
-                  booking.startTime
-                ).getTime() -
-                  Date.now()) /
-                (60 * 60_000),
-              noticeHours: config.rescheduleNoticeHours,
-              overrideRequested: input.overridePolicy,
-            });
-          if (input.overridePolicy && !validOverrideReason(input.reason)) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message:
-                "La excepción requiere un motivo de al menos 10 caracteres",
-            });
-          }
-          if (!canOverride && exceedsMaximum) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `La reserva ya alcanzó el máximo de ${config.maxReschedules} reagendamientos`,
-            });
-          }
-          if (!canOverride && violatesNotice) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `La política exige reagendar con al menos ${config.rescheduleNoticeHours} horas de anticipación`,
-            });
-          }
+          await acquireSaunaSyncMutationLock(tx);
           try {
-            const availability = await availabilityForDay(
-              tx,
-              input.bookingDate
-            );
-            const slot = availability.slots.find(
-              item => item.startTime === input.startTime
-            );
-            if (!slot) {
+            await acquireCapacityLock(tx, input.bookingDate);
+            await assertNoLiveReservationPaymentAttempt(tx, "sauna", input.id);
+            const [booking] = await tx
+              .select()
+              .from(saunaBookings)
+              .where(eq(saunaBookings.id, input.id))
+              .limit(1);
+            if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+            if (!["pending", "confirmed"].includes(booking.status)) {
               throw new TRPCError({
-                code: "CONFLICT",
+                code: "BAD_REQUEST",
+                message: "Esta reserva ya no admite reagendamiento",
+              });
+            }
+            if (
+              serializeDate(booking.bookingDate) === input.bookingDate &&
+              booking.startTime === input.startTime
+            ) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Selecciona una fecha u hora distinta",
+              });
+            }
+            if (booking.source === "skedu" && !booking.skeduAppointmentUuid) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
                 message:
-                  "El horario seleccionado no está habilitado para Sauna",
+                  "La reserva no tiene un identificador de Skedu válido para reagendarla",
               });
             }
-            const endTime = slot.endTime;
-            await assertCapacity(
-              tx,
-              {
-                date: input.bookingDate,
-                startTime: input.startTime,
-                endTime,
-                capacityUsed: booking.capacityUsed,
-              },
-              booking.id
-            );
-            const policyViolations: ReschedulePolicyViolation[] = [];
-            if (violatesNotice) {
-              policyViolations.push({
-                code: "notice",
-                noticeHours: config.rescheduleNoticeHours,
-              });
-            }
-            if (exceedsMaximum) {
-              policyViolations.push({
-                code: "maximum_reschedules",
+            const config = await settings(tx);
+            const { exceedsMaximum, violatesNotice, canOverride } =
+              evaluateReschedulePolicy({
+                rescheduleCount: booking.rescheduleCount,
                 maxReschedules: config.maxReschedules,
+                hoursUntilStart:
+                  (chileLocalDateTimeToUtc(
+                    serializeDate(booking.bookingDate),
+                    booking.startTime
+                  ).getTime() -
+                    Date.now()) /
+                  (60 * 60_000),
+                noticeHours: config.rescheduleNoticeHours,
+                overrideRequested: input.overridePolicy,
+              });
+            if (input.overridePolicy && !validOverrideReason(input.reason)) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message:
+                  "La excepción requiere un motivo de al menos 10 caracteres",
               });
             }
-            const auditLine = buildRescheduleAuditLine({
-              from: {
-                date: serializeDate(booking.bookingDate),
-                time: booking.startTime,
-              },
-              to: {
-                date: input.bookingDate,
-                time: input.startTime,
-              },
-              reason: input.reason,
-              actor: ctx.user,
-              policyOverride: canOverride,
-              policyViolations,
-            });
-            await tx
-              .update(saunaBookings)
-              .set({
-                bookingDate: input.bookingDate,
-                startTime: input.startTime,
-                endTime,
-                rescheduleCount: booking.rescheduleCount + 1,
-                notes: appendRescheduleAuditLine(booking.notes, auditLine),
-              })
-              .where(eq(saunaBookings.id, booking.id));
-            return { success: true };
+            if (!canOverride && exceedsMaximum) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `La reserva ya alcanzó el máximo de ${config.maxReschedules} reagendamientos`,
+              });
+            }
+            if (!canOverride && violatesNotice) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `La política exige reagendar con al menos ${config.rescheduleNoticeHours} horas de anticipación`,
+              });
+            }
+            try {
+              const availability = await availabilityForDay(
+                tx,
+                input.bookingDate
+              );
+              const slot = availability.slots.find(
+                item => item.startTime === input.startTime
+              );
+              if (!slot) {
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message:
+                    "El horario seleccionado no está habilitado para Sauna",
+                });
+              }
+              const endTime = slot.endTime;
+              await assertCapacity(
+                tx,
+                {
+                  date: input.bookingDate,
+                  startTime: input.startTime,
+                  endTime,
+                  capacityUsed: booking.capacityUsed,
+                },
+                booking.id
+              );
+              const policyViolations: ReschedulePolicyViolation[] = [];
+              if (violatesNotice) {
+                policyViolations.push({
+                  code: "notice",
+                  noticeHours: config.rescheduleNoticeHours,
+                });
+              }
+              if (exceedsMaximum) {
+                policyViolations.push({
+                  code: "maximum_reschedules",
+                  maxReschedules: config.maxReschedules,
+                });
+              }
+              const auditLine = buildRescheduleAuditLine({
+                from: {
+                  date: serializeDate(booking.bookingDate),
+                  time: booking.startTime,
+                },
+                to: {
+                  date: input.bookingDate,
+                  time: input.startTime,
+                },
+                reason: input.reason,
+                actor: ctx.user,
+                policyOverride: canOverride,
+                policyViolations,
+              });
+              let externalReschedule: Awaited<
+                ReturnType<typeof rescheduleSkeduAppointment>
+              > | null = null;
+              if (booking.source === "skedu" && booking.skeduAppointmentUuid) {
+                try {
+                  externalReschedule = await rescheduleSkeduAppointment(
+                    booking.skeduAppointmentUuid,
+                    {
+                      startsAt: chileLocalDateTimeToUtc(
+                        input.bookingDate,
+                        input.startTime
+                      ).toISOString(),
+                      resourceUuid: SAUNA_SKEDU_RESOURCE_UUID,
+                    }
+                  );
+                } catch (error) {
+                  if (error instanceof SkeduAppointmentOperationError) {
+                    throw new TRPCError({
+                      code: "PRECONDITION_FAILED",
+                      message: `${error.message}. La reserva no se reagendó en el CMS`,
+                    });
+                  }
+                  throw error;
+                }
+              }
+              const externalUpdatedAt = validExternalDate(
+                externalReschedule?.appointment?.UpdatedAt
+              );
+              const externalRescheduleCount = Number(
+                externalReschedule?.appointment?.RescheduleCount
+              );
+              await tx
+                .update(saunaBookings)
+                .set({
+                  bookingDate: input.bookingDate,
+                  startTime: input.startTime,
+                  endTime,
+                  rescheduleCount:
+                    Number.isInteger(externalRescheduleCount) &&
+                    externalRescheduleCount >= 0
+                      ? Math.max(
+                          booking.rescheduleCount + 1,
+                          externalRescheduleCount
+                        )
+                      : booking.rescheduleCount + 1,
+                  notes: appendRescheduleAuditLine(booking.notes, auditLine),
+                  ...(externalUpdatedAt ? { externalUpdatedAt } : {}),
+                  ...(externalReschedule ? { lastSyncedAt: new Date() } : {}),
+                })
+                .where(eq(saunaBookings.id, booking.id));
+              return { success: true };
+            } finally {
+              await releaseCapacityLock(tx, input.bookingDate);
+            }
           } finally {
-            await releaseCapacityLock(tx, input.bookingDate);
+            await releaseSaunaSyncMutationLock(tx);
           }
         }, RESERVATION_PAYMENT_TRANSACTION);
       }),

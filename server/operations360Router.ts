@@ -34,6 +34,7 @@ import {
   saunaBookings,
   saunaCheckoutOrders,
   saunaProgramQueue,
+  saunaServices,
 } from "../drizzle/schema";
 import {
   hasCmsPermission,
@@ -66,6 +67,7 @@ import {
   redactFinancialReservationNotes,
 } from "./reservationFinancialPrivacy";
 import { parseRescheduleAuditLines } from "./rescheduleAudit";
+import { parseSaunaCancellationAuditLines } from "./saunaCancellationAudit";
 import { syncMassageSale } from "./massageSales";
 import {
   assertRegularClassOperationsResourceAccess,
@@ -448,6 +450,25 @@ function noteRescheduleActivities(notes: string | null | undefined, prefix: stri
     ]
       .filter(Boolean)
       .join(" · "),
+    at: entry.timestamp,
+  }));
+}
+
+function noteSaunaCancellationActivities(
+  notes: string | null | undefined,
+  prefix: string
+) {
+  return parseSaunaCancellationAuditLines(notes).map((entry, index) => ({
+    id: `cancelled:${prefix}:${entry.timestamp}:${index}`,
+    type: "activity" as const,
+    label: entry.policyOverride
+      ? "Cancelación con excepción"
+      : "Reserva cancelada",
+    detail: [
+      `Motivo: ${entry.reason}`,
+      `Responsable: ${entry.actor}`,
+      `Origen: ${entry.source}`,
+    ].join(" · "),
     at: entry.timestamp,
   }));
 }
@@ -2605,46 +2626,79 @@ export const operations360Router = router({
           ctx.user,
           "sauna.manage_agenda"
         );
-        const canViewPayments = canReadReservationFinancials(
-          ctx.user,
-          "sauna"
-        );
-        const [[booking], paymentRows, [checkout]] = await Promise.all([
-          db
-            .select()
-            .from(saunaBookings)
-            .where(eq(saunaBookings.id, input.entityId))
-            .limit(1),
-          canViewPayments
-            ? db
-                .select()
-                .from(reservationPayments)
-                .where(
-                  and(
-                    eq(reservationPayments.module, "sauna"),
-                    eq(reservationPayments.reservationId, input.entityId)
+        const canViewPayments = canReadReservationFinancials(ctx.user, "sauna");
+        const [[booking], paymentRows, [checkout], serviceRows] =
+          await Promise.all([
+            db
+              .select()
+              .from(saunaBookings)
+              .where(eq(saunaBookings.id, input.entityId))
+              .limit(1),
+            canViewPayments
+              ? db
+                  .select()
+                  .from(reservationPayments)
+                  .where(
+                    and(
+                      eq(reservationPayments.module, "sauna"),
+                      eq(reservationPayments.reservationId, input.entityId)
+                    )
                   )
-                )
-            : Promise.resolve([]),
-          canViewPayments
-            ? db
-                .select()
-                .from(saunaCheckoutOrders)
-                .where(eq(saunaCheckoutOrders.bookingId, input.entityId))
-                .limit(1)
-            : Promise.resolve([]),
-        ]);
+              : Promise.resolve([]),
+            canViewPayments
+              ? db
+                  .select()
+                  .from(saunaCheckoutOrders)
+                  .where(eq(saunaCheckoutOrders.bookingId, input.entityId))
+                  .limit(1)
+              : Promise.resolve([]),
+            canManagePayments
+              ? db.select().from(saunaServices)
+              : Promise.resolve([]),
+          ]);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        const matchingService = serviceRows.find(
+          service =>
+            (booking.skeduServiceUuid &&
+              service.skeduServiceUuid === booking.skeduServiceUuid) ||
+            service.name === booking.serviceName
+        );
+        const cancellationActivities = noteSaunaCancellationActivities(
+          booking.notes,
+          `sauna:${booking.id}`
+        );
+        const editableService =
+          matchingService?.published &&
+          matchingService.kind !== "program" &&
+          matchingService.priceClp > 0
+            ? matchingService
+            : null;
         return {
           service: "sauna" as const,
           canManagePayments,
-          canManageReservation: booking.source !== "skedu" && canManagePayments,
+          canManageReservation: canManagePayments,
           canRedeemGiftCards: canReplaceReservation360GiftCard(
             ctx.user,
             "sauna"
           ),
           paymentRestricted: !canViewPayments,
           title: booking.serviceName,
+          editable: canManagePayments
+            ? {
+                serviceId: editableService?.id ?? null,
+                guests: booking.guests,
+                kind: booking.kind,
+                source: booking.source,
+                externalManagementUrl:
+                  booking.source === "skedu"
+                    ? `https://panel.skedu.com/c5e0a893-7eff-42b8-815a-296b1a9c345d/calendar${
+                        booking.skeduAppointmentUuid
+                          ? `?appointmentModal=${encodeURIComponent(booking.skeduAppointmentUuid)}`
+                          : ""
+                      }`
+                    : null,
+              }
+            : undefined,
           client: {
             name: booking.clientName ?? "Sin cliente registrado",
             email: booking.clientEmail,
@@ -2690,7 +2744,8 @@ export const operations360Router = router({
               at: booking.createdAt,
             },
             ...noteRescheduleActivities(booking.notes, `sauna:${booking.id}`),
-            ...(booking.cancelledAt
+            ...cancellationActivities,
+            ...(booking.cancelledAt && cancellationActivities.length === 0
               ? [
                   {
                     id: `cancelled:${booking.id}`,

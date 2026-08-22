@@ -270,6 +270,10 @@ async function syncSaunaFromSkeduUnlocked(rangeFrom: string, rangeTo: string) {
           ? new Date(appointment.RealDeletedAt ?? appointment.DeletedAt)
           : null,
       };
+      // `notes` también contiene la auditoría operativa agregada por el CMS.
+      // Se importa el mensaje de Skedu al crear, pero no se pisa en cada sync.
+      const { notes: _appointmentMessage, ...syncedValues } = values;
+      void _appointmentMessage;
       await db
         .insert(saunaBookings)
         .values({
@@ -279,7 +283,7 @@ async function syncSaunaFromSkeduUnlocked(rangeFrom: string, rangeTo: string) {
         })
         .onDuplicateKeyUpdate({
           set: {
-            ...values,
+            ...syncedValues,
             amountClp: sql`CASE WHEN ${externalAmountClp} > 0 THEN ${externalAmountClp} ELSE ${saunaBookings.amountClp} END`,
           },
         });

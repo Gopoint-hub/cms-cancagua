@@ -1206,7 +1206,7 @@ function BookingCard({
   canManage: boolean;
   onManage: () => void;
   onStatus: (
-    status: "pending" | "confirmed" | "completed" | "cancelled" | "no_show"
+    status: "pending" | "confirmed" | "completed" | "no_show"
   ) => void;
   onReschedule: () => void;
 }) {
@@ -1269,8 +1269,9 @@ function BookingCard({
       </Button>
       {booking.source === "skedu" ? (
         <p className="mt-3 text-xs text-muted-foreground">
-          Cambios operacionales: gestionar en Skedu; el CMS los reflejará
-          automáticamente.
+          Editar abre la ficha original de Skedu. Desde Gestionar reserva
+          también puedes reagendar o cancelar y ambos sistemas quedarán
+          sincronizados.
         </p>
       ) : (
         canManage &&
@@ -1292,14 +1293,6 @@ function BookingCard({
               onClick={() => onStatus("completed")}
             >
               Completada
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-red-600"
-              onClick={() => onStatus("cancelled")}
-            >
-              Cancelar
             </Button>
           </div>
         )

@@ -1608,24 +1608,40 @@ function ReservationActions({
   const [duration, setDuration] = useState(
     String(detail.editable?.duration ?? 50)
   );
+  const [saunaServiceId, setSaunaServiceId] = useState(
+    detail.editable?.serviceId ? String(detail.editable.serviceId) : "current"
+  );
+  const [saunaGuests, setSaunaGuests] = useState(
+    String(detail.editable?.guests ?? 1)
+  );
   const [bookingDate, setBookingDate] = useState(detail.schedule.date);
   const [startTime, setStartTime] = useState(
     detail.schedule.startTime.slice(0, 5)
   );
   const [reason, setReason] = useState("");
   const [overridePolicy, setOverridePolicy] = useState(false);
+  const [cancelOverride, setCancelOverride] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const techniques = trpc.masajes.tecnicas.getAll.useQuery(undefined, {
     enabled: editOpen && event.kind === "massage",
   });
+  const saunaServices = trpc.sauna.services.list.useQuery(undefined, {
+    enabled:
+      editOpen &&
+      event.kind === "sauna" &&
+      detail.editable?.source !== "skedu" &&
+      detail.editable?.source !== "detox",
+  });
   const updateGuests = trpc.biopools.bookings.updateGuests.useMutation();
   const updateMassage = trpc.masajes.agenda.updateService.useMutation();
+  const updateSauna = trpc.sauna.agenda.updateBooking.useMutation();
   const rescheduleBiopool = trpc.biopools.bookings.reschedule.useMutation();
   const rescheduleMassage = trpc.masajes.agenda.reschedule.useMutation();
   const rescheduleSauna = trpc.sauna.agenda.reschedule.useMutation();
   const cancelBiopool = trpc.biopools.bookings.updateStatus.useMutation();
   const cancelMassage = trpc.masajes.agenda.updateStatus.useMutation();
+  const cancelSauna = trpc.sauna.agenda.setStatus.useMutation();
 
   const execute = async (
     action: () => Promise<any>,
@@ -1662,6 +1678,24 @@ function ReservationActions({
   const biopoolPrice =
     Number(adults || 0) * Number(detail.editable?.adultPriceClp ?? 0) +
     Number(children || 0) * Number(detail.editable?.childPriceClp ?? 0);
+  const saunaSource = String(detail.editable?.source ?? "cms");
+  const publishedSaunaServices = (saunaServices.data ?? []).filter(
+    (service: any) =>
+      Boolean(service.published) &&
+      service.kind !== "program" &&
+      Number(service.priceClp) > 0
+  );
+  const selectedSaunaService: any = publishedSaunaServices.find(
+    (service: any) => String(service.id) === saunaServiceId
+  );
+  const saunaServiceChanged =
+    selectedSaunaService &&
+    String(selectedSaunaService.id) !==
+      String(detail.editable?.serviceId ?? "");
+  const saunaGuestCount =
+    selectedSaunaService && selectedSaunaService.kind !== "private"
+      ? Number(selectedSaunaService.partySize)
+      : Number(saunaGuests);
 
   const submitReschedule = () => {
     if (event.kind === "biopool") {
@@ -1698,6 +1732,14 @@ function ReservationActions({
         reason: reason.trim(),
       });
     }
+    if (event.kind === "sauna") {
+      return cancelSauna.mutateAsync({
+        id: event.entityId,
+        status: "cancelled",
+        reason: reason.trim(),
+        overridePolicy: cancelOverride,
+      });
+    }
     return cancelMassage.mutateAsync({
       id: event.entityId,
       status: "cancelled",
@@ -1709,7 +1751,25 @@ function ReservationActions({
   return (
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-        {(event.kind === "biopool" || event.kind === "massage") && (
+        {event.kind === "sauna" && saunaSource === "skedu" ? (
+          detail.editable?.externalManagementUrl ? (
+            <Button type="button" variant="outline" asChild>
+              <a
+                href={detail.editable.externalManagementUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Pencil className="mr-2 h-4 w-4" />
+                Editar reserva
+              </a>
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" disabled>
+              <Pencil className="mr-2 h-4 w-4" />
+              Editar reserva
+            </Button>
+          )
+        ) : (
           <Button
             type="button"
             variant="outline"
@@ -1718,6 +1778,12 @@ function ReservationActions({
               setChildren(String(detail.editable?.childQuantity ?? 0));
               setTechniqueId(String(detail.editable?.techniqueId ?? ""));
               setDuration(String(detail.editable?.duration ?? 50));
+              setSaunaServiceId(
+                detail.editable?.serviceId
+                  ? String(detail.editable.serviceId)
+                  : "current"
+              );
+              setSaunaGuests(String(detail.editable?.guests ?? 1));
               setEditOpen(true);
             }}
           >
@@ -1739,19 +1805,18 @@ function ReservationActions({
           <CalendarClock className="mr-2 h-4 w-4" />
           Reagendar
         </Button>
-        {event.kind !== "sauna" && (
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={() => {
-              setReason("");
-              setCancelOpen(true);
-            }}
-          >
-            <Ban className="mr-2 h-4 w-4" />
-            Cancelar reserva
-          </Button>
-        )}
+        <Button
+          type="button"
+          variant="destructive"
+          onClick={() => {
+            setReason("");
+            setCancelOverride(false);
+            setCancelOpen(true);
+          }}
+        >
+          <Ban className="mr-2 h-4 w-4" />
+          Cancelar reserva
+        </Button>
       </div>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -1760,11 +1825,16 @@ function ReservationActions({
             <DialogTitle>
               {event.kind === "biopool"
                 ? "Editar cantidad de personas"
-                : "Editar masaje"}
+                : event.kind === "massage"
+                  ? "Editar masaje"
+                  : "Editar reserva de Sauna"}
             </DialogTitle>
             <DialogDescription>
-              El valor y el saldo se recalcularán sin modificar los pagos ya
-              registrados.
+              {event.kind === "sauna"
+                ? saunaSource === "detox"
+                  ? "Se actualizará la cantidad de personas sin modificar el programa ni sus pagos."
+                  : "Si cambias la variante, el valor y el saldo se recalcularán sin modificar los pagos ya registrados."
+                : "El valor y el saldo se recalcularán sin modificar los pagos ya registrados."}
             </DialogDescription>
           </DialogHeader>
           {event.kind === "biopool" ? (
@@ -1813,7 +1883,7 @@ function ReservationActions({
                 Guardar cambios
               </Button>
             </div>
-          ) : (
+          ) : event.kind === "massage" ? (
             <div className="space-y-4">
               <div>
                 <Label>Tipo de masaje</Label>
@@ -1873,6 +1943,97 @@ function ReservationActions({
                 Guardar cambios
               </Button>
             </div>
+          ) : (
+            <div className="space-y-4">
+              {saunaSource !== "detox" && (
+                <div>
+                  <Label>Servicio / variante</Label>
+                  <Select
+                    value={saunaServiceId}
+                    onValueChange={value => {
+                      setSaunaServiceId(value);
+                      const next = publishedSaunaServices.find(
+                        (service: any) => String(service.id) === value
+                      );
+                      if (next && next.kind !== "private") {
+                        setSaunaGuests(String(next.partySize));
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona una variante" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {!detail.editable?.serviceId && (
+                        <SelectItem value="current">
+                          Mantener {detail.title} y su valor actual
+                        </SelectItem>
+                      )}
+                      {publishedSaunaServices.map((service: any) => (
+                        <SelectItem key={service.id} value={String(service.id)}>
+                          {service.name} · {money(Number(service.priceClp))}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div>
+                <Label>Personas</Label>
+                {selectedSaunaService &&
+                selectedSaunaService.kind !== "private" ? (
+                  <div className="mt-1 rounded-md border bg-muted px-3 py-2 text-sm">
+                    {saunaGuestCount} persona
+                    {saunaGuestCount === 1 ? "" : "s"} según la variante
+                  </div>
+                ) : (
+                  <Input
+                    type="number"
+                    min={1}
+                    max={6}
+                    value={saunaGuests}
+                    onChange={event => setSaunaGuests(event.target.value)}
+                  />
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-muted p-3 text-sm">
+                <span>
+                  {saunaServiceChanged ? "Nuevo precio de lista" : "Precio"}
+                </span>
+                <strong>
+                  {saunaServiceChanged
+                    ? money(Number(selectedSaunaService.priceClp))
+                    : "Se conserva sin cambios"}
+                </strong>
+              </div>
+              <Button
+                disabled={
+                  busy ||
+                  !Number.isInteger(saunaGuestCount) ||
+                  saunaGuestCount < 1 ||
+                  saunaGuestCount > 6 ||
+                  (saunaSource !== "detox" &&
+                    Boolean(detail.editable?.serviceId) &&
+                    !selectedSaunaService)
+                }
+                onClick={() =>
+                  execute(
+                    () =>
+                      updateSauna.mutateAsync({
+                        id: event.entityId,
+                        guests: saunaGuestCount,
+                        ...(saunaServiceChanged
+                          ? { serviceId: Number(selectedSaunaService.id) }
+                          : {}),
+                      }),
+                    "Reserva de Sauna actualizada",
+                    () => setEditOpen(false)
+                  )
+                }
+              >
+                Guardar cambios
+              </Button>
+            </div>
           )}
         </DialogContent>
       </Dialog>
@@ -1888,7 +2049,9 @@ function ReservationActions({
           <DialogHeader>
             <DialogTitle>Reagendar reserva</DialogTitle>
             <DialogDescription>
-              Se comprobará nuevamente la disponibilidad antes de guardar.
+              {event.kind === "sauna" && saunaSource === "skedu"
+                ? "Se comprobará la disponibilidad y el cambio se actualizará y verificará también en Skedu."
+                : "Se comprobará nuevamente la disponibilidad antes de guardar."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1948,13 +2111,22 @@ function ReservationActions({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+      <Dialog
+        open={cancelOpen}
+        onOpenChange={open => {
+          setCancelOpen(open);
+          if (!open) setCancelOverride(false);
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Cancelar reserva</DialogTitle>
             <DialogDescription>
-              La reserva desaparecerá del Calendario 360. Los pagos electrónicos
-              conservarán sus reglas de reembolso.
+              {event.kind === "sauna" && saunaSource === "skedu"
+                ? "La reserva se cancelará y verificará también en Skedu. Ningún pago se reembolsa automáticamente."
+                : event.kind === "sauna" && saunaSource === "detox"
+                  ? "Se cancelará esta sesión de Sauna y el beneficio del programa volverá a pendientes para poder agendarlo otra vez. Ningún pago se reembolsa automáticamente."
+                  : "La reserva desaparecerá del Calendario 360. Ningún pago se reembolsa automáticamente."}
             </DialogDescription>
           </DialogHeader>
           <div>
@@ -1965,9 +2137,18 @@ function ReservationActions({
               placeholder="Indica por qué se cancela"
             />
           </div>
+          {event.kind === "sauna" && (
+            <ReschedulePolicyOverride
+              checked={cancelOverride}
+              onCheckedChange={setCancelOverride}
+              title="Política de cancelación"
+              policySummary="Sauna exige el plazo mínimo de cancelación configurado para la reserva."
+              exceptionDescription="Permite omitir únicamente el plazo mínimo. La cancelación no reembolsa pagos ni omite las validaciones financieras."
+            />
+          )}
           <Button
             variant="destructive"
-            disabled={busy || reason.trim().length < 3}
+            disabled={busy || reason.trim().length < (cancelOverride ? 10 : 3)}
             onClick={() =>
               execute(submitCancellation, "Reserva cancelada", () => {
                 setCancelOpen(false);

@@ -65,4 +65,32 @@ describe("contrato compartido de operaciones de reservas 360", () => {
       expect(source(file)).toContain("Reservation360DetailDialog");
     }
   });
+
+  it("mantiene las tres acciones operativas para Sauna en el diálogo común", () => {
+    const dialog = source(
+      "client/src/components/cms/Reservation360DetailDialog.tsx"
+    );
+    const agenda = source("client/src/pages/cms/sauna/Agenda.tsx");
+    const saunaRouter = source("server/saunaRouter.ts");
+    const saunaSync = source("server/saunaSync.ts");
+    const operationsRouter = source("server/operations360Router.ts");
+
+    expect(dialog).toContain("trpc.sauna.agenda.updateBooking.useMutation()");
+    expect(dialog).toContain("trpc.sauna.agenda.reschedule.useMutation()");
+    expect(dialog).toContain("trpc.sauna.agenda.setStatus.useMutation()");
+    expect(dialog).toContain('if (event.kind === "sauna")');
+    expect(dialog).toContain('status: "cancelled"');
+    expect(dialog).toContain("externalManagementUrl");
+    expect(dialog).not.toContain('event.kind !== "sauna"');
+    expect(agenda).not.toContain('onStatus("cancelled")');
+
+    expect(saunaRouter).toContain("updateBooking: protectedProcedure");
+    expect(saunaRouter).toContain("cancelSkeduAppointment(");
+    expect(saunaRouter).toContain("rescheduleSkeduAppointment(");
+    expect(saunaRouter).toContain("getSkeduAppointmentPayments(");
+    expect(saunaRouter).toContain("acquireSaunaSyncMutationLock(");
+    expect(saunaSync).toContain("...syncedValues");
+    expect(operationsRouter).toContain("externalManagementUrl:");
+    expect(operationsRouter).toContain("noteSaunaCancellationActivities(");
+  });
 });

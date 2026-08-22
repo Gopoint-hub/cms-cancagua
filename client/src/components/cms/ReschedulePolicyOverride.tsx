@@ -5,14 +5,18 @@ import { cn } from "@/lib/utils";
 type ReschedulePolicyOverrideProps = {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+  title?: ReactNode;
   policySummary?: ReactNode;
+  exceptionDescription?: ReactNode;
   className?: string;
 };
 
 export function ReschedulePolicyOverride({
   checked,
   onCheckedChange,
+  title,
   policySummary,
+  exceptionDescription,
   className,
 }: ReschedulePolicyOverrideProps) {
   return (
@@ -28,7 +32,7 @@ export function ReschedulePolicyOverride({
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
         <div>
-          <p className="font-medium">Política de reagendamiento</p>
+          <p className="font-medium">{title ?? "Política de reagendamiento"}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {policySummary ??
               "La reserva mantiene sus reglas normales de anticipación y cantidad máxima de cambios."}
@@ -48,9 +52,13 @@ export function ReschedulePolicyOverride({
             Autorizar excepción administrativa
           </span>
           <span className="mt-1 block text-xs text-muted-foreground">
-            Permite omitir únicamente el plazo mínimo o el máximo de cambios. La
-            disponibilidad, el aforo y los recursos continúan siendo
-            obligatorios.
+            {exceptionDescription ?? (
+              <>
+                Permite omitir únicamente el plazo mínimo o el máximo de
+                cambios. La disponibilidad, el aforo y los recursos continúan
+                siendo obligatorios.
+              </>
+            )}
           </span>
         </span>
       </label>
