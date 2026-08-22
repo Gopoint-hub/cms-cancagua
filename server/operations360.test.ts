@@ -13,6 +13,8 @@ import {
   guardLegacyPaymentMaterialization,
   inferSkeduClientService,
   isVisibleCalendarReservation,
+  groupMassageProgramBookings,
+  massageProgramGroupState,
   massageProgramPaymentState,
   normalizeClientEmail,
   normalizeClientPhone,
@@ -274,6 +276,93 @@ describe("pagos diferenciados del Calendario 360", () => {
       paidClp: 20_000,
       status: "partially_paid",
     });
+  });
+
+  it("consolida los dos bloques de un programa como una sola reserva lógica", () => {
+    const base = {
+      bookingGroupId: "grupo-4",
+      groupSize: 4,
+      scheduleMode: "two_by_two",
+      program: "reconecta",
+      duration: 30,
+      modality: "double",
+      bookingDate: "2026-08-25",
+      endTime: "10:30",
+      status: "confirmed",
+      paymentMethod: "pending_payment",
+      clientEmail: null,
+      clientPhone: null,
+      secondClientName: null,
+    };
+    const bookings = [
+      {
+        ...base,
+        id: 101,
+        groupSequence: 1,
+        clientName: "Ana",
+        secondClientName: "Berta",
+        clientEmail: "ana@example.com",
+        clientPhone: "+56911111111",
+        startTime: "10:00",
+      },
+      {
+        ...base,
+        id: 102,
+        groupSequence: 2,
+        clientName: "Carla",
+        secondClientName: "Diana",
+        startTime: "10:40",
+        endTime: "11:10",
+      },
+    ] as any;
+    const grouped = groupMassageProgramBookings(bookings);
+    const state = massageProgramGroupState(grouped[0], [
+      {
+        module: "massage_programs",
+        reservationId: 101,
+        status: "paid",
+        amountClp: 70_000,
+      },
+      {
+        module: "massage_programs",
+        reservationId: 102,
+        status: "paid",
+        amountClp: 70_000,
+      },
+    ] as any);
+
+    expect(grouped).toHaveLength(1);
+    expect(state).toMatchObject({
+      leader: expect.objectContaining({ id: 101, clientEmail: "ana@example.com" }),
+      participantNames: ["Ana", "Berta", "Carla", "Diana"],
+      startTime: "10:00",
+      endTime: "11:10",
+      reservationStatus: "confirmed",
+      totalClp: 140_000,
+      paidClp: 140_000,
+      paymentStatus: "paid",
+    });
+  });
+
+  it("no presenta una cancelación pagada como si hubiese sido reembolsada", () => {
+    const booking = {
+      id: 201,
+      duration: 30,
+      modality: "simple",
+      status: "cancelled",
+      paymentMethod: "pending_payment",
+    } as any;
+    const state = massageProgramPaymentState(booking, [
+      {
+        module: "massage_programs",
+        reservationId: 201,
+        status: "paid",
+        amountClp: 35_000,
+      },
+    ] as any);
+
+    expect(state.status).toBe("paid");
+    expect(state.status).not.toBe("refunded");
   });
 
   it("separa código de descuento y pago Webpay", () => {

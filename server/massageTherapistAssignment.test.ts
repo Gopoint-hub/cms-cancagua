@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildFreelanceAssignmentMessage,
   buildFreelanceExpirationMessage,
   buildInhouseAssignmentMessage,
+  confirmAssignmentBookingIfPending,
   isTherapistAssignmentExpired,
   selectNextTherapistCandidate,
   THERAPIST_RESPONSE_WINDOW_MS,
@@ -52,6 +53,50 @@ const candidates = [
 ];
 
 describe("therapist assignment rotation", () => {
+  it("no vuelve a confirmar un programa que fue cancelado concurrentemente", async () => {
+    const updateWhere = vi.fn().mockResolvedValue([{ affectedRows: 0 }]);
+    const statusQuery = {
+      from: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{ status: "cancelled" }]),
+    };
+    statusQuery.from.mockReturnValue(statusQuery);
+    statusQuery.where.mockReturnValue(statusQuery);
+    const db = {
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({ where: updateWhere }),
+      }),
+      select: vi.fn().mockReturnValue(statusQuery),
+    };
+
+    await expect(
+      confirmAssignmentBookingIfPending(db, "skedu_program", 91)
+    ).resolves.toBe(false);
+    expect(updateWhere).toHaveBeenCalledOnce();
+  });
+
+  it("acepta la confirmación que otro slot del mismo masaje ya persistió", async () => {
+    const statusQuery = {
+      from: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{ status: "confirmed" }]),
+    };
+    statusQuery.from.mockReturnValue(statusQuery);
+    statusQuery.where.mockReturnValue(statusQuery);
+    const db = {
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ affectedRows: 0 }]),
+        }),
+      }),
+      select: vi.fn().mockReturnValue(statusQuery),
+    };
+
+    await expect(
+      confirmAssignmentBookingIfPending(db, "skedu_program", 92)
+    ).resolves.toBe(true);
+  });
+
   it("expires each freelance response link exactly after the 60-minute window", () => {
     const sentAt = new Date("2026-07-29T15:00:00.000Z");
     const expiresAt = new Date(sentAt.getTime() + THERAPIST_RESPONSE_WINDOW_MS);

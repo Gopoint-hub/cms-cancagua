@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   Clock3,
   Link2,
+  Loader2,
   Plus,
   Trash2,
   UserRound,
@@ -45,6 +46,13 @@ import {
 } from "@/components/cms/ReservationPaymentLinks";
 
 type DirectService = "massages" | "biopools" | "sauna";
+type ProgramPartySize = 1 | 2 | 3 | 4;
+type ProgramScheduleMode = "simultaneous" | "two_by_two";
+type ProgramAvailabilityStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "unavailable";
 export type CreatedReservation = {
   service: DirectService | "massage_programs";
   reservationId: number;
@@ -79,7 +87,12 @@ type BookingDraft = {
   notes: string;
   payments: PaymentDraft[];
   modality: "simple" | "double";
+  partySize: ProgramPartySize;
+  scheduleMode: ProgramScheduleMode;
+  programAvailabilityStatus: ProgramAvailabilityStatus;
   secondClientName: string;
+  thirdClientName: string;
+  fourthClientName: string;
   externalReference: string;
   programPaymentMethod: string;
   programPaymentReference: string;
@@ -121,6 +134,44 @@ const cardMethods = new Set([
   "transbank",
   "transbank_machine",
 ]);
+
+const programModality = (partySize: ProgramPartySize): "simple" | "double" =>
+  partySize === 1 ? "simple" : "double";
+const requiredProgramTherapists = (
+  partySize: ProgramPartySize,
+  scheduleMode: ProgramScheduleMode
+) => (partySize === 4 && scheduleMode === "two_by_two" ? 2 : partySize);
+const requiredProgramRooms = (
+  partySize: ProgramPartySize,
+  scheduleMode: ProgramScheduleMode
+) =>
+  partySize <= 2 || (partySize === 4 && scheduleMode === "two_by_two") ? 1 : 2;
+
+function programAdditionalParticipantNames(item: BookingDraft) {
+  return [
+    item.secondClientName,
+    item.thirdClientName,
+    item.fourthClientName,
+  ].slice(0, Math.max(0, item.partySize - 1));
+}
+
+function programParticipantsComplete(item: BookingDraft) {
+  return programAdditionalParticipantNames(item).every(
+    name => name.trim().length >= 2
+  );
+}
+
+function programSummary(item: BookingDraft) {
+  const distribution =
+    item.partySize === 1
+      ? ""
+      : item.partySize === 4 && item.scheduleMode === "two_by_two"
+        ? " · 2 primero y 2 después"
+        : " · al mismo tiempo";
+  const additionalNames =
+    programAdditionalParticipantNames(item).filter(Boolean);
+  return `${item.duration} minutos · ${item.partySize} ${item.partySize === 1 ? "persona" : "personas"}${distribution}${additionalNames.length ? ` · ${additionalNames.join(" · ")}` : ""}`;
+}
 
 function localDate() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -185,7 +236,12 @@ function booking(service: DirectService, date = localDate()): BookingDraft {
     notes: "",
     payments: [payment()],
     modality: "simple",
+    partySize: 1,
+    scheduleMode: "simultaneous",
+    programAvailabilityStatus: "idle",
     secondClientName: "",
+    thirdClientName: "",
+    fourthClientName: "",
     externalReference: "",
     programPaymentMethod: "skedu_program",
     programPaymentReference: "",
@@ -310,9 +366,9 @@ function PaymentEditor({
       {service === "sauna" &&
         items.some(item => item.method === "pending_payment") && (
           <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            El precio del catálogo quedó pendiente de pago. Puedes continuar
-            así y editar el pago después, o seleccionar ahora el medio real si
-            el cliente ya pagó.
+            El precio del catálogo quedó pendiente de pago. Puedes continuar así
+            y editar el pago después, o seleccionar ahora el medio real si el
+            cliente ya pagó.
           </p>
         )}
       {items.map((item, index) => (
@@ -491,7 +547,10 @@ function BookingEditor({
         bookingDate: value.date,
         startTime: value.time || "10:00",
         duration: (value.duration === 30 ? 30 : 50) as 30 | 50,
-        modality: value.modality,
+        modality: programModality(value.partySize),
+        partySize: value.partySize,
+        scheduleMode: value.scheduleMode,
+        preferredRoomId: value.roomId ? Number(value.roomId) : undefined,
       },
       { enabled: isProgram && Boolean(value.date && value.time) }
     );
@@ -538,16 +597,19 @@ function BookingEditor({
   const activeSauna =
     saunaServices.data?.filter(
       (item: any) =>
-        item.published &&
-        item.kind !== "program" &&
-        Number(item.priceClp) > 0
+        item.published && item.kind !== "program" && Number(item.priceClp) > 0
     ) ?? [];
-  const programHasTherapists =
-    (programResources.data?.therapists.length ?? 0) >=
-    (value.modality === "double" ? 2 : 1);
-  const programRooms = programHasTherapists
-    ? (programResources.data?.rooms ?? [])
-    : [];
+  const programResourcesAvailable = programResources.data?.available === true;
+  const programRequiredTherapists =
+    programResources.data?.requiredTherapists ??
+    requiredProgramTherapists(value.partySize, value.scheduleMode);
+  const programRequiredRooms =
+    programResources.data?.requiredRooms ??
+    requiredProgramRooms(value.partySize, value.scheduleMode);
+  // Aunque la sala elegida haya dejado de estar disponible, el backend
+  // devuelve las alternativas candidatas. Mantenerlas visibles permite
+  // seleccionar otra y disparar una revalidación inmediata.
+  const programRooms = programResources.data?.rooms ?? [];
   const selectedTechnique: any = techniques.data?.find(
     (item: any) => !isProgram && String(item.id) === value.serviceId
   );
@@ -640,30 +702,61 @@ function BookingEditor({
     const duration = allowed.includes(value.duration)
       ? value.duration
       : allowed[0];
-    const amount =
-      (duration === 30 ? 35_000 : 45_000) *
-      (value.modality === "double" ? 2 : 1);
+    const amount = (duration === 30 ? 35_000 : 45_000) * value.partySize;
     if (duration !== value.duration || amount !== value.amountClp)
       onChange({ ...value, duration, amountClp: amount, discountAmountClp: 0 });
   }, [
     isProgram,
     selectedProgram,
     value.duration,
-    value.modality,
+    value.partySize,
     value.amountClp,
   ]);
   useEffect(() => {
-    if (!isProgram || !value.time || !programResources.data) return;
+    if (!isProgram || !value.time) {
+      if (value.programAvailabilityStatus !== "idle") {
+        onChange({ ...value, programAvailabilityStatus: "idle" });
+      }
+      return;
+    }
+
+    if (programResources.isFetching) {
+      if (value.programAvailabilityStatus !== "checking") {
+        onChange({ ...value, programAvailabilityStatus: "checking" });
+      }
+      return;
+    }
+
     const roomIds = programRooms.map((room: any) => String(room.id));
-    if (!roomIds.includes(value.roomId))
-      onChange({ ...value, roomId: String(programRooms[0]?.id ?? "") });
+    const nextRoomId = roomIds.includes(value.roomId)
+      ? value.roomId
+      : String(programRooms[0]?.id ?? "");
+    const nextStatus: ProgramAvailabilityStatus =
+      programResourcesAvailable && Boolean(nextRoomId)
+        ? "available"
+        : "unavailable";
+    if (
+      nextRoomId !== value.roomId ||
+      nextStatus !== value.programAvailabilityStatus
+    ) {
+      onChange({
+        ...value,
+        roomId: nextRoomId,
+        programAvailabilityStatus: nextStatus,
+      });
+    }
   }, [
     isProgram,
     value.time,
     value.date,
     value.duration,
-    value.modality,
+    value.partySize,
+    value.scheduleMode,
+    value.roomId,
+    value.programAvailabilityStatus,
     programResources.data,
+    programResources.isFetching,
+    programResourcesAvailable,
   ]);
   useEffect(() => {
     if (value.service === "biopools" && tickets.length) {
@@ -814,6 +907,7 @@ function BookingEditor({
                       serviceName: item.name ?? "",
                       serviceKind: item.kind ?? "",
                       time: "",
+                      programAvailabilityStatus: "idle",
                       discountAmountClp: 0,
                       ...(value.service === "sauna"
                         ? {
@@ -863,7 +957,12 @@ function BookingEditor({
               min={localDate()}
               value={value.date}
               onChange={event =>
-                onChange({ ...value, date: event.target.value, time: "" })
+                onChange({
+                  ...value,
+                  date: event.target.value,
+                  time: "",
+                  programAvailabilityStatus: "idle",
+                })
               }
             />
           </div>
@@ -875,7 +974,12 @@ function BookingEditor({
                   key={date.value}
                   type="button"
                   onClick={() =>
-                    onChange({ ...value, date: date.value, time: "" })
+                    onChange({
+                      ...value,
+                      date: date.value,
+                      time: "",
+                      programAvailabilityStatus: "idle",
+                    })
                   }
                   className={`min-h-14 min-w-12 p-2 text-center capitalize sm:p-3 ${value.date === date.value ? "bg-[#9a7655] text-white" : "hover:bg-muted"}`}
                 >
@@ -917,6 +1021,9 @@ function BookingEditor({
                             value.service === "massages"
                               ? String(item.availableRooms?.[0] ?? "")
                               : value.roomId,
+                          programAvailabilityStatus: isProgram
+                            ? "checking"
+                            : value.programAvailabilityStatus,
                         })
                       }
                     >
@@ -936,14 +1043,48 @@ function BookingEditor({
               )}
             </div>
           </div>
+          {isProgram && value.time && programResources.isFetching && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm font-medium text-sky-900"
+            >
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              Revisando disponibilidad de terapeutas y salas…
+            </div>
+          )}
           {isProgram &&
             value.time &&
             !programResources.isFetching &&
-            !programRooms.length && (
+            !programResourcesAvailable && (
               <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                No hay suficientes terapeutas o una sala compatible en este
-                horario. Selecciona otro.
+                No hay suficientes recursos para {value.partySize} personas. Se
+                necesitan {programRequiredTherapists} terapeutas y{" "}
+                {programRequiredRooms}{" "}
+                {programRequiredRooms === 1 ? "sala" : "salas"}. Selecciona otro
+                horario o distribución.
               </p>
+            )}
+          {isProgram &&
+            value.time &&
+            !programResources.isFetching &&
+            programResourcesAvailable &&
+            (programResources.data?.sessions.length ?? 0) > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                <p className="font-medium">
+                  Plan disponible · {programRequiredTherapists} terapeutas ·{" "}
+                  {programRequiredRooms}{" "}
+                  {programRequiredRooms === 1 ? "sala" : "salas"}
+                </p>
+                <div className="mt-2 space-y-1 text-xs">
+                  {programResources.data?.sessions.map((session, index) => (
+                    <p key={`${session.startTime}-${session.roomId}-${index}`}>
+                      Bloque {index + 1}: {session.people} personas ·{" "}
+                      {session.startTime}–{session.endTime} · {session.roomName}
+                    </p>
+                  ))}
+                </div>
+              </div>
             )}
           <p className="text-center text-xs text-muted-foreground">
             Horarios de Cancagua · America/Santiago
@@ -992,6 +1133,7 @@ function BookingEditor({
                   serviceName: selected?.name ?? "",
                   serviceKind: selected?.kind ?? "",
                   time: "",
+                  programAvailabilityStatus: "idle",
                   discountAmountClp: 0,
                 });
               }}
@@ -1034,6 +1176,7 @@ function BookingEditor({
                     ...value,
                     duration: Number(duration),
                     time: "",
+                    programAvailabilityStatus: "idle",
                     discountAmountClp: 0,
                   })
                 }
@@ -1058,38 +1201,102 @@ function BookingEditor({
               </Select>
             </div>
           )}
-        {(section === "all" || section === "variant") && isProgram && (
+      {(section === "all" || section === "variant") && isProgram && (
           <>
             <div>
-              <Label>Modalidad</Label>
+              <Label>Cantidad de personas</Label>
               <Select
-                value={value.modality}
-                onValueChange={(modality: "simple" | "double") =>
+                value={String(value.partySize)}
+                onValueChange={rawPartySize => {
+                  const partySize = Number(rawPartySize) as ProgramPartySize;
                   onChange({
                     ...value,
-                    modality,
+                    partySize,
+                    modality: programModality(partySize),
+                    scheduleMode:
+                      partySize === 4 ? value.scheduleMode : "simultaneous",
                     roomId: "",
+                    programAvailabilityStatus: value.time ? "checking" : "idle",
                     secondClientName:
-                      modality === "simple" ? "" : value.secondClientName,
-                  })
-                }
+                      partySize >= 2 ? value.secondClientName : "",
+                    thirdClientName:
+                      partySize >= 3 ? value.thirdClientName : "",
+                    fourthClientName:
+                      partySize >= 4 ? value.fourthClientName : "",
+                  });
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="simple">Simple · 1 persona</SelectItem>
-                  <SelectItem value="double">Doble · 2 personas</SelectItem>
+                  <SelectItem value="1">1 persona</SelectItem>
+                  <SelectItem value="2">2 personas</SelectItem>
+                  <SelectItem value="3">3 personas</SelectItem>
+                  <SelectItem value="4">4 personas</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {value.modality === "double" && (
+            {value.partySize === 4 && (
               <div>
-                <Label>Segundo cliente</Label>
+                <Label>Distribución</Label>
+                <Select
+                  value={value.scheduleMode}
+                  onValueChange={(scheduleMode: ProgramScheduleMode) =>
+                    onChange({
+                      ...value,
+                      scheduleMode,
+                      roomId: "",
+                      time: "",
+                      programAvailabilityStatus: "idle",
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="simultaneous">
+                      4 al mismo tiempo
+                    </SelectItem>
+                    <SelectItem value="two_by_two">
+                      2 primero y 2 después
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {value.partySize >= 2 && (
+              <div>
+                <Label>Cliente 2 *</Label>
                 <Input
                   value={value.secondClientName}
                   onChange={event =>
                     onChange({ ...value, secondClientName: event.target.value })
+                  }
+                  placeholder="Nombre y apellido"
+                />
+              </div>
+            )}
+            {value.partySize >= 3 && (
+              <div>
+                <Label>Cliente 3 *</Label>
+                <Input
+                  value={value.thirdClientName}
+                  onChange={event =>
+                    onChange({ ...value, thirdClientName: event.target.value })
+                  }
+                  placeholder="Nombre y apellido"
+                />
+              </div>
+            )}
+            {value.partySize >= 4 && (
+              <div>
+                <Label>Cliente 4 *</Label>
+                <Input
+                  value={value.fourthClientName}
+                  onChange={event =>
+                    onChange({ ...value, fourthClientName: event.target.value })
                   }
                   placeholder="Nombre y apellido"
                 />
@@ -1105,7 +1312,12 @@ function BookingEditor({
               min={localDate()}
               value={value.date}
               onChange={event =>
-                onChange({ ...value, date: event.target.value, time: "" })
+                onChange({
+                  ...value,
+                  date: event.target.value,
+                  time: "",
+                  programAvailabilityStatus: "idle",
+                })
               }
             />
           </div>
@@ -1126,6 +1338,9 @@ function BookingEditor({
                     value.service === "massages"
                       ? String(slot?.availableRooms?.[0] ?? "")
                       : value.roomId,
+                  programAvailabilityStatus: isProgram
+                    ? "checking"
+                    : value.programAvailabilityStatus,
                 });
               }}
             >
@@ -1165,10 +1380,18 @@ function BookingEditor({
         {(section === "all" || section === "availability") &&
           value.service === "massages" && (
             <div>
-              <Label>Sala</Label>
+              <Label>{isProgram ? "Sala principal" : "Sala"}</Label>
               <Select
                 value={value.roomId}
-                onValueChange={roomId => onChange({ ...value, roomId })}
+                onValueChange={roomId =>
+                  onChange({
+                    ...value,
+                    roomId,
+                    programAvailabilityStatus: isProgram
+                      ? "checking"
+                      : value.programAvailabilityStatus,
+                  })
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Automática" />
@@ -1379,9 +1602,7 @@ function BookingEditor({
           </div>
           {canManageMassagePayments &&
             !isPendingMassagePaymentMethod(value.programPaymentMethod) &&
-            !["cash", "skedu_program"].includes(
-              value.programPaymentMethod
-            ) && (
+            !["cash", "skedu_program"].includes(value.programPaymentMethod) && (
             <div>
               <Label>Referencia de pago</Label>
               <Input
@@ -1608,9 +1829,9 @@ export function UnifiedBookingDialog({
         (program || !item.discountCode.trim() || item.discountAmountClp > 0) &&
         (item.service !== "massages" || item.roomId) &&
         (!program ||
-          ((!canManageMassagePayments || programPaymentComplete(item)) &&
-            (item.modality === "simple" ||
-              item.secondClientName.trim().length >= 2))) &&
+          (item.programAvailabilityStatus === "available" &&
+            (!canManageMassagePayments || programPaymentComplete(item)) &&
+            programParticipantsComplete(item))) &&
         (item.service !== "biopools" ||
           (item.adults >= 1 && item.adults + item.children > 0)) &&
         (program ||
@@ -1631,21 +1852,19 @@ export function UnifiedBookingDialog({
     activeItem?.amountClp > 0 &&
     (activeItem?.service !== "biopools" || activeItem.adults >= 1) &&
     (activeItem?.serviceKind !== "massage_program" ||
-      activeItem.modality === "simple" ||
-      activeItem.secondClientName.trim().length >= 2);
+      programParticipantsComplete(activeItem));
   const availabilityValid = Boolean(
     activeItem?.date &&
       activeItem?.time &&
-      (activeItem.service !== "massages" || activeItem.roomId)
+      (activeItem.service !== "massages" || activeItem.roomId) &&
+      (activeItem.serviceKind !== "massage_program" ||
+        activeItem.programAvailabilityStatus === "available")
   );
   const paymentValid = activeItem
     ? (() => {
         if (activeItem.service === "sauna" && activeItem.amountClp <= 0)
           return false;
-        if (
-          activeItem.service === "massages" &&
-          !canManageMassagePayments
-        )
+        if (activeItem.service === "massages" && !canManageMassagePayments)
           return true;
         if (activeItem.serviceKind === "massage_program")
           return programPaymentComplete(activeItem);
@@ -1677,6 +1896,12 @@ export function UnifiedBookingDialog({
       return toast.error("Ingresa un monto mayor a $0 para Sauna");
     if (step === 1 && !variantValid)
       return toast.error("Completa la variante y cantidad de personas");
+    if (
+      step === 2 &&
+      activeItem.serviceKind === "massage_program" &&
+      activeItem.programAvailabilityStatus === "checking"
+    )
+      return toast.info("Revisando disponibilidad de terapeutas y salas");
     if (step === 2 && !availabilityValid)
       return toast.error("Selecciona un día y horario disponible");
     if (step === 3 && !clientValid)
@@ -1731,16 +1956,15 @@ export function UnifiedBookingDialog({
         const due = Math.max(0, item.amountClp - item.discountAmountClp);
         const canManageItemPayments =
           item.service !== "massages" || canManageMassagePayments;
-        const paid =
-          !canManageItemPayments
+        const paid = !canManageItemPayments
             ? 0
             : item.serviceKind === "massage_program"
-            ? isPendingMassagePaymentMethod(item.programPaymentMethod)
-              ? 0
-              : due
-            : item.payments
-                .filter(row => row.status === "paid")
-                .reduce((sum, row) => sum + Number(row.amountClp || 0), 0);
+              ? isPendingMassagePaymentMethod(item.programPaymentMethod)
+                ? 0
+                : due
+              : item.payments
+                  .filter(row => row.status === "paid")
+                  .reduce((sum, row) => sum + Number(row.amountClp || 0), 0);
         const payments =
           canManageItemPayments && due > 0
             ? item.payments.map(paymentInput)
@@ -1752,12 +1976,16 @@ export function UnifiedBookingDialog({
           const result = await programCreate.mutateAsync({
             program: item.serviceId.replace(/^program:/, "") as any,
             duration: item.duration === 30 ? 30 : 50,
-            modality: item.modality,
+            modality: programModality(item.partySize),
+            partySize: item.partySize,
+            scheduleMode: item.scheduleMode,
             clientName: client.name.trim(),
             secondClientName:
-              item.modality === "double"
-                ? item.secondClientName.trim()
-                : undefined,
+              item.partySize >= 2 ? item.secondClientName.trim() : undefined,
+            thirdClientName:
+              item.partySize >= 3 ? item.thirdClientName.trim() : undefined,
+            fourthClientName:
+              item.partySize >= 4 ? item.fourthClientName.trim() : undefined,
             clientEmail: client.email.trim(),
             clientPhone: client.phone.trim(),
             bookingDate: item.date,
@@ -1772,15 +2000,21 @@ export function UnifiedBookingDialog({
               : undefined,
             notes: item.notes.trim() || undefined,
           });
-          allCreated.push({
-            service: "massage_programs",
-            reservationId: result.id,
-          });
-          if (canManageMassagePayments && due > paid)
-            created.push({
+          const resultIds = result.ids.length ? result.ids : [result.id];
+          for (const reservationId of resultIds) {
+            allCreated.push({
               service: "massage_programs",
-              reservationId: result.id,
+              reservationId,
             });
+          }
+          if (canManageMassagePayments && due > paid) {
+            for (const reservationId of resultIds) {
+              created.push({
+                service: "massage_programs",
+                reservationId,
+              });
+            }
+          }
         } else if (item.service === "massages") {
           const result = await massageCreate.mutateAsync({
             clientName: client.name.trim(),
@@ -2222,7 +2456,7 @@ export function UnifiedBookingDialog({
                           : item.service === "sauna"
                             ? `${item.guests} persona(s)`
                             : item.serviceKind === "massage_program"
-                              ? `${item.duration} minutos · modalidad ${item.modality === "double" ? "doble" : "simple"}${item.secondClientName ? ` · ${item.secondClientName}` : ""}`
+                              ? programSummary(item)
                               : `${item.duration} minutos`}
                       </p>
                       {item.discountAmountClp > 0 && (
@@ -2452,7 +2686,15 @@ export function UnifiedBookingDialog({
               >
                 {step === 0 ? "Cancelar" : "Atrás"}
               </Button>
-              <Button type="button" onClick={next}>
+              <Button
+                type="button"
+                onClick={next}
+                disabled={
+                  step === 2 &&
+                  activeItem?.serviceKind === "massage_program" &&
+                  activeItem.programAvailabilityStatus !== "available"
+                }
+              >
                 Siguiente
               </Button>
             </>

@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import { z } from "zod";
 import {
   biopoolBookings,
@@ -276,10 +276,92 @@ export function massageProgramPaymentState(
   return {
     totalClp,
     paidClp: effectivePaidClp,
-    status:
-      booking.status === "cancelled"
-        ? null
-        : calculatedPaymentStatus(effectivePaidClp, totalClp),
+    // Cancelar la atención no devuelve dinero por sí solo. El estado
+    // financiero siempre se deriva de los abonos realmente registrados.
+    status: calculatedPaymentStatus(effectivePaidClp, totalClp),
+  };
+}
+
+export function groupMassageProgramBookings(
+  rows: Array<typeof massageProgramBookings.$inferSelect>
+) {
+  const groups = new Map<
+    string,
+    Array<typeof massageProgramBookings.$inferSelect>
+  >();
+  for (const row of rows) {
+    const key = row.bookingGroupId
+      ? `group:${row.bookingGroupId}`
+      : `booking:${row.id}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  return Array.from(groups.values()).map(group =>
+    [...group].sort(
+      (left, right) => left.groupSequence - right.groupSequence
+    )
+  );
+}
+
+export function massageProgramGroupState(
+  bookings: Array<typeof massageProgramBookings.$inferSelect>,
+  rows: Array<typeof reservationPayments.$inferSelect>
+) {
+  if (!bookings.length) {
+    throw new Error("El grupo de programa no puede estar vacío");
+  }
+  const sortedBookings = [...bookings].sort(
+    (left, right) => left.groupSequence - right.groupSequence
+  );
+  const leader = sortedBookings[0];
+  const bookingIds = new Set(sortedBookings.map(booking => booking.id));
+  const states = sortedBookings.map(booking =>
+    massageProgramPaymentState(
+      booking,
+      rows.filter(
+        payment =>
+          payment.reservationId === booking.id &&
+          payment.module === "massage_programs"
+      )
+    )
+  );
+  const totalClp = states.reduce((sum, state) => sum + state.totalClp, 0);
+  const paidClp = states.reduce((sum, state) => sum + state.paidClp, 0);
+  const participantNames = sortedBookings.flatMap(booking => [
+    booking.clientName,
+    ...(booking.secondClientName ? [booking.secondClientName] : []),
+  ]);
+  const startTime = sortedBookings.reduce(
+    (earliest, booking) =>
+      booking.startTime < earliest ? booking.startTime : earliest,
+    leader.startTime
+  );
+  const endTime = sortedBookings.reduce(
+    (latest, booking) =>
+      booking.endTime > latest ? booking.endTime : latest,
+    leader.endTime
+  );
+  const reservationStatus = sortedBookings.some(
+    booking => booking.status === "cancelled"
+  )
+    ? "cancelled"
+    : sortedBookings.some(booking => booking.status === "pending")
+      ? "pending"
+      : sortedBookings.every(booking => booking.status === "completed")
+        ? "completed"
+        : sortedBookings.some(booking => booking.status === "confirmed")
+          ? "confirmed"
+          : leader.status;
+
+  return {
+    leader,
+    bookingIds,
+    participantNames,
+    startTime,
+    endTime,
+    reservationStatus,
+    totalClp,
+    paidClp,
+    paymentStatus: calculatedPaymentStatus(paidClp, totalClp),
   };
 }
 
@@ -710,13 +792,28 @@ async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]>
         npsComment: nps?.comment ?? null,
       });
     }
-    for (const row of programs) {
+    for (const group of groupMassageProgramBookings(programs)) {
+      const groupState = massageProgramGroupState(group, programPaymentRows);
+      const row = groupState.leader;
       const sourceKey = `massage_program:${row.id}`;
-      const nps = npsResponses.find(item => item.bookingType === "skedu_program" && item.bookingId === row.id);
-      const payment = massageProgramPaymentState(
-        row,
-        programPaymentRows.filter(item => item.reservationId === row.id)
+      const nps = npsResponses.find(
+        item =>
+          item.bookingType === "skedu_program" && item.bookingId === row.id
       );
+      const groupDetail = group.length > 1
+        ? [
+            row.scheduleMode === "two_by_two"
+              ? "2 primero y 2 después"
+              : "Simultáneos",
+            groupState.participantNames.join(" / "),
+            row.notes,
+          ]
+        : [
+            row.secondClientName
+              ? `Acompañante: ${row.secondClientName}`
+              : null,
+            row.notes,
+          ];
       events.push({
         id: `massage-program:${row.id}`,
         sourceKey,
@@ -725,22 +822,23 @@ async function loadRawClientEvents(user: PermissionUser): Promise<ClientEvent[]>
         clientKey: buildClientKey({ email: row.clientEmail, phone: row.clientPhone, name: row.clientName, sourceKey }),
         service: "massages",
         date: serializeDate(row.bookingDate),
-        startTime: row.startTime,
-        endTime: row.endTime,
-        title: `Programa ${row.program.replaceAll("_", " ")}`,
-        status: row.status,
-        paymentStatus: payment.status,
-        amountClp: payment.paidClp,
-        totalAmountClp: payment.totalClp,
-        balanceAmountClp: row.status === "cancelled" ? 0 : Math.max(0, payment.totalClp - payment.paidClp),
-        people: row.modality === "double" ? 2 : 1,
+        startTime: groupState.startTime,
+        endTime: groupState.endTime,
+        title: `Programa ${row.program.replaceAll("_", " ")}${group.length > 1 ? ` · Grupo ${groupState.participantNames.length}` : ""}`,
+        status: groupState.reservationStatus,
+        paymentStatus: groupState.paymentStatus,
+        amountClp: groupState.paidClp,
+        totalAmountClp: groupState.totalClp,
+        balanceAmountClp:
+          groupState.reservationStatus === "cancelled"
+            ? 0
+            : Math.max(0, groupState.totalClp - groupState.paidClp),
+        people: groupState.participantNames.length,
         href: `/cms/masajes/agenda?date=${serializeDate(row.bookingDate)}`,
         clientName: row.clientName,
         clientEmail: row.clientEmail,
         clientPhone: row.clientPhone,
-        detail: [row.secondClientName ? `Acompañante: ${row.secondClientName}` : null, row.notes]
-          .filter(Boolean)
-          .join(" · ") || null,
+        detail: groupDetail.filter(Boolean).join(" · ") || null,
         npsScore: nps?.score ?? null,
         npsComment: nps?.comment ?? null,
       });
@@ -1770,7 +1868,7 @@ export const operations360Router = router({
             date: serializeDate(row.bookingDate),
             startTime: row.startTime,
             endTime: row.endTime,
-            title: `Programa ${row.program.replaceAll("_", " ")}`,
+            title: `Programa ${row.program.replaceAll("_", " ")}${row.bookingGroupId ? ` · Grupo ${row.groupSize} (${row.groupSequence}/2)` : ""}`,
             clientName: row.secondClientName
               ? `${row.clientName} / ${row.secondClientName}`
               : row.clientName,
@@ -2376,6 +2474,20 @@ export const operations360Router = router({
           .where(eq(massageProgramBookings.id, input.entityId))
           .limit(1);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
+        const groupBookings = booking.bookingGroupId
+          ? await db
+              .select()
+              .from(massageProgramBookings)
+              .where(
+                eq(
+                  massageProgramBookings.bookingGroupId,
+                  booking.bookingGroupId
+                )
+              )
+              .orderBy(asc(massageProgramBookings.groupSequence))
+          : [booking];
+        const groupLeader = groupBookings[0];
+        const groupBookingIds = groupBookings.map(item => item.id);
         const [[nps], paymentRows] = await Promise.all([
           db
             .select()
@@ -2383,7 +2495,7 @@ export const operations360Router = router({
             .where(
               and(
                 eq(massageNpsResponses.bookingType, "skedu_program"),
-                eq(massageNpsResponses.bookingId, input.entityId)
+                eq(massageNpsResponses.bookingId, groupLeader.id)
               )
             )
             .limit(1),
@@ -2394,13 +2506,24 @@ export const operations360Router = router({
                 .where(
                   and(
                     eq(reservationPayments.module, "massage_programs"),
-                    eq(reservationPayments.reservationId, input.entityId)
+                    inArray(
+                      reservationPayments.reservationId,
+                      groupBookingIds
+                    )
                   )
                 )
             : Promise.resolve([]),
         ]);
+        const groupState = massageProgramGroupState(
+          groupBookings,
+          paymentRows
+        );
         const programPayment = canViewPayments
-          ? massageProgramPaymentState(booking, paymentRows)
+          ? {
+              totalClp: groupState.totalClp,
+              paidClp: groupState.paidClp,
+              paymentStatus: groupState.paymentStatus,
+            }
           : null;
         return {
           service: "massages" as const,
@@ -2408,48 +2531,51 @@ export const operations360Router = router({
           canManageReservation: false,
           canRedeemGiftCards: false,
           paymentRestricted: !canViewPayments,
-          title: `Programa ${booking.program.replaceAll("_", " ")}`,
+          title: `Programa ${groupLeader.program.replaceAll("_", " ")}`,
           client: {
-            name: booking.clientName,
-            email: booking.clientEmail,
-            phone: booking.clientPhone,
+            name: groupLeader.clientName,
+            email: groupLeader.clientEmail,
+            phone: groupLeader.clientPhone,
           },
           schedule: {
-            date: serializeDate(booking.bookingDate),
-            startTime: booking.startTime,
-            endTime: booking.endTime,
+            date: serializeDate(groupLeader.bookingDate),
+            startTime: groupState.startTime,
+            endTime: groupState.endTime,
           },
-          status: booking.status,
+          status: groupState.reservationStatus,
           payment: programPayment
             ? buildPaymentDetail({
-                status: programPayment.status,
-                method: booking.paymentMethod,
-                reference: booking.paymentReference,
+                status: programPayment.paymentStatus,
+                method: groupLeader.paymentMethod,
+                reference: groupLeader.paymentReference,
                 originalAmountClp: programPayment.totalClp,
                 amountPaidClp: programPayment.paidClp,
                 refundAmountClp: 0,
-                createdAt: booking.createdAt,
+                createdAt: groupLeader.createdAt,
                 rows: paymentRows,
               })
             : null,
-          notes: visibleReservationNotes(booking.notes, canViewPayments),
-          detail: `${booking.modality === "double" ? "Doble" : "Simple"} · ${booking.duration} min`,
+          notes: visibleReservationNotes(groupLeader.notes, canViewPayments),
+          detail:
+            groupBookings.length > 1
+              ? `${groupState.participantNames.length} personas · ${groupLeader.scheduleMode === "two_by_two" ? "2 primero y 2 después" : "simultáneos"} · ${groupLeader.duration} min por tanda · ${groupState.participantNames.join(" / ")}`
+              : `${groupLeader.modality === "double" ? "Doble" : "Simple"} · ${groupLeader.duration} min`,
           activity: [
             {
-              id: `created:${booking.id}`,
+              id: `created:${groupLeader.id}`,
               type: "activity",
               label: "Programa ingresado",
-              detail: booking.externalReference,
-              at: booking.createdAt,
+              detail: groupLeader.externalReference,
+              at: groupLeader.createdAt,
             },
-            ...(booking.cancelledAt
+            ...(groupLeader.cancelledAt
               ? [
                   {
-                    id: `cancelled:${booking.id}`,
+                    id: `cancelled:${groupLeader.id}`,
                     type: "activity",
                     label: "Reserva cancelada",
-                    detail: booking.cancellationReason,
-                    at: booking.cancelledAt,
+                    detail: groupLeader.cancellationReason,
+                    at: groupLeader.cancelledAt,
                   },
                 ]
               : []),
@@ -2468,7 +2594,7 @@ export const operations360Router = router({
             (a, b) =>
               new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime()
           ),
-          href: `/cms/masajes/agenda?date=${serializeDate(booking.bookingDate)}`,
+          href: `/cms/masajes/agenda?date=${serializeDate(groupLeader.bookingDate)}`,
         };
       }
 

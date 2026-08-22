@@ -277,7 +277,7 @@ export default function MasajesDashboard() {
                       <div>
                         <p className="font-medium text-sm flex items-center gap-2">
                           {b.clientName}
-                          {b.bookingKind === "skedu_program" && <Badge variant="outline" className="text-[10px] border-violet-400 text-violet-700">Skedu</Badge>}
+                          {b.bookingKind === "skedu_program" && <Badge variant="outline" className="text-[10px] border-violet-400 text-violet-700">{b.bookingGroupId ? `Skedu · Grupo ${b.groupSize} · ${b.groupSequence}/2` : "Skedu"}</Badge>}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {b.techniqueName} · {b.duration} min · {b.roomName}

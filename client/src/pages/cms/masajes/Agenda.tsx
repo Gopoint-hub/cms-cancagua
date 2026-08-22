@@ -393,7 +393,9 @@ function BookingCard({
                   variant="outline"
                   className="border-violet-400 text-violet-700 bg-violet-50"
                 >
-                  Skedu · {b.modality === "double" ? "Doble" : "Simple"}
+                  {b.bookingGroupId
+                    ? `Skedu · Grupo ${b.groupSize} · bloque ${b.groupSequence}/2`
+                    : `Skedu · ${b.modality === "double" ? "Doble" : "Simple"}`}
                 </Badge>
               )}
               {b.paymentStatus && (

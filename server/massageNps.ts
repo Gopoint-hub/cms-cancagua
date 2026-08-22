@@ -25,7 +25,7 @@ const chileDateFormatter = new Intl.DateTimeFormat("en-US", {
 
 function getChileDate(now = new Date()): string {
   const parts = Object.fromEntries(
-    chileDateFormatter.formatToParts(now).map((part) => [part.type, part.value]),
+    chileDateFormatter.formatToParts(now).map(part => [part.type, part.value])
   );
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
@@ -49,14 +49,14 @@ function getChileOffsetMs(at: Date): number {
     second: "2-digit",
     hourCycle: "h23",
   }).formatToParts(at);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   const representedAsUtc = Date.UTC(
     Number(values.year),
     Number(values.month) - 1,
     Number(values.day),
     Number(values.hour),
     Number(values.minute),
-    Number(values.second),
+    Number(values.second)
   );
   return representedAsUtc - at.getTime();
 }
@@ -82,7 +82,11 @@ function surveyUrl(token: string): string {
   return `${origin}/nps/masajes/${token}`;
 }
 
-function buildNpsMessage(clientName: string, serviceName: string, token: string): string {
+function buildNpsMessage(
+  clientName: string,
+  serviceName: string,
+  token: string
+): string {
   const firstName = clientName.trim().split(/\s+/)[0] || "Hola";
   return `Hola ${firstName} 😊 Esperamos que hayas disfrutado tu experiencia en Cancagua Spa.\n\nDel 0 al 10, ¿qué tan probable es que nos recomiendes?\n\nResponde aquí: ${surveyUrl(token)}\n\nTe tomará menos de un minuto. ¡Gracias por ayudarnos a mejorar!`;
 }
@@ -97,6 +101,54 @@ type Candidate = {
   endTime: string;
 };
 
+type ProgramCandidateRow = {
+  bookingId: number;
+  bookingGroupId: string | null;
+  groupSequence: number;
+  serviceName: string;
+  clientName: string;
+  clientPhone: string | null;
+  serviceDate: unknown;
+  endTime: string;
+  status: string;
+};
+
+export function buildSkeduProgramNpsCandidates(
+  rows: ProgramCandidateRow[]
+): Candidate[] {
+  const grouped = new Map<string, ProgramCandidateRow[]>();
+  for (const row of rows) {
+    const key = row.bookingGroupId
+      ? `group:${row.bookingGroupId}`
+      : `booking:${row.bookingId}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
+  const candidates: Candidate[] = [];
+  for (const group of grouped.values()) {
+    if (group.some(row => !["confirmed", "completed"].includes(row.status)))
+      continue;
+    const leader = [...group].sort(
+      (left, right) => left.groupSequence - right.groupSequence
+    )[0];
+    const clientPhone = leader.clientPhone?.trim();
+    if (!clientPhone) continue;
+    candidates.push({
+      bookingType: "skedu_program",
+      bookingId: leader.bookingId,
+      serviceName: `Programa ${leader.serviceName.replaceAll("_", " ")}`,
+      clientName: leader.clientName,
+      clientPhone,
+      serviceDate: serializeDate(leader.serviceDate),
+      endTime: group.reduce(
+        (latest, row) => (row.endTime > latest ? row.endTime : latest),
+        leader.endTime
+      ),
+    });
+  }
+  return candidates;
+}
+
 async function findCandidates(): Promise<Candidate[]> {
   const db = await getDb();
   if (!db) return [];
@@ -104,7 +156,8 @@ async function findCandidates(): Promise<Candidate[]> {
   const yesterday = addDays(today, -1);
 
   const [massages, programs] = await Promise.all([
-    db.select({
+    db
+      .select({
       bookingId: massageBookings.id,
       serviceName: massageTechniques.name,
       clientName: massageBookings.clientName,
@@ -113,32 +166,41 @@ async function findCandidates(): Promise<Candidate[]> {
       endTime: massageBookings.endTime,
     })
       .from(massageBookings)
-      .leftJoin(massageTechniques, eq(massageBookings.techniqueId, massageTechniques.id))
-      .where(and(
+      .leftJoin(
+        massageTechniques,
+        eq(massageBookings.techniqueId, massageTechniques.id)
+      )
+      .where(
+        and(
         gte(massageBookings.bookingDate, yesterday as any),
         lte(massageBookings.bookingDate, today as any),
         inArray(massageBookings.status, ["confirmed", "completed"]),
-        sql`${massageBookings.clientPhone} IS NOT NULL AND TRIM(${massageBookings.clientPhone}) <> ''`,
-      )),
-    db.select({
+          sql`${massageBookings.clientPhone} IS NOT NULL AND TRIM(${massageBookings.clientPhone}) <> ''`
+        )
+      ),
+    db
+      .select({
       bookingId: massageProgramBookings.id,
+        bookingGroupId: massageProgramBookings.bookingGroupId,
+        groupSequence: massageProgramBookings.groupSequence,
       serviceName: massageProgramBookings.program,
       clientName: massageProgramBookings.clientName,
       clientPhone: massageProgramBookings.clientPhone,
       serviceDate: massageProgramBookings.bookingDate,
       endTime: massageProgramBookings.endTime,
+        status: massageProgramBookings.status,
     })
       .from(massageProgramBookings)
-      .where(and(
+      .where(
+        and(
         gte(massageProgramBookings.bookingDate, yesterday as any),
-        lte(massageProgramBookings.bookingDate, today as any),
-        inArray(massageProgramBookings.status, ["confirmed", "completed"]),
-        sql`${massageProgramBookings.clientPhone} IS NOT NULL AND TRIM(${massageProgramBookings.clientPhone}) <> ''`,
-      )),
+          lte(massageProgramBookings.bookingDate, today as any)
+        )
+      ),
   ]);
 
   return [
-    ...massages.map((row) => ({
+    ...massages.map(row => ({
       bookingType: "massage" as const,
       bookingId: row.bookingId,
       serviceName: row.serviceName ?? "Masaje",
@@ -147,15 +209,7 @@ async function findCandidates(): Promise<Candidate[]> {
       serviceDate: serializeDate(row.serviceDate),
       endTime: row.endTime,
     })),
-    ...programs.map((row) => ({
-      bookingType: "skedu_program" as const,
-      bookingId: row.bookingId,
-      serviceName: `Programa ${row.serviceName.replaceAll("_", " ")}`,
-      clientName: row.clientName,
-      clientPhone: row.clientPhone!,
-      serviceDate: serializeDate(row.serviceDate),
-      endTime: row.endTime,
-    })),
+    ...buildSkeduProgramNpsCandidates(programs),
   ];
 }
 
@@ -163,26 +217,47 @@ async function createAndSend(candidate: Candidate, now: Date): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const scheduledSendAt = new Date(
-    chileLocalDateTimeToUtc(candidate.serviceDate, candidate.endTime).getTime() + NPS_DELAY_MS,
+    chileLocalDateTimeToUtc(
+      candidate.serviceDate,
+      candidate.endTime
+    ).getTime() + NPS_DELAY_MS
   );
   const overdue = now.getTime() - scheduledSendAt.getTime();
   if (overdue < 0 || overdue > MAX_OVERDUE_MS) return;
 
   const token = randomBytes(24).toString("hex");
-  await db.insert(massageNpsResponses).values({
+  await db
+    .insert(massageNpsResponses)
+    .values({
     ...candidate,
     serviceDate: candidate.serviceDate as any,
     surveyToken: token,
     scheduledSendAt,
-  }).onDuplicateKeyUpdate({ set: { serviceName: candidate.serviceName } });
+    })
+    .onDuplicateKeyUpdate({ set: { serviceName: candidate.serviceName } });
 
-  const [survey] = await db.select().from(massageNpsResponses).where(and(
+  const [survey] = await db
+    .select()
+    .from(massageNpsResponses)
+    .where(
+      and(
     eq(massageNpsResponses.bookingType, candidate.bookingType),
-    eq(massageNpsResponses.bookingId, candidate.bookingId),
-  )).limit(1);
-  if (!survey || survey.deliveryStatus === "sent" || survey.deliveryStatus === "skipped") return;
+        eq(massageNpsResponses.bookingId, candidate.bookingId)
+      )
+    )
+    .limit(1);
+  if (
+    !survey ||
+    survey.deliveryStatus === "sent" ||
+    survey.deliveryStatus === "skipped"
+  )
+    return;
   if (survey.attemptCount >= 3) return;
-  if (survey.lastAttemptAt && now.getTime() - survey.lastAttemptAt.getTime() < RETRY_AFTER_MS) return;
+  if (
+    survey.lastAttemptAt &&
+    now.getTime() - survey.lastAttemptAt.getTime() < RETRY_AFTER_MS
+  )
+    return;
 
   const staleSendingBefore = new Date(now.getTime() - RETRY_AFTER_MS);
   const claimResult = await db.execute(sql`
@@ -196,17 +271,32 @@ async function createAndSend(candidate: Candidate, now: Date): Promise<void> {
         OR (delivery_status = 'sending' AND last_attempt_at < ${staleSendingBefore})
       )
   `);
-  const affectedRows = Number((claimResult as any)?.[0]?.affectedRows ?? (claimResult as any)?.affectedRows ?? 0);
+  const affectedRows = Number(
+    (claimResult as any)?.[0]?.affectedRows ??
+      (claimResult as any)?.affectedRows ??
+      0
+  );
   if (affectedRows !== 1) return;
 
   const result = await sendWhatsApp(
     candidate.clientPhone,
-    buildNpsMessage(candidate.clientName, candidate.serviceName, survey.surveyToken),
+    buildNpsMessage(
+      candidate.clientName,
+      candidate.serviceName,
+      survey.surveyToken
+    )
   );
-  await db.update(massageNpsResponses).set(result.success
+  await db
+    .update(massageNpsResponses)
+    .set(
+      result.success
     ? { deliveryStatus: "sent", sentAt: new Date(), deliveryError: null }
-    : { deliveryStatus: "failed", deliveryError: result.error?.slice(0, 2000) ?? "Error desconocido" }
-  ).where(eq(massageNpsResponses.id, survey.id));
+        : {
+            deliveryStatus: "failed",
+            deliveryError: result.error?.slice(0, 2000) ?? "Error desconocido",
+          }
+    )
+    .where(eq(massageNpsResponses.id, survey.id));
 }
 
 export async function processMassageNpsQueue(now = new Date()): Promise<void> {
@@ -215,7 +305,10 @@ export async function processMassageNpsQueue(now = new Date()): Promise<void> {
     try {
       await createAndSend(candidate, now);
     } catch (error) {
-      console.error(`[NPS] No se pudo procesar ${candidate.bookingType} #${candidate.bookingId}:`, error);
+      console.error(
+        `[NPS] No se pudo procesar ${candidate.bookingType} #${candidate.bookingId}:`,
+        error
+      );
     }
   }
 }

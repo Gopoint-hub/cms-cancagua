@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import { createGetnetSession, getGetnetSessionInfo } from "./getnet";
@@ -124,8 +125,16 @@ import {
 } from "./rescheduleAudit";
 import {
   assertNoLiveReservationPaymentAttempt,
+  lockReservationPaymentScopes,
   RESERVATION_PAYMENT_TRANSACTION,
 } from "./reservationPaymentLinkGuards";
+import {
+  buildSkeduProgramResourcePlan,
+  getSkeduProgramSecondStartTime,
+  type SkeduProgramPartySize,
+  type SkeduProgramScheduleMode,
+} from "./skeduProgramGroupPlan";
+import { lockAndReloadSkeduProgramGroupForSettlement } from "./skeduProgramConcurrency";
 
 const manualMassagePaymentMethodSchema = z.enum(MANUAL_MASSAGE_PAYMENT_METHODS);
 export const SKEDU_PROGRAM_PAYMENT_METHODS = [
@@ -143,6 +152,13 @@ const skeduProgramSettlementMethodSchema = z.enum([
   "getnet_pos",
   "transbank",
 ]);
+const skeduProgramPartySizeSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+]);
+const skeduProgramScheduleModeSchema = z.enum(["simultaneous", "two_by_two"]);
 
 export function massagePriceForDuration(
   technique: Pick<
@@ -338,7 +354,9 @@ export function getSkeduMassageUnitPrice(duration: number): number {
     : 0;
 }
 
-export function getSkeduMassageQuantity(modality: "simple" | "double"): number {
+export function getSkeduMassageQuantity(
+  modality: "simple" | "double"
+): 1 | 2 {
   return modality === "double" ? 2 : 1;
 }
 
@@ -1787,6 +1805,67 @@ async function getSkeduProgramResourceAvailability(params: {
   };
 }
 
+async function getSkeduProgramGroupResourceAvailability(params: {
+  db: MassageDb;
+  bookingDate: string;
+  startTime: string;
+  duration: number;
+  partySize: SkeduProgramPartySize;
+  scheduleMode: SkeduProgramScheduleMode;
+  preferredRoomId?: number;
+  excludeProgramBookingId?: number;
+  now?: Date;
+}) {
+  const twoByTwo =
+    params.partySize === 4 && params.scheduleMode === "two_by_two";
+  const primaryModality = params.partySize === 1 ? "simple" : "double";
+  const common = {
+    db: params.db,
+    bookingDate: params.bookingDate,
+    duration: params.duration,
+    excludeProgramBookingId: params.excludeProgramBookingId,
+    now: params.now,
+  } as const;
+  const primary = await getSkeduProgramResourceAvailability({
+    ...common,
+    startTime: params.startTime,
+    modality: primaryModality,
+  });
+
+  let secondary:
+    | Awaited<ReturnType<typeof getSkeduProgramResourceAvailability>>
+    | undefined;
+  let secondStartTime: string | undefined;
+  if (params.partySize === 3) {
+    secondary = await getSkeduProgramResourceAvailability({
+      ...common,
+      startTime: params.startTime,
+      modality: "simple",
+    });
+  } else if (twoByTwo) {
+    secondStartTime = getSkeduProgramSecondStartTime(
+      params.startTime,
+      params.duration,
+      PROGRAM_PREP_MINUTES
+    );
+    secondary = await getSkeduProgramResourceAvailability({
+      ...common,
+      startTime: secondStartTime,
+      modality: "double",
+    });
+  }
+
+  return buildSkeduProgramResourcePlan({
+    partySize: params.partySize,
+    scheduleMode: params.scheduleMode,
+    startTime: params.startTime,
+    secondStartTime,
+    primary,
+    secondary,
+    preferredRoomId: params.preferredRoomId,
+  });
+}
+
 // ─── AGENDA / RESERVAS ────────────────────────────────────────
 const agendaRouter = router({
   getSkeduPrograms: protectedProcedure.query(async ({ ctx }) => {
@@ -1801,25 +1880,60 @@ const agendaRouter = router({
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       duration: z.union([z.literal(30), z.literal(50)]),
       modality: z.enum(["simple", "double"]),
+        partySize: skeduProgramPartySizeSchema.optional(),
+        scheduleMode: skeduProgramScheduleModeSchema.optional(),
+        preferredRoomId: z.number().int().positive().optional(),
       excludeBookingId: z.number().int().positive().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
       await massageAssignment(ctx.user);
       const db = await getDb();
-      if (!db) return { therapists: [], rooms: [], endTime: "" };
-      const { excludeBookingId, ...availabilityInput } = input;
-      const resources = await getSkeduProgramResourceAvailability({
+      if (!db)
+        return {
+          available: false,
+          requiredTherapists: 0,
+          requiredRooms: 0,
+          therapists: [],
+          rooms: [],
+          endTime: "",
+          sessions: [],
+        };
+      const partySize =
+        input.partySize ?? getSkeduMassageQuantity(input.modality);
+      const scheduleMode = input.scheduleMode ?? "simultaneous";
+      if (scheduleMode === "two_by_two" && partySize !== 4) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "La modalidad 2 + 2 requiere cuatro personas",
+        });
+      }
+      const resources = await getSkeduProgramGroupResourceAvailability({
         db,
-        ...availabilityInput,
-        excludeProgramBookingId: excludeBookingId,
+        bookingDate: input.bookingDate,
+        startTime: input.startTime,
+        duration: input.duration,
+        partySize,
+        scheduleMode,
+        preferredRoomId: input.preferredRoomId,
+        excludeProgramBookingId: input.excludeBookingId,
       });
       return {
-        therapists: resources.availableTherapists.map(
+        available: resources.available,
+        requiredTherapists: resources.requiredTherapists,
+        requiredRooms: resources.requiredRooms,
+        therapists: resources.therapists.map(
           ({ phone: _phone, email: _email, ...therapist }) => therapist
         ),
-        rooms: resources.availableRooms,
+        rooms: resources.rooms,
         endTime: resources.endTime,
+        sessions: resources.segments.map(segment => ({
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+          people: segment.partySize,
+          roomId: segment.room.id,
+          roomName: segment.room.name,
+        })),
       };
     }),
 
@@ -1835,8 +1949,12 @@ const agendaRouter = router({
         ]),
       duration: z.union([z.literal(30), z.literal(50)]),
       modality: z.enum(["simple", "double"]),
+        partySize: skeduProgramPartySizeSchema.optional(),
+        scheduleMode: skeduProgramScheduleModeSchema.optional(),
       clientName: z.string().min(2),
       secondClientName: z.string().optional(),
+        thirdClientName: z.string().optional(),
+        fourthClientName: z.string().optional(),
       clientPhone: z.string().optional(),
       clientEmail: z.string().email().optional().or(z.literal("")),
       bookingDate: z.string(),
@@ -1875,16 +1993,31 @@ const agendaRouter = router({
           message: "Duración no disponible para este programa",
         });
       }
-      if (input.modality === "double" && !input.secondClientName?.trim()) {
+      const partySize =
+        input.partySize ?? getSkeduMassageQuantity(input.modality);
+      const scheduleMode = input.scheduleMode ?? "simultaneous";
+      if (scheduleMode === "two_by_two" && partySize !== 4) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Un masaje doble requiere dos clientes",
+          message: "La modalidad 2 + 2 requiere cuatro personas",
+        });
+      }
+      const clientNames = [
+        input.clientName,
+        input.secondClientName,
+        input.thirdClientName,
+        input.fourthClientName,
+      ].slice(0, partySize);
+      const missingClientIndex = clientNames.findIndex(
+        name => !name?.trim() || name.trim().length < 2
+      );
+      if (missingClientIndex >= 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Ingresa el nombre del cliente ${missingClientIndex + 1}`,
         });
       }
 
-      const programTotalClp =
-        getSkeduMassageUnitPrice(input.duration) *
-        getSkeduMassageQuantity(input.modality);
       const paymentStatus = isPendingMassagePaymentMethod(input.paymentMethod)
         ? "pending"
         : "paid";
@@ -1899,6 +2032,11 @@ const agendaRouter = router({
         });
       }
 
+      const bookingGroupId = partySize > 2 ? randomUUID() : null;
+      const insertedIds = await withMassageResourceLock(
+        db,
+        input.bookingDate,
+        async () => {
       if (input.externalReference?.trim()) {
         const [duplicate] = await db
           .select({ id: massageProgramBookings.id })
@@ -1921,65 +2059,71 @@ const agendaRouter = router({
         }
       }
 
-      // Revalidar inmediatamente antes de guardar para evitar cruces con una
-      // reserva pública o manual creada mientras el formulario estaba abierto.
-      const resources = await getSkeduProgramResourceAvailability({
+          // La lectura y los inserts comparten el lock por fecha. Así ningún
+          // formulario manual puede ocupar uno de los recursos entre ambos.
+          const resources = await getSkeduProgramGroupResourceAvailability({
         db,
         bookingDate: input.bookingDate,
         startTime: input.startTime,
         duration: input.duration,
-        modality: input.modality,
+            partySize,
+            scheduleMode,
+            preferredRoomId: input.roomId,
       });
-      const availableTherapistIds = new Set(
-        resources.availableTherapists.map(therapist => therapist.id)
-      );
-      const availableRoomIds = new Set(
-        resources.availableRooms.map(room => room.id)
-      );
-      const selectedTherapists = resources.availableTherapists.slice(
-        0,
-        input.modality === "double" ? 2 : 1
-      );
-      if (
-        selectedTherapists.length < (input.modality === "double" ? 2 : 1) ||
-        selectedTherapists.some(
-          therapist => !availableTherapistIds.has(therapist.id)
-        )
-      ) {
+          if (!resources.available || resources.segments.length === 0) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "No hay suficientes terapeutas disponibles en ese horario",
-        });
-      }
-      if (!availableRoomIds.has(input.roomId)) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "La sala ya no está disponible en ese horario",
+              message:
+                "Ya no hay suficientes terapeutas o salas disponibles para esa distribución",
         });
       }
 
-      const inserted = await db.transaction(async tx => {
+          return db.transaction(async tx => {
+            const createdIds: number[] = [];
+            let clientOffset = 0;
+            for (const [
+              segmentIndex,
+              segment,
+            ] of resources.segments.entries()) {
+              const segmentNames = clientNames
+                .slice(clientOffset, clientOffset + segment.partySize)
+                .map(name => name!.trim());
+              clientOffset += segment.partySize;
         const [created] = await tx
           .insert(massageProgramBookings)
           .values({
+                  bookingGroupId,
+                  groupSequence: segmentIndex + 1,
+                  groupSize: partySize,
+                  scheduleMode,
             program: input.program,
             duration: input.duration,
-            modality: input.modality,
-            clientName: input.clientName.trim(),
+                  modality: segment.modality,
+                  clientName: segmentNames[0],
             secondClientName:
-              input.modality === "double"
-                ? input.secondClientName!.trim()
+                    segment.partySize === 2 ? segmentNames[1] : null,
+                  // El contacto del responsable vive en el bloque líder para
+                  // evitar encuestas NPS duplicadas. Pagos resuelve el líder
+                  // mediante bookingGroupId cuando arma un cobro conjunto.
+                  clientPhone:
+                    segmentIndex === 0
+                      ? input.clientPhone?.trim() || null
+                      : null,
+                  clientEmail:
+                    segmentIndex === 0
+                      ? input.clientEmail?.trim() || null
                 : null,
-            clientPhone: input.clientPhone?.trim() || null,
-            clientEmail: input.clientEmail?.trim() || null,
             bookingDate: input.bookingDate as any,
-            startTime: input.startTime,
-            endTime: resources.endTime,
-            therapistId: selectedTherapists[0].id,
+                  startTime: segment.startTime,
+                  endTime: segment.endTime,
+                  therapistId: segment.therapists[0].id,
             secondTherapistId:
-              input.modality === "double" ? selectedTherapists[1].id : null,
-            roomId: input.roomId,
-            externalReference: input.externalReference?.trim() || null,
+                    segment.partySize === 2 ? segment.therapists[1].id : null,
+                  roomId: segment.room.id,
+                  externalReference:
+                    segmentIndex === 0
+                      ? input.externalReference?.trim() || null
+                      : null,
             paymentMethod: input.paymentMethod,
             paymentReference: input.paymentReference?.trim() || null,
             notes: input.notes?.trim() || null,
@@ -1987,22 +2131,36 @@ const agendaRouter = router({
             createdByUserId: ctx.user.id,
           })
           .$returningId();
+              createdIds.push(created.id);
         await tx.insert(reservationPayments).values({
           module: "massage_programs",
           reservationId: created.id,
           method: input.paymentMethod,
           status: paymentStatus,
-          amountClp: programTotalClp,
+                amountClp:
+                  getSkeduMassageUnitPrice(input.duration) * segment.partySize,
           paidAt: paymentStatus === "paid" ? new Date() : null,
           reference: input.paymentReference?.trim() || null,
           createdByUserId: ctx.user.id,
         });
-        return created;
+            }
+            return createdIds;
       });
+        }
+      );
 
-      await startTherapistAssignmentForBooking("skedu_program", inserted.id);
+      for (const bookingId of insertedIds) {
+        try {
+          await startTherapistAssignmentForBooking("skedu_program", bookingId);
+        } catch (error) {
+          console.error(
+            `[SkeduProgram] No se pudo iniciar la asignación para #${bookingId}:`,
+            error
+          );
+        }
+      }
 
-      return { success: true, id: inserted.id };
+      return { success: true, id: insertedIds[0], ids: insertedIds };
     }),
 
   settleSkeduProgramPayment: protectedProcedure
@@ -2024,61 +2182,102 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.transaction(async tx => {
-        await assertNoLiveReservationPaymentAttempt(tx, "massage_programs", input.id);
-        const [booking] = await tx
+        const [selectedBooking] = await tx
           .select()
           .from(massageProgramBookings)
           .where(eq(massageProgramBookings.id, input.id))
           .limit(1);
-        if (!booking) throw new TRPCError({ code: "NOT_FOUND" });
-        if (booking.status === "cancelled") {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "No puedes cobrar una reserva cancelada",
+        if (!selectedBooking) throw new TRPCError({ code: "NOT_FOUND" });
+        const discoveredBookings = selectedBooking.bookingGroupId
+          ? await tx
+              .select()
+              .from(massageProgramBookings)
+              .where(
+                eq(
+                  massageProgramBookings.bookingGroupId,
+                  selectedBooking.bookingGroupId
+                )
+              )
+              .orderBy(asc(massageProgramBookings.groupSequence))
+          : [selectedBooking];
+        const bookingIds = discoveredBookings
+          .map(booking => booking.id)
+          .sort((a, b) => a - b);
+        const bookings = await lockAndReloadSkeduProgramGroupForSettlement({
+          bookingIds,
+          lockPaymentScopes: ids =>
+            lockReservationPaymentScopes(
+              tx,
+              ids.map(reservationId => ({
+                service: "massage_programs" as const,
+                reservationId,
+              }))
+            ),
+          assertNoLivePaymentAttempt: bookingId =>
+            assertNoLiveReservationPaymentAttempt(
+              tx,
+              "massage_programs",
+              bookingId
+            ),
+          reloadBookings: ids =>
+            tx
+              .select()
+              .from(massageProgramBookings)
+              .where(inArray(massageProgramBookings.id, ids)),
           });
-        }
         const payments = await tx
           .select()
           .from(reservationPayments)
           .where(
             and(
               eq(reservationPayments.module, "massage_programs"),
-              eq(reservationPayments.reservationId, input.id)
+              inArray(reservationPayments.reservationId, bookingIds)
             )
           );
+        const balances = bookings.map(booking => {
         const totalClp =
           getSkeduMassageUnitPrice(booking.duration) *
           getSkeduMassageQuantity(booking.modality);
-        const settlement = calculateSkeduProgramSettlement({
+          return {
+            booking,
+            balanceAmountClp: calculateSkeduProgramSettlement({
           totalClp,
-          payments,
+              payments: payments.filter(
+                payment => payment.reservationId === booking.id
+              ),
           legacyPaymentMethod: booking.paymentMethod,
+            }).balanceAmountClp,
+          };
         });
-        if (settlement.balanceAmountClp <= 0) {
+        if (balances.every(item => item.balanceAmountClp <= 0)) {
           throw new TRPCError({
             code: "CONFLICT",
             message: "Este programa ya figura pagado",
           });
         }
         // Los intentos y placeholders pendientes se conservan para mantener su
-        // trazabilidad. La nueva fila registra exclusivamente el saldo cobrado.
+        // trazabilidad. Cada bloque recibe exclusivamente su saldo, mientras la
+        // operación de recepción sigue siendo un único cobro del grupo.
+        for (const item of balances) {
+          if (item.balanceAmountClp <= 0) continue;
         await tx.insert(reservationPayments).values({
           module: "massage_programs",
-          reservationId: input.id,
+            reservationId: item.booking.id,
           method: input.method,
           status: "paid",
-          amountClp: settlement.balanceAmountClp,
+            amountClp: item.balanceAmountClp,
           paidAt: new Date(),
           reference: input.reference?.trim() || null,
           createdByUserId: ctx.user.id,
         });
+        }
         await tx
           .update(massageProgramBookings)
           .set({
             paymentMethod: input.method,
             paymentReference: input.reference?.trim() || null,
           })
-          .where(eq(massageProgramBookings.id, input.id));
+          .where(inArray(massageProgramBookings.id, bookingIds));
       }, RESERVATION_PAYMENT_TRANSACTION);
       return { success: true };
     }),
@@ -2096,6 +2295,30 @@ const agendaRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
+      const [initialBooking] = await db
+        .select({
+          id: massageProgramBookings.id,
+          bookingDate: massageProgramBookings.bookingDate,
+        })
+        .from(massageProgramBookings)
+        .where(eq(massageProgramBookings.id, input.id))
+        .limit(1);
+      if (!initialBooking) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Reserva de programa no encontrada",
+        });
+      }
+      const bookingDate = serializeDateOnly(initialBooking.bookingDate);
+      if (!bookingDate) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "La reserva no tiene una fecha válida",
+        });
+      }
+      await withMassageResourceLock(db, bookingDate, async () => {
+        // La reserva y los bloqueos se releen una vez adquirido el mutex. El
+        // formulario pudo quedar obsoleto mientras esperaba el lock.
       const [booking] = await db
         .select()
         .from(massageProgramBookings)
@@ -2119,14 +2342,6 @@ const agendaRouter = router({
         input.therapistId,
         input.secondTherapistId
       );
-
-      const bookingDate = serializeDateOnly(booking.bookingDate);
-      if (!bookingDate) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "La reserva no tiene una fecha válida",
-        });
-      }
       const resources = await getSkeduProgramResourceAvailability({
         db,
         bookingDate,
@@ -2140,7 +2355,8 @@ const agendaRouter = router({
       );
       // Los terapeutas actuales siguen siendo seleccionables aunque después se
       // hayan desactivado; conservarlos no agrega un nuevo bloqueo a la agenda.
-      if (booking.therapistId) selectableTherapistIds.add(booking.therapistId);
+        if (booking.therapistId)
+          selectableTherapistIds.add(booking.therapistId);
       if (booking.secondTherapistId)
         selectableTherapistIds.add(booking.secondTherapistId);
 
@@ -2156,7 +2372,7 @@ const agendaRouter = router({
         });
       }
 
-      await db
+        const updateResult = await db
         .update(massageProgramBookings)
         .set({
           therapistId: input.therapistId,
@@ -2164,7 +2380,37 @@ const agendaRouter = router({
             booking.modality === "double" ? input.secondTherapistId! : null,
           status: "pending",
         })
-        .where(eq(massageProgramBookings.id, input.id));
+          .where(
+            and(
+              eq(massageProgramBookings.id, input.id),
+              ne(massageProgramBookings.status, "cancelled")
+            )
+          );
+        const updatedRows = Number(
+          (updateResult as any)?.[0]?.affectedRows ??
+            (updateResult as any)?.affectedRows ??
+            0
+        );
+        if (updatedRows !== 1) {
+          const [current] = await db
+            .select({ status: massageProgramBookings.status })
+            .from(massageProgramBookings)
+            .where(eq(massageProgramBookings.id, input.id))
+            .limit(1);
+          if (!current) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Reserva de programa no encontrada",
+            });
+          }
+          if (current.status === "cancelled") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "La reserva fue cancelada mientras se reasignaba",
+            });
+          }
+        }
+      });
 
       await startTherapistAssignmentForBooking("skedu_program", input.id, {
         force: true,
@@ -2194,9 +2440,75 @@ const agendaRouter = router({
           message: "Debes indicar por qué se cancela el masaje",
         });
       }
-      await db.transaction(async tx => {
-        if (input.status === "cancelled") await assertNoLiveReservationPaymentAttempt(tx, "massage_programs", input.id);
-        await tx.update(massageProgramBookings).set({
+      const [initialBooking] = await db
+        .select({ bookingDate: massageProgramBookings.bookingDate })
+        .from(massageProgramBookings)
+        .where(eq(massageProgramBookings.id, input.id))
+        .limit(1);
+      if (!initialBooking) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Reserva de programa no encontrada",
+        });
+      }
+      const bookingDate = serializeDateOnly(initialBooking.bookingDate);
+      if (!bookingDate) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "La reserva no tiene una fecha válida",
+        });
+      }
+      const affectedIds = await withMassageResourceLock(
+        db,
+        bookingDate,
+        () =>
+          db.transaction(async tx => {
+            // Relectura dentro del mutex: asignación, confirmación manual y
+            // cancelación nunca pueden pisarse con un snapshot anterior.
+            const [selectedBooking] = await tx
+              .select()
+              .from(massageProgramBookings)
+              .where(eq(massageProgramBookings.id, input.id))
+              .limit(1);
+            if (!selectedBooking) {
+              throw new TRPCError({
+                code: "NOT_FOUND",
+                message: "Reserva de programa no encontrada",
+              });
+            }
+            const bookings = selectedBooking.bookingGroupId
+              ? await tx
+                  .select({ id: massageProgramBookings.id })
+                  .from(massageProgramBookings)
+                  .where(
+                    eq(
+                      massageProgramBookings.bookingGroupId,
+                      selectedBooking.bookingGroupId
+                    )
+                  )
+              : [{ id: selectedBooking.id }];
+            const bookingIds = bookings
+              .map(booking => booking.id)
+              .sort((a, b) => a - b);
+            if (input.status === "cancelled") {
+              await lockReservationPaymentScopes(
+                tx,
+                bookingIds.map(reservationId => ({
+                  service: "massage_programs" as const,
+                  reservationId,
+                }))
+              );
+              for (const bookingId of bookingIds) {
+                await assertNoLiveReservationPaymentAttempt(
+                  tx,
+                  "massage_programs",
+                  bookingId
+                );
+              }
+            }
+            await tx
+              .update(massageProgramBookings)
+              .set({
           status: input.status,
           ...(input.status === "cancelled"
             ? {
@@ -2206,9 +2518,14 @@ const agendaRouter = router({
                 cancelledByUserId: ctx.user.id,
               }
             : {}),
-        }).where(eq(massageProgramBookings.id, input.id));
-      }, RESERVATION_PAYMENT_TRANSACTION);
-      await stopTherapistAssignmentForBooking("skedu_program", input.id);
+              })
+              .where(inArray(massageProgramBookings.id, bookingIds));
+            return bookingIds;
+          }, RESERVATION_PAYMENT_TRANSACTION)
+      );
+      for (const bookingId of affectedIds) {
+        await stopTherapistAssignmentForBooking("skedu_program", bookingId);
+      }
       return { success: true };
     }),
 
@@ -2382,6 +2699,9 @@ const agendaRouter = router({
             ? totalClp
             : 0;
         const paymentStatus = calculatedPaymentStatus(paidAmountClp, totalClp);
+        const groupSuffix = row.bookingGroupId
+          ? ` · Grupo ${row.groupSize} (${row.groupSequence}/2)`
+          : "";
         return {
         id: row.id,
         bookingKind: "skedu_program" as const,
@@ -2390,7 +2710,7 @@ const agendaRouter = router({
           : row.clientName,
         clientPhone: row.clientPhone,
         techniqueId: null,
-        techniqueName: `Programa ${SKEDU_MASSAGE_PROGRAMS.find(program => program.value === row.program)?.label ?? row.program}`,
+          techniqueName: `Programa ${SKEDU_MASSAGE_PROGRAMS.find(program => program.value === row.program)?.label ?? row.program}${groupSuffix}`,
         therapistId: row.therapistId,
         therapistName: row.therapistId
           ? (therapistNames.get(row.therapistId) ?? null)
@@ -2406,8 +2726,7 @@ const agendaRouter = router({
         startTime: row.startTime,
         endTime: row.endTime,
         status: row.status,
-        paymentStatus:
-          row.status === "cancelled" ? null : paymentStatus,
+          paymentStatus: row.status === "cancelled" ? null : paymentStatus,
         amountPaid: row.status === "cancelled" ? null : String(paidAmountClp),
         manualPaymentMethod: row.paymentMethod,
         notes: row.notes,
@@ -2421,6 +2740,10 @@ const agendaRouter = router({
         modality: row.modality,
         program: row.program,
         externalReference: row.externalReference,
+          bookingGroupId: row.bookingGroupId,
+          groupSequence: row.groupSequence,
+          groupSize: row.groupSize,
+          scheduleMode: row.scheduleMode,
         };
       });
 
@@ -4707,6 +5030,8 @@ const analyticsRouter = router({
         db
           .select({
           id: massageProgramBookings.id,
+            bookingGroupId: massageProgramBookings.bookingGroupId,
+            groupSequence: massageProgramBookings.groupSequence,
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           status: massageProgramBookings.status,
@@ -4776,6 +5101,8 @@ const analyticsRouter = router({
         db
           .select({
           id: massageProgramBookings.id,
+            bookingGroupId: massageProgramBookings.bookingGroupId,
+            groupSequence: massageProgramBookings.groupSequence,
           status: massageProgramBookings.status,
           startTime: massageProgramBookings.startTime,
           duration: massageProgramBookings.duration,
@@ -4801,7 +5128,12 @@ const analyticsRouter = router({
           .from(massageBookings)
           .where(eq(massageBookings.bookingDate, today as any)),
         db
-          .select({ status: massageProgramBookings.status })
+          .select({
+            id: massageProgramBookings.id,
+            bookingGroupId: massageProgramBookings.bookingGroupId,
+            groupSequence: massageProgramBookings.groupSequence,
+            status: massageProgramBookings.status,
+          })
           .from(massageProgramBookings)
           .where(eq(massageProgramBookings.bookingDate, today as any)),
         db
@@ -4816,6 +5148,8 @@ const analyticsRouter = router({
         db
           .select({
           id: massageProgramBookings.id,
+            bookingGroupId: massageProgramBookings.bookingGroupId,
+            groupSequence: massageProgramBookings.groupSequence,
           duration: massageProgramBookings.duration,
           modality: massageProgramBookings.modality,
           status: massageProgramBookings.status,
@@ -4846,7 +5180,15 @@ const analyticsRouter = router({
           bookingDate: massageProgramBookings.bookingDate,
           })
           .from(massageProgramBookings)
-          .where(lte(massageProgramBookings.bookingDate, input.to as any)),
+          .where(
+            and(
+              lte(massageProgramBookings.bookingDate, input.to as any),
+              or(
+                isNull(massageProgramBookings.bookingGroupId),
+                eq(massageProgramBookings.groupSequence, 1)
+              )
+            )
+          ),
         db
           .select({
           id: massageNpsResponses.id,
@@ -4870,6 +5212,33 @@ const analyticsRouter = router({
           .select({ id: massageTherapists.id, name: massageTherapists.name })
           .from(massageTherapists),
       ]);
+
+      const groupProgramRows = <
+        Row extends {
+          id: number;
+          bookingGroupId: string | null;
+          groupSequence: number;
+          status: string;
+        },
+      >(
+        rows: Row[]
+      ) => {
+        const groups = new Map<string, Row[]>();
+        for (const row of rows) {
+          const key = row.bookingGroupId
+            ? `group:${row.bookingGroupId}`
+            : `booking:${row.id}`;
+          groups.set(key, [...(groups.get(key) ?? []), row]);
+        }
+        return Array.from(groups.values()).map(group =>
+          [...group].sort(
+            (left, right) => left.groupSequence - right.groupSequence
+          )
+        );
+      };
+      const periodProgramGroups = groupProgramRows(programPeriod);
+      const todayProgramGroups = groupProgramRows(programToday);
+      const createdTodayProgramGroups = groupProgramRows(programCreatedToday);
 
       const relevantProgramIds = Array.from(
         new Set(
@@ -4981,25 +5350,46 @@ const analyticsRouter = router({
             sum + getSkeduMassageQuantity(row.booking.modality),
           0
         );
-      const allPeriodBookings = [...standardPeriod, ...programPeriod];
-      const confirmedBookings = allPeriodBookings.filter(
+      const confirmedBookings =
+        standardPeriod.filter(
         booking =>
           booking.status === "confirmed" || booking.status === "completed"
+        ).length +
+        periodProgramGroups.filter(group =>
+          group.every(booking =>
+            ["confirmed", "completed"].includes(booking.status)
+          )
       ).length;
-      const cancelledBookings = allPeriodBookings.filter(
-        booking => booking.status === "cancelled"
+      const cancelledBookings =
+        standardPeriod.filter(booking => booking.status === "cancelled")
+          .length +
+        periodProgramGroups.filter(group =>
+          group.every(booking => booking.status === "cancelled")
       ).length;
-      const completedBookings = allPeriodBookings.filter(
-        booking => booking.status === "completed"
+      const completedBookings =
+        standardPeriod.filter(booking => booking.status === "completed")
+          .length +
+        periodProgramGroups.filter(group =>
+          group.every(booking => booking.status === "completed")
       ).length;
       const hourly = Array.from({ length: 24 }, (_, hour) => ({
         hour,
         label: `${String(hour).padStart(2, "0")}:00`,
         reservations: 0,
       }));
-      for (const booking of allPeriodBookings) {
+      for (const booking of standardPeriod) {
         if (booking.status === "cancelled") continue;
         const hour = Number(booking.startTime.slice(0, 2));
+        if (hourly[hour]) hourly[hour].reservations += 1;
+      }
+      for (const group of periodProgramGroups) {
+        if (group.every(booking => booking.status === "cancelled")) continue;
+        const firstStart = group.reduce(
+          (earliest, booking) =>
+            booking.startTime < earliest ? booking.startTime : earliest,
+          group[0].startTime
+        );
+        const hour = Number(firstStart.slice(0, 2));
         if (hourly[hour]) hourly[hour].reservations += 1;
       }
 
@@ -5067,7 +5457,7 @@ const analyticsRouter = router({
         );
 
       const totals = {
-        totalBookings: allPeriodBookings.length,
+        totalBookings: standardPeriod.length + periodProgramGroups.length,
         paidBookings: paidSales.length + paidProgramMassages,
         totalRevenue: revenue,
         grossRevenue:
@@ -5090,11 +5480,14 @@ const analyticsRouter = router({
 
       const daily = {
         date: today,
-        reservationsForToday: [...standardToday, ...programToday].filter(
-          booking => booking.status !== "cancelled"
+        reservationsForToday:
+          standardToday.filter(booking => booking.status !== "cancelled")
+            .length +
+          todayProgramGroups.filter(
+            group => !group.every(booking => booking.status === "cancelled")
         ).length,
         reservationsCreatedToday:
-          standardCreatedToday.length + programCreatedToday.length,
+          standardCreatedToday.length + createdTodayProgramGroups.length,
         paymentsReceivedToday:
           todayPaymentsRows.reduce(
             (sum, sale) => sum + Number(sale.amount),
@@ -5109,8 +5502,8 @@ const analyticsRouter = router({
           booking =>
             booking.status !== "cancelled" && booking.bookingSource === "web"
         ).length,
-        skeduProgramsToday: programToday.filter(
-          booking => booking.status !== "cancelled"
+        skeduProgramsToday: todayProgramGroups.filter(
+          group => !group.every(booking => booking.status === "cancelled")
         ).length,
       };
 
@@ -5127,7 +5520,7 @@ const analyticsRouter = router({
         webMassageServices: standardPeriod.filter(
           booking => booking.bookingSource === "web"
         ).length,
-        skeduPrograms: programPeriod.length,
+        skeduPrograms: periodProgramGroups.length,
         skeduRevenue: programRevenue,
         hourly: hourly.filter(row => row.reservations > 0),
       };
@@ -6915,6 +7308,21 @@ const masajesPublicRouter = router({
         });
       }
 
+      const {
+        prepared,
+        discountResult,
+        massageOriginalTotal,
+        massageTotal,
+        classTotal,
+        originalTotal,
+        total,
+        normalizedGiftCardCode,
+        giftCardServiceKey,
+        bookingIds,
+      } = await withMassageResourceLocks(
+        db,
+        input.items.map(item => item.bookingDate),
+        async () => {
       const blockingByDate = new Map<
         string,
         Awaited<ReturnType<typeof loadBlockingMassageBookings>>
@@ -6949,8 +7357,14 @@ const masajesPublicRouter = router({
             code: "NOT_FOUND",
             message: "Uno de los masajes ya no está disponible.",
           });
-        if (!isMassageTechniqueAvailableForDate(technique, item.bookingDate)) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Uno de los masajes no está disponible para el mes seleccionado." });
+            if (
+              !isMassageTechniqueAvailableForDate(technique, item.bookingDate)
+            ) {
+              throw new TRPCError({
+                code: "NOT_FOUND",
+                message:
+                  "Uno de los masajes no está disponible para el mes seleccionado.",
+              });
         }
 
         const durations = (technique.durations ?? "")
@@ -6991,13 +7405,19 @@ const masajesPublicRouter = router({
           )
           .innerJoin(
             massageTherapistAvailability,
-            eq(massageTherapistAvailability.therapistId, massageTherapists.id)
+                eq(
+                  massageTherapistAvailability.therapistId,
+                  massageTherapists.id
+                )
           )
           .where(
             and(
             eq(massageTherapistTechniques.techniqueId, item.techniqueId),
             eq(massageTherapists.active, 1),
-            eq(massageTherapistAvailability.date, item.bookingDate as any),
+                  eq(
+                    massageTherapistAvailability.date,
+                    item.bookingDate as any
+                  ),
               eq(massageTherapistAvailability.isAvailable, 1)
             )
           );
@@ -7015,7 +7435,10 @@ const masajesPublicRouter = router({
 
         let blocking = blockingByDate.get(item.bookingDate);
         if (!blocking) {
-          blocking = await loadBlockingMassageBookings(db, item.bookingDate);
+              blocking = await loadBlockingMassageBookings(
+                db,
+                item.bookingDate
+              );
           blockingByDate.set(item.bookingDate, blocking);
         }
         let rooms = roomsByDate.get(item.bookingDate);
@@ -7102,16 +7525,46 @@ const masajesPublicRouter = router({
         }
       }
 
-      const massageOriginalTotal = prepared.reduce((sum, item) => sum + item.price, 0);
-      const massageTotal = prepared.reduce((sum, item, index) => sum + item.price - (discountResult?.lineDiscounts[index] ?? 0), 0);
-      const classTotal = classPlan ? classPlan.priceClp - (discountResult?.lineDiscounts[prepared.length] ?? 0) : 0;
-      const originalTotal = massageOriginalTotal + (classPlan?.priceClp ?? 0);
+          const massageOriginalTotal = prepared.reduce(
+            (sum, item) => sum + item.price,
+            0
+          );
+          const massageTotal = prepared.reduce(
+            (sum, item, index) =>
+              sum + item.price - (discountResult?.lineDiscounts[index] ?? 0),
+            0
+          );
+          const classTotal = classPlan
+            ? classPlan.priceClp -
+              (discountResult?.lineDiscounts[prepared.length] ?? 0)
+            : 0;
+          const originalTotal =
+            massageOriginalTotal + (classPlan?.priceClp ?? 0);
       const total = massageTotal + classTotal;
-      const normalizedGiftCardCode = input.giftCardCode?.trim().toUpperCase();
-      const giftCardServiceKey = prepared.length > 0 && !classPlan ? "massages" as const : prepared.length === 0 && classPlan ? "regular_classes" as const : "mixed_program" as const;
+          const normalizedGiftCardCode = input.giftCardCode
+            ?.trim()
+            .toUpperCase();
+          const giftCardServiceKey =
+            prepared.length > 0 && !classPlan
+              ? ("massages" as const)
+              : prepared.length === 0 && classPlan
+                ? ("regular_classes" as const)
+                : ("mixed_program" as const);
       if (normalizedGiftCardCode) {
-        const [card] = await db.select().from(giftCards).where(eq(giftCards.code, normalizedGiftCardCode)).limit(1);
-        if (card?.amount === 0 && prepared.length + (classPlan ? 1 : 0) !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Una Gift Card de servicio solo puede canjearse por un servicio a la vez" });
+            const [card] = await db
+              .select()
+              .from(giftCards)
+              .where(eq(giftCards.code, normalizedGiftCardCode))
+              .limit(1);
+            if (
+              card?.amount === 0 &&
+              prepared.length + (classPlan ? 1 : 0) !== 1
+            )
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message:
+                  "Una Gift Card de servicio solo puede canjearse por un servicio a la vez",
+              });
         validatePublicGiftCard(card, giftCardServiceKey, total);
       }
 
@@ -7167,7 +7620,9 @@ const masajesPublicRouter = router({
         });
       } catch (error) {
         const cause =
-          error instanceof Error && "cause" in error ? error.cause : undefined;
+              error instanceof Error && "cause" in error
+                ? error.cause
+                : undefined;
         console.error(
           "[initCartPayment] Booking insert failed:",
           cause ?? error
@@ -7178,6 +7633,21 @@ const masajesPublicRouter = router({
             "No pudimos crear la reserva para iniciar el pago. Intenta nuevamente.",
         });
       }
+
+          return {
+            prepared,
+            discountResult,
+            massageOriginalTotal,
+            massageTotal,
+            classTotal,
+            originalTotal,
+            total,
+            normalizedGiftCardCode,
+            giftCardServiceKey,
+            bookingIds,
+          };
+        }
+      );
 
       let membershipId: number | undefined;
       try {

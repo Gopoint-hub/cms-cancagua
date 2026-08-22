@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
 import {
   assertPaymentLinkPayable,
+  buildPaymentLinkPresentationItems,
   type BookingSnapshot,
   paymentLinkServiceSchema,
   paymentLinkExpiry,
@@ -190,6 +191,74 @@ describe("validación de aprobaciones del proveedor", () => {
 });
 
 describe("vigencia y agrupación del cobro", () => {
+  it("presenta los dos bloques financieros de un programa grupal como una reserva", () => {
+    const items = buildPaymentLinkPresentationItems([
+      {
+        snapshot: snapshot({
+          service: "massage_programs",
+          reservationId: 102,
+          provider: "getnet",
+          serviceName: "Programa reconecta",
+          bookingGroupId: "grupo-4-personas",
+          groupSequence: 2,
+          groupSize: 4,
+          startTime: "11:00",
+        }),
+        amountClp: 90_000,
+      },
+      {
+        snapshot: snapshot({
+          service: "massage_programs",
+          reservationId: 101,
+          provider: "getnet",
+          serviceName: "Programa reconecta",
+          bookingGroupId: "grupo-4-personas",
+          groupSequence: 1,
+          groupSize: 4,
+          startTime: "10:00",
+        }),
+        amountClp: 90_000,
+      },
+    ]);
+
+    expect(items).toEqual([
+      {
+        service: "massage_programs",
+        reservationId: 101,
+        serviceName: "Programa reconecta · 4 personas",
+        bookingDate: "2026-08-18",
+        startTime: "10:00",
+        amountClp: 180_000,
+      },
+    ]);
+  });
+
+  it("no fusiona reservas independientes aunque pertenezcan al mismo módulo", () => {
+    const items = buildPaymentLinkPresentationItems([
+      {
+        snapshot: snapshot({
+          service: "massage_programs",
+          reservationId: 201,
+          provider: "getnet",
+          serviceName: "Programa reset",
+        }),
+        amountClp: 35_000,
+      },
+      {
+        snapshot: snapshot({
+          service: "massage_programs",
+          reservationId: 202,
+          provider: "getnet",
+          serviceName: "Programa reset",
+        }),
+        amountClp: 35_000,
+      },
+    ]);
+
+    expect(items).toHaveLength(2);
+    expect(items.map(item => item.reservationId)).toEqual([201, 202]);
+  });
+
   it("identifica al mismo cliente por correo normalizado", () => {
     expect(
       samePaymentLinkClient(

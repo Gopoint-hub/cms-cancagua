@@ -515,9 +515,16 @@ async function offerNextTherapistUnlocked(
   };
 
   if (candidate.type === "inhouse") {
-    if (bookingType === "skedu_program" && await allRequiredSlotsConfirmed(booking)) {
-      await db.update(massageProgramBookings).set({ status: "confirmed" })
-        .where(eq(massageProgramBookings.id, bookingId));
+    if (
+      bookingType === "skedu_program" &&
+      (await allRequiredSlotsConfirmed(booking))
+    ) {
+      const persisted = await confirmAssignmentBookingIfPending(
+        db,
+        bookingType,
+        bookingId
+      );
+      if (!persisted) return { offered: false, mode: "exhausted" };
     }
     if (candidate.phone) {
       const result = await sendWhatsApp(
@@ -656,7 +663,64 @@ async function allRequiredSlotsConfirmed(booking: AssignmentBooking) {
   return new Set(confirmed.map((request) => request.slotIndex)).size >= booking.slotCount;
 }
 
-async function expireAndRotate(request: typeof massageTherapistAssignmentRequests.$inferSelect) {
+/**
+ * Confirma la reserva únicamente si todavía sigue pendiente. Una cancelación
+ * concurrente puede ocurrir después de que el terapeuta abrió su enlace; el
+ * predicado de estado impide que esa respuesta resucite la reserva cancelada.
+ */
+export async function confirmAssignmentBookingIfPending(
+  db: any,
+  bookingType: AssignmentBookingType,
+  bookingId: number
+): Promise<boolean> {
+  const result =
+    bookingType === "massage"
+      ? await db
+          .update(massageBookings)
+          .set({
+            status: "confirmed",
+            freelanceApprovalStatus: "therapist_confirmed",
+            therapistConfirmationToken: null,
+          })
+          .where(
+            and(
+              eq(massageBookings.id, bookingId),
+              eq(massageBookings.status, "pending")
+            )
+          )
+      : await db
+          .update(massageProgramBookings)
+          .set({ status: "confirmed" })
+          .where(
+            and(
+              eq(massageProgramBookings.id, bookingId),
+              eq(massageProgramBookings.status, "pending")
+            )
+          );
+  if (affectedRows(result) === 1) return true;
+
+  // Dos respuestas de un masaje doble pueden cerrar los slots a la vez. En ese
+  // caso una actualiza y la otra observa `confirmed`; ambas son válidas. Un
+  // estado cancelado/completado, en cambio, se trata como ya procesado.
+  const table =
+    bookingType === "massage" ? massageBookings : massageProgramBookings;
+  const idColumn =
+    bookingType === "massage" ? massageBookings.id : massageProgramBookings.id;
+  const statusColumn =
+    bookingType === "massage"
+      ? massageBookings.status
+      : massageProgramBookings.status;
+  const [current] = await db
+    .select({ status: statusColumn })
+    .from(table)
+    .where(eq(idColumn, bookingId))
+    .limit(1);
+  return current?.status === "confirmed";
+}
+
+async function expireAndRotate(
+  request: typeof massageTherapistAssignmentRequests.$inferSelect
+) {
   const db = await getDb();
   if (!db) return false;
   const claim = await db.update(massageTherapistAssignmentRequests).set({
@@ -778,15 +842,16 @@ export async function respondToTherapistAssignment(
   }
 
   if (await allRequiredSlotsConfirmed(booking)) {
-    if (request.bookingType === "massage") {
-      await db.update(massageBookings).set({
-        status: "confirmed",
-        freelanceApprovalStatus: "therapist_confirmed",
-        therapistConfirmationToken: null,
-      }).where(eq(massageBookings.id, request.bookingId));
-    } else {
-      await db.update(massageProgramBookings).set({ status: "confirmed" })
-        .where(eq(massageProgramBookings.id, request.bookingId));
+    const persisted = await confirmAssignmentBookingIfPending(
+      db,
+      request.bookingType,
+      request.bookingId
+    );
+    if (!persisted) {
+      return {
+        ...(await getTherapistAssignmentRequestView(token, now)),
+        state: "processed",
+      };
     }
     await sendWhatsApp(
       TAMARA_MUNOZ_PHONE,

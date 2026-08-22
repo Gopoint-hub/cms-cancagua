@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   biopoolBookingActivity,
@@ -82,7 +82,78 @@ export type BookingSnapshot = {
   serviceName: string;
   bookingDate: string;
   startTime: string;
+  bookingGroupId?: string | null;
+  groupSequence?: number;
+  groupSize?: number;
 };
+
+export type PaymentLinkPresentationItem = {
+  service: PaymentLinkService;
+  reservationId: number;
+  serviceName: string;
+  bookingDate: string;
+  startTime: string;
+  amountClp: number;
+};
+
+/**
+ * Conserva una allocation financiera por bloque, pero presenta los bloques de
+ * un programa grupal como la única reserva comercial que compró el cliente.
+ */
+export function buildPaymentLinkPresentationItems(
+  sources: Array<{ snapshot: BookingSnapshot; amountClp: number }>
+): PaymentLinkPresentationItem[] {
+  const items = new Map<
+    string,
+    PaymentLinkPresentationItem & { leaderSequence: number }
+  >();
+
+  for (const { snapshot, amountClp } of sources) {
+    const isProgramGroup =
+      snapshot.service === "massage_programs" &&
+      Boolean(snapshot.bookingGroupId);
+    const key = isProgramGroup
+      ? `massage_programs:group:${snapshot.bookingGroupId}`
+      : `${snapshot.service}:reservation:${snapshot.reservationId}`;
+    const groupSize = Math.max(1, Number(snapshot.groupSize ?? 1));
+    const serviceName =
+      isProgramGroup && groupSize > 1
+        ? `${snapshot.serviceName} · ${groupSize} personas`
+        : snapshot.serviceName;
+    const leaderSequence = Number(snapshot.groupSequence ?? 1);
+    const existing = items.get(key);
+
+    if (!existing) {
+      items.set(key, {
+        service: snapshot.service,
+        reservationId: snapshot.reservationId,
+        serviceName,
+        bookingDate: snapshot.bookingDate,
+        startTime: snapshot.startTime,
+        amountClp: Math.max(0, Number(amountClp) || 0),
+        leaderSequence,
+      });
+      continue;
+    }
+
+    existing.amountClp += Math.max(0, Number(amountClp) || 0);
+    if (leaderSequence < existing.leaderSequence) {
+      existing.reservationId = snapshot.reservationId;
+      existing.leaderSequence = leaderSequence;
+    }
+    if (
+      `${snapshot.bookingDate} ${snapshot.startTime}` <
+      `${existing.bookingDate} ${existing.startTime}`
+    ) {
+      existing.bookingDate = snapshot.bookingDate;
+      existing.startTime = snapshot.startTime;
+    }
+  }
+
+  return Array.from(items.values(), ({ leaderSequence: _leader, ...item }) =>
+    item
+  );
+}
 
 export type WebpayAttemptDecision = { action: "approved" } | { action: "not_approved"; terminalStatus: "rejected" | "failed" } | { action: "pending" } | { action: "reconciliation"; reason: string };
 
@@ -330,6 +401,18 @@ async function getBookingSnapshot(db: any, service: PaymentLinkService, reservat
     const detailedPaid = payments.filter((payment: any) => payment.status === "paid").reduce((sum: number, payment: any) => sum + payment.amountClp, 0);
     const legacyPaid = payments.length === 0 && !isPendingMassagePaymentMethod(row.paymentMethod) ? totalClp : 0;
     const amountPaidClp = Math.min(totalClp, detailedPaid + legacyPaid);
+    const [groupLeader] = row.bookingGroupId
+      ? await db
+          .select({
+            clientName: massageProgramBookings.clientName,
+            clientEmail: massageProgramBookings.clientEmail,
+            clientPhone: massageProgramBookings.clientPhone,
+          })
+          .from(massageProgramBookings)
+          .where(eq(massageProgramBookings.bookingGroupId, row.bookingGroupId))
+          .orderBy(asc(massageProgramBookings.groupSequence))
+          .limit(1)
+      : [null];
     return {
       service,
       reservationId,
@@ -338,12 +421,18 @@ async function getBookingSnapshot(db: any, service: PaymentLinkService, reservat
       amountPaidClp,
       outstandingClp: Math.max(0, totalClp - amountPaidClp),
       status: row.status,
-      clientName: row.clientName,
-      clientEmail: row.clientEmail,
-      clientPhone: row.clientPhone,
+      // Todos los segmentos de una reserva grupal comparten el responsable
+      // comercial del bloque líder, aunque la agenda conserve los nombres de
+      // quienes reciben cada masaje.
+      clientName: groupLeader?.clientName ?? row.clientName,
+      clientEmail: groupLeader?.clientEmail ?? row.clientEmail,
+      clientPhone: groupLeader?.clientPhone ?? row.clientPhone,
       serviceName: `Programa ${row.program.replaceAll("_", " ")}`,
       bookingDate: dateString(row.bookingDate),
       startTime: row.startTime,
+      bookingGroupId: row.bookingGroupId,
+      groupSequence: row.groupSequence,
+      groupSize: row.groupSize,
     };
   }
   if (service === "biopools") {
@@ -586,6 +675,24 @@ async function loadRequest(db: any, token: string) {
 
 async function loadAllocations(db: any, requestId: number) {
   return db.select().from(reservationPaymentAllocations).where(eq(reservationPaymentAllocations.requestId, requestId));
+}
+
+async function paymentLinkPresentationItems(
+  db: any,
+  allocations: Array<typeof reservationPaymentAllocations.$inferSelect>
+): Promise<PaymentLinkPresentationItem[]> {
+  const sources: Array<{ snapshot: BookingSnapshot; amountClp: number }> = [];
+  for (const allocation of allocations) {
+    sources.push({
+      snapshot: await getBookingSnapshot(
+        db,
+        allocation.service,
+        allocation.reservationId
+      ),
+      amountClp: allocation.amountClp,
+    });
+  }
+  return buildPaymentLinkPresentationItems(sources);
 }
 
 async function resolveStaleProviderAttempt(db: any, request: typeof reservationPaymentRequests.$inferSelect): Promise<void> {
@@ -1826,15 +1933,66 @@ export const reservationPaymentLinksRouter = router({
         })
     )
     .mutation(async ({ ctx, input }) => {
-      for (const item of input.reservations) assertCreatePermission(ctx.user, item.service);
+      for (const item of input.reservations) {
+        assertCreatePermission(ctx.user, item.service);
+      }
       const db = await getDb();
       if (!db)
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Base de datos no disponible",
         });
-      const snapshots: BookingSnapshot[] = [];
+      const expandedReservations: Array<{
+        service: PaymentLinkService;
+        reservationId: number;
+      }> = [];
       for (const item of input.reservations) {
+        if (item.service !== "massage_programs") {
+          expandedReservations.push(item);
+          continue;
+        }
+        const [booking] = await db
+          .select({ bookingGroupId: massageProgramBookings.bookingGroupId })
+          .from(massageProgramBookings)
+          .where(eq(massageProgramBookings.id, item.reservationId))
+          .limit(1);
+        if (!booking?.bookingGroupId) {
+          expandedReservations.push(item);
+          continue;
+        }
+        const siblings = await db
+          .select({ id: massageProgramBookings.id })
+          .from(massageProgramBookings)
+          .where(
+            eq(
+              massageProgramBookings.bookingGroupId,
+              booking.bookingGroupId
+            )
+          )
+          .orderBy(asc(massageProgramBookings.groupSequence));
+        expandedReservations.push(
+          ...siblings.map(sibling => ({
+            service: "massage_programs" as const,
+            reservationId: sibling.id,
+          }))
+        );
+      }
+      const reservations = Array.from(
+        new Map(
+          expandedReservations.map(item => [
+            `${item.service}:${item.reservationId}`,
+            item,
+          ])
+        ).values()
+      );
+      if (reservations.length > 20) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "El cobro agrupado supera el máximo de 20 reservas",
+        });
+      }
+      const snapshots: BookingSnapshot[] = [];
+      for (const item of reservations) {
         const snapshot = await getBookingSnapshot(db, item.service, item.reservationId);
         assertPaymentLinkPayable(snapshot);
         snapshots.push(snapshot);
@@ -1914,7 +2072,12 @@ export const reservationPaymentLinksRouter = router({
             provider,
             totalClp,
             url: publicPaymentUrl(token),
-            reservationCount: group.length,
+            reservationCount: buildPaymentLinkPresentationItems(
+              group.map(snapshot => ({
+                snapshot,
+                amountClp: snapshot.outstandingClp,
+              }))
+            ).length,
             expiresAt,
           });
         }
@@ -1935,18 +2098,7 @@ export const reservationPaymentLinksRouter = router({
     const allocations = await loadAllocations(db, request.id);
     const [latestAttempt] = await db.select().from(reservationPaymentAttempts).where(eq(reservationPaymentAttempts.requestId, request.id)).orderBy(desc(reservationPaymentAttempts.id)).limit(1);
     const status = request.status === "active" && latestAttempt && ["rejected", "aborted", "failed"].includes(latestAttempt.status) ? ("rejected" as const) : request.status;
-    const items = [];
-    for (const allocation of allocations) {
-      const snapshot = await getBookingSnapshot(db, allocation.service, allocation.reservationId);
-      items.push({
-        service: allocation.service,
-        reservationId: allocation.reservationId,
-        serviceName: snapshot.serviceName,
-        bookingDate: snapshot.bookingDate,
-        startTime: snapshot.startTime,
-        amountClp: allocation.amountClp,
-      });
-    }
+    const items = await paymentLinkPresentationItems(db, allocations);
     return {
       token: request.publicToken,
       provider: request.provider,
@@ -2019,7 +2171,14 @@ export const reservationPaymentLinksRouter = router({
           .orderBy(desc(reservationPaymentRequests.id))
           .limit(1);
       }
-      const reservationCount = request ? (await loadAllocations(db, request.request.id)).length : 0;
+      const reservationCount = request
+        ? (
+            await paymentLinkPresentationItems(
+              db,
+              await loadAllocations(db, request.request.id)
+            )
+          ).length
+        : 0;
       return request
         ? {
             token: request.request.publicToken,

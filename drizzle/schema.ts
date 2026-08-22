@@ -2025,6 +2025,15 @@ export type InsertMassageCheckoutSession = typeof massageCheckoutSessions.$infer
 // Se mantienen separadas de massage_bookings para no mezclarlas con ventas Getnet.
 export const massageProgramBookings = mysqlTable("massage_program_bookings", {
   id: int("id").autoincrement().primaryKey(),
+  // Una reserva grupal de 3 o 4 personas se materializa en dos bloques de
+  // agenda para reutilizar las reglas probadas de sala doble/simple. Estos
+  // campos mantienen ambos bloques unidos como una sola operación comercial.
+  bookingGroupId: varchar("booking_group_id", { length: 36 }),
+  groupSequence: int("group_sequence").default(1).notNull(),
+  groupSize: int("group_size").default(1).notNull(),
+  scheduleMode: mysqlEnum("schedule_mode", ["simultaneous", "two_by_two"])
+    .default("simultaneous")
+    .notNull(),
   program: varchar("program", { length: 50 }).notNull(),
   duration: int("duration").notNull(),
   modality: mysqlEnum("modality", ["simple", "double"]).notNull(),
